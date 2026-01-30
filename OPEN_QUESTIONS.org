@@ -1,0 +1,165 @@
+#+TITLE: Keepbook Open Questions
+#+AUTHOR:
+#+OPTIONS: toc:1
+
+Design questions and uncertainties to resolve as the project develops.
+
+* Storage Abstraction
+
+** Where does deduplication live?
+When a synchronizer fetches transactions, some may already exist. Who is responsible for detecting and handling duplicates?
+- Option A: Storage layer handles it (upsert semantics)
+- Option B: Sync engine diffs against existing before writing
+- Option C: Synchronizer is responsible for tracking what it's already fetched
+
+** Batching and atomicity
+- Should storage support single-item and batch writes, or just batch?
+- If writing 100 transactions and #50 fails, what state are we in?
+- Do we need rollback/transaction semantics?
+- Should cross-account writes be atomic (e.g., recording a transfer)?
+
+** Read patterns
+- Will we need indexed queries (e.g., "all transactions with amount > $100")?
+- Or is "load all transactions for time range, filter in memory" sufficient?
+- Should storage support pagination, or always return full results?
+
+* Synchronizer Architecture
+
+** Single repo vs plugins
+Still undecided whether synchronizers live in the main repo or as separate packages.
+- Monorepo: Easier coordination, single versioning, but heavier main package
+- Plugins: More flexible, but coordination overhead, versioning complexity
+- Could start monorepo and split later if needed
+
+** Synchronizer trait design
+What does a synchronizer need to do? Rough sketch:
+#+BEGIN_SRC rust
+trait Synchronizer {
+    fn authenticate(&self, ...) -> Result<Session>;
+    fn fetch_accounts(&self, session: &Session) -> Result<Vec<Account>>;
+    fn fetch_transactions(&self, session: &Session, account: &Account, since: Option<DateTime>) -> Result<Vec<Transaction>>;
+    fn fetch_balances(&self, session: &Session, account: &Account) -> Result<Vec<Balance>>;
+}
+#+END_SRC
+But this may be too rigid. Some synchronizers might work very differently (file imports, webhooks, etc.).
+
+** Incremental vs full sync
+- Some APIs support "give me everything since cursor X" (Plaid)
+- Some only support "give me last 90 days"
+- How does the synchronizer communicate its capabilities?
+
+* Credentials and Secrets
+
+** Where do secrets live?
+Never resolved. Options:
+- Environment variables
+- System keychain (platform-specific)
+- Encrypted file in repo (needs master password)
+- External secret manager (pass, 1Password CLI, etc.)
+- Synchronizer-specific (each handles its own)
+
+** What secrets exist?
+- Plaid access tokens
+- Direct bank API credentials
+- OAuth refresh tokens
+- API keys for various services
+
+* Git Integration
+
+** When to commit?
+- After every sync?
+- On-demand only?
+- Configurable?
+
+** Commit granularity
+- One commit per sync operation?
+- One commit per account?
+- Batched commits on a schedule?
+
+** Handling conflicts
+If the repo is used from multiple machines, merge conflicts are possible.
+- Are our file formats merge-friendly?
+- Do we need conflict resolution logic?
+- Or just "last write wins"?
+
+* Asset Identification
+
+** Type-specific fields
+We established that assets have a =type= field that determines other fields:
+#+BEGIN_SRC json
+{"type": "currency", "iso_code": "USD"}
+{"type": "equity", "ticker": "AAPL", "exchange": "NASDAQ"}
+{"type": "crypto", "symbol": "BTC"}
+#+END_SRC
+
+But the exact fields for each type aren't fully defined:
+- Equities: Is =exchange= required? What about mutual funds, ETFs?
+- Crypto: Just =symbol=? What about tokens on specific chains?
+- Other asset types: Real estate? Collectibles? Custom assets?
+
+** Cross-synchronizer matching
+Two synchronizers reporting the same asset should match. This works if they use the same field values, but:
+- What if one says "NASDAQ" and another says "XNAS"?
+- Do we need canonicalization?
+
+* Balances
+
+** Available vs current
+Banks report both "current balance" and "available balance". We're starting with just one, but may need both later.
+
+** Balance frequency
+How often should balances be recorded?
+- Every sync?
+- Only when changed?
+- Daily snapshots?
+
+* Transaction Details
+
+** Status enum completeness
+We have: =pending=, =posted=, =reversed=
+Are there others? =canceled=? =failed=?
+
+** Multiple timestamps
+Banks often have: authorization date, transaction date, posted date. We're using one =timestamp= and letting the synchronizer choose. Might need more granularity later.
+
+** Transaction types
+Should there be a =type= field (debit, credit, transfer, fee, interest, etc.)? Or infer from amount sign and description?
+
+* Frontend Interaction
+
+** Deferred intentionally
+How frontends (web, mobile, CLI) interact with the core is explicitly not decided:
+- HTTP API (local server)
+- WASM (run in browser)
+- CLI invocation
+- FFI bindings
+- Direct file reading
+
+This depends on what we build and learn.
+
+* Annotation Layer
+
+** Annotation scope
+Annotations are for user edits on transactions. What about:
+- Account-level annotations?
+- Balance corrections?
+- Connection notes?
+
+** Annotation conflicts
+If raw data changes (re-sync), do annotations still apply?
+- Match by transaction ID (stable if synchronizer keeps same IDs)
+- What if a transaction disappears from the source?
+
+* Performance Considerations
+
+** Acceptable for now
+- Loading all transactions into memory for queries
+- O(n) scans for filtering
+- No indexes
+
+** May need later
+- Derived summary files (monthly totals, category breakdowns)
+- In-memory caching/indexing at startup
+- Lazy loading of old data
+
+We're betting that personal finance scale (< 1M transactions lifetime) doesn't need optimization. This assumption should be validated.
