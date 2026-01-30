@@ -38,25 +38,37 @@ Frontends (web, mobile, CLI) are built separately and consume the core however m
 
 ** Storage Format
 
-Account-separated, monthly time-sharded:
+Account-separated, monthly time-sharded, with connections as a distinct concept:
 
 #+BEGIN_SRC
 data/
+  connections/
+    plaid-chase-abc123/
+      connection.json         # credentials ref, sync state, institution info
+    plaid-amex-def456/
+      connection.json
+
   accounts/
-    chase-checking-a]1b2/
-      account.json            # metadata, institution info
+    chase-checking-a1b2/
+      account.json            # metadata, references parent connection
       2024/
         01-balances.json      # balance snapshots for January
         01-transactions.json  # transactions for January
         02-balances.json
         02-transactions.json
+    chase-savings-e5f6/
+      account.json            # same connection, different account
+      2024/
+        ...
     amex-platinum-c3d4/
       account.json
       2024/
         ...
 #+END_SRC
 
-- One directory per account (named by institution + last 4 or hash)
+- *Connections* represent a sync source (Plaid item, bank login, file import). One sync can produce multiple accounts.
+- *Accounts* are the actual financial accounts. Each references its parent connection.
+- One directory per account (named by institution + type + last 4 or hash)
 - Monthly sharding keeps files small and diffs clean
 - JSONL where append-friendly matters, JSON where structure matters
 
