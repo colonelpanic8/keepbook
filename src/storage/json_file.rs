@@ -1,27 +1,25 @@
 use std::path::{Path, PathBuf};
+
 use anyhow::{Context, Result};
-use chrono::{Datelike, Utc};
 use tokio::fs;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use uuid::Uuid;
 
-use crate::models::{Account, Balance, Connection, Transaction};
-use super::{Storage, TimeRange};
+use crate::models::{Account, Balance, Connection, Id, Transaction};
+use super::Storage;
 
-/// JSON file-based storage implementation
+/// JSON file-based storage implementation.
 ///
 /// Directory structure:
-/// ```
+/// ```text
 /// data/
 ///   connections/
-///     {uuid}/
+///     {id}/
 ///       connection.json
 ///   accounts/
-///     {uuid}/
+///     {id}/
 ///       account.json
-///       2024/
-///         01-balances.jsonl
-///         01-transactions.jsonl
+///       balances.jsonl
+///       transactions.jsonl
 /// ```
 pub struct JsonFileStorage {
     base_path: PathBuf,
@@ -42,33 +40,30 @@ impl JsonFileStorage {
         self.base_path.join("accounts")
     }
 
-    fn connection_file(&self, id: &Uuid) -> PathBuf {
+    fn connection_file(&self, id: &Id) -> PathBuf {
         self.connections_dir().join(id.to_string()).join("connection.json")
     }
 
-    fn account_file(&self, id: &Uuid) -> PathBuf {
-        self.accounts_dir().join(id.to_string()).join("account.json")
+    fn account_dir(&self, id: &Id) -> PathBuf {
+        self.accounts_dir().join(id.to_string())
     }
 
-    fn account_year_dir(&self, account_id: &Uuid, year: i32) -> PathBuf {
-        self.accounts_dir()
-            .join(account_id.to_string())
-            .join(year.to_string())
+    fn account_file(&self, id: &Id) -> PathBuf {
+        self.account_dir(id).join("account.json")
     }
 
-    fn balances_file(&self, account_id: &Uuid, year: i32, month: u32) -> PathBuf {
-        self.account_year_dir(account_id, year)
-            .join(format!("{:02}-balances.jsonl", month))
+    fn balances_file(&self, account_id: &Id) -> PathBuf {
+        self.account_dir(account_id).join("balances.jsonl")
     }
 
-    fn transactions_file(&self, account_id: &Uuid, year: i32, month: u32) -> PathBuf {
-        self.account_year_dir(account_id, year)
-            .join(format!("{:02}-transactions.jsonl", month))
+    fn transactions_file(&self, account_id: &Id) -> PathBuf {
+        self.account_dir(account_id).join("transactions.jsonl")
     }
 
     async fn ensure_dir(&self, path: &Path) -> Result<()> {
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).await
+            fs::create_dir_all(parent)
+                .await
                 .context("Failed to create directory")?;
         }
         Ok(())
@@ -88,9 +83,9 @@ impl JsonFileStorage {
 
     async fn write_json<T: serde::Serialize>(&self, path: &Path, value: &T) -> Result<()> {
         self.ensure_dir(path).await?;
-        let content = serde_json::to_string_pretty(value)
-            .context("Failed to serialize JSON")?;
-        fs::write(path, content).await
+        let content = serde_json::to_string_pretty(value).context("Failed to serialize JSON")?;
+        fs::write(path, content)
+            .await
             .context("Failed to write file")?;
         Ok(())
     }
@@ -133,8 +128,7 @@ impl JsonFileStorage {
             .context("Failed to open file for append")?;
 
         for item in items {
-            let line = serde_json::to_string(item)
-                .context("Failed to serialize item")?;
+            let line = serde_json::to_string(item).context("Failed to serialize item")?;
             file.write_all(line.as_bytes()).await?;
             file.write_all(b"\n").await?;
         }
@@ -142,7 +136,7 @@ impl JsonFileStorage {
         Ok(())
     }
 
-    async fn list_dirs(&self, path: &Path) -> Result<Vec<Uuid>> {
+    async fn list_dirs(&self, path: &Path) -> Result<Vec<Id>> {
         let mut ids = Vec::new();
 
         let mut entries = match fs::read_dir(path).await {
@@ -155,8 +149,8 @@ impl JsonFileStorage {
             if let Ok(file_type) = entry.file_type().await {
                 if file_type.is_dir() {
                     if let Some(name) = entry.file_name().to_str() {
-                        if let Ok(id) = Uuid::parse_str(name) {
-                            ids.push(id);
+                        if !name.is_empty() {
+                            ids.push(Id::from(name));
                         }
                     }
                 }
@@ -182,7 +176,7 @@ impl Storage for JsonFileStorage {
         Ok(connections)
     }
 
-    async fn get_connection(&self, id: &Uuid) -> Result<Option<Connection>> {
+    async fn get_connection(&self, id: &Id) -> Result<Option<Connection>> {
         self.read_json(&self.connection_file(id)).await
     }
 
@@ -203,7 +197,7 @@ impl Storage for JsonFileStorage {
         Ok(accounts)
     }
 
-    async fn get_account(&self, id: &Uuid) -> Result<Option<Account>> {
+    async fn get_account(&self, id: &Id) -> Result<Option<Account>> {
         self.read_json(&self.account_file(id)).await
     }
 
@@ -211,75 +205,19 @@ impl Storage for JsonFileStorage {
         self.write_json(&self.account_file(&account.id), account).await
     }
 
-    async fn get_balances(&self, account_id: &Uuid, range: &TimeRange) -> Result<Vec<Balance>> {
-        // For now, just get current year/month. In a real impl, would iterate over range.
-        let now = Utc::now();
-        let path = self.balances_file(account_id, now.year(), now.month());
-        let mut balances: Vec<Balance> = self.read_jsonl(&path).await?;
-
-        // Filter by range if specified
-        if let Some(start) = range.start {
-            balances.retain(|b| b.timestamp >= start);
-        }
-        if let Some(end) = range.end {
-            balances.retain(|b| b.timestamp <= end);
-        }
-
-        Ok(balances)
+    async fn get_balances(&self, account_id: &Id) -> Result<Vec<Balance>> {
+        self.read_jsonl(&self.balances_file(account_id)).await
     }
 
-    async fn append_balances(&self, account_id: &Uuid, balances: &[Balance]) -> Result<()> {
-        // Group balances by year/month and append to appropriate files
-        use std::collections::HashMap;
-
-        let mut grouped: HashMap<(i32, u32), Vec<&Balance>> = HashMap::new();
-
-        for balance in balances {
-            let key = (balance.timestamp.year(), balance.timestamp.month());
-            grouped.entry(key).or_default().push(balance);
-        }
-
-        for ((year, month), items) in grouped {
-            let path = self.balances_file(account_id, year, month);
-            self.append_jsonl(&path, &items).await?;
-        }
-
-        Ok(())
+    async fn append_balances(&self, account_id: &Id, balances: &[Balance]) -> Result<()> {
+        self.append_jsonl(&self.balances_file(account_id), balances).await
     }
 
-    async fn get_transactions(&self, account_id: &Uuid, range: &TimeRange) -> Result<Vec<Transaction>> {
-        // For now, just get current year/month. In a real impl, would iterate over range.
-        let now = Utc::now();
-        let path = self.transactions_file(account_id, now.year(), now.month());
-        let mut transactions: Vec<Transaction> = self.read_jsonl(&path).await?;
-
-        // Filter by range if specified
-        if let Some(start) = range.start {
-            transactions.retain(|t| t.timestamp >= start);
-        }
-        if let Some(end) = range.end {
-            transactions.retain(|t| t.timestamp <= end);
-        }
-
-        Ok(transactions)
+    async fn get_transactions(&self, account_id: &Id) -> Result<Vec<Transaction>> {
+        self.read_jsonl(&self.transactions_file(account_id)).await
     }
 
-    async fn append_transactions(&self, account_id: &Uuid, txns: &[Transaction]) -> Result<()> {
-        // Group transactions by year/month and append to appropriate files
-        use std::collections::HashMap;
-
-        let mut grouped: HashMap<(i32, u32), Vec<&Transaction>> = HashMap::new();
-
-        for txn in txns {
-            let key = (txn.timestamp.year(), txn.timestamp.month());
-            grouped.entry(key).or_default().push(txn);
-        }
-
-        for ((year, month), items) in grouped {
-            let path = self.transactions_file(account_id, year, month);
-            self.append_jsonl(&path, &items).await?;
-        }
-
-        Ok(())
+    async fn append_transactions(&self, account_id: &Id, txns: &[Transaction]) -> Result<()> {
+        self.append_jsonl(&self.transactions_file(account_id), txns).await
     }
 }

@@ -48,21 +48,20 @@ The core operates on typed data structures and programs against a storage trait:
 trait Storage {
     // Connections
     fn list_connections(&self) -> Result<Vec<Connection>>;
-    fn get_connection(&self, id: &Uuid) -> Result<Connection>;
-    fn save_connection(&self, conn: &Connection) -> Result<()>;
+    fn get_connection(&self, id: &Id) -> Result<Connection>;
 
     // Accounts
     fn list_accounts(&self) -> Result<Vec<Account>>;
-    fn get_account(&self, id: &Uuid) -> Result<Account>;
-    fn save_account(&self, account: &Account) -> Result<()>;
+    fn get_account(&self, id: &Id) -> Result<Account>;
 
     // Balances
-    fn get_balances(&self, account_id: &Uuid, range: TimeRange) -> Result<Vec<Balance>>;
-    fn append_balances(&self, account_id: &Uuid, balances: &[Balance]) -> Result<()>;
+    fn get_balances(&self, account_id: &Id, range: TimeRange) -> Result<Vec<Balance>>;
 
     // Transactions
-    fn get_transactions(&self, account_id: &Uuid, range: TimeRange) -> Result<Vec<Transaction>>;
-    fn append_transactions(&self, account_id: &Uuid, txns: &[Transaction]) -> Result<()>;
+    fn get_transactions(&self, account_id: &Id, range: TimeRange) -> Result<Vec<Transaction>>;
+
+    // Writes (batch-only)
+    fn write_batch(&self, metadata: &BatchMetadata, updates: &[AccountUpdate]) -> Result<()>;
 }
 #+END_SRC
 
@@ -119,7 +118,7 @@ A sync source — one Plaid link, one bank login, one file import source.
 
 | Field | Description |
 |-------+-------------|
-| id | UUID, immutable |
+| id | Opaque string id (often UUID), immutable |
 | name | Human-friendly, user-editable |
 | synchronizer | Which sync plugin handles this connection |
 | status | active, error, disconnected, pending_reauth |
@@ -145,7 +144,7 @@ An individual financial account (checking, savings, credit card, brokerage, etc.
 
 | Field | Description |
 |-------+-------------|
-| id | UUID, immutable |
+| id | Opaque string id (often UUID), immutable |
 | name | Human-friendly, user-editable |
 | connection_id | Parent connection that syncs this account |
 | tags | User-defined labels for organization |
@@ -197,7 +196,7 @@ A financial transaction. Stored in monthly JSONL files.
 
 | Field | Description |
 |-------+-------------|
-| id | UUID, immutable |
+| id | Opaque string id (often UUID), immutable |
 | timestamp | Transaction date (synchronizer decides which date to use) |
 | amount | Signed string — negative for debits, positive for credits |
 | asset | What was transacted |

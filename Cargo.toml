@@ -3,6 +3,26 @@ name = "keepbook"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "keepbook"
+path = "src/lib.rs"
+
+[[bin]]
+name = "keepbook"
+path = "src/main.rs"
+
+[[example]]
+name = "coinbase"
+path = "examples/coinbase.rs"
+
+[[example]]
+name = "plaid"
+path = "examples/plaid.rs"
+
+[[example]]
+name = "schwab"
+path = "examples/schwab.rs"
+
 [dependencies]
 # Async runtime
 tokio = { version = "1", features = ["full"] }

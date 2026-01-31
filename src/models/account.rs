@@ -1,13 +1,14 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+
+use super::Id;
 
 /// An individual financial account (checking, savings, credit card, brokerage, etc.)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Account {
-    pub id: Uuid,
+    pub id: Id,
     pub name: String,
-    pub connection_id: Uuid,
+    pub connection_id: Id,
     #[serde(default)]
     pub tags: Vec<String>,
     pub created_at: DateTime<Utc>,
@@ -18,9 +19,9 @@ pub struct Account {
 }
 
 impl Account {
-    pub fn new(name: impl Into<String>, connection_id: Uuid) -> Self {
+    pub fn new(name: impl Into<String>, connection_id: Id) -> Self {
         Self {
-            id: Uuid::new_v4(),
+            id: Id::new(),
             name: name.into(),
             connection_id,
             tags: Vec::new(),

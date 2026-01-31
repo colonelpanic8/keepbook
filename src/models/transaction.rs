@@ -1,8 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
-use super::Asset;
+use super::{Asset, Id};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -17,7 +16,7 @@ pub enum TransactionStatus {
 /// A financial transaction. Stored in monthly JSONL files.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Transaction {
-    pub id: Uuid,
+    pub id: Id,
     pub timestamp: DateTime<Utc>,
     /// Signed amount as string - negative for debits, positive for credits
     pub amount: String,
@@ -37,7 +36,7 @@ impl Transaction {
         description: impl Into<String>,
     ) -> Self {
         Self {
-            id: Uuid::new_v4(),
+            id: Id::new(),
             timestamp: Utc::now(),
             amount: amount.into(),
             asset,
@@ -57,7 +56,7 @@ impl Transaction {
         self
     }
 
-    pub fn with_id(mut self, id: Uuid) -> Self {
+    pub fn with_id(mut self, id: Id) -> Self {
         self.id = id;
         self
     }
