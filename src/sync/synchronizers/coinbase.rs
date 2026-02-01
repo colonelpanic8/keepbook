@@ -1,29 +1,30 @@
-//! Coinbase CDP API synchronizer - Proof of Concept
+//! Coinbase CDP API synchronizer.
 //!
-//! This example demonstrates syncing from Coinbase using their CDP API.
+//! This synchronizer uses Coinbase's CDP API with JWT authentication.
 //! Credentials are loaded via the CredentialStore abstraction.
-//!
-//! Run with: cargo run --example coinbase
+
+use std::collections::HashSet;
 
 use anyhow::{Context, Result};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use chrono::{DateTime, Utc};
-use keepbook::credentials::CredentialStore;
-use keepbook::models::{
-    Account, Asset, Balance, Connection, ConnectionConfig, ConnectionStatus, Id, LastSync, SyncStatus, Transaction,
-};
-use keepbook::storage::{JsonFileStorage, Storage};
-use keepbook::sync::{SyncedBalance, SyncResult};
 use p256::ecdsa::{signature::Signer, Signature, SigningKey};
 use p256::SecretKey;
 use reqwest::Client;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 
+use crate::credentials::CredentialStore;
+use crate::models::{
+    Account, Asset, Balance, Connection, ConnectionStatus, Id, LastSync, SyncStatus, Transaction,
+};
+use crate::storage::Storage;
+use crate::sync::{SyncResult, SyncedBalance, Synchronizer};
+
 const CDP_API_BASE: &str = "https://api.coinbase.com";
 
-/// Coinbase CDP API synchronizer
-struct CoinbaseSynchronizer {
+/// Coinbase CDP API synchronizer.
+pub struct CoinbaseSynchronizer {
     key_name: String,
     private_key_pem: SecretString,
     client: Client,
@@ -39,7 +40,8 @@ struct JwtClaims {
 }
 
 impl CoinbaseSynchronizer {
-    fn new(key_name: String, private_key_pem: SecretString) -> Self {
+    /// Create a new Coinbase synchronizer with explicit credentials.
+    pub fn new(key_name: String, private_key_pem: SecretString) -> Self {
         Self {
             key_name,
             private_key_pem,
@@ -47,8 +49,8 @@ impl CoinbaseSynchronizer {
         }
     }
 
-    /// Load credentials from a credential store.
-    async fn from_credentials(store: &dyn CredentialStore) -> Result<Self> {
+    /// Create a synchronizer by loading credentials from storage.
+    pub async fn from_credentials(store: &dyn CredentialStore) -> Result<Self> {
         let key_name = store
             .get("key-name")
             .await?
@@ -96,8 +98,8 @@ impl CoinbaseSynchronizer {
         let message = format!("{}.{}", header_b64, claims_b64);
 
         // Parse the EC private key (SEC1 format)
-        let secret_key =
-            SecretKey::from_sec1_pem(self.private_key_pem.expose_secret()).context("Failed to parse EC private key")?;
+        let secret_key = SecretKey::from_sec1_pem(self.private_key_pem.expose_secret())
+            .context("Failed to parse EC private key")?;
         let signing_key = SigningKey::from(&secret_key);
 
         // Sign the message
@@ -153,12 +155,16 @@ impl CoinbaseSynchronizer {
         Ok(resp.ledger)
     }
 
-    async fn sync(&self, connection: &mut Connection, storage: &JsonFileStorage) -> Result<SyncResult> {
+    async fn sync_internal<S: Storage>(
+        &self,
+        connection: &mut Connection,
+        storage: &S,
+    ) -> Result<SyncResult> {
         let coinbase_accounts = self.get_accounts().await?;
 
         // Load existing accounts to check for history
         let existing_accounts = storage.list_accounts().await?;
-        let existing_ids: std::collections::HashSet<String> = existing_accounts
+        let existing_ids: HashSet<String> = existing_accounts
             .iter()
             .filter(|a| a.connection_id == *connection.id())
             .map(|a| a.id.to_string())
@@ -274,6 +280,7 @@ struct CoinbaseAccount {
 #[derive(Debug, Deserialize)]
 struct CoinbaseBalance {
     value: String,
+    #[allow(dead_code)]
     currency: String,
 }
 
@@ -287,73 +294,37 @@ struct CoinbaseTransaction {
     description: Option<String>,
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    println!("Keepbook - Coinbase Sync (POC)");
-    println!("==============================\n");
-
-    let storage = JsonFileStorage::new("data");
-
-    let connections = storage.list_connections().await?;
-    let mut connection = connections
-        .into_iter()
-        .find(|c| c.synchronizer() == "coinbase")
-        .unwrap_or_else(|| {
-            Connection::new(ConnectionConfig {
-                name: "Coinbase".to_string(),
-                synchronizer: "coinbase".to_string(),
-                credentials: None,
-            })
-        });
-
-    println!("Connection: {} ({})", connection.name(), connection.id());
-
-    // Save connection first so the directory exists for credentials.toml
-    storage.save_connection(&connection).await?;
-
-    // Load credential store from connection's config or fallback credentials.toml
-    let credential_store = storage
-        .get_credential_store(connection.id())?
-        .with_context(|| {
-            format!(
-                "Missing credentials for connection.\n\
-                 Add [credentials] section to connection.toml or create credentials.toml\n\n\
-                 Example connection.toml:\n\
-                 name = \"Coinbase\"\n\
-                 synchronizer = \"coinbase\"\n\n\
-                 [credentials]\n\
-                 backend = \"pass\"\n\
-                 path = \"coinbase-api-key\""
-            )
-        })?;
-
-    println!("\nLoading Coinbase credentials...");
-    let synchronizer = CoinbaseSynchronizer::from_credentials(credential_store.as_ref()).await?;
-
-    println!("Syncing from Coinbase...\n");
-    let result = synchronizer.sync(&mut connection, &storage).await?;
-
-    for account in &result.accounts {
-        println!("  - {} ({})", account.name, account.id);
+#[async_trait::async_trait]
+impl Synchronizer for CoinbaseSynchronizer {
+    fn name(&self) -> &str {
+        "coinbase"
     }
 
-    for (_account_id, synced_balances) in &result.balances {
-        for sb in synced_balances {
-            println!(
-                "    Balance: {} {}",
-                sb.balance.amount,
-                serde_json::to_string(&sb.balance.asset)?
-            );
-        }
+    async fn sync(&self, _connection: &mut Connection) -> Result<SyncResult> {
+        // We need storage but can't access it through the trait
+        // This is a limitation - we'll need to refactor
+        anyhow::bail!(
+            "CoinbaseSynchronizer::sync requires storage access. Use sync_with_storage instead."
+        )
+    }
+}
+
+impl CoinbaseSynchronizer {
+    /// Create a new synchronizer from connection credentials.
+    pub async fn from_connection<S: Storage>(connection: &Connection, storage: &S) -> Result<Self> {
+        let credential_store = storage
+            .get_credential_store(connection.id())?
+            .context("No credentials configured for this connection")?;
+
+        Self::from_credentials(credential_store.as_ref()).await
     }
 
-    result.save(&storage).await?;
-
-    println!("\nSync complete!");
-    println!("Saved {} accounts", result.accounts.len());
-    if let Some(last_sync) = &result.connection.state.last_sync {
-        println!("Last sync: {} - {:?}", last_sync.at, last_sync.status);
+    /// Sync with storage access for looking up existing accounts.
+    pub async fn sync_with_storage<S: Storage>(
+        &self,
+        connection: &mut Connection,
+        storage: &S,
+    ) -> Result<SyncResult> {
+        self.sync_internal(connection, storage).await
     }
-
-    Ok(())
 }

@@ -1,7 +1,9 @@
 mod orchestrator;
 pub mod schwab;
+pub mod synchronizers;
 
 pub use orchestrator::{PriceRefreshResult, SyncOrchestrator};
+pub use synchronizers::create_synchronizer;
 
 use anyhow::Result;
 use crate::market_data::PricePoint;
@@ -74,4 +76,25 @@ pub trait Synchronizer: Send + Sync {
 
     /// Perform a full sync, returning all accounts, balances, and transactions
     async fn sync(&self, connection: &mut Connection) -> Result<SyncResult>;
+}
+
+/// Authentication status for synchronizers requiring interactive auth.
+#[derive(Debug, Clone)]
+pub enum AuthStatus {
+    /// Session is valid and can be used
+    Valid,
+    /// No session exists
+    Missing,
+    /// Session exists but is expired or invalid
+    Expired { reason: String },
+}
+
+/// Trait for synchronizers that require interactive (browser-based) authentication.
+#[async_trait::async_trait]
+pub trait InteractiveAuth: Synchronizer {
+    /// Check if the current authentication is valid.
+    async fn check_auth(&self) -> Result<AuthStatus>;
+
+    /// Perform interactive login (typically opens a browser).
+    async fn login(&mut self) -> Result<()>;
 }

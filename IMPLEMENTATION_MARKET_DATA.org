@@ -1,0 +1,150 @@
+#+TITLE: Market Data + Net Worth Implementation
+#+AUTHOR:
+#+OPTIONS: toc:2
+
+* Goals
+- Keep balances/holdings as the source of truth.
+- Support net worth in any base currency.
+- Allow dynamic price lookup, persisted price history, or a mix.
+- Keep storage human-readable, append-only, and git-friendly.
+- Enable backfilling and historical projections with explicit assumptions.
+
+* Non-goals (for now)
+- Intraday pricing (daily close only).
+- Full performance analytics (e.g., IRR, TWRR).
+- Corporate actions processing beyond storing metadata (splits/dividends).
+
+* Core Concepts
+
+** Asset Registry
+- Assets remain inline in balances/transactions, but for pricing we use a stable *asset_id*.
+- *asset_id* is derived from a canonical JSON form of the asset descriptor, then hashed and encoded (path-safe).
+- This avoids filesystem issues with symbols like /, :, or non-ASCII.
+
+*** Canonicalization (suggested)
+1. Normalize field names and order (type first, then other fields lexicographically).
+2. Normalize case where appropriate (e.g., ticker/exchange uppercase, crypto symbol uppercase).
+3. Serialize to JSON with stable ordering and no whitespace.
+4. Hash with SHA-256 and encode as base32 (RFC 4648, lowercase, no padding) or base64url.
+
+*** Registry file
+- =data/assets/index.jsonl=
+- Each line maps =asset_id= to the asset descriptor and optional provider identifiers.
+
+Example:
+#+BEGIN_SRC json
+{"id":"f3p9h0...","asset":{"type":"equity","ticker":"AAPL","exchange":"NASDAQ"},"provider_ids":{"polygon":"AAPL"},"tz":"America/New_York"}
+#+END_SRC
+
+** Market Data Provider (dynamic fetch)
+A trait for fetching price/FX points from external providers.
+
+** Market Data Store (optional persistence)
+A trait for reading/writing historical prices/FX. Implementations:
+- =NullStore= (dynamic-only)
+- =JsonlStore= (persist in repo)
+- =MemoryStore= (per-run cache)
+
+** Market Data Service (orchestrator)
+- Reads from store first.
+- Falls back to provider if missing/stale.
+- Writes back to store if configured.
+
+* Data Model
+
+** Price Point (daily close)
+Fields:
+- =asset_id= (or implied by directory path)
+- =as_of_date= (YYYY-MM-DD, market-local close date)
+- =timestamp= (RFC3339 close time)
+- =price= (string decimal)
+- =quote_currency= (ISO 4217 or crypto symbol for crypto quotes)
+- =kind= "close" (future: "adj_close")
+- =source= provider name
+
+** FX Rate Point (daily close)
+Fields:
+- =base= (currency)
+- =quote= (currency)
+- =as_of_date=
+- =timestamp=
+- =rate= (string decimal, quote per 1 base)
+- =kind= "close"
+- =source=
+
+* Storage Layout
+
+** Recommended (per-asset, path-safe)
+- =data/market/prices/{asset_id}/YYYY/MM.jsonl=
+- =data/market/fx/{BASE}-{QUOTE}/YYYY/MM.jsonl=
+
+Example:
+#+BEGIN_SRC json
+{"as_of_date":"2024-06-03","timestamp":"2024-06-03T20:00:00Z","price":"189.99","quote_currency":"USD","kind":"close","source":"provider"}
+#+END_SRC
+
+** Alternative (by month, inline asset_id)
+- =data/market/prices/YYYY/MM.jsonl=
+- =data/market/fx/YYYY/MM.jsonl=
+
+Pros: fewer directories. Cons: slower lookup unless indexed.
+
+* Net Worth Computation (daily close)
+
+Given a target date D and base currency B:
+1. Load balances as of D (or latest prior).
+2. For each balance:
+   - If asset is currency C: value = amount * fx(C -> B, D)
+   - Else: price = close(asset, D); value = amount * price * fx(quote -> B, D)
+3. Sum by account and total.
+
+Notes:
+- Use *market-local* =as_of_date= for prices; for crypto use UTC date.
+- Prefer the most recent close <= D when exact date missing.
+- If holdings are sparse, forward-fill balances between snapshots but mark valuation as *assumed*.
+
+* Dynamic vs Persisted Modes
+
+- **Dynamic only**: Provider + NullStore
+- **Mixed (cache/backfill)**: Provider + JsonlStore
+- **Pinned/Offline**: JsonlStore only
+
+Expose via CLI/config:
+- =--prices live|cached|pinned=
+
+* Assumptions & Provenance
+
+Store derived valuation outputs with metadata:
+- price source + timestamp
+- fx source + timestamp
+- assumptions (e.g., "positions_constant_since:2024-05-01")
+
+This preserves auditability and allows users to distinguish observed vs projected.
+
+* Provider Strategy (free tiers)
+- Expect multiple providers to cover equities + international + crypto.
+- Normalize into a single provider interface.
+- Store provider IDs in asset registry to avoid ambiguous symbol mapping.
+
+* Integration Plan (Rust)
+
+** Traits (sketch)
+- =MarketDataProvider=: fetch_price(asset_id, date) -> PricePoint; fetch_fx(base, quote, date) -> FxPoint
+- =MarketDataStore=: get_price(asset_id, date) -> Option<PricePoint>; put_price(...)
+- =MarketDataService=: orchestrates provider + store
+
+** Net worth
+- Add a query function that takes:
+  - balances iterator
+  - base currency
+  - market data service
+  - date
+
+Return per-account totals + overall total + metadata.
+
+* Open Questions
+- Canonicalization rules per asset type (ticker case, exchange alias normalization).
+- Preferred hashing/encoding for asset_id.
+- Currency list source (ISO 4217 + crypto symbols).
+- Default mode: dynamic vs cached vs pinned.
+- Whether to store adjusted close as a separate kind.

@@ -1,0 +1,40 @@
+#+TITLE: Source Routing + Rate Limits
+#+AUTHOR:
+#+OPTIONS: toc:2
+
+* Scope
+- Provide capability-based source traits and router skeletons.
+- Centralize fallback logic and rate-limit enforcement.
+- Keep routers independent of storage (market data store is a separate layer).
+
+* Files
+- =src/market_data/sources.rs= (traits + routers)
+
+* Traits
+** EquityPriceSource
+- =fetch_close(asset, asset_id, date) -> Option<PricePoint>=
+- Contract: =asset= must be =Asset::Equity=.
+
+** CryptoPriceSource
+- =fetch_close(asset, asset_id, date) -> Option<PricePoint>=
+- Contract: =asset= must be =Asset::Crypto=.
+
+** FxRateSource
+- =fetch_close(base, quote, date) -> Option<FxRatePoint>=
+
+* Routers
+- =EquityPriceRouter=, =CryptoPriceRouter=, =FxRateRouter=
+- Iterate sources in configured order; return first hit.
+- Use rate-limit config (per-source) before calling.
+
+* Rate limits
+- Config shape should be simple and shared:
+  - =max_requests= (u32)
+  - =window_seconds= (u64)
+- Router should enforce max requests per window and apply backoff on denial.
+- Record the source chosen for auditability.
+
+* TODOs
+- Implement a real limiter (token bucket or sliding window).
+- Add error classification to distinguish "no data" vs "rate-limited" vs "hard error".
+- Add per-source fallback policy (e.g., skip if rate-limited).
