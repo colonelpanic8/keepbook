@@ -302,6 +302,11 @@ impl JsonFileStorage {
 
 #[async_trait::async_trait]
 impl Storage for JsonFileStorage {
+    fn get_credential_store(&self, connection_id: &Id) -> Result<Option<Box<dyn CredentialStore>>> {
+        // Delegate to the inherent method
+        JsonFileStorage::get_credential_store(self, connection_id)
+    }
+
     async fn list_connections(&self) -> Result<Vec<Connection>> {
         let ids = self.list_dirs(&self.connections_dir()).await?;
         let mut connections = Vec::new();

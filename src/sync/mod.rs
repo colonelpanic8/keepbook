@@ -1,7 +1,9 @@
 mod orchestrator;
 pub mod schwab;
+pub mod synchronizers;
 
 pub use orchestrator::{PriceRefreshResult, SyncOrchestrator};
+pub use synchronizers::create_synchronizer;
 
 use anyhow::Result;
 use crate::market_data::PricePoint;
