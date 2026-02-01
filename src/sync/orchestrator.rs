@@ -157,13 +157,22 @@ impl<S: Storage + Send + Sync> SyncOrchestrator<S> {
         // 2. Save sync results (this stores balances)
         result.save(self.storage.as_ref()).await?;
 
-        // 3. Collect assets that need prices
+        // 3. Store any prices the synchronizer provided
+        for (_, synced_balances) in &result.balances {
+            for sb in synced_balances {
+                if let Some(price) = &sb.price {
+                    self.market_data.store_price(price).await?;
+                }
+            }
+        }
+
+        // 4. Collect assets that need prices
         let assets: HashSet<Asset> = result.balances
             .iter()
             .flat_map(|(_, sbs)| sbs.iter().map(|sb| sb.balance.asset.clone()))
             .collect();
 
-        // 4. Fetch missing prices
+        // 5. Fetch missing prices
         let date = chrono::Utc::now().date_naive();
         self.ensure_prices(&assets, date, force_refresh).await?;
 

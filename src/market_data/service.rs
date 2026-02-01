@@ -115,6 +115,11 @@ impl MarketDataService {
         Ok(())
     }
 
+    /// Store a price point directly (e.g., from a synchronizer).
+    pub async fn store_price(&self, price: &PricePoint) -> Result<()> {
+        self.store.put_prices(&[price.clone()]).await
+    }
+
     async fn fetch_price_from_sources(
         &self,
         asset: &Asset,
