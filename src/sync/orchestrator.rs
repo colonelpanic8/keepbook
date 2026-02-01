@@ -7,8 +7,10 @@ use anyhow::Result;
 use chrono::NaiveDate;
 
 use crate::market_data::MarketDataService;
-use crate::models::{Asset, Id};
+use crate::models::{Asset, Connection, Id};
 use crate::storage::Storage;
+
+use super::{SyncResult, Synchronizer};
 
 /// Coordinates sync + price fetching operations.
 pub struct SyncOrchestrator<S: Storage> {
@@ -140,5 +142,31 @@ impl<S: Storage + Send + Sync> SyncOrchestrator<S> {
             .map(|b| b.asset)
             .collect();
         self.ensure_prices(&assets, date, force).await
+    }
+
+    /// Run sync and fetch any missing prices.
+    pub async fn sync_with_prices(
+        &self,
+        synchronizer: &dyn Synchronizer,
+        connection: &mut Connection,
+        force_refresh: bool,
+    ) -> Result<SyncResult> {
+        // 1. Run the sync
+        let result = synchronizer.sync(connection).await?;
+
+        // 2. Save sync results (this stores balances)
+        result.save(self.storage.as_ref()).await?;
+
+        // 3. Collect assets that need prices
+        let assets: HashSet<Asset> = result.balances
+            .iter()
+            .flat_map(|(_, sbs)| sbs.iter().map(|sb| sb.balance.asset.clone()))
+            .collect();
+
+        // 4. Fetch missing prices
+        let date = chrono::Utc::now().date_naive();
+        self.ensure_prices(&assets, date, force_refresh).await?;
+
+        Ok(result)
     }
 }
