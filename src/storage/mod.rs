@@ -12,11 +12,13 @@ pub trait Storage: Send + Sync {
     async fn list_connections(&self) -> Result<Vec<Connection>>;
     async fn get_connection(&self, id: &Id) -> Result<Option<Connection>>;
     async fn save_connection(&self, conn: &Connection) -> Result<()>;
+    async fn delete_connection(&self, id: &Id) -> Result<bool>;
 
     // Accounts
     async fn list_accounts(&self) -> Result<Vec<Account>>;
     async fn get_account(&self, id: &Id) -> Result<Option<Account>>;
     async fn save_account(&self, account: &Account) -> Result<()>;
+    async fn delete_account(&self, id: &Id) -> Result<bool>;
 
     // Balances
     async fn get_balances(&self, account_id: &Id) -> Result<Vec<Balance>>;

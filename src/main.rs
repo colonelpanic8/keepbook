@@ -4,6 +4,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use keepbook::config::ResolvedConfig;
 use keepbook::market_data::PriceSourceRegistry;
+use keepbook::models::Id;
 use keepbook::storage::{JsonFileStorage, Storage};
 use serde::Serialize;
 
@@ -27,6 +28,19 @@ enum Command {
     /// List entities
     #[command(subcommand)]
     List(ListCommand),
+
+    /// Remove entities
+    #[command(subcommand)]
+    Remove(RemoveCommand),
+}
+
+#[derive(Subcommand)]
+enum RemoveCommand {
+    /// Remove a connection and all its accounts
+    Connection {
+        /// Connection ID to remove
+        id: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -128,6 +142,13 @@ async fn main() -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
 
+        Some(Command::Remove(remove_cmd)) => match remove_cmd {
+            RemoveCommand::Connection { id } => {
+                let result = remove_connection(&storage, &id).await?;
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
+        },
+
         Some(Command::List(list_cmd)) => match list_cmd {
             ListCommand::Connections => {
                 let connections = list_connections(&storage).await?;
@@ -171,7 +192,7 @@ async fn main() -> Result<()> {
                 "version": env!("CARGO_PKG_VERSION"),
                 "config_file": cli.config.display().to_string(),
                 "data_directory": config.data_dir.display().to_string(),
-                "commands": ["config", "list connections", "list accounts", "list price-sources", "list balances", "list transactions", "list all"]
+                "commands": ["config", "list connections", "list accounts", "list price-sources", "list balances", "list transactions", "list all", "remove connection <id>"]
             });
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
@@ -259,4 +280,45 @@ async fn list_transactions(storage: &JsonFileStorage) -> Result<Vec<TransactionO
     }
 
     Ok(all_transactions)
+}
+
+async fn remove_connection(storage: &JsonFileStorage, id_str: &str) -> Result<serde_json::Value> {
+    let id = Id::from_string(id_str);
+
+    // Get connection info first
+    let connection = storage.get_connection(&id).await?;
+    let conn = match connection {
+        Some(c) => c,
+        None => {
+            return Ok(serde_json::json!({
+                "success": false,
+                "error": "Connection not found",
+                "id": id_str
+            }));
+        }
+    };
+
+    let name = conn.config.name.clone();
+    let account_ids: Vec<String> = conn.state.account_ids.iter().map(|a| a.to_string()).collect();
+
+    // Delete all accounts belonging to this connection
+    let mut deleted_accounts = 0;
+    for account_id in &conn.state.account_ids {
+        if storage.delete_account(account_id).await? {
+            deleted_accounts += 1;
+        }
+    }
+
+    // Delete the connection
+    storage.delete_connection(&id).await?;
+
+    Ok(serde_json::json!({
+        "success": true,
+        "connection": {
+            "id": id_str,
+            "name": name
+        },
+        "deleted_accounts": deleted_accounts,
+        "account_ids": account_ids
+    }))
 }

@@ -326,6 +326,18 @@ impl Storage for JsonFileStorage {
         Ok(())
     }
 
+    async fn delete_connection(&self, id: &Id) -> Result<bool> {
+        let dir = self.connection_dir(id);
+        if dir.exists() {
+            fs::remove_dir_all(&dir)
+                .await
+                .with_context(|| format!("Failed to delete connection directory: {}", dir.display()))?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
     async fn list_accounts(&self) -> Result<Vec<Account>> {
         let ids = self.list_dirs(&self.accounts_dir()).await?;
         let mut accounts = Vec::new();
@@ -345,6 +357,18 @@ impl Storage for JsonFileStorage {
 
     async fn save_account(&self, account: &Account) -> Result<()> {
         self.write_json(&self.account_file(&account.id), account).await
+    }
+
+    async fn delete_account(&self, id: &Id) -> Result<bool> {
+        let dir = self.account_dir(id);
+        if dir.exists() {
+            fs::remove_dir_all(&dir)
+                .await
+                .with_context(|| format!("Failed to delete account directory: {}", dir.display()))?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 
     async fn get_balances(&self, account_id: &Id) -> Result<Vec<Balance>> {
