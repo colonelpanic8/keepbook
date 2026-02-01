@@ -1,0 +1,176 @@
+use std::path::{Path, PathBuf};
+
+use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
+
+/// Application configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Config {
+    /// Path to data directory. If relative, resolved from config file location.
+    /// If not specified, defaults to the config file's directory.
+    pub data_dir: Option<PathBuf>,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self { data_dir: None }
+    }
+}
+
+impl Config {
+    /// Load config from a TOML file.
+    pub fn load(path: &Path) -> Result<Self> {
+        let content = std::fs::read_to_string(path)
+            .with_context(|| format!("Failed to read config file: {}", path.display()))?;
+
+        let config: Config = toml::from_str(&content)
+            .with_context(|| format!("Failed to parse config file: {}", path.display()))?;
+
+        Ok(config)
+    }
+
+    /// Load config from a file, or return default config if file doesn't exist.
+    pub fn load_or_default(path: &Path) -> Result<Self> {
+        if path.exists() {
+            Self::load(path)
+        } else {
+            Ok(Self::default())
+        }
+    }
+
+    /// Resolve the data directory path.
+    ///
+    /// If `data_dir` is set and relative, it's resolved relative to `config_dir`.
+    /// If `data_dir` is not set, returns `config_dir`.
+    pub fn resolve_data_dir(&self, config_dir: &Path) -> PathBuf {
+        match &self.data_dir {
+            Some(data_dir) if data_dir.is_absolute() => data_dir.clone(),
+            Some(data_dir) => config_dir.join(data_dir),
+            None => config_dir.to_path_buf(),
+        }
+    }
+}
+
+/// Loaded configuration with resolved paths.
+#[derive(Debug, Clone)]
+pub struct ResolvedConfig {
+    /// The resolved data directory path.
+    pub data_dir: PathBuf,
+}
+
+impl ResolvedConfig {
+    /// Load and resolve config from a file path.
+    ///
+    /// The data directory is resolved relative to the config file's parent directory.
+    pub fn load(config_path: &Path) -> Result<Self> {
+        let config_path = config_path
+            .canonicalize()
+            .with_context(|| format!("Config file not found: {}", config_path.display()))?;
+
+        let config_dir = config_path
+            .parent()
+            .context("Config file has no parent directory")?;
+
+        let config = Config::load(&config_path)?;
+        let data_dir = config.resolve_data_dir(config_dir);
+
+        Ok(Self { data_dir })
+    }
+
+    /// Load config, creating a default if the file doesn't exist.
+    ///
+    /// If the config file doesn't exist, uses the config file's intended
+    /// parent directory as the data directory.
+    pub fn load_or_default(config_path: &Path) -> Result<Self> {
+        if config_path.exists() {
+            Self::load(config_path)
+        } else {
+            // Resolve the config path relative to current directory
+            let config_path = if config_path.is_relative() {
+                std::env::current_dir()
+                    .context("Failed to get current directory")?
+                    .join(config_path)
+            } else {
+                config_path.to_path_buf()
+            };
+
+            // Use the intended config directory as data dir
+            let config_dir = config_path
+                .parent()
+                .context("Config path has no parent directory")?;
+
+            Ok(Self {
+                data_dir: config_dir.to_path_buf(),
+            })
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_default_data_dir_is_config_dir() {
+        let config = Config::default();
+        let config_dir = Path::new("/home/user/finances");
+        assert_eq!(
+            config.resolve_data_dir(config_dir),
+            PathBuf::from("/home/user/finances")
+        );
+    }
+
+    #[test]
+    fn test_relative_data_dir() {
+        let config = Config {
+            data_dir: Some(PathBuf::from("data")),
+        };
+        let config_dir = Path::new("/home/user/finances");
+        assert_eq!(
+            config.resolve_data_dir(config_dir),
+            PathBuf::from("/home/user/finances/data")
+        );
+    }
+
+    #[test]
+    fn test_absolute_data_dir() {
+        let config = Config {
+            data_dir: Some(PathBuf::from("/var/keepbook/data")),
+        };
+        let config_dir = Path::new("/home/user/finances");
+        assert_eq!(
+            config.resolve_data_dir(config_dir),
+            PathBuf::from("/var/keepbook/data")
+        );
+    }
+
+    #[test]
+    fn test_load_config() -> Result<()> {
+        let dir = TempDir::new()?;
+        let config_path = dir.path().join("keepbook.toml");
+
+        let mut file = std::fs::File::create(&config_path)?;
+        writeln!(file, "data_dir = \"./my-data\"")?;
+
+        let config = Config::load(&config_path)?;
+        assert_eq!(config.data_dir, Some(PathBuf::from("./my-data")));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_load_empty_config() -> Result<()> {
+        let dir = TempDir::new()?;
+        let config_path = dir.path().join("keepbook.toml");
+
+        std::fs::File::create(&config_path)?;
+
+        let config = Config::load(&config_path)?;
+        assert_eq!(config.data_dir, None);
+
+        Ok(())
+    }
+}

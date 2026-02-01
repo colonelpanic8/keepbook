@@ -1,15 +1,47 @@
+use std::path::PathBuf;
+
 use anyhow::Result;
+use clap::{Parser, Subcommand};
+use keepbook::config::ResolvedConfig;
+
+#[derive(Parser)]
+#[command(name = "keepbook")]
+#[command(about = "Personal finance manager")]
+struct Cli {
+    /// Path to config file
+    #[arg(short, long, default_value = "keepbook.toml")]
+    config: PathBuf,
+
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Show current configuration
+    Config,
+}
 
 fn main() -> Result<()> {
-    println!("Keepbook - Personal Finance Manager");
-    println!("====================================\n");
-    println!("Usage: keepbook <command>\n");
-    println!("Commands:");
-    println!("  (coming soon)\n");
-    println!("Proof-of-concept synchronizers are available as examples:");
-    println!("  cargo run --example coinbase");
-    println!("  cargo run --example plaid -- [setup|sync]");
-    println!("  cargo run --example schwab -- [setup|sync]");
+    let cli = Cli::parse();
+
+    let config = ResolvedConfig::load_or_default(&cli.config)?;
+
+    match cli.command {
+        Some(Command::Config) => {
+            println!("Config file: {}", cli.config.display());
+            println!("Data directory: {}", config.data_dir.display());
+        }
+        None => {
+            println!("Keepbook - Personal Finance Manager");
+            println!("====================================\n");
+            println!("Config: {}", cli.config.display());
+            println!("Data directory: {}\n", config.data_dir.display());
+            println!("Commands:");
+            println!("  config    Show current configuration\n");
+            println!("Run 'keepbook --help' for more options.");
+        }
+    }
 
     Ok(())
 }
