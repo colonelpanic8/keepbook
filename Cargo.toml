@@ -23,6 +23,10 @@ path = "examples/plaid.rs"
 name = "schwab"
 path = "examples/schwab.rs"
 
+[[example]]
+name = "eodhd_test"
+path = "examples/eodhd_test.rs"
+
 [dependencies]
 # Async runtime
 tokio = { version = "1", features = ["full"] }
@@ -50,6 +54,8 @@ rand = "0.8"
 
 # Base64 encoding
 base64 = "0.22"
+sha2 = "0.10"
+rust_decimal = "1"
 
 # Error handling
 thiserror = "2"
