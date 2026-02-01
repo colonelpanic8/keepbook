@@ -6,9 +6,11 @@
 use anyhow::{anyhow, Result};
 use chrono::{NaiveDate, Utc};
 use reqwest::Client;
+use secrecy::ExposeSecret;
 use serde::Deserialize;
 use std::collections::HashMap;
 
+use crate::credentials::CredentialStore;
 use crate::market_data::{AssetId, EquityPriceSource, PriceKind, PricePoint};
 use crate::models::Asset;
 
@@ -24,7 +26,7 @@ pub struct AlphaVantagePriceSource {
 }
 
 impl AlphaVantagePriceSource {
-    /// Create a new Alpha Vantage provider with the given API key.
+    /// Create a new Alpha Vantage price source with the given API key.
     pub fn new(api_key: impl Into<String>) -> Self {
         Self {
             api_key: api_key.into(),
@@ -32,12 +34,24 @@ impl AlphaVantagePriceSource {
         }
     }
 
-    /// Create a new Alpha Vantage provider with a custom reqwest client.
+    /// Create a new Alpha Vantage price source with a custom reqwest client.
     pub fn with_client(api_key: impl Into<String>, client: Client) -> Self {
         Self {
             api_key: api_key.into(),
             client,
         }
+    }
+
+    /// Create a new Alpha Vantage price source from a credential store.
+    ///
+    /// Expects the store to have an "api_key" field (or "password" for simple pass entries).
+    pub async fn from_credentials(store: &dyn CredentialStore) -> Result<Self> {
+        let api_key = store
+            .get("api_key")
+            .await?
+            .or(store.get("password").await?)
+            .ok_or_else(|| anyhow!("missing api_key in credential store"))?;
+        Ok(Self::new(api_key.expose_secret()))
     }
 
     /// Format the symbol for Alpha Vantage API.

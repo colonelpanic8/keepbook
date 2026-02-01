@@ -3,11 +3,13 @@
 //! Implements the `EquityPriceSource` trait using Twelve Data's REST API for daily time series.
 //! Free tier covers US equities; international symbols may be limited.
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use chrono::{NaiveDate, Utc};
 use reqwest::Client;
+use secrecy::ExposeSecret;
 use serde::Deserialize;
 
+use crate::credentials::CredentialStore;
 use crate::market_data::{AssetId, EquityPriceSource, PriceKind, PricePoint};
 use crate::models::Asset;
 
@@ -22,7 +24,7 @@ pub struct TwelveDataPriceSource {
 }
 
 impl TwelveDataPriceSource {
-    /// Creates a new Twelve Data provider with the given API key.
+    /// Creates a new Twelve Data price source with the given API key.
     pub fn new(api_key: impl Into<String>) -> Self {
         Self {
             api_key: api_key.into(),
@@ -30,12 +32,24 @@ impl TwelveDataPriceSource {
         }
     }
 
-    /// Creates a new provider with a custom reqwest client.
+    /// Creates a new price source with a custom reqwest client.
     pub fn with_client(api_key: impl Into<String>, client: Client) -> Self {
         Self {
             api_key: api_key.into(),
             client,
         }
+    }
+
+    /// Create a new Twelve Data price source from a credential store.
+    ///
+    /// Expects the store to have an "api_key" field (or "password" for simple pass entries).
+    pub async fn from_credentials(store: &dyn CredentialStore) -> Result<Self> {
+        let api_key = store
+            .get("api_key")
+            .await?
+            .or(store.get("password").await?)
+            .ok_or_else(|| anyhow!("missing api_key in credential store"))?;
+        Ok(Self::new(api_key.expose_secret()))
     }
 
     /// Builds the symbol string for Twelve Data API.
