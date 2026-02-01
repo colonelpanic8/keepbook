@@ -7,7 +7,7 @@ use anyhow::Result;
 use chrono::NaiveDate;
 
 use crate::market_data::MarketDataService;
-use crate::models::Asset;
+use crate::models::{Asset, Id};
 use crate::storage::Storage;
 
 /// Coordinates sync + price fetching operations.
@@ -96,5 +96,49 @@ impl<S: Storage + Send + Sync> SyncOrchestrator<S> {
         }
 
         Ok(result)
+    }
+
+    /// Refresh prices for all assets across all accounts.
+    pub async fn refresh_all_prices(
+        &self,
+        date: NaiveDate,
+        force: bool,
+    ) -> Result<PriceRefreshResult> {
+        let balances = self.storage.get_latest_balances().await?;
+        let assets: HashSet<Asset> = balances
+            .into_iter()
+            .map(|(_, b)| b.asset)
+            .collect();
+        self.ensure_prices(&assets, date, force).await
+    }
+
+    /// Refresh prices for assets in a specific connection's accounts.
+    pub async fn refresh_connection_prices(
+        &self,
+        connection_id: &Id,
+        date: NaiveDate,
+        force: bool,
+    ) -> Result<PriceRefreshResult> {
+        let balances = self.storage.get_latest_balances_for_connection(connection_id).await?;
+        let assets: HashSet<Asset> = balances
+            .into_iter()
+            .map(|(_, b)| b.asset)
+            .collect();
+        self.ensure_prices(&assets, date, force).await
+    }
+
+    /// Refresh prices for assets in a specific account.
+    pub async fn refresh_account_prices(
+        &self,
+        account_id: &Id,
+        date: NaiveDate,
+        force: bool,
+    ) -> Result<PriceRefreshResult> {
+        let balances = self.storage.get_latest_balances_for_account(account_id).await?;
+        let assets: HashSet<Asset> = balances
+            .into_iter()
+            .map(|b| b.asset)
+            .collect();
+        self.ensure_prices(&assets, date, force).await
     }
 }
