@@ -13,7 +13,7 @@ use keepbook::models::{
     Account, Asset, Balance, Connection, ConnectionConfig, ConnectionStatus, Id, LastSync, SyncStatus, Transaction,
 };
 use keepbook::storage::{JsonFileStorage, Storage};
-use keepbook::sync::SyncResult;
+use keepbook::sync::{SyncedBalance, SyncResult};
 use p256::ecdsa::{signature::Signer, Signature, SigningKey};
 use p256::SecretKey;
 use reqwest::Client;
@@ -157,7 +157,7 @@ impl CoinbaseSynchronizer {
         let coinbase_accounts = self.get_accounts().await?;
 
         let mut accounts = Vec::new();
-        let mut balances: Vec<(Id, Vec<Balance>)> = Vec::new();
+        let mut balances: Vec<(Id, Vec<SyncedBalance>)> = Vec::new();
         let mut transactions: Vec<(Id, Vec<Transaction>)> = Vec::new();
 
         for cb_account in coinbase_accounts {
@@ -213,7 +213,7 @@ impl CoinbaseSynchronizer {
                 .collect();
 
             accounts.push(account);
-            balances.push((account_id.clone(), vec![balance]));
+            balances.push((account_id.clone(), vec![SyncedBalance::new(balance)]));
             transactions.push((account_id, account_transactions));
         }
 
@@ -311,12 +311,12 @@ async fn main() -> Result<()> {
         println!("  - {} ({})", account.name, account.id);
     }
 
-    for (_account_id, balances) in &result.balances {
-        for balance in balances {
+    for (_account_id, synced_balances) in &result.balances {
+        for sb in synced_balances {
             println!(
                 "    Balance: {} {}",
-                balance.amount,
-                serde_json::to_string(&balance.asset)?
+                sb.balance.amount,
+                serde_json::to_string(&sb.balance.asset)?
             );
         }
     }
