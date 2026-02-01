@@ -1,14 +1,33 @@
 pub mod schwab;
 
 use anyhow::Result;
+use crate::market_data::PricePoint;
 use crate::models::{Account, Balance, Connection, Id, Transaction};
 use crate::storage::Storage;
+
+/// A balance paired with optional price data from the synchronizer.
+#[derive(Debug, Clone)]
+pub struct SyncedBalance {
+    pub balance: Balance,
+    pub price: Option<PricePoint>,
+}
+
+impl SyncedBalance {
+    pub fn new(balance: Balance) -> Self {
+        Self { balance, price: None }
+    }
+
+    pub fn with_price(mut self, price: PricePoint) -> Self {
+        self.price = Some(price);
+        self
+    }
+}
 
 /// Result of a sync operation.
 pub struct SyncResult {
     pub connection: Connection,
     pub accounts: Vec<Account>,
-    pub balances: Vec<(Id, Vec<Balance>)>,
+    pub balances: Vec<(Id, Vec<SyncedBalance>)>,
     pub transactions: Vec<(Id, Vec<Transaction>)>,
 }
 
@@ -21,9 +40,13 @@ impl SyncResult {
             storage.save_account(account).await?;
         }
 
-        for (account_id, balances) in &self.balances {
+        for (account_id, synced_balances) in &self.balances {
+            let balances: Vec<Balance> = synced_balances
+                .iter()
+                .map(|sb| sb.balance.clone())
+                .collect();
             if !balances.is_empty() {
-                storage.append_balances(account_id, balances).await?;
+                storage.append_balances(account_id, &balances).await?;
             }
         }
 
