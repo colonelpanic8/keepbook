@@ -1,11 +1,14 @@
+use std::io::{self, Write};
 use std::path::PathBuf;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use keepbook::config::ResolvedConfig;
 use keepbook::market_data::PriceSourceRegistry;
-use keepbook::models::Id;
+use keepbook::models::{Connection, Id};
 use keepbook::storage::{JsonFileStorage, Storage};
+use keepbook::sync::synchronizers::{CoinbaseSynchronizer, SchwabSynchronizer};
+use keepbook::sync::{AuthStatus, InteractiveAuth};
 use serde::Serialize;
 
 #[derive(Parser)]
@@ -32,6 +35,34 @@ enum Command {
     /// Remove entities
     #[command(subcommand)]
     Remove(RemoveCommand),
+
+    /// Sync data from connections
+    #[command(subcommand)]
+    Sync(SyncCommand),
+
+    /// Schwab-specific commands
+    #[command(subcommand)]
+    Schwab(SchwabCommand),
+}
+
+#[derive(Subcommand)]
+enum SyncCommand {
+    /// Sync a specific connection by ID or name
+    Connection {
+        /// Connection ID or name
+        id_or_name: String,
+    },
+    /// Sync all connections
+    All,
+}
+
+#[derive(Subcommand)]
+enum SchwabCommand {
+    /// Login via browser to capture session
+    Login {
+        /// Connection ID or name (optional if only one Schwab connection)
+        id_or_name: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -149,6 +180,24 @@ async fn main() -> Result<()> {
             }
         },
 
+        Some(Command::Sync(sync_cmd)) => match sync_cmd {
+            SyncCommand::Connection { id_or_name } => {
+                let result = sync_connection(&storage, &id_or_name).await?;
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
+            SyncCommand::All => {
+                let result = sync_all(&storage).await?;
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
+        },
+
+        Some(Command::Schwab(schwab_cmd)) => match schwab_cmd {
+            SchwabCommand::Login { id_or_name } => {
+                let result = schwab_login(&storage, id_or_name.as_deref()).await?;
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
+        },
+
         Some(Command::List(list_cmd)) => match list_cmd {
             ListCommand::Connections => {
                 let connections = list_connections(&storage).await?;
@@ -192,7 +241,19 @@ async fn main() -> Result<()> {
                 "version": env!("CARGO_PKG_VERSION"),
                 "config_file": cli.config.display().to_string(),
                 "data_directory": config.data_dir.display().to_string(),
-                "commands": ["config", "list connections", "list accounts", "list price-sources", "list balances", "list transactions", "list all", "remove connection <id>"]
+                "commands": [
+                    "config",
+                    "list connections",
+                    "list accounts",
+                    "list price-sources",
+                    "list balances",
+                    "list transactions",
+                    "list all",
+                    "remove connection <id>",
+                    "sync connection <id-or-name>",
+                    "sync all",
+                    "schwab login [id-or-name]"
+                ]
             });
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
@@ -320,5 +381,185 @@ async fn remove_connection(storage: &JsonFileStorage, id_str: &str) -> Result<se
         },
         "deleted_accounts": deleted_accounts,
         "account_ids": account_ids
+    }))
+}
+
+/// Find a connection by ID first, then by name
+async fn find_connection(storage: &JsonFileStorage, id_or_name: &str) -> Result<Option<Connection>> {
+    // Try by ID first
+    let id = Id::from_string(id_or_name);
+    if let Some(conn) = storage.get_connection(&id).await? {
+        return Ok(Some(conn));
+    }
+
+    // Try by name
+    let connections = storage.list_connections().await?;
+    for conn in connections {
+        if conn.config.name.eq_ignore_ascii_case(id_or_name) {
+            return Ok(Some(conn));
+        }
+    }
+
+    Ok(None)
+}
+
+/// Sync a specific connection
+async fn sync_connection(storage: &JsonFileStorage, id_or_name: &str) -> Result<serde_json::Value> {
+    let mut connection = find_connection(storage, id_or_name)
+        .await?
+        .context(format!("Connection not found: {}", id_or_name))?;
+
+    let conn_name = connection.config.name.clone();
+    let conn_id = connection.id().to_string();
+    let synchronizer_type = connection.config.synchronizer.clone();
+
+    // Handle auth check for Schwab
+    if synchronizer_type == "schwab" {
+        let mut synchronizer = SchwabSynchronizer::from_connection(&connection, storage).await?;
+
+        match synchronizer.check_auth().await? {
+            AuthStatus::Valid => {}
+            AuthStatus::Missing => {
+                // Prompt user
+                print!("No session found. Run login now? [Y/n] ");
+                io::stdout().flush()?;
+                let mut input = String::new();
+                io::stdin().read_line(&mut input)?;
+                let input = input.trim().to_lowercase();
+
+                if input.is_empty() || input == "y" || input == "yes" {
+                    synchronizer.login().await?;
+                } else {
+                    return Ok(serde_json::json!({
+                        "success": false,
+                        "error": "No session available",
+                        "connection": conn_name
+                    }));
+                }
+            }
+            AuthStatus::Expired { reason } => {
+                print!("Session expired ({}). Run login now? [Y/n] ", reason);
+                io::stdout().flush()?;
+                let mut input = String::new();
+                io::stdin().read_line(&mut input)?;
+                let input = input.trim().to_lowercase();
+
+                if input.is_empty() || input == "y" || input == "yes" {
+                    synchronizer.login().await?;
+                } else {
+                    return Ok(serde_json::json!({
+                        "success": false,
+                        "error": format!("Session expired: {}", reason),
+                        "connection": conn_name
+                    }));
+                }
+            }
+        }
+
+        // Now sync
+        let result = synchronizer.sync_with_storage(&mut connection, storage).await?;
+        result.save(storage).await?;
+
+        return Ok(serde_json::json!({
+            "success": true,
+            "connection": {
+                "id": conn_id,
+                "name": conn_name
+            },
+            "accounts_synced": result.accounts.len(),
+            "last_sync": result.connection.state.last_sync.as_ref().map(|ls| ls.at.to_rfc3339())
+        }));
+    }
+
+    // Handle Coinbase
+    if synchronizer_type == "coinbase" {
+        let synchronizer = CoinbaseSynchronizer::from_connection(&connection, storage).await?;
+        let result = synchronizer.sync_with_storage(&mut connection, storage).await?;
+        result.save(storage).await?;
+
+        return Ok(serde_json::json!({
+            "success": true,
+            "connection": {
+                "id": conn_id,
+                "name": conn_name
+            },
+            "accounts_synced": result.accounts.len(),
+            "last_sync": result.connection.state.last_sync.as_ref().map(|ls| ls.at.to_rfc3339())
+        }));
+    }
+
+    Err(anyhow::anyhow!("Unknown synchronizer type: {}", synchronizer_type))
+}
+
+/// Sync all connections
+async fn sync_all(storage: &JsonFileStorage) -> Result<serde_json::Value> {
+    let connections = storage.list_connections().await?;
+
+    let mut results = Vec::new();
+    for conn in connections {
+        let id_or_name = conn.id().to_string();
+        match sync_connection(storage, &id_or_name).await {
+            Ok(result) => results.push(result),
+            Err(e) => results.push(serde_json::json!({
+                "success": false,
+                "connection": conn.config.name,
+                "error": e.to_string()
+            })),
+        }
+    }
+
+    Ok(serde_json::json!({
+        "results": results,
+        "total": results.len()
+    }))
+}
+
+/// Schwab login command
+async fn schwab_login(storage: &JsonFileStorage, id_or_name: Option<&str>) -> Result<serde_json::Value> {
+    // Find Schwab connection(s)
+    let connections = storage.list_connections().await?;
+    let schwab_connections: Vec<_> = connections
+        .into_iter()
+        .filter(|c| c.config.synchronizer == "schwab")
+        .collect();
+
+    let connection = match (id_or_name, schwab_connections.len()) {
+        // Explicit ID/name provided
+        (Some(id_or_name), _) => {
+            find_connection(storage, id_or_name)
+                .await?
+                .filter(|c| c.config.synchronizer == "schwab")
+                .context(format!("Schwab connection not found: {}", id_or_name))?
+        }
+        // No ID, exactly one Schwab connection
+        (None, 1) => schwab_connections.into_iter().next().unwrap(),
+        // No ID, no Schwab connections
+        (None, 0) => {
+            return Err(anyhow::anyhow!("No Schwab connections found"));
+        }
+        // No ID, multiple Schwab connections
+        (None, n) => {
+            let names: Vec<_> = schwab_connections.iter().map(|c| &c.config.name).collect();
+            return Err(anyhow::anyhow!(
+                "Multiple Schwab connections found ({}). Specify one: {:?}",
+                n,
+                names
+            ));
+        }
+    };
+
+    let conn_name = connection.config.name.clone();
+    let conn_id = connection.id().to_string();
+
+    let mut synchronizer = SchwabSynchronizer::from_connection(&connection, storage).await?;
+    synchronizer.login().await?;
+
+    Ok(serde_json::json!({
+        "success": true,
+        "connection": {
+            "id": conn_id,
+            "name": conn_name
+        },
+        "message": "Session captured successfully"
     }))
 }
