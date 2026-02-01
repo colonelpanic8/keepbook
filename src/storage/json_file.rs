@@ -362,4 +362,52 @@ impl Storage for JsonFileStorage {
     async fn append_transactions(&self, account_id: &Id, txns: &[Transaction]) -> Result<()> {
         self.append_jsonl(&self.transactions_file(account_id), txns).await
     }
+
+    async fn get_latest_balances_for_account(&self, account_id: &Id) -> Result<Vec<Balance>> {
+        use crate::models::Asset;
+
+        let balances = self.get_balances(account_id).await?;
+
+        // Group by asset, keep most recent
+        let mut latest: std::collections::HashMap<Asset, Balance> = std::collections::HashMap::new();
+        for balance in balances {
+            latest
+                .entry(balance.asset.clone())
+                .and_modify(|existing| {
+                    if balance.timestamp > existing.timestamp {
+                        *existing = balance.clone();
+                    }
+                })
+                .or_insert(balance);
+        }
+
+        Ok(latest.into_values().collect())
+    }
+
+    async fn get_latest_balances_for_connection(&self, connection_id: &Id) -> Result<Vec<(Id, Balance)>> {
+        let connection = self.get_connection(connection_id).await?
+            .ok_or_else(|| anyhow::anyhow!("Connection not found"))?;
+
+        let mut results = Vec::new();
+        for account_id in &connection.state.account_ids {
+            let balances = self.get_latest_balances_for_account(account_id).await?;
+            for balance in balances {
+                results.push((account_id.clone(), balance));
+            }
+        }
+
+        Ok(results)
+    }
+
+    async fn get_latest_balances(&self) -> Result<Vec<(Id, Balance)>> {
+        let connections = self.list_connections().await?;
+
+        let mut results = Vec::new();
+        for connection in connections {
+            let connection_balances = self.get_latest_balances_for_connection(connection.id()).await?;
+            results.extend(connection_balances);
+        }
+
+        Ok(results)
+    }
 }
