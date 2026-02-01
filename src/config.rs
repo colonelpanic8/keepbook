@@ -3,6 +3,11 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
+/// Default reporting currency.
+fn default_reporting_currency() -> String {
+    "USD".to_string()
+}
+
 /// Application configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -10,11 +15,18 @@ pub struct Config {
     /// Path to data directory. If relative, resolved from config file location.
     /// If not specified, defaults to the config file's directory.
     pub data_dir: Option<PathBuf>,
+
+    /// Currency for reporting all values (e.g., "USD")
+    #[serde(default = "default_reporting_currency")]
+    pub reporting_currency: String,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Self { data_dir: None }
+        Self {
+            data_dir: None,
+            reporting_currency: default_reporting_currency(),
+        }
     }
 }
 
@@ -57,6 +69,9 @@ impl Config {
 pub struct ResolvedConfig {
     /// The resolved data directory path.
     pub data_dir: PathBuf,
+
+    /// Currency for reporting all values (e.g., "USD")
+    pub reporting_currency: String,
 }
 
 impl ResolvedConfig {
@@ -75,7 +90,10 @@ impl ResolvedConfig {
         let config = Config::load(&config_path)?;
         let data_dir = config.resolve_data_dir(config_dir);
 
-        Ok(Self { data_dir })
+        Ok(Self {
+            data_dir,
+            reporting_currency: config.reporting_currency,
+        })
     }
 
     /// Load config, creating a default if the file doesn't exist.
@@ -102,6 +120,7 @@ impl ResolvedConfig {
 
             Ok(Self {
                 data_dir: config_dir.to_path_buf(),
+                reporting_currency: default_reporting_currency(),
             })
         }
     }
@@ -127,6 +146,7 @@ mod tests {
     fn test_relative_data_dir() {
         let config = Config {
             data_dir: Some(PathBuf::from("data")),
+            ..Default::default()
         };
         let config_dir = Path::new("/home/user/finances");
         assert_eq!(
@@ -139,6 +159,7 @@ mod tests {
     fn test_absolute_data_dir() {
         let config = Config {
             data_dir: Some(PathBuf::from("/var/keepbook/data")),
+            ..Default::default()
         };
         let config_dir = Path::new("/home/user/finances");
         assert_eq!(
