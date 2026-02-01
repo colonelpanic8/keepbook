@@ -59,6 +59,11 @@ impl JsonFileStorage {
         self.connection_dir(id).join("connection.json")
     }
 
+    /// Get the path to a connection's config file.
+    pub fn connection_config_path(&self, id: &Id) -> PathBuf {
+        self.connection_config_file(id)
+    }
+
     /// Load the credential store for a connection.
     ///
     /// First checks the connection's config for inline credentials,

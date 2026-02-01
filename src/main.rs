@@ -1,10 +1,11 @@
 use std::path::PathBuf;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
+use chrono::Utc;
 use clap::{Parser, Subcommand};
 use keepbook::config::ResolvedConfig;
 use keepbook::market_data::PriceSourceRegistry;
-use keepbook::models::Id;
+use keepbook::models::{Account, Asset, Balance, Connection, ConnectionConfig, ConnectionState, Id};
 use keepbook::storage::{JsonFileStorage, Storage};
 use serde::Serialize;
 
@@ -25,6 +26,10 @@ enum Command {
     /// Show current configuration
     Config,
 
+    /// Add entities
+    #[command(subcommand)]
+    Add(AddCommand),
+
     /// List entities
     #[command(subcommand)]
     List(ListCommand),
@@ -32,6 +37,51 @@ enum Command {
     /// Remove entities
     #[command(subcommand)]
     Remove(RemoveCommand),
+
+    /// Set/update values
+    #[command(subcommand)]
+    Set(SetCommand),
+}
+
+#[derive(Subcommand)]
+enum AddCommand {
+    /// Add a new manual connection
+    Connection {
+        /// Name for the connection
+        name: String,
+    },
+
+    /// Add a new account to a connection
+    Account {
+        /// Connection ID to add the account to
+        #[arg(long)]
+        connection: String,
+
+        /// Name for the account
+        name: String,
+
+        /// Tags for the account (can be specified multiple times)
+        #[arg(long, short)]
+        tag: Vec<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum SetCommand {
+    /// Set or update a balance for an account
+    Balance {
+        /// Account ID
+        #[arg(long)]
+        account: String,
+
+        /// Asset type (e.g., "USD", "equity:AAPL", "crypto:BTC")
+        #[arg(long)]
+        asset: String,
+
+        /// Amount
+        #[arg(long)]
+        amount: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -142,9 +192,27 @@ async fn main() -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
 
+        Some(Command::Add(add_cmd)) => match add_cmd {
+            AddCommand::Connection { name } => {
+                let result = add_connection(&storage, &name).await?;
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
+            AddCommand::Account { connection, name, tag } => {
+                let result = add_account(&storage, &connection, &name, tag).await?;
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
+        },
+
         Some(Command::Remove(remove_cmd)) => match remove_cmd {
             RemoveCommand::Connection { id } => {
                 let result = remove_connection(&storage, &id).await?;
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
+        },
+
+        Some(Command::Set(set_cmd)) => match set_cmd {
+            SetCommand::Balance { account, asset, amount } => {
+                let result = set_balance(&storage, &account, &asset, &amount).await?;
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
         },
@@ -321,4 +389,126 @@ async fn remove_connection(storage: &JsonFileStorage, id_str: &str) -> Result<se
         "deleted_accounts": deleted_accounts,
         "account_ids": account_ids
     }))
+}
+
+async fn add_connection(storage: &JsonFileStorage, name: &str) -> Result<serde_json::Value> {
+    let connection = Connection {
+        config: ConnectionConfig {
+            name: name.to_string(),
+            synchronizer: "manual".to_string(),
+            credentials: None,
+        },
+        state: ConnectionState::new(),
+    };
+
+    let id = connection.state.id.to_string();
+
+    // Save the connection (this creates the directory structure)
+    storage.save_connection(&connection).await?;
+
+    // Also write the config TOML since save_connection only writes state
+    let config_path = storage.connection_config_path(&connection.state.id);
+    let config_toml = toml::to_string_pretty(&connection.config)?;
+    tokio::fs::create_dir_all(config_path.parent().unwrap()).await?;
+    tokio::fs::write(&config_path, config_toml).await?;
+
+    Ok(serde_json::json!({
+        "success": true,
+        "connection": {
+            "id": id,
+            "name": name,
+            "synchronizer": "manual"
+        }
+    }))
+}
+
+async fn add_account(
+    storage: &JsonFileStorage,
+    connection_id: &str,
+    name: &str,
+    tags: Vec<String>,
+) -> Result<serde_json::Value> {
+    let conn_id = Id::from_string(connection_id);
+
+    // Verify connection exists
+    let mut connection = storage
+        .get_connection(&conn_id)
+        .await?
+        .context("Connection not found")?;
+
+    // Create account
+    let account = Account {
+        id: Id::new(),
+        name: name.to_string(),
+        connection_id: conn_id.clone(),
+        tags,
+        created_at: Utc::now(),
+        active: true,
+        synchronizer_data: serde_json::Value::Null,
+    };
+
+    let account_id = account.id.to_string();
+
+    // Save account
+    storage.save_account(&account).await?;
+
+    // Update connection's account_ids
+    connection.state.account_ids.push(account.id);
+    storage.save_connection(&connection).await?;
+
+    Ok(serde_json::json!({
+        "success": true,
+        "account": {
+            "id": account_id,
+            "name": name,
+            "connection_id": connection_id
+        }
+    }))
+}
+
+async fn set_balance(
+    storage: &JsonFileStorage,
+    account_id: &str,
+    asset_str: &str,
+    amount: &str,
+) -> Result<serde_json::Value> {
+    let id = Id::from_string(account_id);
+
+    // Verify account exists
+    storage
+        .get_account(&id)
+        .await?
+        .context("Account not found")?;
+
+    // Parse asset string (formats: "USD", "equity:AAPL", "crypto:BTC")
+    let asset = parse_asset(asset_str)?;
+
+    // Create balance
+    let balance = Balance::new(asset.clone(), amount);
+
+    // Append balance
+    storage.append_balances(&id, &[balance.clone()]).await?;
+
+    Ok(serde_json::json!({
+        "success": true,
+        "balance": {
+            "account_id": account_id,
+            "asset": serde_json::to_value(&asset)?,
+            "amount": amount,
+            "timestamp": balance.timestamp.to_rfc3339()
+        }
+    }))
+}
+
+/// Parse asset string into Asset enum.
+/// Formats: "USD", "EUR" (currency), "equity:AAPL", "crypto:BTC"
+fn parse_asset(s: &str) -> Result<Asset> {
+    if let Some(symbol) = s.strip_prefix("equity:") {
+        Ok(Asset::equity(symbol))
+    } else if let Some(symbol) = s.strip_prefix("crypto:") {
+        Ok(Asset::crypto(symbol))
+    } else {
+        // Assume it's a currency code
+        Ok(Asset::currency(s))
+    }
 }
