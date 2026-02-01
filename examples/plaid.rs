@@ -10,7 +10,7 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDate, Utc};
 use keepbook::models::{
-    Account, Asset, Balance, Connection, ConnectionStatus, Id, LastSync, SyncStatus, Transaction,
+    Account, Asset, Balance, Connection, ConnectionConfig, ConnectionStatus, Id, LastSync, SyncStatus, Transaction,
     TransactionStatus,
 };
 use keepbook::storage::{JsonFileStorage, Storage};
@@ -247,6 +247,7 @@ impl PlaidSynchronizer {
 
     async fn sync(&self, connection: &mut Connection) -> Result<SyncResult> {
         let access_token = connection
+            .state
             .synchronizer_data
             .get("access_token")
             .and_then(|v| v.as_str())
@@ -299,7 +300,7 @@ impl PlaidSynchronizer {
             let account = Account {
                 id: account_id.clone(),
                 name: plaid_account.name.clone(),
-                connection_id: connection.id.clone(),
+                connection_id: connection.id().clone(),
                 tags: vec![
                     "plaid".to_string(),
                     plaid_account.account_type.clone(),
@@ -363,14 +364,14 @@ impl PlaidSynchronizer {
             transactions.push((account_id, account_transactions));
         }
 
-        // Update connection
-        connection.account_ids = accounts.iter().map(|a| a.id.clone()).collect();
-        connection.last_sync = Some(LastSync {
+        // Update connection state
+        connection.state.account_ids = accounts.iter().map(|a| a.id.clone()).collect();
+        connection.state.last_sync = Some(LastSync {
             at: Utc::now(),
             status: SyncStatus::Success,
             error: None,
         });
-        connection.status = ConnectionStatus::Active;
+        connection.state.status = ConnectionStatus::Active;
 
         Ok(SyncResult {
             connection: connection.clone(),
@@ -428,14 +429,18 @@ async fn setup(storage: &JsonFileStorage, synchronizer: &PlaidSynchronizer) -> R
     println!("Access token obtained successfully!\n");
 
     // Create a new connection with the access token
-    let mut connection = Connection::new("Plaid Sandbox", "plaid");
-    connection.synchronizer_data = serde_json::json!({
+    let mut connection = Connection::new(ConnectionConfig {
+        name: "Plaid Sandbox".to_string(),
+        synchronizer: "plaid".to_string(),
+        credentials: None,
+    });
+    connection.state.synchronizer_data = serde_json::json!({
         "access_token": access_token,
         "institution_id": institution_id,
         "environment": "sandbox",
     });
 
-    println!("Connection: {} ({})", connection.name, connection.id);
+    println!("Connection: {} ({})", connection.name(), connection.id());
 
     println!("\nPerforming initial sync...\n");
     let result = synchronizer.sync(&mut connection).await?;
@@ -457,13 +462,13 @@ async fn sync(storage: &JsonFileStorage, synchronizer: &PlaidSynchronizer) -> Re
     let connections = storage.list_connections().await?;
     let connection = connections
         .into_iter()
-        .find(|c| c.synchronizer == "plaid");
+        .find(|c| c.synchronizer() == "plaid");
 
     let mut connection = connection.context(
         "No Plaid connection found. Run 'cargo run --example plaid -- setup' first.",
     )?;
 
-    println!("Connection: {} ({})", connection.name, connection.id);
+    println!("Connection: {} ({})", connection.name(), connection.id());
 
     println!("\nSyncing from Plaid...\n");
     let result = synchronizer.sync(&mut connection).await?;
@@ -476,7 +481,7 @@ async fn sync(storage: &JsonFileStorage, synchronizer: &PlaidSynchronizer) -> Re
 
     println!("\nSync complete!");
     println!("Saved {} accounts", result.accounts.len());
-    if let Some(last_sync) = &result.connection.last_sync {
+    if let Some(last_sync) = &result.connection.state.last_sync {
         println!("Last sync: {} - {:?}", last_sync.at, last_sync.status);
     }
 

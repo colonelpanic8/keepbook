@@ -22,7 +22,7 @@ use chromiumoxide::cdp::browser_protocol::fetch::{
 use futures::StreamExt;
 use keepbook::credentials::{SessionCache, SessionData};
 use keepbook::models::{
-    Account, Asset, Balance, Connection, ConnectionStatus, Id, LastSync, SyncStatus,
+    Account, Asset, Balance, Connection, ConnectionConfig, ConnectionStatus, Id, LastSync, SyncStatus,
 };
 use keepbook::storage::{JsonFileStorage, Storage};
 use keepbook::sync::schwab::{SchwabClient, Position};
@@ -134,11 +134,16 @@ async fn login() -> Result<()> {
     )?;
     println!("Using browser: {}", chrome_path);
 
-    // Configure browser
+    // Configure browser with anti-detection flags
     let config = BrowserConfig::builder()
         .chrome_executable(chrome_path)
         .with_head() // Show the browser window
         .viewport(None) // Use default viewport
+        // Anti-automation detection flags
+        .arg("--disable-blink-features=AutomationControlled")
+        .arg("--disable-infobars")
+        .arg("--no-first-run")
+        .arg("--no-default-browser-check")
         .build()
         .map_err(|e| anyhow::anyhow!("Failed to configure browser: {}", e))?;
 
@@ -353,10 +358,16 @@ async fn sync(storage: &JsonFileStorage) -> Result<()> {
     let connections = storage.list_connections().await?;
     let mut connection = connections
         .into_iter()
-        .find(|c| c.synchronizer == "schwab")
-        .unwrap_or_else(|| Connection::new("Charles Schwab", "schwab"));
+        .find(|c| c.synchronizer() == "schwab")
+        .unwrap_or_else(|| {
+            Connection::new(ConnectionConfig {
+                name: "Charles Schwab".to_string(),
+                synchronizer: "schwab".to_string(),
+                credentials: None,
+            })
+        });
 
-    println!("Connection: {} ({})\n", connection.name, connection.id);
+    println!("Connection: {} ({})\n", connection.name(), connection.id());
 
     // Create client and fetch data
     let client = SchwabClient::new(session)?;
@@ -391,7 +402,7 @@ async fn sync(storage: &JsonFileStorage) -> Result<()> {
             } else {
                 schwab_account.nick_name.clone()
             },
-            connection_id: connection.id.clone(),
+            connection_id: connection.id().clone(),
             tags: vec![
                 "schwab".to_string(),
                 schwab_account.account_type.to_lowercase(),
@@ -440,14 +451,14 @@ async fn sync(storage: &JsonFileStorage) -> Result<()> {
         balances.push((account_id, account_balances));
     }
 
-    // Update connection
-    connection.account_ids = accounts.iter().map(|a| a.id.clone()).collect();
-    connection.last_sync = Some(LastSync {
+    // Update connection state
+    connection.state.account_ids = accounts.iter().map(|a| a.id.clone()).collect();
+    connection.state.last_sync = Some(LastSync {
         at: Utc::now(),
         status: SyncStatus::Success,
         error: None,
     });
-    connection.status = ConnectionStatus::Active;
+    connection.state.status = ConnectionStatus::Active;
 
     let result = SyncResult {
         connection,

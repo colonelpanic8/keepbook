@@ -10,7 +10,7 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use chrono::{DateTime, Utc};
 use keepbook::credentials::CredentialStore;
 use keepbook::models::{
-    Account, Asset, Balance, Connection, ConnectionStatus, Id, LastSync, SyncStatus, Transaction,
+    Account, Asset, Balance, Connection, ConnectionConfig, ConnectionStatus, Id, LastSync, SyncStatus, Transaction,
 };
 use keepbook::storage::{JsonFileStorage, Storage};
 use keepbook::sync::SyncResult;
@@ -164,7 +164,7 @@ impl CoinbaseSynchronizer {
             let account_id = Id::new();
             let asset = Asset::crypto(&cb_account.currency);
 
-            let account = Account::new(cb_account.name.clone(), connection.id.clone());
+            let account = Account::new(cb_account.name.clone(), connection.id().clone());
             let account = Account {
                 id: account_id.clone(),
                 tags: vec!["coinbase".to_string(), cb_account.account_type.clone()],
@@ -217,14 +217,14 @@ impl CoinbaseSynchronizer {
             transactions.push((account_id, account_transactions));
         }
 
-        // Update connection
-        connection.account_ids = accounts.iter().map(|a| a.id.clone()).collect();
-        connection.last_sync = Some(LastSync {
+        // Update connection state
+        connection.state.account_ids = accounts.iter().map(|a| a.id.clone()).collect();
+        connection.state.last_sync = Some(LastSync {
             at: Utc::now(),
             status: SyncStatus::Success,
             error: None,
         });
-        connection.status = ConnectionStatus::Active;
+        connection.state.status = ConnectionStatus::Active;
 
         Ok(SyncResult {
             connection: connection.clone(),
@@ -271,25 +271,33 @@ async fn main() -> Result<()> {
     let connections = storage.list_connections().await?;
     let mut connection = connections
         .into_iter()
-        .find(|c| c.synchronizer == "coinbase")
-        .unwrap_or_else(|| Connection::new("Coinbase", "coinbase"));
+        .find(|c| c.synchronizer() == "coinbase")
+        .unwrap_or_else(|| {
+            Connection::new(ConnectionConfig {
+                name: "Coinbase".to_string(),
+                synchronizer: "coinbase".to_string(),
+                credentials: None,
+            })
+        });
 
-    println!("Connection: {} ({})", connection.name, connection.id);
+    println!("Connection: {} ({})", connection.name(), connection.id());
 
     // Save connection first so the directory exists for credentials.toml
     storage.save_connection(&connection).await?;
 
-    // Load credential store from connection's credentials.toml
+    // Load credential store from connection's config or fallback credentials.toml
     let credential_store = storage
-        .get_credential_store(&connection.id)?
+        .get_credential_store(connection.id())?
         .with_context(|| {
             format!(
-                "Missing credentials.toml for connection.\n\
-                 Create one at: {}\n\n\
-                 Example contents:\n\
+                "Missing credentials for connection.\n\
+                 Add [credentials] section to connection.toml or create credentials.toml\n\n\
+                 Example connection.toml:\n\
+                 name = \"Coinbase\"\n\
+                 synchronizer = \"coinbase\"\n\n\
+                 [credentials]\n\
                  backend = \"pass\"\n\
-                 path = \"coinbase-api-key\"",
-                storage.credentials_config_path(&connection.id).display()
+                 path = \"coinbase-api-key\""
             )
         })?;
 
@@ -317,7 +325,7 @@ async fn main() -> Result<()> {
 
     println!("\nSync complete!");
     println!("Saved {} accounts", result.accounts.len());
-    if let Some(last_sync) = &result.connection.last_sync {
+    if let Some(last_sync) = &result.connection.state.last_sync {
         println!("Last sync: {} - {:?}", last_sync.at, last_sync.status);
     }
 

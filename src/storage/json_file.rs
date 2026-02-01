@@ -4,8 +4,8 @@ use anyhow::{Context, Result};
 use tokio::fs;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
-use crate::credentials::{CredentialConfig, CredentialStore};
-use crate::models::{Account, Balance, Connection, Id, Transaction};
+use crate::credentials::CredentialStore;
+use crate::models::{Account, Balance, Connection, ConnectionConfig, ConnectionState, Id, Transaction};
 use super::Storage;
 
 /// JSON file-based storage implementation.
@@ -15,7 +15,9 @@ use super::Storage;
 /// data/
 ///   connections/
 ///     {id}/
-///       connection.json
+///       connection.toml   # human-declared config
+///       connection.json   # machine-managed state
+///       accounts/         # symlinks to account dirs
 ///   accounts/
 ///     {id}/
 ///       account.json
@@ -45,28 +47,43 @@ impl JsonFileStorage {
         self.connections_dir().join(id.to_string())
     }
 
-    fn connection_file(&self, id: &Id) -> PathBuf {
-        self.connection_dir(id).join("connection.json")
+    fn connection_accounts_dir(&self, id: &Id) -> PathBuf {
+        self.connection_dir(id).join("accounts")
     }
 
-    fn credentials_file(&self, id: &Id) -> PathBuf {
-        self.connection_dir(id).join("credentials.toml")
+    fn connection_config_file(&self, id: &Id) -> PathBuf {
+        self.connection_dir(id).join("connection.toml")
+    }
+
+    fn connection_state_file(&self, id: &Id) -> PathBuf {
+        self.connection_dir(id).join("connection.json")
     }
 
     /// Load the credential store for a connection.
     ///
-    /// Returns `None` if no `credentials.toml` exists for the connection.
+    /// First checks the connection's config for inline credentials,
+    /// then falls back to a separate credentials.toml file for backwards compatibility.
     pub fn get_credential_store(&self, connection_id: &Id) -> Result<Option<Box<dyn CredentialStore>>> {
-        let config_path = self.credentials_file(connection_id);
-        let config = CredentialConfig::load_optional(&config_path)?;
-        Ok(config.map(|c| c.build()))
-    }
+        // First try to load from connection config
+        let config_path = self.connection_config_file(connection_id);
+        if config_path.exists() {
+            let content = std::fs::read_to_string(&config_path)
+                .with_context(|| format!("Failed to read {}", config_path.display()))?;
+            let config: ConnectionConfig = toml::from_str(&content)
+                .with_context(|| format!("Failed to parse {}", config_path.display()))?;
+            if let Some(cred_config) = config.credentials {
+                return Ok(Some(cred_config.build()));
+            }
+        }
 
-    /// Get the path to the credentials config file for a connection.
-    ///
-    /// Useful for creating or editing the credentials configuration.
-    pub fn credentials_config_path(&self, connection_id: &Id) -> PathBuf {
-        self.credentials_file(connection_id)
+        // Fallback to separate credentials.toml (backwards compatibility)
+        let creds_path = self.connection_dir(connection_id).join("credentials.toml");
+        if creds_path.exists() {
+            let config = crate::credentials::CredentialConfig::load(&creds_path)?;
+            return Ok(Some(config.build()));
+        }
+
+        Ok(None)
     }
 
     fn account_dir(&self, id: &Id) -> PathBuf {
@@ -113,6 +130,18 @@ impl JsonFileStorage {
             .await
             .context("Failed to write file")?;
         Ok(())
+    }
+
+    fn read_toml_sync<T: for<'de> serde::Deserialize<'de>>(&self, path: &Path) -> Result<Option<T>> {
+        match std::fs::read_to_string(path) {
+            Ok(content) => {
+                let value = toml::from_str(&content)
+                    .with_context(|| format!("Failed to parse TOML from {:?}", path))?;
+                Ok(Some(value))
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e).context("Failed to read file"),
+        }
     }
 
     async fn read_jsonl<T: for<'de> serde::Deserialize<'de>>(&self, path: &Path) -> Result<Vec<T>> {
@@ -184,6 +213,91 @@ impl JsonFileStorage {
 
         Ok(ids)
     }
+
+    /// Load a connection by reading both config (TOML) and state (JSON).
+    async fn load_connection(&self, id: &Id) -> Result<Option<Connection>> {
+        let config_path = self.connection_config_file(id);
+        let state_path = self.connection_state_file(id);
+
+        // Config is required
+        let config: ConnectionConfig = match self.read_toml_sync(&config_path)? {
+            Some(c) => c,
+            None => return Ok(None),
+        };
+
+        // State may not exist yet (new connection)
+        let state: ConnectionState = match self.read_json(&state_path).await? {
+            Some(s) => s,
+            None => {
+                // Create default state with the directory name as ID
+                ConnectionState {
+                    id: id.clone(),
+                    ..Default::default()
+                }
+            }
+        };
+
+        Ok(Some(Connection { config, state }))
+    }
+
+    /// Update symlinks from connection's accounts/ dir to the actual account directories.
+    ///
+    /// Creates symlinks like:
+    ///   connections/{conn-id}/accounts/{account-id} -> ../../../accounts/{account-id}
+    async fn update_account_symlinks(&self, conn: &Connection) -> Result<()> {
+        let accounts_dir = self.connection_accounts_dir(conn.id());
+
+        // Create or ensure the accounts directory exists
+        fs::create_dir_all(&accounts_dir)
+            .await
+            .context("Failed to create connection accounts directory")?;
+
+        // Get existing symlinks
+        let mut existing: std::collections::HashSet<String> = std::collections::HashSet::new();
+        if let Ok(mut entries) = fs::read_dir(&accounts_dir).await {
+            while let Ok(Some(entry)) = entries.next_entry().await {
+                if let Ok(file_type) = entry.file_type().await {
+                    if file_type.is_symlink() {
+                        if let Some(name) = entry.file_name().to_str() {
+                            existing.insert(name.to_string());
+                        }
+                    }
+                }
+            }
+        }
+
+        // Create symlinks for current account IDs
+        let current: std::collections::HashSet<String> = conn
+            .state
+            .account_ids
+            .iter()
+            .map(|id| id.to_string())
+            .collect();
+
+        // Remove stale symlinks
+        for stale in existing.difference(&current) {
+            let link_path = accounts_dir.join(stale);
+            let _ = fs::remove_file(&link_path).await;
+        }
+
+        // Create missing symlinks
+        for account_id in &current {
+            let link_path = accounts_dir.join(account_id);
+            if !link_path.exists() {
+                // Relative path: ../../../accounts/{account-id}
+                let target = PathBuf::from("../../../accounts").join(account_id);
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::symlink;
+                    // Ignore errors - symlink may already exist or target may not exist yet
+                    let _ = symlink(&target, &link_path);
+                }
+                // On non-Unix platforms, symlinks are skipped (Windows requires admin or developer mode)
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[async_trait::async_trait]
@@ -193,7 +307,7 @@ impl Storage for JsonFileStorage {
         let mut connections = Vec::new();
 
         for id in ids {
-            if let Some(conn) = self.get_connection(&id).await? {
+            if let Some(conn) = self.load_connection(&id).await? {
                 connections.push(conn);
             }
         }
@@ -202,11 +316,14 @@ impl Storage for JsonFileStorage {
     }
 
     async fn get_connection(&self, id: &Id) -> Result<Option<Connection>> {
-        self.read_json(&self.connection_file(id)).await
+        self.load_connection(id).await
     }
 
     async fn save_connection(&self, conn: &Connection) -> Result<()> {
-        self.write_json(&self.connection_file(&conn.id), conn).await
+        // Only save state - config is human-managed
+        self.write_json(&self.connection_state_file(conn.id()), &conn.state).await?;
+        self.update_account_symlinks(conn).await?;
+        Ok(())
     }
 
     async fn list_accounts(&self) -> Result<Vec<Account>> {
