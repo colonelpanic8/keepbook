@@ -12,16 +12,8 @@ name = "keepbook"
 path = "src/main.rs"
 
 [[example]]
-name = "coinbase"
-path = "examples/coinbase.rs"
-
-[[example]]
 name = "plaid"
 path = "examples/plaid.rs"
-
-[[example]]
-name = "schwab"
-path = "examples/schwab.rs"
 
 [[example]]
 name = "eodhd_test"
