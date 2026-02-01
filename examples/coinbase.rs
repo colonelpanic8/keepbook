@@ -153,30 +153,29 @@ impl CoinbaseSynchronizer {
         Ok(resp.ledger)
     }
 
-    async fn sync(&self, connection: &mut Connection) -> Result<SyncResult> {
+    async fn sync(&self, connection: &mut Connection, storage: &JsonFileStorage) -> Result<SyncResult> {
         let coinbase_accounts = self.get_accounts().await?;
+
+        // Load existing accounts to check for history
+        let existing_accounts = storage.list_accounts().await?;
+        let existing_ids: std::collections::HashSet<String> = existing_accounts
+            .iter()
+            .filter(|a| a.connection_id == *connection.id())
+            .map(|a| a.id.to_string())
+            .collect();
 
         let mut accounts = Vec::new();
         let mut balances: Vec<(Id, Vec<SyncedBalance>)> = Vec::new();
         let mut transactions: Vec<(Id, Vec<Transaction>)> = Vec::new();
 
         for cb_account in coinbase_accounts {
-            let account_id = Id::new();
+            // Use Coinbase's UUID directly as our account ID
+            let account_id = Id::from_string(&cb_account.uuid);
             let asset = Asset::crypto(&cb_account.currency);
+            let balance_amount: f64 = cb_account.available_balance.value.parse().unwrap_or(0.0);
 
-            let account = Account::new(cb_account.name.clone(), connection.id().clone());
-            let account = Account {
-                id: account_id.clone(),
-                tags: vec!["coinbase".to_string(), cb_account.account_type.clone()],
-                synchronizer_data: serde_json::json!({
-                    "coinbase_uuid": cb_account.uuid,
-                    "currency": cb_account.currency,
-                }),
-                ..account
-            };
-
-            // Record current balance
-            let balance = Balance::new(asset.clone(), &cb_account.available_balance.value);
+            // Check if account already exists
+            let existing = existing_ids.contains(&cb_account.uuid);
 
             // Get transactions for this account
             let cb_transactions = self
@@ -189,6 +188,33 @@ impl CoinbaseSynchronizer {
                     );
                     Vec::new()
                 });
+
+            // Skip zero-balance accounts unless they already exist or have transactions
+            if balance_amount == 0.0 && !existing && cb_transactions.is_empty() {
+                continue;
+            }
+
+            // Get existing account's created_at or use now
+            let created_at = existing_accounts
+                .iter()
+                .find(|a| a.id.to_string() == cb_account.uuid)
+                .map(|a| a.created_at)
+                .unwrap_or_else(Utc::now);
+
+            let account = Account {
+                id: account_id.clone(),
+                name: cb_account.name.clone(),
+                connection_id: connection.id().clone(),
+                tags: vec!["coinbase".to_string(), cb_account.account_type.clone()],
+                created_at,
+                active: true,
+                synchronizer_data: serde_json::json!({
+                    "currency": cb_account.currency,
+                }),
+            };
+
+            // Record current balance
+            let balance = Balance::new(asset.clone(), &cb_account.available_balance.value);
 
             let account_transactions: Vec<Transaction> = cb_transactions
                 .into_iter()
@@ -305,7 +331,7 @@ async fn main() -> Result<()> {
     let synchronizer = CoinbaseSynchronizer::from_credentials(credential_store.as_ref()).await?;
 
     println!("Syncing from Coinbase...\n");
-    let result = synchronizer.sync(&mut connection).await?;
+    let result = synchronizer.sync(&mut connection, &storage).await?;
 
     for account in &result.accounts {
         println!("  - {} ({})", account.name, account.id);
