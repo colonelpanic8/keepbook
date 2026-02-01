@@ -1,13 +1,14 @@
 //! Coinbase CDP API synchronizer - Proof of Concept
 //!
 //! This example demonstrates syncing from Coinbase using their CDP API.
-//! Credentials are loaded from `pass` (password-store).
+//! Credentials are loaded via the CredentialStore abstraction.
 //!
 //! Run with: cargo run --example coinbase
 
 use anyhow::{Context, Result};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use chrono::{DateTime, Utc};
+use keepbook::credentials::CredentialStore;
 use keepbook::models::{
     Account, Asset, Balance, Connection, ConnectionStatus, Id, LastSync, SyncStatus, Transaction,
 };
@@ -16,6 +17,7 @@ use keepbook::sync::SyncResult;
 use p256::ecdsa::{signature::Signer, Signature, SigningKey};
 use p256::SecretKey;
 use reqwest::Client;
+use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 
 const CDP_API_BASE: &str = "https://api.coinbase.com";
@@ -23,7 +25,7 @@ const CDP_API_BASE: &str = "https://api.coinbase.com";
 /// Coinbase CDP API synchronizer
 struct CoinbaseSynchronizer {
     key_name: String,
-    private_key_pem: String,
+    private_key_pem: SecretString,
     client: Client,
 }
 
@@ -37,7 +39,7 @@ struct JwtClaims {
 }
 
 impl CoinbaseSynchronizer {
-    fn new(key_name: String, private_key_pem: String) -> Self {
+    fn new(key_name: String, private_key_pem: SecretString) -> Self {
         Self {
             key_name,
             private_key_pem,
@@ -45,37 +47,22 @@ impl CoinbaseSynchronizer {
         }
     }
 
-    /// Load credentials from pass
-    fn from_pass() -> Result<Self> {
-        let output = std::process::Command::new("pass")
-            .arg("show")
-            .arg("coinbase-api-key")
-            .output()
-            .context("Failed to run pass")?;
+    /// Load credentials from a credential store.
+    async fn from_credentials(store: &dyn CredentialStore) -> Result<Self> {
+        let key_name = store
+            .get("key-name")
+            .await?
+            .context("Missing key-name in credentials")?;
 
-        if !output.status.success() {
-            anyhow::bail!("pass command failed");
-        }
+        let private_key = store
+            .get("private-key")
+            .await?
+            .context("Missing private-key in credentials")?;
 
-        let content =
-            String::from_utf8(output.stdout).context("Invalid UTF-8 in pass output")?;
-
-        let mut key_name = None;
-        let mut private_key = None;
-
-        for line in content.lines() {
-            if let Some(name) = line.strip_prefix("key-name: ") {
-                key_name = Some(name.to_string());
-            } else if let Some(key) = line.strip_prefix("private-key: ") {
-                // The key has literal \n that need to be converted to actual newlines
-                private_key = Some(key.replace("\\n", "\n"));
-            }
-        }
-
-        let key_name = key_name.context("Missing key-name in pass entry")?;
-        let private_key = private_key.context("Missing private-key in pass entry")?;
-
-        Ok(Self::new(key_name, private_key))
+        Ok(Self::new(
+            key_name.expose_secret().to_string(),
+            private_key,
+        ))
     }
 
     fn generate_jwt(&self, method: &str, path: &str) -> Result<String> {
@@ -110,7 +97,7 @@ impl CoinbaseSynchronizer {
 
         // Parse the EC private key (SEC1 format)
         let secret_key =
-            SecretKey::from_sec1_pem(&self.private_key_pem).context("Failed to parse EC private key")?;
+            SecretKey::from_sec1_pem(self.private_key_pem.expose_secret()).context("Failed to parse EC private key")?;
         let signing_key = SigningKey::from(&secret_key);
 
         // Sign the message
@@ -289,8 +276,25 @@ async fn main() -> Result<()> {
 
     println!("Connection: {} ({})", connection.name, connection.id);
 
-    println!("\nLoading Coinbase credentials from pass...");
-    let synchronizer = CoinbaseSynchronizer::from_pass()?;
+    // Save connection first so the directory exists for credentials.toml
+    storage.save_connection(&connection).await?;
+
+    // Load credential store from connection's credentials.toml
+    let credential_store = storage
+        .get_credential_store(&connection.id)?
+        .with_context(|| {
+            format!(
+                "Missing credentials.toml for connection.\n\
+                 Create one at: {}\n\n\
+                 Example contents:\n\
+                 backend = \"pass\"\n\
+                 path = \"coinbase-api-key\"",
+                storage.credentials_config_path(&connection.id).display()
+            )
+        })?;
+
+    println!("\nLoading Coinbase credentials...");
+    let synchronizer = CoinbaseSynchronizer::from_credentials(credential_store.as_ref()).await?;
 
     println!("Syncing from Coinbase...\n");
     let result = synchronizer.sync(&mut connection).await?;

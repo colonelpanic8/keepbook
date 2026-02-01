@@ -1,392 +1,502 @@
 //! Schwab synchronizer - Proof of Concept
 //!
-//! This example demonstrates syncing from Schwab using scraped data.
-//! Since Schwab doesn't have a public API, this uses hardcoded test data
-//! that would typically come from browser automation.
+//! This example demonstrates syncing from Schwab using their internal APIs.
+//! Uses Chrome DevTools Protocol for automated session capture.
 //!
 //! Run with:
-//!   cargo run --example schwab -- setup    # Set up with current scraped data
-//!   cargo run --example schwab -- sync     # Sync existing connection
+//!   cargo run --example schwab -- login   # Opens Chrome, captures session
+//!   cargo run --example schwab -- export  # Export session to stdout
+//!   cargo run --example schwab -- import  # Import session from stdin
+//!   cargo run --example schwab -- sync    # Sync using stored session
+
+use std::io::{self, Read};
+use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use chrono::Utc;
+use chromiumoxide::browser::{Browser, BrowserConfig};
+use chromiumoxide::cdp::browser_protocol::fetch::{
+    self, EventRequestPaused, RequestPattern, RequestStage,
+};
+use futures::StreamExt;
+use keepbook::credentials::{SessionCache, SessionData};
 use keepbook::models::{
     Account, Asset, Balance, Connection, ConnectionStatus, Id, LastSync, SyncStatus,
 };
 use keepbook::storage::{JsonFileStorage, Storage};
+use keepbook::sync::schwab::{SchwabClient, Position};
 use keepbook::sync::SyncResult;
-use serde::{Deserialize, Serialize};
+use tokio::sync::Mutex;
 
-/// A position/holding in a Schwab account
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct SchwabPosition {
-    symbol: String,
-    description: String,
-    quantity: f64,
-    price: f64,
-    market_value: f64,
-    cost_basis: f64,
-    gain_loss_dollar: f64,
-    gain_loss_percent: f64,
-    security_type: String, // "equity", "etf", "cash"
+const CONNECTION_ID: &str = "schwab";
+const SCHWAB_LOGIN_URL: &str = "https://client.schwab.com/Login/SignOn/CustomerCenterLogin.aspx";
+const SCHWAB_API_DOMAIN: &str = "ausgateway.schwab.com";
+
+/// Session data captured from browser, ready for export.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct ExportableSession {
+    /// When this session was captured
+    captured_at: chrono::DateTime<Utc>,
+    /// Bearer token (without "Bearer " prefix)
+    token: String,
+    /// All cookies from the session
+    cookies: std::collections::HashMap<String, String>,
 }
 
-/// Scraped account data from Schwab
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct SchwabAccountData {
-    account_name: String,
-    account_number_last4: String,
-    account_type: String, // "brokerage", "checking", etc.
-    total_value: f64,
-    cash_value: f64,
-    positions: Vec<SchwabPosition>,
-}
-
-/// Schwab synchronizer
-struct SchwabSynchronizer;
-
-impl SchwabSynchronizer {
-    fn new() -> Self {
-        Self
-    }
-
-    fn sync_from_scraped_data(
-        &self,
-        connection: &mut Connection,
-        scraped_accounts: Vec<SchwabAccountData>,
-    ) -> Result<SyncResult> {
-        let mut accounts = Vec::new();
-        let mut balances: Vec<(Id, Vec<Balance>)> = Vec::new();
-
-        for scraped in scraped_accounts {
-            let account_id = Id::new();
-
-            let account = Account {
-                id: account_id.clone(),
-                name: scraped.account_name.clone(),
-                connection_id: connection.id.clone(),
-                tags: vec!["schwab".to_string(), scraped.account_type.clone()],
-                created_at: Utc::now(),
-                active: true,
-                synchronizer_data: serde_json::json!({
-                    "account_number_last4": scraped.account_number_last4,
-                    "positions": scraped.positions,
-                }),
-            };
-
-            // Create balance for total account value
-            let total_balance = Balance::new(Asset::currency("USD"), scraped.total_value.to_string());
-
-            // Also track individual position values as balances
-            let mut account_balances = vec![total_balance];
-
-            // Add individual equity positions as balances
-            for position in &scraped.positions {
-                if position.security_type != "cash" {
-                    let position_balance =
-                        Balance::new(Asset::equity(&position.symbol), position.quantity.to_string());
-                    account_balances.push(position_balance);
-                }
-            }
-
-            accounts.push(account);
-            balances.push((account_id, account_balances));
+impl From<ExportableSession> for SessionData {
+    fn from(exp: ExportableSession) -> Self {
+        SessionData {
+            token: Some(exp.token),
+            cookies: exp.cookies,
+            captured_at: Some(exp.captured_at.timestamp()),
+            data: std::collections::HashMap::new(),
         }
+    }
+}
 
-        // Update connection
-        connection.account_ids = accounts.iter().map(|a| a.id.clone()).collect();
-        connection.last_sync = Some(LastSync {
-            at: Utc::now(),
-            status: SyncStatus::Success,
-            error: None,
-        });
-        connection.status = ConnectionStatus::Active;
+impl TryFrom<&SessionData> for ExportableSession {
+    type Error = anyhow::Error;
 
-        Ok(SyncResult {
-            connection: connection.clone(),
-            accounts,
-            balances,
-            transactions: Vec::new(),
+    fn try_from(session: &SessionData) -> Result<Self> {
+        let token = session
+            .token
+            .clone()
+            .context("Session has no token")?;
+        let captured_at = session
+            .captured_at
+            .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
+            .unwrap_or_else(Utc::now);
+
+        Ok(ExportableSession {
+            captured_at,
+            token,
+            cookies: session.cookies.clone(),
         })
     }
 }
 
-/// Helper function to create hardcoded test data based on current Schwab positions
-fn create_current_schwab_data() -> Vec<SchwabAccountData> {
-    vec![
-        SchwabAccountData {
-            account_name: "Individual Brokerage".to_string(),
-            account_number_last4: "739".to_string(),
-            account_type: "brokerage".to_string(),
-            total_value: 1825933.33,
-            cash_value: 6858.05,
-            positions: vec![
-                SchwabPosition {
-                    symbol: "AMT".to_string(),
-                    description: "AMERICAN TOWER CORP NEW REIT".to_string(),
-                    quantity: 84.0,
-                    price: 177.025,
-                    market_value: 14870.10,
-                    cost_basis: 24897.59,
-                    gain_loss_dollar: -10027.49,
-                    gain_loss_percent: -40.27,
-                    security_type: "equity".to_string(),
-                },
-                SchwabPosition {
-                    symbol: "CHTR".to_string(),
-                    description: "CHARTER COMMUNICATIONS CLASS A".to_string(),
-                    quantity: 38.0,
-                    price: 208.20,
-                    market_value: 7911.60,
-                    cost_basis: 22503.84,
-                    gain_loss_dollar: -14592.24,
-                    gain_loss_percent: -64.84,
-                    security_type: "equity".to_string(),
-                },
-                SchwabPosition {
-                    symbol: "FG".to_string(),
-                    description: "F&G ANNUITIES & LIFE INC".to_string(),
-                    quantity: 38.0,
-                    price: 28.9523,
-                    market_value: 1100.19,
-                    cost_basis: 889.93,
-                    gain_loss_dollar: 210.26,
-                    gain_loss_percent: 23.63,
-                    security_type: "equity".to_string(),
-                },
-                SchwabPosition {
-                    symbol: "FNF".to_string(),
-                    description: "FNF GROUP CLASS A".to_string(),
-                    quantity: 305.0,
-                    price: 53.92,
-                    market_value: 16445.60,
-                    cost_basis: 9985.70,
-                    gain_loss_dollar: 6459.90,
-                    gain_loss_percent: 64.69,
-                    security_type: "equity".to_string(),
-                },
-                SchwabPosition {
-                    symbol: "GOOGL".to_string(),
-                    description: "ALPHABET INC CLASS A".to_string(),
-                    quantity: 390.2659,
-                    price: 338.5729,
-                    market_value: 132133.46,
-                    cost_basis: 44783.36,
-                    gain_loss_dollar: 87350.10,
-                    gain_loss_percent: 195.05,
-                    security_type: "equity".to_string(),
-                },
-                SchwabPosition {
-                    symbol: "MSFT".to_string(),
-                    description: "MICROSOFT CORP".to_string(),
-                    quantity: 79.1713,
-                    price: 430.4527,
-                    market_value: 34079.50,
-                    cost_basis: 19602.09,
-                    gain_loss_dollar: 14477.41,
-                    gain_loss_percent: 73.86,
-                    security_type: "equity".to_string(),
-                },
-                SchwabPosition {
-                    symbol: "V".to_string(),
-                    description: "VISA INC CLASS A".to_string(),
-                    quantity: 223.0,
-                    price: 322.5316,
-                    market_value: 71924.55,
-                    cost_basis: 49066.69,
-                    gain_loss_dollar: 22857.86,
-                    gain_loss_percent: 46.59,
-                    security_type: "equity".to_string(),
-                },
-                SchwabPosition {
-                    symbol: "QQQ".to_string(),
-                    description: "INVESCO QQQ ETF".to_string(),
-                    quantity: 775.0,
-                    price: 625.1576,
-                    market_value: 484497.14,
-                    cost_basis: 267512.75,
-                    gain_loss_dollar: 216984.39,
-                    gain_loss_percent: 81.11,
-                    security_type: "etf".to_string(),
-                },
-                SchwabPosition {
-                    symbol: "RSP".to_string(),
-                    description: "INVESCO S&P 500 EQUAL WEIGHT ETF".to_string(),
-                    quantity: 2284.2546,
-                    price: 197.13,
-                    market_value: 450295.11,
-                    cost_basis: 319260.61,
-                    gain_loss_dollar: 131034.50,
-                    gain_loss_percent: 41.04,
-                    security_type: "etf".to_string(),
-                },
-                SchwabPosition {
-                    symbol: "VNQ".to_string(),
-                    description: "VANGUARD REAL ESTATE ETF".to_string(),
-                    quantity: 931.0,
-                    price: 89.88,
-                    market_value: 83678.28,
-                    cost_basis: 96764.03,
-                    gain_loss_dollar: -13085.75,
-                    gain_loss_percent: -13.52,
-                    security_type: "etf".to_string(),
-                },
-                SchwabPosition {
-                    symbol: "VOO".to_string(),
-                    description: "VANGUARD S&P 500 ETF".to_string(),
-                    quantity: 602.0,
-                    price: 635.9091,
-                    market_value: 382817.28,
-                    cost_basis: 214920.78,
-                    gain_loss_dollar: 167896.50,
-                    gain_loss_percent: 78.12,
-                    security_type: "etf".to_string(),
-                },
-                SchwabPosition {
-                    symbol: "VXUS".to_string(),
-                    description: "VANGUARD TOTAL INTL STOCK ETF".to_string(),
-                    quantity: 1585.0124,
-                    price: 80.035,
-                    market_value: 126856.47,
-                    cost_basis: 97079.46,
-                    gain_loss_dollar: 29777.01,
-                    gain_loss_percent: 30.67,
-                    security_type: "etf".to_string(),
-                },
-                SchwabPosition {
-                    symbol: "XBI".to_string(),
-                    description: "SPDR S&P BIOTECH ETF".to_string(),
-                    quantity: 100.0,
-                    price: 124.66,
-                    market_value: 12466.00,
-                    cost_basis: 9855.64,
-                    gain_loss_dollar: 2610.36,
-                    gain_loss_percent: 26.49,
-                    security_type: "etf".to_string(),
-                },
-                SchwabPosition {
-                    symbol: "CASH".to_string(),
-                    description: "Cash & Cash Investments".to_string(),
-                    quantity: 6858.05,
-                    price: 1.0,
-                    market_value: 6858.05,
-                    cost_basis: 6858.05,
-                    gain_loss_dollar: 0.0,
-                    gain_loss_percent: 0.0,
-                    security_type: "cash".to_string(),
-                },
-            ],
-        },
-        SchwabAccountData {
-            account_name: "Investor Checking".to_string(),
-            account_number_last4: "420".to_string(),
-            account_type: "checking".to_string(),
-            total_value: 14487.41,
-            cash_value: 14487.41,
-            positions: vec![SchwabPosition {
-                symbol: "CASH".to_string(),
-                description: "Checking Balance".to_string(),
-                quantity: 14487.41,
-                price: 1.0,
-                market_value: 14487.41,
-                cost_basis: 14487.41,
-                gain_loss_dollar: 0.0,
-                gain_loss_percent: 0.0,
-                security_type: "cash".to_string(),
-            }],
-        },
-    ]
-}
-
-async fn setup(storage: &JsonFileStorage) -> Result<()> {
-    let mut connection = Connection::new("Charles Schwab", "schwab");
-
-    println!("Connection: {} ({})", connection.name, connection.id);
-
-    println!("\nUsing current scraped Schwab data...\n");
-    let scraped_data = create_current_schwab_data();
-
-    let synchronizer = SchwabSynchronizer::new();
-    let result = synchronizer.sync_from_scraped_data(&mut connection, scraped_data)?;
-
-    for account in &result.accounts {
-        println!("  - {} ({})", account.name, account.id);
-        if let Some(balances) = result.balances.iter().find(|(id, _)| id == &account.id) {
-            for balance in &balances.1 {
-                println!(
-                    "    {} {}",
-                    balance.amount,
-                    serde_json::to_string(&balance.asset)?
-                );
+/// Find Chrome/Chromium executable.
+fn find_chrome() -> Option<String> {
+    // First try using `which` to find chrome in PATH
+    if let Ok(output) = std::process::Command::new("which")
+        .arg("google-chrome")
+        .output()
+    {
+        if output.status.success() {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path.is_empty() {
+                return Some(path);
             }
         }
     }
 
-    result.save(storage).await?;
+    if let Ok(output) = std::process::Command::new("which")
+        .arg("chromium")
+        .output()
+    {
+        if output.status.success() {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path.is_empty() {
+                return Some(path);
+            }
+        }
+    }
 
-    let total: f64 = create_current_schwab_data()
-        .iter()
-        .map(|a| a.total_value)
-        .sum();
+    // Fall back to known paths
+    let candidates = [
+        "/usr/bin/google-chrome",
+        "/usr/bin/google-chrome-stable",
+        "/usr/bin/chromium",
+        "/usr/bin/chromium-browser",
+        "/snap/bin/chromium",
+        // NixOS
+        "/run/current-system/sw/bin/google-chrome",
+        "/run/current-system/sw/bin/chromium",
+        // macOS
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    ];
 
-    println!("\nSync complete!");
-    println!("Saved {} accounts", result.accounts.len());
-    println!("Total value across accounts: ${:.2}", total);
+    for candidate in candidates {
+        if std::path::Path::new(candidate).exists() {
+            return Some(candidate.to_string());
+        }
+    }
+    None
+}
+
+/// Login command: Opens Chrome, guides user through login, captures session.
+async fn login() -> Result<()> {
+    // Check for Chrome
+    let chrome_path = find_chrome().context(
+        "Chrome/Chromium not found. Please install Chrome or Chromium to use the login command.",
+    )?;
+    println!("Using browser: {}", chrome_path);
+
+    // Configure browser
+    let config = BrowserConfig::builder()
+        .chrome_executable(chrome_path)
+        .with_head() // Show the browser window
+        .viewport(None) // Use default viewport
+        .build()
+        .map_err(|e| anyhow::anyhow!("Failed to configure browser: {}", e))?;
+
+    println!("Launching browser...");
+    let (browser, mut handler) = Browser::launch(config)
+        .await
+        .context("Failed to launch browser")?;
+
+    // Spawn the handler task
+    let handler_task = tokio::spawn(async move {
+        while let Some(_) = handler.next().await {}
+    });
+
+    // Create a new page
+    let page = browser.new_page("about:blank").await?;
+
+    // Set up request interception to capture the bearer token
+    let captured_token: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    let token_clone = captured_token.clone();
+
+    // Enable fetch domain for request interception
+    let patterns = vec![RequestPattern {
+        url_pattern: Some(format!("*{}*", SCHWAB_API_DOMAIN)),
+        resource_type: None,
+        request_stage: Some(RequestStage::Request),
+    }];
+
+    page.execute(fetch::EnableParams {
+        patterns: Some(patterns),
+        handle_auth_requests: None,
+    })
+    .await?;
+
+    // Listen for paused requests
+    let mut request_events = page.event_listener::<EventRequestPaused>().await?;
+
+    let page_clone = page.clone();
+    let intercept_task = tokio::spawn(async move {
+        while let Some(event) = request_events.next().await {
+            // Check for Authorization header in the request
+            let headers = event.request.headers.inner();
+            if let Some(headers_obj) = headers.as_object() {
+                // Try both lowercase and capitalized versions
+                let auth_value = headers_obj
+                    .get("authorization")
+                    .or_else(|| headers_obj.get("Authorization"));
+
+                if let Some(auth) = auth_value.and_then(|v| v.as_str()) {
+                    if auth.starts_with("Bearer ") {
+                        let token = auth.strip_prefix("Bearer ").unwrap().to_string();
+                        println!("\nCaptured bearer token!");
+                        let mut guard = token_clone.lock().await;
+                        *guard = Some(token);
+                    }
+                }
+            }
+
+            // Continue the request
+            let _ = page_clone
+                .execute(fetch::ContinueRequestParams {
+                    request_id: event.request_id.clone(),
+                    url: None,
+                    method: None,
+                    post_data: None,
+                    headers: None,
+                    intercept_response: None,
+                })
+                .await;
+        }
+    });
+
+    // Navigate to Schwab login
+    println!("Navigating to Schwab login page...");
+    page.goto(SCHWAB_LOGIN_URL).await?;
+
+    println!("\n========================================");
+    println!("Complete the login process in the browser.");
+    println!("Include any 2FA/security verification.");
+    println!("Once logged in, navigate around the site");
+    println!("(e.g., click on Accounts) to trigger API calls.");
+    println!("========================================\n");
+
+    // Wait for token capture
+    println!("Waiting for session capture...");
+    let timeout = Duration::from_secs(300); // 5 minute timeout
+    let start = std::time::Instant::now();
+
+    loop {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        let guard = captured_token.lock().await;
+        if guard.is_some() {
+            break;
+        }
+        drop(guard);
+
+        if start.elapsed() > timeout {
+            anyhow::bail!("Timeout waiting for login. Please try again.");
+        }
+    }
+
+    // Get the token
+    let token = captured_token.lock().await.clone().unwrap();
+
+    // Get all cookies
+    println!("Capturing cookies...");
+    let cookies = page.get_cookies().await?;
+
+    let mut cookie_map = std::collections::HashMap::new();
+    for cookie in cookies {
+        cookie_map.insert(cookie.name.clone(), cookie.value.clone());
+    }
+
+    println!("Captured {} cookies", cookie_map.len());
+
+    // Build session data
+    let session = SessionData {
+        token: Some(token.clone()),
+        cookies: cookie_map,
+        captured_at: Some(Utc::now().timestamp()),
+        data: std::collections::HashMap::new(),
+    };
+
+    // Save to cache
+    let cache = SessionCache::new()?;
+    cache.set(CONNECTION_ID, &session)?;
+
+    println!("\nSession saved successfully!");
+    println!(
+        "Token: {}...",
+        &token[..50.min(token.len())]
+    );
+    println!("Cookies: {} captured", session.cookies.len());
+
+    // Clean up
+    intercept_task.abort();
+    drop(browser);
+    handler_task.abort();
+
+    println!("\nRun 'cargo run --example schwab -- sync' to fetch positions.");
+    println!("Run 'cargo run --example schwab -- export' to export session for remote use.");
+
+    Ok(())
+}
+
+/// Export command: Dump session to stdout as JSON.
+fn export_session() -> Result<()> {
+    let cache = SessionCache::new()?;
+    let session = cache
+        .get(CONNECTION_ID)?
+        .context("No session found. Run 'cargo run --example schwab -- login' first.")?;
+
+    let exportable = ExportableSession::try_from(&session)?;
+    let json = serde_json::to_string_pretty(&exportable)?;
+
+    // Write to stdout
+    println!("{}", json);
+
+    // Also print info to stderr so it doesn't pollute the JSON
+    eprintln!("\n# Session exported. Pipe to a file or remote host:");
+    eprintln!("#   cargo run --example schwab -- export > session.json");
+    eprintln!("#   cargo run --example schwab -- export | ssh remote 'schwab import'");
+
+    Ok(())
+}
+
+/// Import command: Read session from stdin.
+fn import_session() -> Result<()> {
+    eprintln!("Reading session JSON from stdin...");
+    eprintln!("(Paste JSON, then press Ctrl+D)\n");
+
+    let mut input = String::new();
+    io::stdin().read_to_string(&mut input)?;
+
+    // Parse as ExportableSession
+    let exportable: ExportableSession = serde_json::from_str(&input)
+        .context("Failed to parse session JSON. Expected format: {\"captured_at\": ..., \"token\": ..., \"cookies\": {...}}")?;
+
+    // Convert to SessionData
+    let session: SessionData = exportable.into();
+
+    // Save to cache
+    let cache = SessionCache::new()?;
+    cache.set(CONNECTION_ID, &session)?;
+
+    eprintln!("\nSession imported successfully!");
+    eprintln!(
+        "Token: {}...",
+        &session.token.as_ref().unwrap()[..50.min(session.token.as_ref().unwrap().len())]
+    );
+    eprintln!("Cookies: {} imported", session.cookies.len());
+    eprintln!("\nRun 'cargo run --example schwab -- sync' to fetch positions.");
 
     Ok(())
 }
 
 async fn sync(storage: &JsonFileStorage) -> Result<()> {
+    // Load session
+    let cache = SessionCache::new()?;
+    let session = cache
+        .get(CONNECTION_ID)?
+        .context("No session found. Run 'cargo run --example schwab -- login' first.")?;
+
+    println!(
+        "Using cached session from {:?}",
+        session
+            .captured_at
+            .map(|t| chrono::DateTime::from_timestamp(t, 0))
+    );
+
+    // Get or create connection
     let connections = storage.list_connections().await?;
-    let connection = connections
+    let mut connection = connections
         .into_iter()
-        .find(|c| c.synchronizer == "schwab");
+        .find(|c| c.synchronizer == "schwab")
+        .unwrap_or_else(|| Connection::new("Charles Schwab", "schwab"));
 
-    let mut connection = connection.context(
-        "No Schwab connection found. Run 'cargo run --example schwab -- setup' first.",
-    )?;
+    println!("Connection: {} ({})\n", connection.name, connection.id);
 
-    println!("Connection: {} ({})", connection.name, connection.id);
+    // Create client and fetch data
+    let client = SchwabClient::new(session)?;
 
-    // For now, use the hardcoded data
-    // In a full implementation, this would trigger browser automation
-    println!("\nUsing current scraped Schwab data...\n");
-    let scraped_data = create_current_schwab_data();
+    println!("Fetching accounts...");
+    let accounts_resp = client.get_accounts().await?;
+    println!("Found {} accounts\n", accounts_resp.accounts.len());
 
-    let synchronizer = SchwabSynchronizer::new();
-    let result = synchronizer.sync_from_scraped_data(&mut connection, scraped_data)?;
+    println!("Fetching positions...");
+    let positions_resp = client.get_positions().await?;
 
-    for account in &result.accounts {
-        println!("  - {} ({})", account.name, account.id);
+    // Collect all positions into a flat list
+    let all_positions: Vec<Position> = positions_resp
+        .security_groupings
+        .into_iter()
+        .flat_map(|g| g.positions)
+        .collect();
+
+    println!("Found {} positions\n", all_positions.len());
+
+    // Build sync result
+    let mut accounts = Vec::new();
+    let mut balances: Vec<(Id, Vec<Balance>)> = Vec::new();
+
+    for schwab_account in accounts_resp.accounts {
+        let account_id = Id::new();
+
+        let account = Account {
+            id: account_id.clone(),
+            name: if schwab_account.nick_name.is_empty() {
+                schwab_account.default_name.clone()
+            } else {
+                schwab_account.nick_name.clone()
+            },
+            connection_id: connection.id.clone(),
+            tags: vec![
+                "schwab".to_string(),
+                schwab_account.account_type.to_lowercase(),
+            ],
+            created_at: Utc::now(),
+            active: true,
+            synchronizer_data: serde_json::json!({
+                "schwab_account_id": schwab_account.account_id,
+                "account_number": schwab_account.account_number_display_full,
+            }),
+        };
+
+        // Create balance for total account value
+        let mut account_balances = vec![];
+        if let Some(bal) = &schwab_account.balances {
+            account_balances.push(Balance::new(
+                Asset::currency("USD"),
+                bal.balance.to_string(),
+            ));
+        }
+
+        // Add position balances for brokerage accounts
+        if schwab_account.is_brokerage {
+            for position in &all_positions {
+                let asset = if position.default_symbol == "CASH" {
+                    Asset::currency("USD")
+                } else {
+                    Asset::equity(&position.default_symbol)
+                };
+                account_balances.push(Balance::new(asset, position.quantity.to_string()));
+            }
+        }
+
+        println!(
+            "  {} ({}) - ${:.2}",
+            account.name,
+            schwab_account.account_number_display,
+            schwab_account
+                .balances
+                .as_ref()
+                .map(|b| b.balance)
+                .unwrap_or(0.0)
+        );
+
+        accounts.push(account);
+        balances.push((account_id, account_balances));
     }
+
+    // Update connection
+    connection.account_ids = accounts.iter().map(|a| a.id.clone()).collect();
+    connection.last_sync = Some(LastSync {
+        at: Utc::now(),
+        status: SyncStatus::Success,
+        error: None,
+    });
+    connection.status = ConnectionStatus::Active;
+
+    let result = SyncResult {
+        connection,
+        accounts,
+        balances,
+        transactions: Vec::new(),
+    };
 
     result.save(storage).await?;
 
     println!("\nSync complete!");
     println!("Saved {} accounts", result.accounts.len());
-    if let Some(last_sync) = &result.connection.last_sync {
-        println!("Last sync: {} - {:?}", last_sync.at, last_sync.status);
-    }
 
     Ok(())
 }
 
+fn print_usage() {
+    println!("Usage:");
+    println!("  cargo run --example schwab -- login   # Opens Chrome, captures session");
+    println!("  cargo run --example schwab -- export  # Export session JSON to stdout");
+    println!("  cargo run --example schwab -- import  # Import session JSON from stdin");
+    println!("  cargo run --example schwab -- sync    # Sync using stored session");
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
-    println!("Keepbook - Schwab Sync (POC)");
-    println!("============================\n");
-
     let args: Vec<String> = std::env::args().collect();
-    let command = args.get(1).map(|s| s.as_str()).unwrap_or("setup");
+    let command = args.get(1).map(|s| s.as_str()).unwrap_or("help");
+
+    // Only print header for interactive commands (not export which outputs JSON)
+    if command != "export" {
+        println!("Keepbook - Schwab Sync");
+        println!("======================\n");
+    }
 
     let storage = JsonFileStorage::new("data");
 
     match command {
-        "setup" => setup(&storage).await,
+        "login" => login().await,
+        "export" => export_session(),
+        "import" => import_session(),
         "sync" => sync(&storage).await,
+        "help" | "--help" | "-h" => {
+            print_usage();
+            Ok(())
+        }
         other => {
-            println!("Unknown command: {}", other);
-            println!("Usage: cargo run --example schwab -- [setup|sync]");
+            println!("Unknown command: {}\n", other);
+            print_usage();
             Ok(())
         }
     }

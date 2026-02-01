@@ -61,8 +61,15 @@ clap = { version = "4", features = ["derive"] }
 # For reading pass credentials
 secrecy = "0.10"
 
+# For finding cache/config directories
+dirs = "6"
+
 # Async trait support
 async-trait = "0.1"
+
+# Chrome DevTools Protocol for browser automation
+chromiumoxide = { version = "0.7", default-features = false, features = ["tokio-runtime"] }
+futures = "0.3"
 
 [dev-dependencies]
 tempfile = "3"

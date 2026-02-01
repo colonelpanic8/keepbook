@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use tokio::fs;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
+use crate::credentials::{CredentialConfig, CredentialStore};
 use crate::models::{Account, Balance, Connection, Id, Transaction};
 use super::Storage;
 
@@ -40,8 +41,32 @@ impl JsonFileStorage {
         self.base_path.join("accounts")
     }
 
+    fn connection_dir(&self, id: &Id) -> PathBuf {
+        self.connections_dir().join(id.to_string())
+    }
+
     fn connection_file(&self, id: &Id) -> PathBuf {
-        self.connections_dir().join(id.to_string()).join("connection.json")
+        self.connection_dir(id).join("connection.json")
+    }
+
+    fn credentials_file(&self, id: &Id) -> PathBuf {
+        self.connection_dir(id).join("credentials.toml")
+    }
+
+    /// Load the credential store for a connection.
+    ///
+    /// Returns `None` if no `credentials.toml` exists for the connection.
+    pub fn get_credential_store(&self, connection_id: &Id) -> Result<Option<Box<dyn CredentialStore>>> {
+        let config_path = self.credentials_file(connection_id);
+        let config = CredentialConfig::load_optional(&config_path)?;
+        Ok(config.map(|c| c.build()))
+    }
+
+    /// Get the path to the credentials config file for a connection.
+    ///
+    /// Useful for creating or editing the credentials configuration.
+    pub fn credentials_config_path(&self, connection_id: &Id) -> PathBuf {
+        self.credentials_file(connection_id)
     }
 
     fn account_dir(&self, id: &Id) -> PathBuf {
