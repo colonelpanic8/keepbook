@@ -1,4 +1,7 @@
+mod orchestrator;
 pub mod schwab;
+
+pub use orchestrator::{PriceRefreshResult, SyncOrchestrator};
 
 use anyhow::Result;
 use crate::market_data::PricePoint;
