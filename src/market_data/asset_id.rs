@@ -89,22 +89,6 @@ fn canonical_asset_json(asset: &Asset) -> String {
                 );
             }
         }
-        Asset::Other {
-            identifier,
-            description,
-        } => {
-            map.insert("type".to_string(), Value::String("other".to_string()));
-            map.insert(
-                "identifier".to_string(),
-                Value::String(identifier.trim().to_string()),
-            );
-            if let Some(description) = description {
-                map.insert(
-                    "description".to_string(),
-                    Value::String(description.trim().to_string()),
-                );
-            }
-        }
     }
 
     let value = Value::Object(map);

@@ -18,11 +18,6 @@ pub enum Asset {
         #[serde(skip_serializing_if = "Option::is_none")]
         network: Option<String>,
     },
-    Other {
-        identifier: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        description: Option<String>,
-    },
 }
 
 impl Asset {
