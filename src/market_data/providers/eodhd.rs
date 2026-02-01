@@ -28,13 +28,13 @@ struct EodhdEodResponse {
     volume: Option<u64>,
 }
 
-/// Provider for fetching equity prices from EODHD.
-pub struct EodhdProvider {
+/// Price source for fetching equity prices from EODHD.
+pub struct EodhdPriceSource {
     api_key: String,
     client: Client,
 }
 
-impl EodhdProvider {
+impl EodhdPriceSource {
     /// Create a new EODHD provider with the given API key.
     pub fn new(api_key: impl Into<String>) -> Self {
         Self {
@@ -178,7 +178,7 @@ impl EodhdProvider {
 }
 
 #[async_trait::async_trait]
-impl EquityPriceSource for EodhdProvider {
+impl EquityPriceSource for EodhdPriceSource {
     async fn fetch_close(
         &self,
         asset: &Asset,
@@ -287,7 +287,7 @@ mod tests {
         let asset = Asset::equity("AAPL");
         let asset_id = AssetId::from_asset(&asset);
 
-        let result = EodhdProvider::parse_response(&data[0], &asset_id, None).unwrap();
+        let result = EodhdPriceSource::parse_response(&data[0], &asset_id, None).unwrap();
         assert!(result.is_none());
     }
 
@@ -298,7 +298,7 @@ mod tests {
         let asset = Asset::equity("AAPL");
         let asset_id = AssetId::from_asset(&asset);
 
-        let price_point = EodhdProvider::parse_response(&data[0], &asset_id, None)
+        let price_point = EodhdPriceSource::parse_response(&data[0], &asset_id, None)
             .unwrap()
             .unwrap();
 
@@ -322,7 +322,7 @@ mod tests {
         };
         let asset_id = AssetId::from_asset(&asset);
 
-        let price_point = EodhdProvider::parse_response(&data[0], &asset_id, Some("LSE"))
+        let price_point = EodhdPriceSource::parse_response(&data[0], &asset_id, Some("LSE"))
             .unwrap()
             .unwrap();
 
@@ -331,75 +331,75 @@ mod tests {
 
     #[test]
     fn test_build_symbol_us() {
-        assert_eq!(EodhdProvider::build_symbol("AAPL", None), "AAPL.US");
-        assert_eq!(EodhdProvider::build_symbol("AAPL", Some("NYSE")), "AAPL.US");
+        assert_eq!(EodhdPriceSource::build_symbol("AAPL", None), "AAPL.US");
+        assert_eq!(EodhdPriceSource::build_symbol("AAPL", Some("NYSE")), "AAPL.US");
         assert_eq!(
-            EodhdProvider::build_symbol("AAPL", Some("NASDAQ")),
+            EodhdPriceSource::build_symbol("AAPL", Some("NASDAQ")),
             "AAPL.US"
         );
-        assert_eq!(EodhdProvider::build_symbol("AAPL", Some("XNYS")), "AAPL.US");
-        assert_eq!(EodhdProvider::build_symbol("AAPL", Some("XNAS")), "AAPL.US");
+        assert_eq!(EodhdPriceSource::build_symbol("AAPL", Some("XNYS")), "AAPL.US");
+        assert_eq!(EodhdPriceSource::build_symbol("AAPL", Some("XNAS")), "AAPL.US");
     }
 
     #[test]
     fn test_build_symbol_uk() {
-        assert_eq!(EodhdProvider::build_symbol("VOD", Some("LSE")), "VOD.LSE");
-        assert_eq!(EodhdProvider::build_symbol("VOD", Some("XLON")), "VOD.LSE");
+        assert_eq!(EodhdPriceSource::build_symbol("VOD", Some("LSE")), "VOD.LSE");
+        assert_eq!(EodhdPriceSource::build_symbol("VOD", Some("XLON")), "VOD.LSE");
     }
 
     #[test]
     fn test_build_symbol_germany() {
-        assert_eq!(EodhdProvider::build_symbol("SAP", Some("XETRA")), "SAP.XETRA");
-        assert_eq!(EodhdProvider::build_symbol("SAP", Some("XETR")), "SAP.XETRA");
+        assert_eq!(EodhdPriceSource::build_symbol("SAP", Some("XETRA")), "SAP.XETRA");
+        assert_eq!(EodhdPriceSource::build_symbol("SAP", Some("XETR")), "SAP.XETRA");
         assert_eq!(
-            EodhdProvider::build_symbol("SAP", Some("FRANKFURT")),
+            EodhdPriceSource::build_symbol("SAP", Some("FRANKFURT")),
             "SAP.F"
         );
     }
 
     #[test]
     fn test_build_symbol_case_insensitive() {
-        assert_eq!(EodhdProvider::build_symbol("aapl", None), "AAPL.US");
-        assert_eq!(EodhdProvider::build_symbol("Aapl", Some("nyse")), "AAPL.US");
+        assert_eq!(EodhdPriceSource::build_symbol("aapl", None), "AAPL.US");
+        assert_eq!(EodhdPriceSource::build_symbol("Aapl", Some("nyse")), "AAPL.US");
     }
 
     #[test]
     fn test_quote_currency_mapping() {
-        assert_eq!(EodhdProvider::quote_currency_for_exchange(None), "USD");
-        assert_eq!(EodhdProvider::quote_currency_for_exchange(Some("NYSE")), "USD");
-        assert_eq!(EodhdProvider::quote_currency_for_exchange(Some("LSE")), "GBP");
-        assert_eq!(EodhdProvider::quote_currency_for_exchange(Some("XETRA")), "EUR");
-        assert_eq!(EodhdProvider::quote_currency_for_exchange(Some("TSE")), "JPY");
-        assert_eq!(EodhdProvider::quote_currency_for_exchange(Some("HKEX")), "HKD");
-        assert_eq!(EodhdProvider::quote_currency_for_exchange(Some("ASX")), "AUD");
-        assert_eq!(EodhdProvider::quote_currency_for_exchange(Some("TSX")), "CAD");
-        assert_eq!(EodhdProvider::quote_currency_for_exchange(Some("SIX")), "CHF");
-        assert_eq!(EodhdProvider::quote_currency_for_exchange(Some("SGX")), "SGD");
-        assert_eq!(EodhdProvider::quote_currency_for_exchange(Some("BSE")), "INR");
+        assert_eq!(EodhdPriceSource::quote_currency_for_exchange(None), "USD");
+        assert_eq!(EodhdPriceSource::quote_currency_for_exchange(Some("NYSE")), "USD");
+        assert_eq!(EodhdPriceSource::quote_currency_for_exchange(Some("LSE")), "GBP");
+        assert_eq!(EodhdPriceSource::quote_currency_for_exchange(Some("XETRA")), "EUR");
+        assert_eq!(EodhdPriceSource::quote_currency_for_exchange(Some("TSE")), "JPY");
+        assert_eq!(EodhdPriceSource::quote_currency_for_exchange(Some("HKEX")), "HKD");
+        assert_eq!(EodhdPriceSource::quote_currency_for_exchange(Some("ASX")), "AUD");
+        assert_eq!(EodhdPriceSource::quote_currency_for_exchange(Some("TSX")), "CAD");
+        assert_eq!(EodhdPriceSource::quote_currency_for_exchange(Some("SIX")), "CHF");
+        assert_eq!(EodhdPriceSource::quote_currency_for_exchange(Some("SGX")), "SGD");
+        assert_eq!(EodhdPriceSource::quote_currency_for_exchange(Some("BSE")), "INR");
     }
 
     #[test]
     fn test_exchange_mapping() {
         // US exchanges
-        assert_eq!(EodhdProvider::map_exchange(Some("NYSE")), "US");
-        assert_eq!(EodhdProvider::map_exchange(Some("NASDAQ")), "US");
-        assert_eq!(EodhdProvider::map_exchange(Some("XNYS")), "US");
-        assert_eq!(EodhdProvider::map_exchange(Some("XNAS")), "US");
+        assert_eq!(EodhdPriceSource::map_exchange(Some("NYSE")), "US");
+        assert_eq!(EodhdPriceSource::map_exchange(Some("NASDAQ")), "US");
+        assert_eq!(EodhdPriceSource::map_exchange(Some("XNYS")), "US");
+        assert_eq!(EodhdPriceSource::map_exchange(Some("XNAS")), "US");
 
         // International
-        assert_eq!(EodhdProvider::map_exchange(Some("LSE")), "LSE");
-        assert_eq!(EodhdProvider::map_exchange(Some("XLON")), "LSE");
-        assert_eq!(EodhdProvider::map_exchange(Some("XETRA")), "XETRA");
-        assert_eq!(EodhdProvider::map_exchange(Some("TSE")), "TSE");
+        assert_eq!(EodhdPriceSource::map_exchange(Some("LSE")), "LSE");
+        assert_eq!(EodhdPriceSource::map_exchange(Some("XLON")), "LSE");
+        assert_eq!(EodhdPriceSource::map_exchange(Some("XETRA")), "XETRA");
+        assert_eq!(EodhdPriceSource::map_exchange(Some("TSE")), "TSE");
 
         // Default
-        assert_eq!(EodhdProvider::map_exchange(None), "US");
-        assert_eq!(EodhdProvider::map_exchange(Some("UNKNOWN")), "US");
+        assert_eq!(EodhdPriceSource::map_exchange(None), "US");
+        assert_eq!(EodhdPriceSource::map_exchange(Some("UNKNOWN")), "US");
     }
 
     #[test]
     fn test_provider_name() {
-        let provider = EodhdProvider::new("test_key");
+        let provider = EodhdPriceSource::new("test_key");
         assert_eq!(provider.name(), "eodhd");
     }
 

@@ -18,12 +18,12 @@ const BASE_URL: &str = "https://www.alphavantage.co/query";
 ///
 /// Fetches daily time series data using the TIME_SERIES_DAILY endpoint.
 /// Free tier is limited to 25 requests per day.
-pub struct AlphaVantageProvider {
+pub struct AlphaVantagePriceSource {
     api_key: String,
     client: Client,
 }
 
-impl AlphaVantageProvider {
+impl AlphaVantagePriceSource {
     /// Create a new Alpha Vantage provider with the given API key.
     pub fn new(api_key: impl Into<String>) -> Self {
         Self {
@@ -97,7 +97,7 @@ impl AlphaVantageProvider {
 }
 
 #[async_trait::async_trait]
-impl EquityPriceSource for AlphaVantageProvider {
+impl EquityPriceSource for AlphaVantagePriceSource {
     async fn fetch_close(
         &self,
         asset: &Asset,
@@ -295,7 +295,7 @@ mod tests {
 
     #[test]
     fn test_parse_price_point() {
-        let provider = AlphaVantageProvider::new("test_key");
+        let provider = AlphaVantagePriceSource::new("test_key");
         let response: TimeSeriesResponse = serde_json::from_str(SAMPLE_RESPONSE).unwrap();
         let asset_id = AssetId::from("test_asset_id");
         let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
@@ -311,7 +311,7 @@ mod tests {
 
     #[test]
     fn test_parse_price_point_missing_date() {
-        let provider = AlphaVantageProvider::new("test_key");
+        let provider = AlphaVantagePriceSource::new("test_key");
         let response: TimeSeriesResponse = serde_json::from_str(SAMPLE_RESPONSE).unwrap();
         let asset_id = AssetId::from("test_asset_id");
         let date = NaiveDate::from_ymd_opt(2024, 1, 14).unwrap(); // Not in response
@@ -343,14 +343,14 @@ mod tests {
 
     #[test]
     fn test_format_symbol_us_no_exchange() {
-        let provider = AlphaVantageProvider::new("test_key");
+        let provider = AlphaVantagePriceSource::new("test_key");
         assert_eq!(provider.format_symbol("aapl", None), "AAPL");
         assert_eq!(provider.format_symbol("MSFT", None), "MSFT");
     }
 
     #[test]
     fn test_format_symbol_us_exchanges() {
-        let provider = AlphaVantageProvider::new("test_key");
+        let provider = AlphaVantagePriceSource::new("test_key");
         assert_eq!(provider.format_symbol("aapl", Some("NYSE")), "AAPL");
         assert_eq!(provider.format_symbol("msft", Some("NASDAQ")), "MSFT");
         assert_eq!(provider.format_symbol("goog", Some("XNAS")), "GOOG");
@@ -359,7 +359,7 @@ mod tests {
 
     #[test]
     fn test_format_symbol_international_exchanges() {
-        let provider = AlphaVantageProvider::new("test_key");
+        let provider = AlphaVantagePriceSource::new("test_key");
         assert_eq!(provider.format_symbol("BMW", Some("XETR")), "BMW.DEX");
         assert_eq!(provider.format_symbol("BARC", Some("XLON")), "BARC.LON");
         assert_eq!(provider.format_symbol("RY", Some("XTSE")), "RY.TRT");
@@ -370,13 +370,13 @@ mod tests {
 
     #[test]
     fn test_format_symbol_unknown_exchange() {
-        let provider = AlphaVantageProvider::new("test_key");
+        let provider = AlphaVantagePriceSource::new("test_key");
         assert_eq!(provider.format_symbol("ticker", Some("UNKNOWN")), "TICKER.UNKNOWN");
     }
 
     #[test]
     fn test_provider_name() {
-        let provider = AlphaVantageProvider::new("test_key");
+        let provider = AlphaVantagePriceSource::new("test_key");
         assert_eq!(provider.name(), "alpha_vantage");
     }
 }

@@ -7,7 +7,7 @@
 use std::process::Command;
 
 use chrono::NaiveDate;
-use keepbook::market_data::providers::marketstack::MarketstackProvider;
+use keepbook::market_data::providers::marketstack::MarketstackPriceSource;
 use keepbook::market_data::{AssetId, EquityPriceSource};
 use keepbook::models::Asset;
 
@@ -29,7 +29,7 @@ fn get_api_key_from_pass() -> anyhow::Result<String> {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    println!("Marketstack Provider Live Test");
+    println!("Marketstack PriceSource Live Test");
     println!("==============================\n");
 
     // Get API key from pass
@@ -37,8 +37,8 @@ async fn main() -> anyhow::Result<()> {
     println!("API key retrieved from pass: {}...{}", &api_key[..8], &api_key[api_key.len()-4..]);
 
     // Create provider
-    let provider = MarketstackProvider::new(&api_key);
-    println!("Provider name: {}\n", provider.name());
+    let provider = MarketstackPriceSource::new(&api_key);
+    println!("Source name: {}\n", provider.name());
 
     // Test with AAPL on a recent trading day (Thursday Jan 30, 2026)
     // Note: Free tier only allows EOD data, no intraday

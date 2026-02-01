@@ -33,12 +33,12 @@ struct EodData {
 ///
 /// Implements `EquityPriceSource` for fetching daily closing prices
 /// from the Marketstack EOD API.
-pub struct MarketstackProvider {
+pub struct MarketstackPriceSource {
     api_key: String,
     client: Client,
 }
 
-impl MarketstackProvider {
+impl MarketstackPriceSource {
     /// Creates a new Marketstack provider with the given API key.
     pub fn new(api_key: impl Into<String>) -> Self {
         Self {
@@ -112,7 +112,7 @@ impl MarketstackProvider {
 }
 
 #[async_trait::async_trait]
-impl EquityPriceSource for MarketstackProvider {
+impl EquityPriceSource for MarketstackPriceSource {
     async fn fetch_close(
         &self,
         asset: &Asset,
@@ -185,26 +185,26 @@ mod tests {
 
     #[test]
     fn test_format_symbol_no_exchange() {
-        assert_eq!(MarketstackProvider::format_symbol("AAPL", None), "AAPL");
-        assert_eq!(MarketstackProvider::format_symbol("aapl", None), "AAPL");
+        assert_eq!(MarketstackPriceSource::format_symbol("AAPL", None), "AAPL");
+        assert_eq!(MarketstackPriceSource::format_symbol("aapl", None), "AAPL");
     }
 
     #[test]
     fn test_format_symbol_us_exchanges() {
         assert_eq!(
-            MarketstackProvider::format_symbol("AAPL", Some("NASDAQ")),
+            MarketstackPriceSource::format_symbol("AAPL", Some("NASDAQ")),
             "AAPL"
         );
         assert_eq!(
-            MarketstackProvider::format_symbol("AAPL", Some("XNAS")),
+            MarketstackPriceSource::format_symbol("AAPL", Some("XNAS")),
             "AAPL"
         );
         assert_eq!(
-            MarketstackProvider::format_symbol("IBM", Some("NYSE")),
+            MarketstackPriceSource::format_symbol("IBM", Some("NYSE")),
             "IBM"
         );
         assert_eq!(
-            MarketstackProvider::format_symbol("IBM", Some("XNYS")),
+            MarketstackPriceSource::format_symbol("IBM", Some("XNYS")),
             "IBM"
         );
     }
@@ -212,25 +212,25 @@ mod tests {
     #[test]
     fn test_format_symbol_international_exchanges() {
         assert_eq!(
-            MarketstackProvider::format_symbol("VOD", Some("XLON")),
+            MarketstackPriceSource::format_symbol("VOD", Some("XLON")),
             "VOD.XLON"
         );
         assert_eq!(
-            MarketstackProvider::format_symbol("VOD", Some("LSE")),
+            MarketstackPriceSource::format_symbol("VOD", Some("LSE")),
             "VOD.XLON"
         );
         assert_eq!(
-            MarketstackProvider::format_symbol("SAP", Some("XFRA")),
+            MarketstackPriceSource::format_symbol("SAP", Some("XFRA")),
             "SAP.XFRA"
         );
     }
 
     #[test]
     fn test_parse_date() {
-        let date = MarketstackProvider::parse_date("2024-01-15T00:00:00+0000").unwrap();
+        let date = MarketstackPriceSource::parse_date("2024-01-15T00:00:00+0000").unwrap();
         assert_eq!(date, NaiveDate::from_ymd_opt(2024, 1, 15).unwrap());
 
-        let date = MarketstackProvider::parse_date("2024-01-15").unwrap();
+        let date = MarketstackPriceSource::parse_date("2024-01-15").unwrap();
         assert_eq!(date, NaiveDate::from_ymd_opt(2024, 1, 15).unwrap());
     }
 
@@ -289,13 +289,13 @@ mod tests {
 
     #[test]
     fn test_provider_name() {
-        let provider = MarketstackProvider::new("test_key");
+        let provider = MarketstackPriceSource::new("test_key");
         assert_eq!(provider.name(), "marketstack");
     }
 
     #[tokio::test]
     async fn test_non_equity_asset_returns_none() {
-        let provider = MarketstackProvider::new("test_key");
+        let provider = MarketstackPriceSource::new("test_key");
         let asset = Asset::Crypto {
             symbol: "BTC".to_string(),
             network: None,
@@ -310,15 +310,15 @@ mod tests {
     #[test]
     fn test_exchange_code_mapping() {
         // US exchanges return empty string (no suffix needed)
-        assert_eq!(MarketstackProvider::map_exchange_code("NASDAQ"), "");
-        assert_eq!(MarketstackProvider::map_exchange_code("NYSE"), "");
-        assert_eq!(MarketstackProvider::map_exchange_code("XNAS"), "");
-        assert_eq!(MarketstackProvider::map_exchange_code("XNYS"), "");
+        assert_eq!(MarketstackPriceSource::map_exchange_code("NASDAQ"), "");
+        assert_eq!(MarketstackPriceSource::map_exchange_code("NYSE"), "");
+        assert_eq!(MarketstackPriceSource::map_exchange_code("XNAS"), "");
+        assert_eq!(MarketstackPriceSource::map_exchange_code("XNYS"), "");
 
         // International exchanges return MIC codes
-        assert_eq!(MarketstackProvider::map_exchange_code("LSE"), "XLON");
-        assert_eq!(MarketstackProvider::map_exchange_code("XLON"), "XLON");
-        assert_eq!(MarketstackProvider::map_exchange_code("TSX"), "XTSE");
-        assert_eq!(MarketstackProvider::map_exchange_code("ASX"), "XASX");
+        assert_eq!(MarketstackPriceSource::map_exchange_code("LSE"), "XLON");
+        assert_eq!(MarketstackPriceSource::map_exchange_code("XLON"), "XLON");
+        assert_eq!(MarketstackPriceSource::map_exchange_code("TSX"), "XTSE");
+        assert_eq!(MarketstackPriceSource::map_exchange_code("ASX"), "XASX");
     }
 }

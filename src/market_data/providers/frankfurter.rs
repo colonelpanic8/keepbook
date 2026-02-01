@@ -36,11 +36,11 @@ struct FrankfurterResponse {
 /// Uses the Frankfurter API which provides ECB (European Central Bank)
 /// daily reference exchange rates. No API key is required.
 #[derive(Debug, Clone)]
-pub struct FrankfurterProvider {
+pub struct FrankfurterRateSource {
     client: Client,
 }
 
-impl FrankfurterProvider {
+impl FrankfurterRateSource {
     /// Creates a new Frankfurter provider with a default HTTP client.
     pub fn new() -> Self {
         Self {
@@ -85,14 +85,14 @@ impl FrankfurterProvider {
     }
 }
 
-impl Default for FrankfurterProvider {
+impl Default for FrankfurterRateSource {
     fn default() -> Self {
         Self::new()
     }
 }
 
 #[async_trait::async_trait]
-impl FxRateSource for FrankfurterProvider {
+impl FxRateSource for FrankfurterRateSource {
     async fn fetch_close(
         &self,
         base: &str,
@@ -216,7 +216,7 @@ mod tests {
         // USD/GBP = EUR/GBP / EUR/USD = 0.8623 / 1.0956 = 0.7870 (approx)
         let eur_to_usd = 1.0956;
         let eur_to_gbp = 0.8623;
-        let usd_to_gbp = FrankfurterProvider::compute_cross_rate(eur_to_usd, eur_to_gbp);
+        let usd_to_gbp = FrankfurterRateSource::compute_cross_rate(eur_to_usd, eur_to_gbp);
 
         assert!((usd_to_gbp - 0.7870).abs() < 0.001);
     }
@@ -227,20 +227,20 @@ mod tests {
         // GBP/USD = EUR/USD / EUR/GBP = 1.0956 / 0.8623 = 1.2706 (approx)
         let eur_to_gbp = 0.8623;
         let eur_to_usd = 1.0956;
-        let gbp_to_usd = FrankfurterProvider::compute_cross_rate(eur_to_gbp, eur_to_usd);
+        let gbp_to_usd = FrankfurterRateSource::compute_cross_rate(eur_to_gbp, eur_to_usd);
 
         assert!((gbp_to_usd - 1.2706).abs() < 0.001);
     }
 
     #[test]
     fn test_provider_name() {
-        let provider = FrankfurterProvider::new();
+        let provider = FrankfurterRateSource::new();
         assert_eq!(provider.name(), "frankfurter");
     }
 
     #[test]
     fn test_provider_default() {
-        let provider = FrankfurterProvider::default();
+        let provider = FrankfurterRateSource::default();
         assert_eq!(provider.name(), "frankfurter");
     }
 
@@ -251,7 +251,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_same_currency_returns_one() {
-        let provider = FrankfurterProvider::new();
+        let provider = FrankfurterRateSource::new();
         let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
 
         let result = provider
@@ -269,7 +269,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_case_insensitive_currencies() {
-        let provider = FrankfurterProvider::new();
+        let provider = FrankfurterRateSource::new();
         let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
 
         // Same currency with different cases should still return 1

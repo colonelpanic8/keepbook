@@ -33,7 +33,7 @@ struct MarketData {
 ///
 /// Fetches historical daily close prices from CoinGecko's free API.
 /// No API key is required for basic usage, though rate limits apply.
-pub struct CoinGeckoProvider {
+pub struct CoinGeckoPriceSource {
     client: reqwest::Client,
     /// Quote currency for prices (e.g., "usd", "eur")
     quote_currency: String,
@@ -41,7 +41,7 @@ pub struct CoinGeckoProvider {
     custom_mappings: HashMap<String, String>,
 }
 
-impl CoinGeckoProvider {
+impl CoinGeckoPriceSource {
     /// Creates a new CoinGecko provider with USD as the default quote currency.
     pub fn new() -> Self {
         Self {
@@ -201,14 +201,14 @@ impl CoinGeckoProvider {
     }
 }
 
-impl Default for CoinGeckoProvider {
+impl Default for CoinGeckoPriceSource {
     fn default() -> Self {
         Self::new()
     }
 }
 
 #[async_trait::async_trait]
-impl CryptoPriceSource for CoinGeckoProvider {
+impl CryptoPriceSource for CoinGeckoPriceSource {
     async fn fetch_close(
         &self,
         asset: &Asset,
@@ -355,7 +355,7 @@ mod tests {
 
     #[test]
     fn test_symbol_to_coingecko_id_common_symbols() {
-        let provider = CoinGeckoProvider::new();
+        let provider = CoinGeckoPriceSource::new();
 
         assert_eq!(
             provider.symbol_to_coingecko_id("BTC", None),
@@ -385,14 +385,14 @@ mod tests {
 
     #[test]
     fn test_symbol_to_coingecko_id_unknown_symbol() {
-        let provider = CoinGeckoProvider::new();
+        let provider = CoinGeckoPriceSource::new();
 
         assert_eq!(provider.symbol_to_coingecko_id("UNKNOWN123", None), None);
     }
 
     #[test]
     fn test_custom_mapping_overrides_default() {
-        let provider = CoinGeckoProvider::new()
+        let provider = CoinGeckoPriceSource::new()
             .with_mapping("BTC", "wrapped-bitcoin"); // Override BTC mapping
 
         assert_eq!(
@@ -409,7 +409,7 @@ mod tests {
 
     #[test]
     fn test_custom_mapping_for_new_symbol() {
-        let provider = CoinGeckoProvider::new()
+        let provider = CoinGeckoPriceSource::new()
             .with_mapping("MYCOIN", "my-custom-coin-id");
 
         assert_eq!(
@@ -424,22 +424,22 @@ mod tests {
 
     #[test]
     fn test_quote_currency_configuration() {
-        let provider = CoinGeckoProvider::new().with_quote_currency("EUR");
+        let provider = CoinGeckoPriceSource::new().with_quote_currency("EUR");
         assert_eq!(provider.quote_currency, "eur");
 
-        let provider = CoinGeckoProvider::new().with_quote_currency("gbp");
+        let provider = CoinGeckoPriceSource::new().with_quote_currency("gbp");
         assert_eq!(provider.quote_currency, "gbp");
     }
 
     #[test]
     fn test_provider_name() {
-        let provider = CoinGeckoProvider::new();
+        let provider = CoinGeckoPriceSource::new();
         assert_eq!(provider.name(), "coingecko");
     }
 
     #[test]
     fn test_default_implementation() {
-        let provider = CoinGeckoProvider::default();
+        let provider = CoinGeckoPriceSource::default();
         assert_eq!(provider.quote_currency, "usd");
         assert!(provider.custom_mappings.is_empty());
     }
@@ -450,7 +450,7 @@ mod tests {
         mappings.insert("COIN1".to_string(), "coin-one-id".to_string());
         mappings.insert("COIN2".to_string(), "coin-two-id".to_string());
 
-        let provider = CoinGeckoProvider::new().with_custom_mappings(mappings);
+        let provider = CoinGeckoPriceSource::new().with_custom_mappings(mappings);
 
         assert_eq!(
             provider.symbol_to_coingecko_id("COIN1", None),
@@ -464,7 +464,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fetch_close_non_crypto_asset_returns_none() {
-        let provider = CoinGeckoProvider::new();
+        let provider = CoinGeckoPriceSource::new();
         let asset = Asset::equity("AAPL");
         let asset_id = AssetId::from_asset(&asset);
         let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
@@ -488,7 +488,7 @@ mod tests {
 
     #[test]
     fn test_all_major_crypto_mappings_exist() {
-        let provider = CoinGeckoProvider::new();
+        let provider = CoinGeckoPriceSource::new();
 
         // Test that common cryptocurrencies are mapped
         let major_cryptos = vec![
@@ -507,7 +507,7 @@ mod tests {
 
     #[test]
     fn test_defi_token_mappings() {
-        let provider = CoinGeckoProvider::new();
+        let provider = CoinGeckoPriceSource::new();
 
         assert_eq!(
             provider.symbol_to_coingecko_id("AAVE", None),
@@ -529,7 +529,7 @@ mod tests {
 
     #[test]
     fn test_layer2_token_mappings() {
-        let provider = CoinGeckoProvider::new();
+        let provider = CoinGeckoPriceSource::new();
 
         assert_eq!(
             provider.symbol_to_coingecko_id("ARB", None),
@@ -547,7 +547,7 @@ mod tests {
 
     #[test]
     fn test_wrapped_token_mappings() {
-        let provider = CoinGeckoProvider::new();
+        let provider = CoinGeckoPriceSource::new();
 
         assert_eq!(
             provider.symbol_to_coingecko_id("WBTC", None),

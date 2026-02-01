@@ -2,13 +2,13 @@
 //! Run with: cargo test --test frankfurter_live -- --ignored
 
 use chrono::NaiveDate;
-use keepbook::market_data::providers::frankfurter::FrankfurterProvider;
+use keepbook::market_data::providers::frankfurter::FrankfurterRateSource;
 use keepbook::market_data::FxRateSource;
 
 #[tokio::test]
 #[ignore] // Run manually with --ignored flag
 async fn test_frankfurter_live_usd_eur() {
-    let provider = FrankfurterProvider::new();
+    let provider = FrankfurterRateSource::new();
 
     // Use a recent weekday date
     let date = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
@@ -31,7 +31,7 @@ async fn test_frankfurter_live_usd_eur() {
 #[tokio::test]
 #[ignore]
 async fn test_frankfurter_live_eur_gbp() {
-    let provider = FrankfurterProvider::new();
+    let provider = FrankfurterRateSource::new();
     let date = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
 
     let result = provider.fetch_close("EUR", "GBP", date).await;
@@ -49,7 +49,7 @@ async fn test_frankfurter_live_eur_gbp() {
 #[tokio::test]
 #[ignore]
 async fn test_frankfurter_live_cross_rate_usd_gbp() {
-    let provider = FrankfurterProvider::new();
+    let provider = FrankfurterRateSource::new();
     let date = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
 
     // This tests the cross-rate computation (neither currency is EUR)

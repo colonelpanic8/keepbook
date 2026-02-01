@@ -11,7 +11,7 @@ mod valuation;
 pub use asset_id::AssetId;
 pub use jsonl_store::JsonlMarketDataStore;
 pub use models::{AssetRegistryEntry, FxRateKind, FxRatePoint, PriceKind, PricePoint};
-pub use provider::{MarketDataProvider, NoopProvider};
+pub use provider::{MarketDataSource, NoopSource};
 pub use sources::{
     CryptoPriceRouter, CryptoPriceSource, EquityPriceRouter, EquityPriceSource, FxRateRouter,
     FxRateSource, RateLimitConfig,

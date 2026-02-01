@@ -2,14 +2,14 @@
 //! Run with: cargo test --test coingecko_live -- --ignored
 
 use chrono::Utc;
-use keepbook::market_data::providers::coingecko::CoinGeckoProvider;
+use keepbook::market_data::providers::coingecko::CoinGeckoPriceSource;
 use keepbook::market_data::{AssetId, CryptoPriceSource};
 use keepbook::models::Asset;
 
 #[tokio::test]
 #[ignore] // Run manually with --ignored flag
 async fn test_coingecko_live_btc() {
-    let provider = CoinGeckoProvider::new();
+    let provider = CoinGeckoPriceSource::new();
 
     let asset = Asset::Crypto {
         symbol: "BTC".to_string(),
@@ -37,7 +37,7 @@ async fn test_coingecko_live_btc() {
 #[tokio::test]
 #[ignore]
 async fn test_coingecko_live_eth() {
-    let provider = CoinGeckoProvider::new();
+    let provider = CoinGeckoPriceSource::new();
 
     let asset = Asset::Crypto {
         symbol: "ETH".to_string(),

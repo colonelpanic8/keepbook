@@ -16,12 +16,12 @@ const BASE_URL: &str = "https://api.twelvedata.com";
 /// Twelve Data equity price provider.
 ///
 /// Uses the `/time_series` endpoint to fetch daily close prices.
-pub struct TwelveDataProvider {
+pub struct TwelveDataPriceSource {
     api_key: String,
     client: Client,
 }
 
-impl TwelveDataProvider {
+impl TwelveDataPriceSource {
     /// Creates a new Twelve Data provider with the given API key.
     pub fn new(api_key: impl Into<String>) -> Self {
         Self {
@@ -110,7 +110,7 @@ impl TwelveDataProvider {
 }
 
 #[async_trait::async_trait]
-impl EquityPriceSource for TwelveDataProvider {
+impl EquityPriceSource for TwelveDataPriceSource {
     async fn fetch_close(
         &self,
         asset: &Asset,
@@ -325,19 +325,19 @@ mod tests {
 
     #[test]
     fn test_build_symbol_us_equity() {
-        let symbol = TwelveDataProvider::build_symbol("aapl", None);
+        let symbol = TwelveDataPriceSource::build_symbol("aapl", None);
         assert_eq!(symbol, "AAPL");
     }
 
     #[test]
     fn test_build_symbol_with_exchange() {
-        let symbol = TwelveDataProvider::build_symbol("aapl", Some("nasdaq"));
+        let symbol = TwelveDataPriceSource::build_symbol("aapl", Some("nasdaq"));
         assert_eq!(symbol, "AAPL:NASDAQ");
     }
 
     #[test]
     fn test_build_symbol_international() {
-        let symbol = TwelveDataProvider::build_symbol("VOD", Some("LSE"));
+        let symbol = TwelveDataPriceSource::build_symbol("VOD", Some("LSE"));
         assert_eq!(symbol, "VOD:LSE");
     }
 
@@ -379,13 +379,13 @@ mod tests {
 
     #[test]
     fn test_provider_name() {
-        let provider = TwelveDataProvider::new("test_key");
+        let provider = TwelveDataPriceSource::new("test_key");
         assert_eq!(provider.name(), "twelve_data");
     }
 
     #[tokio::test]
     async fn test_non_equity_asset_returns_none() {
-        let provider = TwelveDataProvider::new("test_key");
+        let provider = TwelveDataPriceSource::new("test_key");
         let asset = Asset::crypto("BTC");
         let asset_id = AssetId::from_asset(&asset);
         let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();

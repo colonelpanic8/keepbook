@@ -5,7 +5,7 @@ use super::{AssetId, FxRatePoint, PricePoint};
 use crate::models::Asset;
 
 #[async_trait::async_trait]
-pub trait MarketDataProvider: Send + Sync {
+pub trait MarketDataSource: Send + Sync {
     async fn fetch_price(
         &self,
         asset: &Asset,
@@ -19,10 +19,10 @@ pub trait MarketDataProvider: Send + Sync {
     fn name(&self) -> &str;
 }
 
-pub struct NoopProvider;
+pub struct NoopSource;
 
 #[async_trait::async_trait]
-impl MarketDataProvider for NoopProvider {
+impl MarketDataSource for NoopSource {
     async fn fetch_price(
         &self,
         _asset: &Asset,

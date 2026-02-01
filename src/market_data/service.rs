@@ -5,13 +5,13 @@ use chrono::{Duration, NaiveDate};
 
 use super::{
     AssetId, CryptoPriceRouter, EquityPriceRouter, FxRateKind, FxRatePoint, FxRateRouter,
-    MarketDataProvider, MarketDataStore, PriceKind, PricePoint,
+    MarketDataSource, MarketDataStore, PriceKind, PricePoint,
 };
 use crate::models::Asset;
 
 pub struct MarketDataService {
     store: Arc<dyn MarketDataStore>,
-    provider: Option<Arc<dyn MarketDataProvider>>,
+    provider: Option<Arc<dyn MarketDataSource>>,
     equity_router: Option<Arc<EquityPriceRouter>>,
     crypto_router: Option<Arc<CryptoPriceRouter>>,
     fx_router: Option<Arc<FxRateRouter>>,
@@ -21,7 +21,7 @@ pub struct MarketDataService {
 impl MarketDataService {
     pub fn new(
         store: Arc<dyn MarketDataStore>,
-        provider: Option<Arc<dyn MarketDataProvider>>,
+        provider: Option<Arc<dyn MarketDataSource>>,
     ) -> Self {
         Self {
             store,
