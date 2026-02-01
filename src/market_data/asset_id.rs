@@ -1,8 +1,6 @@
 use std::fmt;
 
-use base64::Engine;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 use crate::models::Asset;
 
@@ -13,12 +11,24 @@ pub struct AssetId(String);
 
 impl AssetId {
     pub fn from_asset(asset: &Asset) -> Self {
-        let canonical = canonical_asset_json(asset);
-        let mut hasher = Sha256::new();
-        hasher.update(canonical.as_bytes());
-        let digest = hasher.finalize();
-        let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest);
-        Self(encoded)
+        let id = match asset {
+            Asset::Currency { iso_code } => {
+                format!("currency/{}", iso_code.trim().to_uppercase())
+            }
+            Asset::Equity { ticker, exchange: None } => {
+                format!("equity/{}", ticker.trim().to_uppercase())
+            }
+            Asset::Equity { ticker, exchange: Some(ex) } => {
+                format!("equity/{}/{}", ticker.trim().to_uppercase(), ex.trim().to_uppercase())
+            }
+            Asset::Crypto { symbol, network: None } => {
+                format!("crypto/{}", symbol.trim().to_uppercase())
+            }
+            Asset::Crypto { symbol, network: Some(net) } => {
+                format!("crypto/{}/{}", symbol.trim().to_uppercase(), net.trim().to_lowercase())
+            }
+        };
+        Self(id)
     }
 
     pub fn as_str(&self) -> &str {
@@ -48,55 +58,6 @@ impl AsRef<str> for AssetId {
     fn as_ref(&self) -> &str {
         self.as_str()
     }
-}
-
-fn canonical_asset_json(asset: &Asset) -> String {
-    use serde_json::{Map, Value};
-
-    let mut map = Map::new();
-
-    match asset {
-        Asset::Currency { iso_code } => {
-            map.insert("type".to_string(), Value::String("currency".to_string()));
-            map.insert(
-                "iso_code".to_string(),
-                Value::String(normalize_upper(iso_code)),
-            );
-        }
-        Asset::Equity { ticker, exchange } => {
-            map.insert("type".to_string(), Value::String("equity".to_string()));
-            map.insert(
-                "ticker".to_string(),
-                Value::String(normalize_upper(ticker)),
-            );
-            if let Some(exchange) = exchange {
-                map.insert(
-                    "exchange".to_string(),
-                    Value::String(normalize_upper(exchange)),
-                );
-            }
-        }
-        Asset::Crypto { symbol, network } => {
-            map.insert("type".to_string(), Value::String("crypto".to_string()));
-            map.insert(
-                "symbol".to_string(),
-                Value::String(normalize_upper(symbol)),
-            );
-            if let Some(network) = network {
-                map.insert(
-                    "network".to_string(),
-                    Value::String(normalize_upper(network)),
-                );
-            }
-        }
-    }
-
-    let value = Value::Object(map);
-    serde_json::to_string(&value).expect("Failed to serialize canonical asset JSON")
-}
-
-fn normalize_upper(value: &str) -> String {
-    value.trim().to_uppercase()
 }
 
 #[cfg(test)]
@@ -132,5 +93,47 @@ mod tests {
         };
         let id_upper = AssetId::from_asset(&asset_upper);
         assert_eq!(id_lower, id_upper);
+        assert_eq!(id_lower.as_str(), "currency/USD");
+    }
+
+    #[test]
+    fn asset_id_is_human_readable_currency() {
+        let asset = Asset::currency("USD");
+        let id = AssetId::from_asset(&asset);
+        assert_eq!(id.as_str(), "currency/USD");
+    }
+
+    #[test]
+    fn asset_id_is_human_readable_equity() {
+        let asset = Asset::equity("AAPL");
+        let id = AssetId::from_asset(&asset);
+        assert_eq!(id.as_str(), "equity/AAPL");
+    }
+
+    #[test]
+    fn asset_id_is_human_readable_equity_with_exchange() {
+        let asset = Asset::Equity {
+            ticker: "AAPL".to_string(),
+            exchange: Some("NYSE".to_string()),
+        };
+        let id = AssetId::from_asset(&asset);
+        assert_eq!(id.as_str(), "equity/AAPL/NYSE");
+    }
+
+    #[test]
+    fn asset_id_is_human_readable_crypto() {
+        let asset = Asset::crypto("BTC");
+        let id = AssetId::from_asset(&asset);
+        assert_eq!(id.as_str(), "crypto/BTC");
+    }
+
+    #[test]
+    fn asset_id_is_human_readable_crypto_with_network() {
+        let asset = Asset::Crypto {
+            symbol: "ETH".to_string(),
+            network: Some("arbitrum".to_string()),
+        };
+        let id = AssetId::from_asset(&asset);
+        assert_eq!(id.as_str(), "crypto/ETH/arbitrum");
     }
 }
