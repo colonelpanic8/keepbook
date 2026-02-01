@@ -21,12 +21,13 @@ use chromiumoxide::cdp::browser_protocol::fetch::{
 };
 use futures::StreamExt;
 use keepbook::credentials::{SessionCache, SessionData};
+use keepbook::market_data::{AssetId, PriceKind, PricePoint};
 use keepbook::models::{
     Account, Asset, Balance, Connection, ConnectionConfig, ConnectionStatus, Id, LastSync, SyncStatus,
 };
 use keepbook::storage::{JsonFileStorage, Storage};
 use keepbook::sync::schwab::{SchwabClient, Position};
-use keepbook::sync::SyncResult;
+use keepbook::sync::{SyncResult, SyncedBalance};
 use tokio::sync::Mutex;
 
 const CONNECTION_ID: &str = "schwab";
@@ -390,7 +391,7 @@ async fn sync(storage: &JsonFileStorage) -> Result<()> {
 
     // Build sync result
     let mut accounts = Vec::new();
-    let mut balances: Vec<(Id, Vec<Balance>)> = Vec::new();
+    let mut balances: Vec<(Id, Vec<SyncedBalance>)> = Vec::new();
 
     for schwab_account in accounts_resp.accounts {
         let account_id = Id::new();
@@ -418,10 +419,10 @@ async fn sync(storage: &JsonFileStorage) -> Result<()> {
         // Create balance for total account value
         let mut account_balances = vec![];
         if let Some(bal) = &schwab_account.balances {
-            account_balances.push(Balance::new(
+            account_balances.push(SyncedBalance::new(Balance::new(
                 Asset::currency("USD"),
                 bal.balance.to_string(),
-            ));
+            )));
         }
 
         // Add position balances for brokerage accounts
@@ -432,7 +433,24 @@ async fn sync(storage: &JsonFileStorage) -> Result<()> {
                 } else {
                     Asset::equity(&position.default_symbol)
                 };
-                account_balances.push(Balance::new(asset, position.quantity.to_string()));
+                let balance = Balance::new(asset.clone(), position.quantity.to_string());
+
+                // Create price point for non-cash positions
+                let synced_balance = if position.default_symbol != "CASH" {
+                    let price_point = PricePoint {
+                        asset_id: AssetId::from_asset(&asset),
+                        as_of_date: Utc::now().date_naive(),
+                        timestamp: Utc::now(),
+                        price: position.price.to_string(),
+                        quote_currency: "USD".to_string(),
+                        kind: PriceKind::Close,
+                        source: "schwab".to_string(),
+                    };
+                    SyncedBalance::new(balance).with_price(price_point)
+                } else {
+                    SyncedBalance::new(balance)
+                };
+                account_balances.push(synced_balance);
             }
         }
 
