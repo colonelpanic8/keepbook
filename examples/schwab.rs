@@ -370,6 +370,14 @@ async fn sync(storage: &JsonFileStorage) -> Result<()> {
 
     println!("Connection: {} ({})\n", connection.name(), connection.id());
 
+    // Load existing accounts to preserve created_at
+    let existing_accounts = storage.list_accounts().await?;
+    let existing_by_id: std::collections::HashMap<String, Account> = existing_accounts
+        .into_iter()
+        .filter(|a| a.connection_id == *connection.id())
+        .map(|a| (a.id.to_string(), a))
+        .collect();
+
     // Create client and fetch data
     let client = SchwabClient::new(session)?;
 
@@ -394,7 +402,14 @@ async fn sync(storage: &JsonFileStorage) -> Result<()> {
     let mut balances: Vec<(Id, Vec<SyncedBalance>)> = Vec::new();
 
     for schwab_account in accounts_resp.accounts {
-        let account_id = Id::new();
+        // Use Schwab's account_id as our account ID (stable identifier)
+        let account_id = Id::from_string(&schwab_account.account_id);
+
+        // Preserve created_at from existing account if it exists
+        let created_at = existing_by_id
+            .get(&schwab_account.account_id)
+            .map(|a| a.created_at)
+            .unwrap_or_else(Utc::now);
 
         let account = Account {
             id: account_id.clone(),
@@ -408,10 +423,9 @@ async fn sync(storage: &JsonFileStorage) -> Result<()> {
                 "schwab".to_string(),
                 schwab_account.account_type.to_lowercase(),
             ],
-            created_at: Utc::now(),
+            created_at,
             active: true,
             synchronizer_data: serde_json::json!({
-                "schwab_account_id": schwab_account.account_id,
                 "account_number": schwab_account.account_number_display_full,
             }),
         };
