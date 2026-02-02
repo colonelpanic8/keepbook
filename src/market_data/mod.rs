@@ -8,8 +8,6 @@ mod service;
 mod source_config;
 mod sources;
 mod store;
-mod valuation;
-
 pub use asset_id::AssetId;
 pub use jsonl_store::JsonlMarketDataStore;
 pub use models::{AssetRegistryEntry, FxRateKind, FxRatePoint, PriceKind, PricePoint};
@@ -22,6 +20,3 @@ pub use sources::{
     FxRateSource, RateLimitConfig,
 };
 pub use store::{MarketDataStore, MemoryMarketDataStore, NullMarketDataStore};
-pub use valuation::{
-    AccountBalances, AccountNetWorth, NetWorthCalculator, NetWorthLineItem, NetWorthResult,
-};
