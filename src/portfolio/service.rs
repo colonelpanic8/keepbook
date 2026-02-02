@@ -71,21 +71,29 @@ impl PortfolioService {
             .collect();
 
         // 3. Aggregate by asset (for by_asset summary)
-        // Key: serialized asset, Value: (total amount, list of (account_id, balance))
-        let mut by_asset_agg: HashMap<String, (Decimal, Vec<(Id, Balance)>)> = HashMap::new();
+        // Key: serialized asset, Value: (total amount, latest balance date, list of (account_id, balance))
+        let mut by_asset_agg: HashMap<String, (Decimal, NaiveDate, Vec<(Id, Balance)>)> =
+            HashMap::new();
         for (account_id, balance) in &filtered_balances {
             let asset_key = serde_json::to_string(&balance.asset)?;
             let amount = Decimal::from_str(&balance.amount)?;
-            let entry = by_asset_agg.entry(asset_key).or_insert((Decimal::ZERO, Vec::new()));
+            let balance_date = balance.timestamp.date_naive();
+            let entry = by_asset_agg
+                .entry(asset_key)
+                .or_insert((Decimal::ZERO, balance_date, Vec::new()));
             entry.0 += amount;
-            entry.1.push((account_id.clone(), balance.clone()));
+            // Track the most recent balance date
+            if balance_date > entry.1 {
+                entry.1 = balance_date;
+            }
+            entry.2.push((account_id.clone(), balance.clone()));
         }
 
         // 4. Calculate values for each asset
         let mut asset_summaries = Vec::new();
         let mut total_value = Decimal::ZERO;
 
-        for (asset_key, (total_amount, holdings)) in &by_asset_agg {
+        for (asset_key, (total_amount, latest_balance_date, holdings)) in &by_asset_agg {
             let asset: Asset = serde_json::from_str(asset_key)?;
             let valuation = self
                 .value_asset(&asset, *total_amount, &query.currency, query.as_of_date)
@@ -119,6 +127,7 @@ impl PortfolioService {
             asset_summaries.push(AssetSummary {
                 asset: asset.clone(),
                 total_amount: total_amount.normalize().to_string(),
+                amount_date: *latest_balance_date,
                 price: valuation.price,
                 price_date: valuation.price_date,
                 fx_rate: valuation.fx_rate,

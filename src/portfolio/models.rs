@@ -70,6 +70,8 @@ pub struct PortfolioSnapshot {
 pub struct AssetSummary {
     pub asset: Asset,
     pub total_amount: String,
+    /// Date of the most recent balance contributing to this amount.
+    pub amount_date: NaiveDate,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub price: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
