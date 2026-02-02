@@ -119,33 +119,41 @@ impl SchwabSynchronizer {
 
             let mut account_balances = vec![];
 
-            // For brokerage accounts, use individual positions (including CASH)
+            // For brokerage accounts, use individual positions (skip CASH position, use balances.cash)
             // For non-brokerage (bank) accounts, use the total balance
             if schwab_account.is_brokerage {
+                // Add equity positions
                 for position in &all_positions {
-                    let asset = if position.default_symbol == "CASH" {
-                        Asset::currency("USD")
-                    } else {
-                        Asset::equity(&position.default_symbol)
-                    };
+                    // Skip CASH position - we'll use balances.cash instead
+                    if position.default_symbol == "CASH" {
+                        continue;
+                    }
+
+                    let asset = Asset::equity(&position.default_symbol);
                     let balance = Balance::new(asset.clone(), position.quantity.to_string());
 
-                    // Create price point for non-cash positions
-                    let synced_balance = if position.default_symbol != "CASH" {
-                        let price_point = PricePoint {
-                            asset_id: AssetId::from_asset(&asset),
-                            as_of_date: Utc::now().date_naive(),
-                            timestamp: Utc::now(),
-                            price: position.price.to_string(),
-                            quote_currency: "USD".to_string(),
-                            kind: PriceKind::Close,
-                            source: "schwab".to_string(),
-                        };
-                        SyncedBalance::new(balance).with_price(price_point)
-                    } else {
-                        SyncedBalance::new(balance)
+                    let price_point = PricePoint {
+                        asset_id: AssetId::from_asset(&asset),
+                        as_of_date: Utc::now().date_naive(),
+                        timestamp: Utc::now(),
+                        price: position.price.to_string(),
+                        quote_currency: "USD".to_string(),
+                        kind: PriceKind::Close,
+                        source: "schwab".to_string(),
                     };
-                    account_balances.push(synced_balance);
+                    account_balances.push(SyncedBalance::new(balance).with_price(price_point));
+                }
+
+                // Add actual cash balance from account balances (not from CASH position)
+                if let Some(bal) = &schwab_account.balances {
+                    if let Some(cash) = bal.cash {
+                        if cash > 0.0 {
+                            account_balances.push(SyncedBalance::new(Balance::new(
+                                Asset::currency("USD"),
+                                cash.to_string(),
+                            )));
+                        }
+                    }
                 }
             } else if let Some(bal) = &schwab_account.balances {
                 // Non-brokerage accounts (bank/checking): store total balance as USD
