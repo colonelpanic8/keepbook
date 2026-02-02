@@ -430,6 +430,7 @@ mod tests {
             name: "Test Bank".to_string(),
             synchronizer: "manual".to_string(),
             credentials: None,
+            balance_staleness: None,
         });
         storage.save_connection(&connection).await?;
 
@@ -469,6 +470,7 @@ mod tests {
             name: "Broker".to_string(),
             synchronizer: "manual".to_string(),
             credentials: None,
+            balance_staleness: None,
         });
         storage.save_connection(&connection).await?;
 
@@ -542,6 +544,7 @@ mod tests {
             name: "Bank".to_string(),
             synchronizer: "manual".to_string(),
             credentials: None,
+            balance_staleness: None,
         });
         storage.save_connection(&connection).await?;
 

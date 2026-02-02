@@ -622,6 +622,7 @@ async fn add_connection(storage: &JsonFileStorage, name: &str) -> Result<serde_j
             name: name.to_string(),
             synchronizer: "manual".to_string(),
             credentials: None,
+            balance_staleness: None,
         },
         state: ConnectionState::new(),
     };

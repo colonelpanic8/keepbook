@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::credentials::CredentialConfig;
+use crate::duration::deserialize_duration_opt;
 
 use super::Id;
 
@@ -16,6 +17,9 @@ pub struct ConnectionConfig {
     /// Credential configuration for this connection.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credentials: Option<CredentialConfig>,
+    /// Override balance staleness for this connection.
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_duration_opt")]
+    pub balance_staleness: Option<std::time::Duration>,
 }
 
 /// Machine-managed connection state.

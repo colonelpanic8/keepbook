@@ -433,6 +433,7 @@ async fn setup(storage: &JsonFileStorage, synchronizer: &PlaidSynchronizer) -> R
         name: "Plaid Sandbox".to_string(),
         synchronizer: "plaid".to_string(),
         credentials: None,
+        balance_staleness: None,
     });
     connection.state.synchronizer_data = serde_json::json!({
         "access_token": access_token,
