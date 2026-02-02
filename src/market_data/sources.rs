@@ -80,8 +80,18 @@ impl EquityPriceRouter {
     ) -> Result<Option<PricePoint>> {
         for source in &self.sources {
             let _limit = self.rate_limits.get(source.name());
-            if let Some(price) = source.fetch_close(asset, asset_id, date).await? {
-                return Ok(Some(price));
+            match source.fetch_close(asset, asset_id, date).await {
+                Ok(Some(price)) => return Ok(Some(price)),
+                Ok(None) => continue,
+                Err(e) => {
+                    eprintln!(
+                        "Warning: {} failed for {:?}: {}",
+                        source.name(),
+                        asset_id,
+                        e
+                    );
+                    continue;
+                }
             }
         }
         Ok(None)
@@ -114,8 +124,18 @@ impl CryptoPriceRouter {
     ) -> Result<Option<PricePoint>> {
         for source in &self.sources {
             let _limit = self.rate_limits.get(source.name());
-            if let Some(price) = source.fetch_close(asset, asset_id, date).await? {
-                return Ok(Some(price));
+            match source.fetch_close(asset, asset_id, date).await {
+                Ok(Some(price)) => return Ok(Some(price)),
+                Ok(None) => continue,
+                Err(e) => {
+                    eprintln!(
+                        "Warning: {} failed for {:?}: {}",
+                        source.name(),
+                        asset_id,
+                        e
+                    );
+                    continue;
+                }
             }
         }
         Ok(None)
@@ -148,8 +168,19 @@ impl FxRateRouter {
     ) -> Result<Option<FxRatePoint>> {
         for source in &self.sources {
             let _limit = self.rate_limits.get(source.name());
-            if let Some(rate) = source.fetch_close(base, quote, date).await? {
-                return Ok(Some(rate));
+            match source.fetch_close(base, quote, date).await {
+                Ok(Some(rate)) => return Ok(Some(rate)),
+                Ok(None) => continue,
+                Err(e) => {
+                    eprintln!(
+                        "Warning: {} failed for {}/{}: {}",
+                        source.name(),
+                        base,
+                        quote,
+                        e
+                    );
+                    continue;
+                }
             }
         }
         Ok(None)
