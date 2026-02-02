@@ -314,16 +314,73 @@ async fn main() -> Result<()> {
 
         Some(Command::Sync(sync_cmd)) => match sync_cmd {
             SyncCommand::Connection { id_or_name, if_stale } => {
-                // TODO: Task 9 will implement if_stale logic
-                let _ = if_stale;
+                if if_stale {
+                    use keepbook::staleness::{check_balance_staleness, resolve_balance_staleness};
+
+                    let connection = find_connection(&storage, &id_or_name)
+                        .await?
+                        .context(format!("Connection not found: {}", id_or_name))?;
+
+                    let threshold = resolve_balance_staleness(None, &connection, &config.refresh);
+                    let check = check_balance_staleness(&connection, threshold);
+
+                    if !check.is_stale {
+                        let output = serde_json::json!({
+                            "success": true,
+                            "skipped": true,
+                            "reason": "not stale",
+                            "connection": connection.config.name
+                        });
+                        println!("{}", serde_json::to_string_pretty(&output)?);
+                        return Ok(());
+                    }
+                }
+
                 let result = sync_connection(&storage, &id_or_name, &config).await?;
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
             SyncCommand::All { if_stale } => {
-                // TODO: Task 9 will implement if_stale logic
-                let _ = if_stale;
-                let result = sync_all(&storage, &config).await?;
-                println!("{}", serde_json::to_string_pretty(&result)?);
+                if if_stale {
+                    use keepbook::staleness::{check_balance_staleness, resolve_balance_staleness};
+
+                    let connections = storage.list_connections().await?;
+                    let mut results = Vec::new();
+
+                    for connection in connections {
+                        let threshold = resolve_balance_staleness(None, &connection, &config.refresh);
+                        let check = check_balance_staleness(&connection, threshold);
+
+                        if check.is_stale {
+                            // Sync this connection
+                            let id_or_name = connection.id().to_string();
+                            match sync_connection(&storage, &id_or_name, &config).await {
+                                Ok(result) => results.push(result),
+                                Err(e) => results.push(serde_json::json!({
+                                    "success": false,
+                                    "connection": connection.config.name,
+                                    "error": e.to_string()
+                                })),
+                            }
+                        } else {
+                            // Skip this connection
+                            results.push(serde_json::json!({
+                                "success": true,
+                                "skipped": true,
+                                "reason": "not stale",
+                                "connection": connection.config.name
+                            }));
+                        }
+                    }
+
+                    let output = serde_json::json!({
+                        "results": results,
+                        "total": results.len()
+                    });
+                    println!("{}", serde_json::to_string_pretty(&output)?);
+                } else {
+                    let result = sync_all(&storage, &config).await?;
+                    println!("{}", serde_json::to_string_pretty(&result)?);
+                }
             }
         },
 
