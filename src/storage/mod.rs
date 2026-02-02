@@ -1,6 +1,10 @@
 mod json_file;
+#[cfg(test)]
+mod memory;
 
 pub use json_file::JsonFileStorage;
+#[cfg(test)]
+pub use memory::MemoryStorage;
 
 use anyhow::Result;
 use crate::credentials::CredentialStore;
