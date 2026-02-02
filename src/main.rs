@@ -525,10 +525,31 @@ async fn main() -> Result<()> {
                                 }
                                 seen_assets.insert(asset_key.clone());
 
-                                // Check cached price
-                                let cached_price = store
-                                    .get_price(&asset_id, query.as_of_date, PriceKind::Close)
-                                    .await?;
+                                // Find most recent cached price (quote or close, with lookback)
+                                let mut cached_price = None;
+
+                                // Try Quote for today first
+                                if let Some(p) = store
+                                    .get_price(&asset_id, query.as_of_date, PriceKind::Quote)
+                                    .await?
+                                {
+                                    cached_price = Some(p);
+                                }
+
+                                // If no quote, try Close with lookback (7 days)
+                                if cached_price.is_none() {
+                                    for offset in 0..=7i64 {
+                                        let target_date = query.as_of_date - chrono::Duration::days(offset);
+                                        if let Some(p) = store
+                                            .get_price(&asset_id, target_date, PriceKind::Close)
+                                            .await?
+                                        {
+                                            cached_price = Some(p);
+                                            break;
+                                        }
+                                    }
+                                }
+
                                 let check = check_price_staleness(
                                     cached_price.as_ref(),
                                     config.refresh.price_staleness,
