@@ -382,8 +382,9 @@ async fn main() -> Result<()> {
                 dry_run,
                 force_refresh,
             } => {
-                use keepbook::portfolio::{
-                    Grouping, PortfolioQuery, PortfolioService, RefreshMode, RefreshPolicy,
+                use keepbook::portfolio::{Grouping, PortfolioQuery, PortfolioService};
+                use keepbook::staleness::{
+                    check_balance_staleness, log_balance_staleness, resolve_balance_staleness,
                 };
 
                 // Parse date
@@ -401,29 +402,17 @@ async fn main() -> Result<()> {
                     _ => anyhow::bail!("Invalid grouping: {group_by}. Use: asset, account, both"),
                 };
 
-                // Build refresh mode from flags
-                // Default behavior (no flags) is auto-refresh stale data
-                let refresh_mode = if force_refresh {
-                    RefreshMode::Force
-                } else if offline {
-                    RefreshMode::CachedOnly
-                } else if dry_run {
-                    // TODO: Task 7 will implement dry_run behavior
-                    // For now, treat as cached-only but we'll add reporting
-                    RefreshMode::CachedOnly
-                } else {
-                    // Default: auto-refresh stale data (same as explicit --auto)
-                    let _ = auto; // Explicit flag has same behavior as default
-                    RefreshMode::IfStale
-                };
+                // Determine what to refresh based on flags
+                // Default (no flags or --auto): auto-refresh stale data
+                // --offline: no refresh
+                // --dry-run: log staleness but no refresh
+                // --force-refresh: refresh everything
+                let should_refresh_balances = !offline && !dry_run;
+                let should_refresh_prices = !offline && !dry_run;
+                let ignore_staleness = force_refresh;
 
-                // Use default stale threshold from config (will be enhanced in Task 7)
-                let stale_threshold = std::time::Duration::from_secs(24 * 60 * 60); // 1 day default
-
-                let refresh_policy = RefreshPolicy {
-                    mode: refresh_mode,
-                    stale_threshold,
-                };
+                // Explicit --auto flag has same behavior as default
+                let _ = auto;
 
                 // Build query
                 let query = PortfolioQuery {
@@ -433,13 +422,39 @@ async fn main() -> Result<()> {
                     include_detail: detail,
                 };
 
-                // Setup market data service
+                // Setup market data store
                 let store = Arc::new(keepbook::market_data::JsonlMarketDataStore::new(
                     &config.data_dir,
                 ));
 
-                // Configure price providers if refresh is enabled (not offline)
-                let market_data = if !offline && !dry_run {
+                // Check which connections need syncing based on staleness
+                let connections = storage.list_connections().await?;
+                let mut connections_to_sync = Vec::new();
+
+                for connection in &connections {
+                    let threshold = resolve_balance_staleness(None, connection, &config.refresh);
+                    let check = check_balance_staleness(connection, threshold);
+
+                    // Log if dry_run
+                    if dry_run {
+                        log_balance_staleness(&connection.config.name, &check);
+                    }
+
+                    // Add to sync list if stale (or force)
+                    if should_refresh_balances && (ignore_staleness || check.is_stale) {
+                        connections_to_sync.push(connection.clone());
+                    }
+                }
+
+                // Sync stale connections
+                if !connections_to_sync.is_empty() {
+                    for connection in &connections_to_sync {
+                        let _ = sync_connection(&storage, &connection.id().to_string(), &config).await;
+                    }
+                }
+
+                // Setup market data service with or without providers
+                let market_data = if should_refresh_prices {
                     use keepbook::market_data::{
                         CryptoPriceRouter, EquityPriceRouter, FxRateRouter,
                     };
@@ -475,11 +490,10 @@ async fn main() -> Result<()> {
                     Arc::new(keepbook::market_data::MarketDataService::new(store, None))
                 };
 
+                // Calculate and output
                 let storage_arc: Arc<dyn keepbook::storage::Storage> = Arc::new(storage);
                 let service = PortfolioService::new(storage_arc, market_data);
-
-                // Calculate and output
-                let snapshot = service.calculate(&query, &refresh_policy).await?;
+                let snapshot = service.calculate(&query, &Default::default()).await?;
                 println!("{}", serde_json::to_string_pretty(&snapshot)?);
             }
         },
