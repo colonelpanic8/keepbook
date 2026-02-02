@@ -4,5 +4,6 @@ pub mod duration;
 pub mod market_data;
 pub mod models;
 pub mod portfolio;
+pub mod staleness;
 pub mod storage;
 pub mod sync;
