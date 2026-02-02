@@ -9,24 +9,46 @@ use crate::models::Asset;
 
 #[async_trait::async_trait]
 pub trait EquityPriceSource: Send + Sync {
+    /// Fetch end-of-day closing price for a specific date.
     async fn fetch_close(
         &self,
         asset: &Asset,
         asset_id: &AssetId,
         date: NaiveDate,
     ) -> Result<Option<PricePoint>>;
+
+    /// Fetch real-time or delayed quote (current price).
+    /// Default implementation returns None (not supported).
+    async fn fetch_quote(
+        &self,
+        _asset: &Asset,
+        _asset_id: &AssetId,
+    ) -> Result<Option<PricePoint>> {
+        Ok(None)
+    }
 
     fn name(&self) -> &str;
 }
 
 #[async_trait::async_trait]
 pub trait CryptoPriceSource: Send + Sync {
+    /// Fetch end-of-day closing price for a specific date.
     async fn fetch_close(
         &self,
         asset: &Asset,
         asset_id: &AssetId,
         date: NaiveDate,
     ) -> Result<Option<PricePoint>>;
+
+    /// Fetch real-time or delayed quote (current price).
+    /// Default implementation returns None (not supported).
+    async fn fetch_quote(
+        &self,
+        _asset: &Asset,
+        _asset_id: &AssetId,
+    ) -> Result<Option<PricePoint>> {
+        Ok(None)
+    }
 
     fn name(&self) -> &str;
 }
@@ -96,6 +118,30 @@ impl EquityPriceRouter {
         }
         Ok(None)
     }
+
+    pub async fn fetch_quote(
+        &self,
+        asset: &Asset,
+        asset_id: &AssetId,
+    ) -> Result<Option<PricePoint>> {
+        for source in &self.sources {
+            let _limit = self.rate_limits.get(source.name());
+            match source.fetch_quote(asset, asset_id).await {
+                Ok(Some(price)) => return Ok(Some(price)),
+                Ok(None) => continue,
+                Err(e) => {
+                    eprintln!(
+                        "Warning: {} quote failed for {:?}: {}",
+                        source.name(),
+                        asset_id,
+                        e
+                    );
+                    continue;
+                }
+            }
+        }
+        Ok(None)
+    }
 }
 
 pub struct CryptoPriceRouter {
@@ -130,6 +176,30 @@ impl CryptoPriceRouter {
                 Err(e) => {
                     eprintln!(
                         "Warning: {} failed for {:?}: {}",
+                        source.name(),
+                        asset_id,
+                        e
+                    );
+                    continue;
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    pub async fn fetch_quote(
+        &self,
+        asset: &Asset,
+        asset_id: &AssetId,
+    ) -> Result<Option<PricePoint>> {
+        for source in &self.sources {
+            let _limit = self.rate_limits.get(source.name());
+            match source.fetch_quote(asset, asset_id).await {
+                Ok(Some(price)) => return Ok(Some(price)),
+                Ok(None) => continue,
+                Err(e) => {
+                    eprintln!(
+                        "Warning: {} quote failed for {:?}: {}",
                         source.name(),
                         asset_id,
                         e

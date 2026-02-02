@@ -79,6 +79,21 @@ impl MarketDataService {
         ))
     }
 
+    /// Get the latest available price for an asset.
+    /// Tries real-time quote first, falls back to historical close.
+    pub async fn price_latest(&self, asset: &Asset, date: NaiveDate) -> Result<PricePoint> {
+        let asset_id = AssetId::from_asset(asset);
+
+        // First, try to get a live quote
+        if let Some(price) = self.fetch_quote_from_sources(asset, &asset_id).await? {
+            self.store.put_prices(&[price.clone()]).await?;
+            return Ok(price);
+        }
+
+        // Fall back to close price
+        self.price_close(asset, date).await
+    }
+
     pub async fn fx_close(&self, base: &str, quote: &str, date: NaiveDate) -> Result<FxRatePoint> {
         for offset in 0..=self.lookback_days {
             let target_date = date - Duration::days(offset as i64);
@@ -118,6 +133,32 @@ impl MarketDataService {
     /// Store a price point directly (e.g., from a synchronizer).
     pub async fn store_price(&self, price: &PricePoint) -> Result<()> {
         self.store.put_prices(&[price.clone()]).await
+    }
+
+    async fn fetch_quote_from_sources(
+        &self,
+        asset: &Asset,
+        asset_id: &AssetId,
+    ) -> Result<Option<PricePoint>> {
+        match asset {
+            Asset::Equity { .. } => {
+                if let Some(router) = &self.equity_router {
+                    if let Some(price) = router.fetch_quote(asset, asset_id).await? {
+                        return Ok(Some(price));
+                    }
+                }
+            }
+            Asset::Crypto { .. } => {
+                if let Some(router) = &self.crypto_router {
+                    if let Some(price) = router.fetch_quote(asset, asset_id).await? {
+                        return Ok(Some(price));
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        Ok(None)
     }
 
     async fn fetch_price_from_sources(

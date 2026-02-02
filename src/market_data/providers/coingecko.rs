@@ -255,6 +255,72 @@ impl CryptoPriceSource for CoinGeckoPriceSource {
         }))
     }
 
+    async fn fetch_quote(
+        &self,
+        asset: &Asset,
+        asset_id: &AssetId,
+    ) -> Result<Option<PricePoint>> {
+        // Extract symbol and network from the asset
+        let (symbol, network) = match asset {
+            Asset::Crypto { symbol, network } => (symbol.as_str(), network.as_deref()),
+            _ => return Ok(None), // Not a crypto asset
+        };
+
+        // Map symbol to CoinGecko ID
+        let coingecko_id = match self.symbol_to_coingecko_id(symbol, network) {
+            Some(id) => id,
+            None => symbol.to_lowercase(),
+        };
+
+        // Use /simple/price endpoint for current price
+        let url = format!(
+            "{}/simple/price?ids={}&vs_currencies={}",
+            COINGECKO_API_BASE, coingecko_id, self.quote_currency
+        );
+
+        let response = self
+            .client
+            .get(&url)
+            .header("Accept", "application/json")
+            .header("User-Agent", "keepbook/0.1.0 (https://github.com/keepbook/keepbook)")
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(anyhow!(
+                "CoinGecko simple/price API error: {} - {}",
+                status,
+                body
+            ));
+        }
+
+        let data: std::collections::HashMap<String, std::collections::HashMap<String, f64>> =
+            response.json().await?;
+
+        let price = data
+            .get(&coingecko_id)
+            .and_then(|prices| prices.get(&self.quote_currency))
+            .copied();
+
+        let Some(price) = price else {
+            return Ok(None);
+        };
+
+        let now = Utc::now();
+
+        Ok(Some(PricePoint {
+            asset_id: asset_id.clone(),
+            as_of_date: now.date_naive(),
+            timestamp: now,
+            price: price.to_string(),
+            quote_currency: self.quote_currency.to_uppercase(),
+            kind: PriceKind::Quote,
+            source: self.name().to_string(),
+        }))
+    }
+
     fn name(&self) -> &str {
         "coingecko"
     }

@@ -1,5 +1,5 @@
 // src/portfolio/models.rs
-use chrono::NaiveDate;
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::models::Asset;
@@ -76,6 +76,9 @@ pub struct AssetSummary {
     pub price: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub price_date: Option<NaiveDate>,
+    /// Exact timestamp when the price was fetched/recorded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub price_timestamp: Option<DateTime<Utc>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fx_rate: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -4,7 +4,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::Result;
-use chrono::NaiveDate;
+use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 
 use crate::market_data::MarketDataService;
@@ -27,6 +27,7 @@ struct AssetValuation {
     value: Option<Decimal>,
     price: Option<String>,
     price_date: Option<NaiveDate>,
+    price_timestamp: Option<DateTime<Utc>>,
     fx_rate: Option<String>,
     fx_date: Option<NaiveDate>,
 }
@@ -130,6 +131,7 @@ impl PortfolioService {
                 amount_date: *latest_balance_date,
                 price: valuation.price,
                 price_date: valuation.price_date,
+                price_timestamp: valuation.price_timestamp,
                 fx_rate: valuation.fx_rate,
                 fx_date: valuation.fx_date,
                 value_in_base: valuation.value.map(|v| v.normalize().to_string()),
@@ -198,6 +200,7 @@ impl PortfolioService {
     }
 
     /// Value an asset in the target currency.
+    /// Uses live quotes when available, falls back to historical close prices.
     async fn value_asset(
         &self,
         asset: &Asset,
@@ -213,6 +216,7 @@ impl PortfolioService {
                         value: Some(amount),
                         price: None,
                         price_date: None,
+                        price_timestamp: None,
                         fx_rate: None,
                         fx_date: None,
                     })
@@ -229,6 +233,7 @@ impl PortfolioService {
                                 value: Some(amount * fx_rate),
                                 price: None,
                                 price_date: None,
+                                price_timestamp: None,
                                 fx_rate: Some(fx_rate.normalize().to_string()),
                                 fx_date: Some(rate.as_of_date),
                             })
@@ -239,6 +244,7 @@ impl PortfolioService {
                                 value: None,
                                 price: None,
                                 price_date: None,
+                                price_timestamp: None,
                                 fx_rate: None,
                                 fx_date: None,
                             })
@@ -247,8 +253,8 @@ impl PortfolioService {
                 }
             }
             Asset::Equity { .. } | Asset::Crypto { .. } => {
-                // Get price - return None value if price unavailable
-                let price_result = self.market_data.price_close(asset, as_of_date).await;
+                // Get price - try live quote first, fall back to close
+                let price_result = self.market_data.price_latest(asset, as_of_date).await;
                 let price_point = match price_result {
                     Ok(p) => p,
                     Err(_) => {
@@ -257,6 +263,7 @@ impl PortfolioService {
                             value: None,
                             price: None,
                             price_date: None,
+                            price_timestamp: None,
                             fx_rate: None,
                             fx_date: None,
                         });
@@ -271,6 +278,7 @@ impl PortfolioService {
                         value: Some(value_in_quote),
                         price: Some(price.normalize().to_string()),
                         price_date: Some(price_point.as_of_date),
+                        price_timestamp: Some(price_point.timestamp),
                         fx_rate: None,
                         fx_date: None,
                     })
@@ -286,6 +294,7 @@ impl PortfolioService {
                                 value: Some(value_in_quote * fx_rate),
                                 price: Some(price.normalize().to_string()),
                                 price_date: Some(price_point.as_of_date),
+                                price_timestamp: Some(price_point.timestamp),
                                 fx_rate: Some(fx_rate.normalize().to_string()),
                                 fx_date: Some(rate.as_of_date),
                             })
@@ -296,6 +305,7 @@ impl PortfolioService {
                                 value: None,
                                 price: Some(price.normalize().to_string()),
                                 price_date: Some(price_point.as_of_date),
+                                price_timestamp: Some(price_point.timestamp),
                                 fx_rate: None,
                                 fx_date: None,
                             })

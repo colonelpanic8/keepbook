@@ -9,8 +9,12 @@ use crate::models::Asset;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PriceKind {
+    /// End-of-day closing price
     Close,
+    /// Adjusted closing price (for splits/dividends)
     AdjClose,
+    /// Real-time or delayed quote (intraday)
+    Quote,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

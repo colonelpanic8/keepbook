@@ -185,6 +185,68 @@ impl EquityPriceSource for TwelveDataPriceSource {
         }))
     }
 
+    async fn fetch_quote(
+        &self,
+        asset: &Asset,
+        asset_id: &AssetId,
+    ) -> Result<Option<PricePoint>> {
+        let (ticker, exchange) = match asset {
+            Asset::Equity { ticker, exchange } => (ticker.as_str(), exchange.as_deref()),
+            _ => return Ok(None),
+        };
+
+        let symbol = Self::build_symbol(ticker, exchange);
+
+        let url = format!(
+            "{}/price?symbol={}&apikey={}",
+            BASE_URL, symbol, self.api_key
+        );
+
+        let response = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .context("Failed to send quote request to Twelve Data")?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            anyhow::bail!("Twelve Data quote API error: status={}, body={}", status, body);
+        }
+
+        let body = response
+            .text()
+            .await
+            .context("Failed to read quote response body")?;
+
+        // Try to parse as error response first
+        if let Ok(error) = serde_json::from_str::<ErrorResponse>(&body) {
+            if error.status == "error" {
+                if error.code == Some(400) || error.message.contains("No data") {
+                    return Ok(None);
+                }
+                anyhow::bail!("Twelve Data quote API error: {}", error.message);
+            }
+        }
+
+        // Parse as price response
+        let data: PriceResponse =
+            serde_json::from_str(&body).context("Failed to parse Twelve Data quote response")?;
+
+        let now = Utc::now();
+
+        Ok(Some(PricePoint {
+            asset_id: asset_id.clone(),
+            as_of_date: now.date_naive(),
+            timestamp: now,
+            price: data.price,
+            quote_currency: "USD".to_string(), // Quote endpoint doesn't return currency
+            kind: PriceKind::Quote,
+            source: self.name().to_string(),
+        }))
+    }
+
     fn name(&self) -> &str {
         "twelve_data"
     }
@@ -233,6 +295,12 @@ struct ErrorResponse {
     status: String,
     code: Option<i32>,
     message: String,
+}
+
+/// Real-time price response from Twelve Data `/price` endpoint.
+#[derive(Debug, Deserialize)]
+struct PriceResponse {
+    price: String,
 }
 
 #[cfg(test)]
