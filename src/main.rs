@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 use chrono::Utc;
 use clap::{Parser, Subcommand};
 use keepbook::config::ResolvedConfig;
-use keepbook::market_data::PriceSourceRegistry;
+use keepbook::market_data::{JsonlMarketDataStore, MarketDataStore, PriceSourceRegistry};
 use keepbook::models::{Account, Asset, Balance, Connection, ConnectionConfig, ConnectionState, Id};
 use keepbook::storage::{JsonFileStorage, Storage};
 use keepbook::sync::synchronizers::{CoinbaseSynchronizer, SchwabSynchronizer};
@@ -289,11 +289,11 @@ async fn main() -> Result<()> {
 
         Some(Command::Sync(sync_cmd)) => match sync_cmd {
             SyncCommand::Connection { id_or_name } => {
-                let result = sync_connection(&storage, &id_or_name).await?;
+                let result = sync_connection(&storage, &id_or_name, &config).await?;
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
             SyncCommand::All => {
-                let result = sync_all(&storage).await?;
+                let result = sync_all(&storage, &config).await?;
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
         },
@@ -706,7 +706,7 @@ async fn find_connection(storage: &JsonFileStorage, id_or_name: &str) -> Result<
 }
 
 /// Sync a specific connection
-async fn sync_connection(storage: &JsonFileStorage, id_or_name: &str) -> Result<serde_json::Value> {
+async fn sync_connection(storage: &JsonFileStorage, id_or_name: &str, config: &ResolvedConfig) -> Result<serde_json::Value> {
     let mut connection = find_connection(storage, id_or_name)
         .await?
         .context(format!("Connection not found: {}", id_or_name))?;
@@ -762,6 +762,9 @@ async fn sync_connection(storage: &JsonFileStorage, id_or_name: &str) -> Result<
         let result = synchronizer.sync_with_storage(&mut connection, storage).await?;
         result.save(storage).await?;
 
+        // Store prices from sync result
+        let prices_stored = store_sync_prices(&result, config).await?;
+
         return Ok(serde_json::json!({
             "success": true,
             "connection": {
@@ -769,6 +772,7 @@ async fn sync_connection(storage: &JsonFileStorage, id_or_name: &str) -> Result<
                 "name": conn_name
             },
             "accounts_synced": result.accounts.len(),
+            "prices_stored": prices_stored,
             "last_sync": result.connection.state.last_sync.as_ref().map(|ls| ls.at.to_rfc3339())
         }));
     }
@@ -779,6 +783,9 @@ async fn sync_connection(storage: &JsonFileStorage, id_or_name: &str) -> Result<
         let result = synchronizer.sync_with_storage(&mut connection, storage).await?;
         result.save(storage).await?;
 
+        // Store prices from sync result
+        let prices_stored = store_sync_prices(&result, config).await?;
+
         return Ok(serde_json::json!({
             "success": true,
             "connection": {
@@ -786,6 +793,7 @@ async fn sync_connection(storage: &JsonFileStorage, id_or_name: &str) -> Result<
                 "name": conn_name
             },
             "accounts_synced": result.accounts.len(),
+            "prices_stored": prices_stored,
             "last_sync": result.connection.state.last_sync.as_ref().map(|ls| ls.at.to_rfc3339())
         }));
     }
@@ -793,14 +801,31 @@ async fn sync_connection(storage: &JsonFileStorage, id_or_name: &str) -> Result<
     Err(anyhow::anyhow!("Unknown synchronizer type: {}", synchronizer_type))
 }
 
+/// Store prices from a sync result into the market data store
+async fn store_sync_prices(result: &keepbook::sync::SyncResult, config: &ResolvedConfig) -> Result<usize> {
+    let market_data_store = JsonlMarketDataStore::new(&config.data_dir);
+    let mut count = 0;
+
+    for (_, synced_balances) in &result.balances {
+        for sb in synced_balances {
+            if let Some(price) = &sb.price {
+                market_data_store.put_prices(&[price.clone()]).await?;
+                count += 1;
+            }
+        }
+    }
+
+    Ok(count)
+}
+
 /// Sync all connections
-async fn sync_all(storage: &JsonFileStorage) -> Result<serde_json::Value> {
+async fn sync_all(storage: &JsonFileStorage, config: &ResolvedConfig) -> Result<serde_json::Value> {
     let connections = storage.list_connections().await?;
 
     let mut results = Vec::new();
     for conn in connections {
         let id_or_name = conn.id().to_string();
-        match sync_connection(storage, &id_or_name).await {
+        match sync_connection(storage, &id_or_name, config).await {
             Ok(result) => results.push(result),
             Err(e) => results.push(serde_json::json!({
                 "success": false,

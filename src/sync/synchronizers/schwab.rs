@@ -117,16 +117,10 @@ impl SchwabSynchronizer {
                 }),
             };
 
-            // Create balance for total account value
             let mut account_balances = vec![];
-            if let Some(bal) = &schwab_account.balances {
-                account_balances.push(SyncedBalance::new(Balance::new(
-                    Asset::currency("USD"),
-                    bal.balance.to_string(),
-                )));
-            }
 
-            // Add position balances for brokerage accounts
+            // For brokerage accounts, use individual positions (including CASH)
+            // For non-brokerage (bank) accounts, use the total balance
             if schwab_account.is_brokerage {
                 for position in &all_positions {
                     let asset = if position.default_symbol == "CASH" {
@@ -153,6 +147,12 @@ impl SchwabSynchronizer {
                     };
                     account_balances.push(synced_balance);
                 }
+            } else if let Some(bal) = &schwab_account.balances {
+                // Non-brokerage accounts (bank/checking): store total balance as USD
+                account_balances.push(SyncedBalance::new(Balance::new(
+                    Asset::currency("USD"),
+                    bal.balance.to_string(),
+                )));
             }
 
             accounts.push(account);
