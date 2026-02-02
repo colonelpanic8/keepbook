@@ -1,5 +1,6 @@
 use std::io::{self, Write};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -52,6 +53,10 @@ enum Command {
     /// Schwab-specific commands
     #[command(subcommand)]
     Schwab(SchwabCommand),
+
+    /// Portfolio commands
+    #[command(subcommand)]
+    Portfolio(PortfolioCommand),
 }
 
 #[derive(Subcommand)]
@@ -143,6 +148,40 @@ enum ListCommand {
 
     /// List everything
     All,
+}
+
+#[derive(Subcommand)]
+enum PortfolioCommand {
+    /// Calculate portfolio snapshot with valuations
+    Snapshot {
+        /// Base currency for valuations (default: from config)
+        #[arg(long)]
+        currency: Option<String>,
+
+        /// Calculate as of this date (YYYY-MM-DD, default: today)
+        #[arg(long)]
+        date: Option<String>,
+
+        /// Output grouping: asset, account, or both
+        #[arg(long, default_value = "both")]
+        group_by: String,
+
+        /// Include per-account breakdown when grouping by asset
+        #[arg(long)]
+        detail: bool,
+
+        /// Fetch prices/FX if stale
+        #[arg(long)]
+        refresh: bool,
+
+        /// Always fetch fresh prices/FX
+        #[arg(long)]
+        force_refresh: bool,
+
+        /// Staleness threshold (e.g., 1d, 4h)
+        #[arg(long, default_value = "1d")]
+        stale_after: String,
+    },
 }
 
 /// JSON output for connections
@@ -303,6 +342,75 @@ async fn main() -> Result<()> {
             }
         },
 
+        Some(Command::Portfolio(portfolio_cmd)) => match portfolio_cmd {
+            PortfolioCommand::Snapshot {
+                currency,
+                date,
+                group_by,
+                detail,
+                refresh,
+                force_refresh,
+                stale_after,
+            } => {
+                use keepbook::portfolio::{
+                    Grouping, PortfolioQuery, PortfolioService, RefreshMode, RefreshPolicy,
+                };
+
+                // Parse date
+                let as_of_date = match date {
+                    Some(d) => chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d")
+                        .with_context(|| format!("Invalid date format: {d}"))?,
+                    None => chrono::Utc::now().date_naive(),
+                };
+
+                // Parse grouping
+                let grouping = match group_by.as_str() {
+                    "asset" => Grouping::Asset,
+                    "account" => Grouping::Account,
+                    "both" => Grouping::Both,
+                    _ => anyhow::bail!("Invalid grouping: {group_by}. Use: asset, account, both"),
+                };
+
+                // Parse stale_after duration
+                let stale_threshold = parse_duration(&stale_after)
+                    .with_context(|| format!("Invalid duration: {stale_after}"))?;
+
+                // Build refresh policy
+                let refresh_mode = if force_refresh {
+                    RefreshMode::Force
+                } else if refresh {
+                    RefreshMode::IfStale
+                } else {
+                    RefreshMode::CachedOnly
+                };
+
+                let refresh_policy = RefreshPolicy {
+                    mode: refresh_mode,
+                    stale_threshold,
+                };
+
+                // Build query
+                let query = PortfolioQuery {
+                    as_of_date,
+                    currency: currency.unwrap_or_else(|| config.reporting_currency.clone()),
+                    grouping,
+                    include_detail: detail,
+                };
+
+                // Setup service
+                let store = Arc::new(keepbook::market_data::JsonlMarketDataStore::new(
+                    &config.data_dir,
+                ));
+                let market_data = Arc::new(keepbook::market_data::MarketDataService::new(store, None));
+                let storage_arc: Arc<dyn keepbook::storage::Storage> = Arc::new(storage);
+                let service = PortfolioService::new(storage_arc, market_data);
+
+                // Calculate and output
+                let snapshot = service.calculate(&query, &refresh_policy).await?;
+                println!("{}", serde_json::to_string_pretty(&snapshot)?);
+            }
+        },
+
         None => {
             let output = serde_json::json!({
                 "name": "keepbook",
@@ -323,7 +431,8 @@ async fn main() -> Result<()> {
                     "remove connection <id>",
                     "sync connection <id-or-name>",
                     "sync all",
-                    "schwab login [id-or-name]"
+                    "schwab login [id-or-name]",
+                    "portfolio snapshot [options]"
                 ]
             });
             println!("{}", serde_json::to_string_pretty(&output)?);
@@ -755,4 +864,29 @@ async fn schwab_login(storage: &JsonFileStorage, id_or_name: Option<&str>) -> Re
         },
         "message": "Session captured successfully"
     }))
+}
+
+fn parse_duration(s: &str) -> Result<std::time::Duration> {
+    let s = s.trim().to_lowercase();
+    let (num, unit) = if s.ends_with('d') {
+        (s.trim_end_matches('d'), "d")
+    } else if s.ends_with('h') {
+        (s.trim_end_matches('h'), "h")
+    } else if s.ends_with('m') {
+        (s.trim_end_matches('m'), "m")
+    } else if s.ends_with('s') {
+        (s.trim_end_matches('s'), "s")
+    } else {
+        anyhow::bail!("Duration must end with d, h, m, or s");
+    };
+
+    let num: u64 = num.parse().with_context(|| "Invalid number in duration")?;
+
+    Ok(match unit {
+        "d" => std::time::Duration::from_secs(num * 24 * 60 * 60),
+        "h" => std::time::Duration::from_secs(num * 60 * 60),
+        "m" => std::time::Duration::from_secs(num * 60),
+        "s" => std::time::Duration::from_secs(num),
+        _ => unreachable!(),
+    })
 }
