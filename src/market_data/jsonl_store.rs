@@ -38,14 +38,12 @@ impl JsonlMarketDataStore {
 
     fn price_file(&self, asset_id: &AssetId, date: NaiveDate) -> PathBuf {
         self.prices_dir(asset_id)
-            .join(format!("{:04}", date.year()))
-            .join(format!("{:02}.jsonl", date.month()))
+            .join(format!("{:04}.jsonl", date.year()))
     }
 
     fn fx_file(&self, base: &str, quote: &str, date: NaiveDate) -> PathBuf {
         self.fx_dir(base, quote)
-            .join(format!("{:04}", date.year()))
-            .join(format!("{:02}.jsonl", date.month()))
+            .join(format!("{:04}.jsonl", date.year()))
     }
 
     async fn ensure_dir(&self, path: &Path) -> Result<()> {
@@ -142,20 +140,16 @@ impl MarketDataStore for JsonlMarketDataStore {
             return Ok(());
         }
 
-        let mut grouped: std::collections::HashMap<(String, i32, u32), Vec<PricePoint>> =
+        let mut grouped: std::collections::HashMap<(String, i32), Vec<PricePoint>> =
             std::collections::HashMap::new();
 
         for price in prices {
-            let key = (
-                price.asset_id.to_string(),
-                price.as_of_date.year(),
-                price.as_of_date.month(),
-            );
+            let key = (price.asset_id.to_string(), price.as_of_date.year());
             grouped.entry(key).or_default().push(price.clone());
         }
 
-        for ((asset_id, year, month), items) in grouped {
-            let date = NaiveDate::from_ymd_opt(year, month, 1)
+        for ((asset_id, year), items) in grouped {
+            let date = NaiveDate::from_ymd_opt(year, 1, 1)
                 .context("Invalid price date for storage")?;
             let path = self.price_file(&AssetId::from(asset_id), date);
             self.append_jsonl(&path, &items).await?;
@@ -181,21 +175,16 @@ impl MarketDataStore for JsonlMarketDataStore {
             return Ok(());
         }
 
-        let mut grouped: std::collections::HashMap<(String, String, i32, u32), Vec<FxRatePoint>> =
+        let mut grouped: std::collections::HashMap<(String, String, i32), Vec<FxRatePoint>> =
             std::collections::HashMap::new();
 
         for rate in rates {
-            let key = (
-                rate.base.clone(),
-                rate.quote.clone(),
-                rate.as_of_date.year(),
-                rate.as_of_date.month(),
-            );
+            let key = (rate.base.clone(), rate.quote.clone(), rate.as_of_date.year());
             grouped.entry(key).or_default().push(rate.clone());
         }
 
-        for ((base, quote, year, month), items) in grouped {
-            let date = NaiveDate::from_ymd_opt(year, month, 1)
+        for ((base, quote, year), items) in grouped {
+            let date = NaiveDate::from_ymd_opt(year, 1, 1)
                 .context("Invalid FX date for storage")?;
             let path = self.fx_file(&base, &quote, date);
             self.append_jsonl(&path, &items).await?;

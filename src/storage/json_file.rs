@@ -128,7 +128,7 @@ impl JsonFileStorage {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
                 .await
-                .context("Failed to create directory")?;
+                .with_context(|| format!("Failed to create directory: {}", parent.display()))?;
         }
         Ok(())
     }

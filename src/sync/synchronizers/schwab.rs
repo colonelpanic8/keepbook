@@ -89,8 +89,8 @@ impl SchwabSynchronizer {
         let mut balances: Vec<(Id, Vec<SyncedBalance>)> = Vec::new();
 
         for schwab_account in accounts_resp.accounts {
-            // Use Schwab's account_id as our account ID (stable identifier)
-            let account_id = Id::from_string(&schwab_account.account_id);
+            // Use Schwab's account_id to generate a stable, filesystem-safe ID
+            let account_id = Id::from_external(&schwab_account.account_id);
 
             // Preserve created_at from existing account if it exists
             let created_at = existing_by_id
