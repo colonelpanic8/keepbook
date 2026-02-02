@@ -6,7 +6,6 @@ use anyhow::{Context, Result};
 use chrono::Utc;
 use clap::{Parser, Subcommand};
 use keepbook::config::ResolvedConfig;
-use keepbook::duration::parse_duration;
 use keepbook::market_data::{JsonlMarketDataStore, MarketDataStore, PriceSourceRegistry};
 use keepbook::models::{Account, Asset, Balance, Connection, ConnectionConfig, ConnectionState, Id};
 use keepbook::storage::{JsonFileStorage, Storage};
@@ -108,9 +107,16 @@ enum SyncCommand {
     Connection {
         /// Connection ID or name
         id_or_name: String,
+        /// Only sync if data is stale
+        #[arg(long)]
+        if_stale: bool,
     },
     /// Sync all connections
-    All,
+    All {
+        /// Only sync connections with stale data
+        #[arg(long)]
+        if_stale: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -172,17 +178,21 @@ enum PortfolioCommand {
         #[arg(long)]
         detail: bool,
 
-        /// Fetch prices/FX if stale
-        #[arg(long)]
-        refresh: bool,
+        /// Auto-refresh stale data (default behavior, explicit flag for scripts)
+        #[arg(long, conflicts_with_all = ["offline", "dry_run", "force_refresh"])]
+        auto: bool,
 
-        /// Always fetch fresh prices/FX
-        #[arg(long)]
+        /// Use cached data only, no network requests
+        #[arg(long, conflicts_with_all = ["auto", "dry_run", "force_refresh"])]
+        offline: bool,
+
+        /// Show what would be refreshed without actually refreshing
+        #[arg(long, conflicts_with_all = ["auto", "offline", "force_refresh"])]
+        dry_run: bool,
+
+        /// Force refresh all data regardless of staleness
+        #[arg(long, conflicts_with_all = ["auto", "offline", "dry_run"])]
         force_refresh: bool,
-
-        /// Staleness threshold (e.g., 1d, 4h)
-        #[arg(long, default_value = "1d")]
-        stale_after: String,
     },
 }
 
@@ -303,11 +313,15 @@ async fn main() -> Result<()> {
         },
 
         Some(Command::Sync(sync_cmd)) => match sync_cmd {
-            SyncCommand::Connection { id_or_name } => {
+            SyncCommand::Connection { id_or_name, if_stale } => {
+                // TODO: Task 9 will implement if_stale logic
+                let _ = if_stale;
                 let result = sync_connection(&storage, &id_or_name, &config).await?;
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
-            SyncCommand::All => {
+            SyncCommand::All { if_stale } => {
+                // TODO: Task 9 will implement if_stale logic
+                let _ = if_stale;
                 let result = sync_all(&storage, &config).await?;
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
@@ -363,9 +377,10 @@ async fn main() -> Result<()> {
                 date,
                 group_by,
                 detail,
-                refresh,
+                auto,
+                offline,
+                dry_run,
                 force_refresh,
-                stale_after,
             } => {
                 use keepbook::portfolio::{
                     Grouping, PortfolioQuery, PortfolioService, RefreshMode, RefreshPolicy,
@@ -386,18 +401,24 @@ async fn main() -> Result<()> {
                     _ => anyhow::bail!("Invalid grouping: {group_by}. Use: asset, account, both"),
                 };
 
-                // Parse stale_after duration
-                let stale_threshold = parse_duration(&stale_after)
-                    .with_context(|| format!("Invalid duration: {stale_after}"))?;
-
-                // Build refresh policy
+                // Build refresh mode from flags
+                // Default behavior (no flags) is auto-refresh stale data
                 let refresh_mode = if force_refresh {
                     RefreshMode::Force
-                } else if refresh {
-                    RefreshMode::IfStale
-                } else {
+                } else if offline {
                     RefreshMode::CachedOnly
+                } else if dry_run {
+                    // TODO: Task 7 will implement dry_run behavior
+                    // For now, treat as cached-only but we'll add reporting
+                    RefreshMode::CachedOnly
+                } else {
+                    // Default: auto-refresh stale data (same as explicit --auto)
+                    let _ = auto; // Explicit flag has same behavior as default
+                    RefreshMode::IfStale
                 };
+
+                // Use default stale threshold from config (will be enhanced in Task 7)
+                let stale_threshold = std::time::Duration::from_secs(24 * 60 * 60); // 1 day default
 
                 let refresh_policy = RefreshPolicy {
                     mode: refresh_mode,
@@ -417,8 +438,8 @@ async fn main() -> Result<()> {
                     &config.data_dir,
                 ));
 
-                // Configure price providers if refresh is enabled
-                let market_data = if refresh || force_refresh {
+                // Configure price providers if refresh is enabled (not offline)
+                let market_data = if !offline && !dry_run {
                     use keepbook::market_data::{
                         CryptoPriceRouter, EquityPriceRouter, FxRateRouter,
                     };
