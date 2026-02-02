@@ -493,7 +493,7 @@ async fn main() -> Result<()> {
                 // Calculate and output
                 let storage_arc: Arc<dyn keepbook::storage::Storage> = Arc::new(storage);
                 let service = PortfolioService::new(storage_arc, market_data);
-                let snapshot = service.calculate(&query, &Default::default()).await?;
+                let snapshot = service.calculate(&query).await?;
                 println!("{}", serde_json::to_string_pretty(&snapshot)?);
             }
         },

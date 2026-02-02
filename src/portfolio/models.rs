@@ -18,41 +18,12 @@ impl Default for Grouping {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RefreshMode {
-    CachedOnly,
-    IfStale,
-    Force,
-}
-
-impl Default for RefreshMode {
-    fn default() -> Self {
-        Self::CachedOnly
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct PortfolioQuery {
     pub as_of_date: NaiveDate,
     pub currency: String,
     pub grouping: Grouping,
     pub include_detail: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct RefreshPolicy {
-    pub mode: RefreshMode,
-    pub stale_threshold: std::time::Duration,
-}
-
-impl Default for RefreshPolicy {
-    fn default() -> Self {
-        Self {
-            mode: RefreshMode::CachedOnly,
-            stale_threshold: std::time::Duration::from_secs(24 * 60 * 60), // 1 day
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

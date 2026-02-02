@@ -13,7 +13,6 @@ use crate::storage::Storage;
 
 use super::{
     AccountHolding, AccountSummary, AssetSummary, Grouping, PortfolioQuery, PortfolioSnapshot,
-    RefreshPolicy,
 };
 
 pub struct PortfolioService {
@@ -54,11 +53,7 @@ impl PortfolioService {
         }
     }
 
-    pub async fn calculate(
-        &self,
-        query: &PortfolioQuery,
-        _refresh: &RefreshPolicy,
-    ) -> Result<PortfolioSnapshot> {
+    pub async fn calculate(&self, query: &PortfolioQuery) -> Result<PortfolioSnapshot> {
         // Load accounts, connections, and balances
         let ctx = self.load_calculation_context(query.as_of_date).await?;
 
@@ -453,7 +448,7 @@ mod tests {
             grouping: Grouping::Both,
             include_detail: false,
         };
-        let result = service.calculate(&query, &RefreshPolicy::default()).await?;
+        let result = service.calculate(&query).await?;
 
         // Decimal::normalize() removes trailing zeros, so "1000.00" becomes "1000"
         assert_eq!(result.total_value, "1000");
@@ -520,7 +515,7 @@ mod tests {
             grouping: Grouping::Asset,
             include_detail: false,
         };
-        let result = service.calculate(&query, &RefreshPolicy::default()).await?;
+        let result = service.calculate(&query).await?;
 
         // 10 shares * $200 = $2000 * 0.91 = 1820 EUR
         assert_eq!(result.total_value, "1820");
@@ -572,7 +567,7 @@ mod tests {
             grouping: Grouping::Asset,
             include_detail: true,
         };
-        let result = service.calculate(&query, &RefreshPolicy::default()).await?;
+        let result = service.calculate(&query).await?;
 
         // Total should be 3000
         assert_eq!(result.total_value, "3000");
