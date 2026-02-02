@@ -85,7 +85,7 @@ pub fn check_price_staleness(price: Option<&PricePoint>, threshold: Duration) ->
 pub fn log_balance_staleness(connection_name: &str, check: &StalenessCheck) {
     let status = if check.is_stale { "stale" } else { "fresh" };
     let age_str = check.age
-        .map(|d| crate::duration::format_duration(d))
+        .map(crate::duration::format_duration)
         .unwrap_or_else(|| "never".to_string());
     let threshold_str = crate::duration::format_duration(check.threshold);
 
@@ -102,7 +102,7 @@ pub fn log_balance_staleness(connection_name: &str, check: &StalenessCheck) {
 pub fn log_price_staleness(asset_id: &str, check: &StalenessCheck) {
     let status = if check.is_stale { "stale" } else { "fresh" };
     let age_str = check.age
-        .map(|d| crate::duration::format_duration(d))
+        .map(crate::duration::format_duration)
         .unwrap_or_else(|| "never".to_string());
     let threshold_str = crate::duration::format_duration(check.threshold);
 
