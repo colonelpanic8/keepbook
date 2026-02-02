@@ -174,8 +174,7 @@ impl CoinGeckoPriceSource {
         let date_str = date.format("%d-%m-%Y").to_string();
 
         let url = format!(
-            "{}/coins/{}/history?date={}&localization=false",
-            COINGECKO_API_BASE, coingecko_id, date_str
+            "{COINGECKO_API_BASE}/coins/{coingecko_id}/history?date={date_str}&localization=false"
         );
 
         let response = self
@@ -190,9 +189,7 @@ impl CoinGeckoPriceSource {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
             return Err(anyhow!(
-                "CoinGecko API error: {} - {}",
-                status,
-                body
+                "CoinGecko API error: {status} - {body}"
             ));
         }
 
@@ -290,9 +287,7 @@ impl CryptoPriceSource for CoinGeckoPriceSource {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
             return Err(anyhow!(
-                "CoinGecko simple/price API error: {} - {}",
-                status,
-                body
+                "CoinGecko simple/price API error: {status} - {body}"
             ));
         }
 
@@ -565,8 +560,7 @@ mod tests {
         for symbol in major_cryptos {
             assert!(
                 provider.symbol_to_coingecko_id(symbol, None).is_some(),
-                "Missing mapping for {}",
-                symbol
+                "Missing mapping for {symbol}"
             );
         }
     }

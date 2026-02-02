@@ -6,12 +6,14 @@ use anyhow::{Context, Result};
 use chrono::Utc;
 use clap::{Parser, Subcommand};
 use keepbook::config::ResolvedConfig;
+use keepbook::duration::parse_duration;
 use keepbook::market_data::{JsonlMarketDataStore, MarketDataStore, PriceSourceRegistry};
 use keepbook::models::{Account, Asset, Balance, Connection, ConnectionConfig, ConnectionState, Id};
 use keepbook::storage::{JsonFileStorage, Storage};
 use keepbook::sync::synchronizers::{CoinbaseSynchronizer, SchwabSynchronizer};
 use keepbook::sync::{AuthStatus, InteractiveAuth};
 use serde::Serialize;
+use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 #[derive(Parser)]
 #[command(name = "keepbook")]
@@ -248,6 +250,19 @@ struct AllOutput {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Initialize structured logging to stderr
+    // Use RUST_LOG env var for filtering (default: warn)
+    tracing_subscriber::registry()
+        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn")))
+        .with(
+            fmt::layer()
+                .with_writer(std::io::stderr)
+                .with_target(true)
+                .with_level(true)
+                .json(),
+        )
+        .init();
+
     let cli = Cli::parse();
 
     let config = ResolvedConfig::load_or_default(&cli.config)?;
@@ -746,7 +761,7 @@ async fn find_connection(storage: &JsonFileStorage, id_or_name: &str) -> Result<
 async fn sync_connection(storage: &JsonFileStorage, id_or_name: &str, config: &ResolvedConfig) -> Result<serde_json::Value> {
     let mut connection = find_connection(storage, id_or_name)
         .await?
-        .context(format!("Connection not found: {}", id_or_name))?;
+        .context(format!("Connection not found: {id_or_name}"))?;
 
     let conn_name = connection.config.name.clone();
     let conn_id = connection.id().to_string();
@@ -777,7 +792,7 @@ async fn sync_connection(storage: &JsonFileStorage, id_or_name: &str, config: &R
                 }
             }
             AuthStatus::Expired { reason } => {
-                print!("Session expired ({}). Run login now? [Y/n] ", reason);
+                print!("Session expired ({reason}). Run login now? [Y/n] ");
                 io::stdout().flush()?;
                 let mut input = String::new();
                 io::stdin().read_line(&mut input)?;
@@ -835,7 +850,7 @@ async fn sync_connection(storage: &JsonFileStorage, id_or_name: &str, config: &R
         }));
     }
 
-    Err(anyhow::anyhow!("Unknown synchronizer type: {}", synchronizer_type))
+    Err(anyhow::anyhow!("Unknown synchronizer type: {synchronizer_type}"))
 }
 
 /// Store prices from a sync result into the market data store
@@ -893,7 +908,7 @@ async fn schwab_login(storage: &JsonFileStorage, id_or_name: Option<&str>) -> Re
             find_connection(storage, id_or_name)
                 .await?
                 .filter(|c| c.config.synchronizer == "schwab")
-                .context(format!("Schwab connection not found: {}", id_or_name))?
+                .context(format!("Schwab connection not found: {id_or_name}"))?
         }
         // No ID, exactly one Schwab connection
         (None, 1) => schwab_connections.into_iter().next().unwrap(),
@@ -905,9 +920,7 @@ async fn schwab_login(storage: &JsonFileStorage, id_or_name: Option<&str>) -> Re
         (None, n) => {
             let names: Vec<_> = schwab_connections.iter().map(|c| &c.config.name).collect();
             return Err(anyhow::anyhow!(
-                "Multiple Schwab connections found ({}). Specify one: {:?}",
-                n,
-                names
+                "Multiple Schwab connections found ({n}). Specify one: {names:?}"
             ));
         }
     };
@@ -928,27 +941,3 @@ async fn schwab_login(storage: &JsonFileStorage, id_or_name: Option<&str>) -> Re
     }))
 }
 
-fn parse_duration(s: &str) -> Result<std::time::Duration> {
-    let s = s.trim().to_lowercase();
-    let (num, unit) = if s.ends_with('d') {
-        (s.trim_end_matches('d'), "d")
-    } else if s.ends_with('h') {
-        (s.trim_end_matches('h'), "h")
-    } else if s.ends_with('m') {
-        (s.trim_end_matches('m'), "m")
-    } else if s.ends_with('s') {
-        (s.trim_end_matches('s'), "s")
-    } else {
-        anyhow::bail!("Duration must end with d, h, m, or s");
-    };
-
-    let num: u64 = num.parse().with_context(|| "Invalid number in duration")?;
-
-    Ok(match unit {
-        "d" => std::time::Duration::from_secs(num * 24 * 60 * 60),
-        "h" => std::time::Duration::from_secs(num * 60 * 60),
-        "m" => std::time::Duration::from_secs(num * 60),
-        "s" => std::time::Duration::from_secs(num),
-        _ => unreachable!(),
-    })
-}

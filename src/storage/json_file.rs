@@ -120,7 +120,7 @@ impl JsonFileStorage {
         match fs::read_to_string(path).await {
             Ok(content) => {
                 let value = serde_json::from_str(&content)
-                    .with_context(|| format!("Failed to parse JSON from {:?}", path))?;
+                    .with_context(|| format!("Failed to parse JSON from {path:?}"))?;
                 Ok(Some(value))
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -141,7 +141,7 @@ impl JsonFileStorage {
         match std::fs::read_to_string(path) {
             Ok(content) => {
                 let value = toml::from_str(&content)
-                    .with_context(|| format!("Failed to parse TOML from {:?}", path))?;
+                    .with_context(|| format!("Failed to parse TOML from {path:?}"))?;
                 Ok(Some(value))
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -165,7 +165,7 @@ impl JsonFileStorage {
                 continue;
             }
             let item: T = serde_json::from_str(&line)
-                .with_context(|| format!("Failed to parse JSONL line: {}", line))?;
+                .with_context(|| format!("Failed to parse JSONL line: {line}"))?;
             items.push(item);
         }
 

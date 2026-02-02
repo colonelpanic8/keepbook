@@ -32,6 +32,20 @@ struct AssetValuation {
     fx_date: Option<NaiveDate>,
 }
 
+/// Aggregated data for a single asset across all accounts.
+struct AssetAggregate {
+    total_amount: Decimal,
+    latest_balance_date: NaiveDate,
+    holdings: Vec<(Id, Balance)>,
+}
+
+/// Context loaded from storage for portfolio calculation.
+struct CalculationContext {
+    account_map: HashMap<Id, Account>,
+    connection_map: HashMap<Id, Connection>,
+    filtered_balances: Vec<(Id, Balance)>,
+}
+
 impl PortfolioService {
     pub fn new(storage: Arc<dyn Storage>, market_data: Arc<MarketDataService>) -> Self {
         Self {
@@ -45,135 +59,32 @@ impl PortfolioService {
         query: &PortfolioQuery,
         _refresh: &RefreshPolicy,
     ) -> Result<PortfolioSnapshot> {
-        // 1. Get all accounts and connections
-        let accounts = self.storage.list_accounts().await?;
-        let connections = self.storage.list_connections().await?;
+        // Load accounts, connections, and balances
+        let ctx = self.load_calculation_context(query.as_of_date).await?;
 
-        // Build lookup maps
-        let account_map: HashMap<Id, Account> =
-            accounts.iter().cloned().map(|a| (a.id.clone(), a)).collect();
-        let connection_map: HashMap<Id, Connection> = connections
-            .iter()
-            .cloned()
-            .map(|c| (c.id().clone(), c))
-            .collect();
+        // Aggregate balances by asset
+        let by_asset_agg = Self::aggregate_by_asset(&ctx.filtered_balances)?;
 
-        // 2. Get latest balances, filtered by as_of_date
-        let all_balances = self.storage.get_latest_balances().await?;
-        let as_of_datetime = query
-            .as_of_date
-            .and_hms_opt(23, 59, 59)
-            .unwrap()
-            .and_utc();
+        // Fetch valuations for all unique assets (cached)
+        let price_cache = self
+            .fetch_asset_valuations(&by_asset_agg, &query.currency, query.as_of_date)
+            .await?;
 
-        let filtered_balances: Vec<(Id, Balance)> = all_balances
-            .into_iter()
-            .filter(|(_, balance)| balance.timestamp <= as_of_datetime)
-            .collect();
+        // Build asset summaries and calculate total value
+        let (mut asset_summaries, total_value) = self.build_asset_summaries(
+            &by_asset_agg,
+            &price_cache,
+            &ctx.account_map,
+            query.include_detail,
+        )?;
 
-        // 3. Aggregate by asset (for by_asset summary)
-        // Key: serialized asset, Value: (total amount, latest balance date, list of (account_id, balance))
-        let mut by_asset_agg: HashMap<String, (Decimal, NaiveDate, Vec<(Id, Balance)>)> =
-            HashMap::new();
-        for (account_id, balance) in &filtered_balances {
-            let asset_key = serde_json::to_string(&balance.asset)?;
-            let amount = Decimal::from_str(&balance.amount)?;
-            let balance_date = balance.timestamp.date_naive();
-            let entry = by_asset_agg
-                .entry(asset_key)
-                .or_insert((Decimal::ZERO, balance_date, Vec::new()));
-            entry.0 += amount;
-            // Track the most recent balance date
-            if balance_date > entry.1 {
-                entry.1 = balance_date;
-            }
-            entry.2.push((account_id.clone(), balance.clone()));
-        }
-
-        // 4. Calculate values for each asset
-        let mut asset_summaries = Vec::new();
-        let mut total_value = Decimal::ZERO;
-
-        for (asset_key, (total_amount, latest_balance_date, holdings)) in &by_asset_agg {
-            let asset: Asset = serde_json::from_str(asset_key)?;
-            let valuation = self
-                .value_asset(&asset, *total_amount, &query.currency, query.as_of_date)
-                .await?;
-
-            // Only add to total if we have a value
-            if let Some(v) = valuation.value {
-                total_value += v;
-            }
-
-            // Build holdings detail if requested
-            let holdings_detail = if query.include_detail {
-                let mut detail = Vec::new();
-                for (account_id, balance) in holdings {
-                    let account = account_map.get(account_id);
-                    let account_name = account.map(|a| a.name.clone()).unwrap_or_default();
-                    detail.push(AccountHolding {
-                        account_id: account_id.to_string(),
-                        account_name,
-                        amount: Decimal::from_str(&balance.amount)?
-                            .normalize()
-                            .to_string(),
-                        balance_date: balance.timestamp.date_naive(),
-                    });
-                }
-                Some(detail)
-            } else {
-                None
-            };
-
-            asset_summaries.push(AssetSummary {
-                asset: asset.clone(),
-                total_amount: total_amount.normalize().to_string(),
-                amount_date: *latest_balance_date,
-                price: valuation.price,
-                price_date: valuation.price_date,
-                price_timestamp: valuation.price_timestamp,
-                fx_rate: valuation.fx_rate,
-                fx_date: valuation.fx_date,
-                value_in_base: valuation.value.map(|v| v.normalize().to_string()),
-                holdings: holdings_detail,
-            });
-        }
-
-        // 5. Aggregate by account (for by_account summary)
-        // Track (sum, has_missing_values) per account
-        let mut by_account_values: HashMap<Id, (Decimal, bool)> = HashMap::new();
-        for (account_id, balance) in &filtered_balances {
-            let amount = Decimal::from_str(&balance.amount)?;
-            let valuation = self
-                .value_asset(&balance.asset, amount, &query.currency, query.as_of_date)
-                .await?;
-            let entry = by_account_values
-                .entry(account_id.clone())
-                .or_insert((Decimal::ZERO, false));
-            match valuation.value {
-                Some(v) => entry.0 += v,
-                None => entry.1 = true, // Mark as having missing values
-            }
-        }
-
-        let mut account_summaries: Vec<AccountSummary> = by_account_values
-            .into_iter()
-            .filter_map(|(account_id, (value, has_missing))| {
-                let account = account_map.get(&account_id)?;
-                let connection = connection_map.get(&account.connection_id)?;
-                Some(AccountSummary {
-                    account_id: account_id.to_string(),
-                    account_name: account.name.clone(),
-                    connection_name: connection.name().to_string(),
-                    // Show value only if no assets are missing prices
-                    value_in_base: if has_missing {
-                        None
-                    } else {
-                        Some(value.normalize().to_string())
-                    },
-                })
-            })
-            .collect();
+        // Build account summaries
+        let mut account_summaries = Self::build_account_summaries(
+            &ctx.filtered_balances,
+            &price_cache,
+            &ctx.account_map,
+            &ctx.connection_map,
+        )?;
 
         // Sort for consistent output
         account_summaries.sort_by(|a, b| a.account_name.cmp(&b.account_name));
@@ -183,7 +94,7 @@ impl PortfolioService {
                 .cmp(&serde_json::to_string(&b.asset).unwrap_or_default())
         });
 
-        // 6. Build snapshot based on grouping
+        // Build snapshot based on grouping
         let (by_asset, by_account) = match query.grouping {
             Grouping::Asset => (Some(asset_summaries), None),
             Grouping::Account => (None, Some(account_summaries)),
@@ -197,6 +108,191 @@ impl PortfolioService {
             by_asset,
             by_account,
         })
+    }
+
+    /// Load accounts, connections, and balances from storage.
+    async fn load_calculation_context(&self, as_of_date: NaiveDate) -> Result<CalculationContext> {
+        let accounts = self.storage.list_accounts().await?;
+        let connections = self.storage.list_connections().await?;
+
+        let account_map: HashMap<Id, Account> =
+            accounts.into_iter().map(|a| (a.id.clone(), a)).collect();
+        let connection_map: HashMap<Id, Connection> =
+            connections.into_iter().map(|c| (c.id().clone(), c)).collect();
+
+        let all_balances = self.storage.get_latest_balances().await?;
+        let as_of_datetime = as_of_date.and_hms_opt(23, 59, 59).unwrap().and_utc();
+
+        let filtered_balances: Vec<(Id, Balance)> = all_balances
+            .into_iter()
+            .filter(|(_, balance)| balance.timestamp <= as_of_datetime)
+            .collect();
+
+        Ok(CalculationContext {
+            account_map,
+            connection_map,
+            filtered_balances,
+        })
+    }
+
+    /// Aggregate balances by asset, tracking totals and holdings.
+    fn aggregate_by_asset(
+        balances: &[(Id, Balance)],
+    ) -> Result<HashMap<String, AssetAggregate>> {
+        let mut by_asset: HashMap<String, AssetAggregate> = HashMap::new();
+
+        for (account_id, balance) in balances {
+            let asset_key = serde_json::to_string(&balance.asset)?;
+            let amount = Decimal::from_str(&balance.amount)?;
+            let balance_date = balance.timestamp.date_naive();
+
+            let entry = by_asset.entry(asset_key).or_insert_with(|| AssetAggregate {
+                total_amount: Decimal::ZERO,
+                latest_balance_date: balance_date,
+                holdings: Vec::new(),
+            });
+
+            entry.total_amount += amount;
+            if balance_date > entry.latest_balance_date {
+                entry.latest_balance_date = balance_date;
+            }
+            entry.holdings.push((account_id.clone(), balance.clone()));
+        }
+
+        Ok(by_asset)
+    }
+
+    /// Fetch valuations for all unique assets, caching to avoid duplicate API calls.
+    async fn fetch_asset_valuations(
+        &self,
+        by_asset: &HashMap<String, AssetAggregate>,
+        target_currency: &str,
+        as_of_date: NaiveDate,
+    ) -> Result<HashMap<String, AssetValuation>> {
+        let mut cache = HashMap::new();
+
+        for asset_key in by_asset.keys() {
+            let asset: Asset = serde_json::from_str(asset_key)?;
+            let valuation = self
+                .value_asset(&asset, Decimal::ONE, target_currency, as_of_date)
+                .await?;
+            cache.insert(asset_key.clone(), valuation);
+        }
+
+        Ok(cache)
+    }
+
+    /// Build asset summaries from aggregated data and cached valuations.
+    fn build_asset_summaries(
+        &self,
+        by_asset: &HashMap<String, AssetAggregate>,
+        price_cache: &HashMap<String, AssetValuation>,
+        account_map: &HashMap<Id, Account>,
+        include_detail: bool,
+    ) -> Result<(Vec<AssetSummary>, Decimal)> {
+        let mut summaries = Vec::new();
+        let mut total_value = Decimal::ZERO;
+
+        for (asset_key, agg) in by_asset {
+            let asset: Asset = serde_json::from_str(asset_key)?;
+            let valuation = price_cache.get(asset_key).unwrap();
+
+            let asset_value = valuation.value.map(|unit_price| unit_price * agg.total_amount);
+            if let Some(v) = asset_value {
+                total_value += v;
+            }
+
+            let holdings_detail = if include_detail {
+                Some(Self::build_holdings_detail(&agg.holdings, account_map)?)
+            } else {
+                None
+            };
+
+            summaries.push(AssetSummary {
+                asset,
+                total_amount: agg.total_amount.normalize().to_string(),
+                amount_date: agg.latest_balance_date,
+                price: valuation.price.clone(),
+                price_date: valuation.price_date,
+                price_timestamp: valuation.price_timestamp,
+                fx_rate: valuation.fx_rate.clone(),
+                fx_date: valuation.fx_date,
+                value_in_base: asset_value.map(|v| v.normalize().to_string()),
+                holdings: holdings_detail,
+            });
+        }
+
+        Ok((summaries, total_value))
+    }
+
+    /// Build holdings detail for an asset.
+    fn build_holdings_detail(
+        holdings: &[(Id, Balance)],
+        account_map: &HashMap<Id, Account>,
+    ) -> Result<Vec<AccountHolding>> {
+        let mut detail = Vec::new();
+
+        for (account_id, balance) in holdings {
+            let account_name = account_map
+                .get(account_id)
+                .map(|a| a.name.clone())
+                .unwrap_or_default();
+
+            detail.push(AccountHolding {
+                account_id: account_id.to_string(),
+                account_name,
+                amount: Decimal::from_str(&balance.amount)?.normalize().to_string(),
+                balance_date: balance.timestamp.date_naive(),
+            });
+        }
+
+        Ok(detail)
+    }
+
+    /// Build account summaries by aggregating values across assets.
+    fn build_account_summaries(
+        balances: &[(Id, Balance)],
+        price_cache: &HashMap<String, AssetValuation>,
+        account_map: &HashMap<Id, Account>,
+        connection_map: &HashMap<Id, Connection>,
+    ) -> Result<Vec<AccountSummary>> {
+        // Track (sum, has_missing_values) per account
+        let mut by_account: HashMap<Id, (Decimal, bool)> = HashMap::new();
+
+        for (account_id, balance) in balances {
+            let asset_key = serde_json::to_string(&balance.asset)?;
+            let amount = Decimal::from_str(&balance.amount)?;
+            let valuation = price_cache.get(&asset_key).unwrap();
+
+            let entry = by_account
+                .entry(account_id.clone())
+                .or_insert((Decimal::ZERO, false));
+
+            match valuation.value {
+                Some(unit_price) => entry.0 += unit_price * amount,
+                None => entry.1 = true,
+            }
+        }
+
+        let summaries = by_account
+            .into_iter()
+            .filter_map(|(account_id, (value, has_missing))| {
+                let account = account_map.get(&account_id)?;
+                let connection = connection_map.get(&account.connection_id)?;
+                Some(AccountSummary {
+                    account_id: account_id.to_string(),
+                    account_name: account.name.clone(),
+                    connection_name: connection.name().to_string(),
+                    value_in_base: if has_missing {
+                        None
+                    } else {
+                        Some(value.normalize().to_string())
+                    },
+                })
+            })
+            .collect();
+
+        Ok(summaries)
     }
 
     /// Value an asset in the target currency.

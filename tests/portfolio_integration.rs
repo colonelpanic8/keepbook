@@ -22,7 +22,7 @@ reporting_currency = "USD"
         .args(["--config", config_path.to_str().unwrap(), "portfolio", "snapshot"])
         .output()?;
 
-    assert!(output.status.success(), "Command failed: {:?}", output);
+    assert!(output.status.success(), "Command failed: {output:?}");
 
     let stdout = String::from_utf8(output.stdout)?;
     let json: serde_json::Value = serde_json::from_str(&stdout)?;

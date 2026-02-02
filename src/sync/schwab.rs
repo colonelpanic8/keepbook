@@ -135,7 +135,7 @@ impl SchwabClient {
         let mut req = self
             .client
             .get(&url)
-            .header("authorization", format!("Bearer {}", token))
+            .header("authorization", format!("Bearer {token}"))
             .header("schwab-client-channel", "IO")
             .header("schwab-client-correlid", uuid::Uuid::new_v4().to_string())
             .header("schwab-env", "PROD")
@@ -154,7 +154,7 @@ impl SchwabClient {
         let status = response.status();
         if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
-            anyhow::bail!("API request failed ({}): {}", status, body);
+            anyhow::bail!("API request failed ({status}): {body}");
         }
 
         let body = response.text().await.context("Failed to read response")?;

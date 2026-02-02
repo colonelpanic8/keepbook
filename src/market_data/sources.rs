@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use chrono::NaiveDate;
+use tracing::{debug, info, warn};
 
 use super::{AssetId, FxRatePoint, PricePoint};
 use crate::models::Asset;
@@ -100,22 +101,37 @@ impl EquityPriceRouter {
         asset_id: &AssetId,
         date: NaiveDate,
     ) -> Result<Option<PricePoint>> {
+        debug!(asset_id = %asset_id, date = %date, "fetching equity close price");
         for source in &self.sources {
             let _limit = self.rate_limits.get(source.name());
             match source.fetch_close(asset, asset_id, date).await {
-                Ok(Some(price)) => return Ok(Some(price)),
-                Ok(None) => continue,
+                Ok(Some(price)) => {
+                    info!(
+                        source = source.name(),
+                        asset_id = %asset_id,
+                        date = %date,
+                        price = %price.price,
+                        currency = %price.quote_currency,
+                        "equity price fetched"
+                    );
+                    return Ok(Some(price));
+                }
+                Ok(None) => {
+                    debug!(source = source.name(), asset_id = %asset_id, "no price from source");
+                    continue;
+                }
                 Err(e) => {
-                    eprintln!(
-                        "Warning: {} failed for {:?}: {}",
-                        source.name(),
-                        asset_id,
-                        e
+                    warn!(
+                        source = source.name(),
+                        asset_id = %asset_id,
+                        error = %e,
+                        "equity price fetch failed"
                     );
                     continue;
                 }
             }
         }
+        warn!(asset_id = %asset_id, date = %date, "no equity close price found from any source");
         Ok(None)
     }
 
@@ -124,22 +140,36 @@ impl EquityPriceRouter {
         asset: &Asset,
         asset_id: &AssetId,
     ) -> Result<Option<PricePoint>> {
+        debug!(asset_id = %asset_id, "fetching equity quote");
         for source in &self.sources {
             let _limit = self.rate_limits.get(source.name());
             match source.fetch_quote(asset, asset_id).await {
-                Ok(Some(price)) => return Ok(Some(price)),
-                Ok(None) => continue,
+                Ok(Some(price)) => {
+                    info!(
+                        source = source.name(),
+                        asset_id = %asset_id,
+                        price = %price.price,
+                        currency = %price.quote_currency,
+                        "equity quote fetched"
+                    );
+                    return Ok(Some(price));
+                }
+                Ok(None) => {
+                    debug!(source = source.name(), asset_id = %asset_id, "no quote from source");
+                    continue;
+                }
                 Err(e) => {
-                    eprintln!(
-                        "Warning: {} quote failed for {:?}: {}",
-                        source.name(),
-                        asset_id,
-                        e
+                    warn!(
+                        source = source.name(),
+                        asset_id = %asset_id,
+                        error = %e,
+                        "equity quote fetch failed"
                     );
                     continue;
                 }
             }
         }
+        debug!(asset_id = %asset_id, "no equity quote found from any source");
         Ok(None)
     }
 }
@@ -168,22 +198,37 @@ impl CryptoPriceRouter {
         asset_id: &AssetId,
         date: NaiveDate,
     ) -> Result<Option<PricePoint>> {
+        debug!(asset_id = %asset_id, date = %date, "fetching crypto close price");
         for source in &self.sources {
             let _limit = self.rate_limits.get(source.name());
             match source.fetch_close(asset, asset_id, date).await {
-                Ok(Some(price)) => return Ok(Some(price)),
-                Ok(None) => continue,
+                Ok(Some(price)) => {
+                    info!(
+                        source = source.name(),
+                        asset_id = %asset_id,
+                        date = %date,
+                        price = %price.price,
+                        currency = %price.quote_currency,
+                        "crypto price fetched"
+                    );
+                    return Ok(Some(price));
+                }
+                Ok(None) => {
+                    debug!(source = source.name(), asset_id = %asset_id, "no price from source");
+                    continue;
+                }
                 Err(e) => {
-                    eprintln!(
-                        "Warning: {} failed for {:?}: {}",
-                        source.name(),
-                        asset_id,
-                        e
+                    warn!(
+                        source = source.name(),
+                        asset_id = %asset_id,
+                        error = %e,
+                        "crypto price fetch failed"
                     );
                     continue;
                 }
             }
         }
+        warn!(asset_id = %asset_id, date = %date, "no crypto close price found from any source");
         Ok(None)
     }
 
@@ -192,22 +237,36 @@ impl CryptoPriceRouter {
         asset: &Asset,
         asset_id: &AssetId,
     ) -> Result<Option<PricePoint>> {
+        debug!(asset_id = %asset_id, "fetching crypto quote");
         for source in &self.sources {
             let _limit = self.rate_limits.get(source.name());
             match source.fetch_quote(asset, asset_id).await {
-                Ok(Some(price)) => return Ok(Some(price)),
-                Ok(None) => continue,
+                Ok(Some(price)) => {
+                    info!(
+                        source = source.name(),
+                        asset_id = %asset_id,
+                        price = %price.price,
+                        currency = %price.quote_currency,
+                        "crypto quote fetched"
+                    );
+                    return Ok(Some(price));
+                }
+                Ok(None) => {
+                    debug!(source = source.name(), asset_id = %asset_id, "no quote from source");
+                    continue;
+                }
                 Err(e) => {
-                    eprintln!(
-                        "Warning: {} quote failed for {:?}: {}",
-                        source.name(),
-                        asset_id,
-                        e
+                    warn!(
+                        source = source.name(),
+                        asset_id = %asset_id,
+                        error = %e,
+                        "crypto quote fetch failed"
                     );
                     continue;
                 }
             }
         }
+        debug!(asset_id = %asset_id, "no crypto quote found from any source");
         Ok(None)
     }
 }
@@ -236,23 +295,38 @@ impl FxRateRouter {
         quote: &str,
         date: NaiveDate,
     ) -> Result<Option<FxRatePoint>> {
+        debug!(base = base, quote = quote, date = %date, "fetching FX rate");
         for source in &self.sources {
             let _limit = self.rate_limits.get(source.name());
             match source.fetch_close(base, quote, date).await {
-                Ok(Some(rate)) => return Ok(Some(rate)),
-                Ok(None) => continue,
+                Ok(Some(rate)) => {
+                    info!(
+                        source = source.name(),
+                        base = base,
+                        quote = quote,
+                        date = %date,
+                        rate = %rate.rate,
+                        "FX rate fetched"
+                    );
+                    return Ok(Some(rate));
+                }
+                Ok(None) => {
+                    debug!(source = source.name(), base = base, quote = quote, "no rate from source");
+                    continue;
+                }
                 Err(e) => {
-                    eprintln!(
-                        "Warning: {} failed for {}/{}: {}",
-                        source.name(),
-                        base,
-                        quote,
-                        e
+                    warn!(
+                        source = source.name(),
+                        base = base,
+                        quote = quote,
+                        error = %e,
+                        "FX rate fetch failed"
                     );
                     continue;
                 }
             }
         }
+        warn!(base = base, quote = quote, date = %date, "no FX rate found from any source");
         Ok(None)
     }
 }

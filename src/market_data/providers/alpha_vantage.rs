@@ -151,11 +151,11 @@ impl EquityPriceSource for AlphaVantagePriceSource {
             if error.error_message.is_some() || error.note.is_some() {
                 // Rate limit or invalid API key - these are errors
                 if let Some(msg) = error.error_message {
-                    return Err(anyhow!("Alpha Vantage API error: {}", msg));
+                    return Err(anyhow!("Alpha Vantage API error: {msg}"));
                 }
                 if let Some(note) = error.note {
                     // Rate limit note
-                    return Err(anyhow!("Alpha Vantage rate limit: {}", note));
+                    return Err(anyhow!("Alpha Vantage rate limit: {note}"));
                 }
             }
             if error.information.is_some() {

@@ -21,10 +21,10 @@ async fn test_frankfurter_live_usd_eur() {
             assert!(!fx_point.rate.is_empty());
             // USD/EUR should be somewhere around 0.9-1.0
             let rate: f64 = fx_point.rate.parse().unwrap();
-            assert!(rate > 0.5 && rate < 2.0, "Rate {} seems unreasonable", rate);
+            assert!(rate > 0.5 && rate < 2.0, "Rate {rate} seems unreasonable");
         }
         Ok(None) => panic!("No FX rate returned"),
-        Err(e) => panic!("Error fetching FX rate: {}", e),
+        Err(e) => panic!("Error fetching FX rate: {e}"),
     }
 }
 
@@ -42,7 +42,7 @@ async fn test_frankfurter_live_eur_gbp() {
             assert!(!fx_point.rate.is_empty());
         }
         Ok(None) => panic!("No FX rate returned"),
-        Err(e) => panic!("Error fetching FX rate: {}", e),
+        Err(e) => panic!("Error fetching FX rate: {e}"),
     }
 }
 
@@ -61,9 +61,9 @@ async fn test_frankfurter_live_cross_rate_usd_gbp() {
             assert!(!fx_point.rate.is_empty());
             // USD/GBP should be around 0.7-0.9
             let rate: f64 = fx_point.rate.parse().unwrap();
-            assert!(rate > 0.5 && rate < 1.5, "Rate {} seems unreasonable", rate);
+            assert!(rate > 0.5 && rate < 1.5, "Rate {rate} seems unreasonable");
         }
         Ok(None) => panic!("No FX rate returned"),
-        Err(e) => panic!("Error fetching FX rate: {}", e),
+        Err(e) => panic!("Error fetching FX rate: {e}"),
     }
 }

@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use chrono::{Duration, NaiveDate};
+use tracing::{debug, info};
 
 use super::{
     AssetId, CryptoPriceRouter, EquityPriceRouter, FxRateKind, FxRatePoint, FxRateRouter,
@@ -55,6 +56,8 @@ impl MarketDataService {
 
     pub async fn price_close(&self, asset: &Asset, date: NaiveDate) -> Result<PricePoint> {
         let asset_id = AssetId::from_asset(asset);
+        debug!(asset_id = %asset_id, date = %date, "looking up close price");
+
         for offset in 0..=self.lookback_days {
             let target_date = date - Duration::days(offset as i64);
             if let Some(price) = self
@@ -62,20 +65,31 @@ impl MarketDataService {
                 .get_price(&asset_id, target_date, PriceKind::Close)
                 .await?
             {
+                debug!(
+                    asset_id = %asset_id,
+                    date = %target_date,
+                    price = %price.price,
+                    "price found in cache"
+                );
                 return Ok(price);
             }
 
             if let Some(price) = self.fetch_price_from_sources(asset, &asset_id, target_date).await?
             {
+                info!(
+                    asset_id = %asset_id,
+                    date = %target_date,
+                    price = %price.price,
+                    source = %price.source,
+                    "price fetched and stored"
+                );
                 self.store.put_prices(&[price.clone()]).await?;
                 return Ok(price);
             }
         }
 
         Err(anyhow::anyhow!(
-            "No close price found for asset {} on or before {}",
-            asset_id,
-            date
+            "No close price found for asset {asset_id} on or before {date}"
         ))
     }
 
@@ -83,18 +97,29 @@ impl MarketDataService {
     /// Tries real-time quote first, falls back to historical close.
     pub async fn price_latest(&self, asset: &Asset, date: NaiveDate) -> Result<PricePoint> {
         let asset_id = AssetId::from_asset(asset);
+        debug!(asset_id = %asset_id, "looking up latest price (quote or close)");
 
         // First, try to get a live quote
         if let Some(price) = self.fetch_quote_from_sources(asset, &asset_id).await? {
+            info!(
+                asset_id = %asset_id,
+                price = %price.price,
+                source = %price.source,
+                kind = ?price.kind,
+                "live quote fetched and stored"
+            );
             self.store.put_prices(&[price.clone()]).await?;
             return Ok(price);
         }
 
+        debug!(asset_id = %asset_id, "no live quote available, falling back to close price");
         // Fall back to close price
         self.price_close(asset, date).await
     }
 
     pub async fn fx_close(&self, base: &str, quote: &str, date: NaiveDate) -> Result<FxRatePoint> {
+        debug!(base = base, quote = quote, date = %date, "looking up FX rate");
+
         for offset in 0..=self.lookback_days {
             let target_date = date - Duration::days(offset as i64);
             if let Some(rate) = self
@@ -102,20 +127,32 @@ impl MarketDataService {
                 .get_fx_rate(base, quote, target_date, FxRateKind::Close)
                 .await?
             {
+                debug!(
+                    base = base,
+                    quote = quote,
+                    date = %target_date,
+                    rate = %rate.rate,
+                    "FX rate found in cache"
+                );
                 return Ok(rate);
             }
 
             if let Some(rate) = self.fetch_fx_from_sources(base, quote, target_date).await? {
+                info!(
+                    base = base,
+                    quote = quote,
+                    date = %target_date,
+                    rate = %rate.rate,
+                    source = %rate.source,
+                    "FX rate fetched and stored"
+                );
                 self.store.put_fx_rates(&[rate.clone()]).await?;
                 return Ok(rate);
             }
         }
 
         Err(anyhow::anyhow!(
-            "No FX rate found for {}->{} on or before {}",
-            base,
-            quote,
-            date
+            "No FX rate found for {base}->{quote} on or before {date}"
         ))
     }
 

@@ -110,7 +110,7 @@ impl PlaidSynchronizer {
         let body_text = response.text().await.context("Failed to read response body")?;
 
         if !status.is_success() {
-            anyhow::bail!("Plaid API request failed ({}): {}", status, body_text);
+            anyhow::bail!("Plaid API request failed ({status}): {body_text}");
         }
 
         serde_json::from_str(&body_text).context("Failed to parse JSON response")
@@ -264,7 +264,7 @@ impl PlaidSynchronizer {
             .get_transactions(&access_token, start_date, end_date)
             .await
             .unwrap_or_else(|e| {
-                eprintln!("Warning: Failed to get transactions: {}", e);
+                eprintln!("Warning: Failed to get transactions: {e}");
                 Vec::new()
             });
 
@@ -418,7 +418,7 @@ async fn setup(storage: &JsonFileStorage, synchronizer: &PlaidSynchronizer) -> R
     let institution_id = "ins_109508";
     let products = &["transactions", "auth"];
 
-    println!("Creating sandbox public token for institution {}...", institution_id);
+    println!("Creating sandbox public token for institution {institution_id}...");
     let public_token = synchronizer
         .create_sandbox_public_token(institution_id, products)
         .await?;
@@ -505,7 +505,7 @@ async fn main() -> Result<()> {
         "setup" => setup(&storage, &synchronizer).await,
         "sync" => sync(&storage, &synchronizer).await,
         other => {
-            println!("Unknown command: {}", other);
+            println!("Unknown command: {other}");
             println!("Usage: cargo run --example plaid -- [setup|sync]");
             Ok(())
         }

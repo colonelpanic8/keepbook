@@ -95,7 +95,7 @@ impl CoinbaseSynchronizer {
         // Encode header and claims
         let header_b64 = URL_SAFE_NO_PAD.encode(serde_json::to_string(&header)?);
         let claims_b64 = URL_SAFE_NO_PAD.encode(serde_json::to_string(&claims)?);
-        let message = format!("{}.{}", header_b64, claims_b64);
+        let message = format!("{header_b64}.{claims_b64}");
 
         // Parse the EC private key (SEC1 format)
         let secret_key = SecretKey::from_sec1_pem(self.private_key_pem.expose_secret())
@@ -107,17 +107,17 @@ impl CoinbaseSynchronizer {
         let sig_bytes = signature.to_bytes();
         let sig_b64 = URL_SAFE_NO_PAD.encode(&sig_bytes);
 
-        Ok(format!("{}.{}", message, sig_b64))
+        Ok(format!("{message}.{sig_b64}"))
     }
 
     async fn request<T: for<'de> Deserialize<'de>>(&self, method: &str, path: &str) -> Result<T> {
         let jwt = self.generate_jwt(method, path)?;
-        let url = format!("{}{}", CDP_API_BASE, path);
+        let url = format!("{CDP_API_BASE}{path}");
 
         let response = self
             .client
             .request(method.parse().unwrap(), &url)
-            .header("Authorization", format!("Bearer {}", jwt))
+            .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json")
             .send()
             .await
@@ -127,7 +127,7 @@ impl CoinbaseSynchronizer {
         let body = response.text().await.context("Failed to read response body")?;
 
         if !status.is_success() {
-            anyhow::bail!("API request failed ({}): {}", status, body);
+            anyhow::bail!("API request failed ({status}): {body}");
         }
 
         serde_json::from_str(&body).context("Failed to parse JSON response")
@@ -150,7 +150,7 @@ impl CoinbaseSynchronizer {
             ledger: Vec<CoinbaseTransaction>,
         }
 
-        let path = format!("/api/v3/brokerage/accounts/{}/ledger", account_id);
+        let path = format!("/api/v3/brokerage/accounts/{account_id}/ledger");
         let resp: Response = self.request("GET", &path).await?;
         Ok(resp.ledger)
     }

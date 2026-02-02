@@ -69,5 +69,9 @@ async-trait = "0.1"
 chromiumoxide = { version = "0.7", default-features = false, features = ["tokio-runtime"] }
 futures = "0.3"
 
+# Structured logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
 [dev-dependencies]
 tempfile = "3"

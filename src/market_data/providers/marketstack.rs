@@ -121,7 +121,7 @@ impl MarketstackPriceSource {
         // Marketstack returns dates in ISO 8601 format: "2024-01-15T00:00:00+0000"
         let date_part = date_str.split('T').next().unwrap_or(date_str);
         NaiveDate::parse_from_str(date_part, "%Y-%m-%d")
-            .map_err(|e| anyhow!("Failed to parse date '{}': {}", date_str, e))
+            .map_err(|e| anyhow!("Failed to parse date '{date_str}': {e}"))
     }
 }
 
@@ -156,9 +156,7 @@ impl EquityPriceSource for MarketstackPriceSource {
                 return Ok(None);
             }
             return Err(anyhow!(
-                "Marketstack API error: {} - {}",
-                status,
-                body
+                "Marketstack API error: {status} - {body}"
             ));
         }
 

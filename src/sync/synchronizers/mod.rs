@@ -23,6 +23,6 @@ pub async fn create_synchronizer<S: Storage>(
     match connection.config.synchronizer.as_str() {
         "schwab" => Ok(Box::new(SchwabSynchronizer::from_connection(connection, storage).await?)),
         "coinbase" => Ok(Box::new(CoinbaseSynchronizer::from_connection(connection, storage).await?)),
-        other => Err(anyhow!("Unknown synchronizer: {}", other)),
+        other => Err(anyhow!("Unknown synchronizer: {other}")),
     }
 }

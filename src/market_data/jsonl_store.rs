@@ -73,7 +73,7 @@ impl JsonlMarketDataStore {
                 continue;
             }
             let item: T = serde_json::from_str(&line)
-                .with_context(|| format!("Failed to parse JSONL line: {}", line))?;
+                .with_context(|| format!("Failed to parse JSONL line: {line}"))?;
             items.push(item);
         }
 

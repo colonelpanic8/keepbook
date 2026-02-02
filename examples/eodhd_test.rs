@@ -47,9 +47,9 @@ async fn main() -> anyhow::Result<()> {
     let test_date = NaiveDate::from_ymd_opt(2026, 1, 30).unwrap();
 
     println!("Fetching close price for:");
-    println!("  Asset: {:?}", asset);
-    println!("  Asset ID: {}", asset_id);
-    println!("  Date: {}\n", test_date);
+    println!("  Asset: {asset:?}");
+    println!("  Asset ID: {asset_id}");
+    println!("  Date: {test_date}\n");
 
     match provider.fetch_close(&asset, &asset_id, test_date).await {
         Ok(Some(price_point)) => {
@@ -65,7 +65,7 @@ async fn main() -> anyhow::Result<()> {
             println!("This might happen if the market was closed.");
         }
         Err(e) => {
-            println!("ERROR: {}", e);
+            println!("ERROR: {e}");
             return Err(e);
         }
     }
@@ -79,8 +79,8 @@ async fn main() -> anyhow::Result<()> {
     let uk_asset_id = AssetId::from_asset(&uk_asset);
 
     println!("Fetching close price for:");
-    println!("  Asset: {:?}", uk_asset);
-    println!("  Date: {}\n", test_date);
+    println!("  Asset: {uk_asset:?}");
+    println!("  Date: {test_date}\n");
 
     match provider.fetch_close(&uk_asset, &uk_asset_id, test_date).await {
         Ok(Some(price_point)) => {
@@ -94,7 +94,7 @@ async fn main() -> anyhow::Result<()> {
             println!("No data returned for VOD on the requested date.");
         }
         Err(e) => {
-            println!("ERROR fetching VOD: {}", e);
+            println!("ERROR fetching VOD: {e}");
         }
     }
 

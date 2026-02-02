@@ -51,7 +51,7 @@ impl SessionData {
     pub fn cookie_header(&self) -> String {
         self.cookies
             .iter()
-            .map(|(k, v)| format!("{}={}", k, v))
+            .map(|(k, v)| format!("{k}={v}"))
             .collect::<Vec<_>>()
             .join("; ")
     }
@@ -73,7 +73,7 @@ impl SessionCache {
             .join("sessions");
 
         std::fs::create_dir_all(&cache_dir)
-            .with_context(|| format!("Failed to create session cache dir: {:?}", cache_dir))?;
+            .with_context(|| format!("Failed to create session cache dir: {cache_dir:?}"))?;
 
         Ok(Self { cache_dir })
     }
@@ -82,12 +82,12 @@ impl SessionCache {
     pub fn with_path(cache_dir: impl AsRef<Path>) -> Result<Self> {
         let cache_dir = cache_dir.as_ref().to_path_buf();
         std::fs::create_dir_all(&cache_dir)
-            .with_context(|| format!("Failed to create session cache dir: {:?}", cache_dir))?;
+            .with_context(|| format!("Failed to create session cache dir: {cache_dir:?}"))?;
         Ok(Self { cache_dir })
     }
 
     fn session_file(&self, connection_id: &str) -> PathBuf {
-        self.cache_dir.join(format!("{}.json", connection_id))
+        self.cache_dir.join(format!("{connection_id}.json"))
     }
 
     /// Load session data for a connection.
@@ -98,10 +98,10 @@ impl SessionCache {
         }
 
         let content = std::fs::read_to_string(&path)
-            .with_context(|| format!("Failed to read session file: {:?}", path))?;
+            .with_context(|| format!("Failed to read session file: {path:?}"))?;
 
         let session: SessionData = serde_json::from_str(&content)
-            .with_context(|| format!("Failed to parse session file: {:?}", path))?;
+            .with_context(|| format!("Failed to parse session file: {path:?}"))?;
 
         Ok(Some(session))
     }
@@ -113,7 +113,7 @@ impl SessionCache {
             .context("Failed to serialize session")?;
 
         std::fs::write(&path, content)
-            .with_context(|| format!("Failed to write session file: {:?}", path))?;
+            .with_context(|| format!("Failed to write session file: {path:?}"))?;
 
         Ok(())
     }
@@ -123,7 +123,7 @@ impl SessionCache {
         let path = self.session_file(connection_id);
         if path.exists() {
             std::fs::remove_file(&path)
-                .with_context(|| format!("Failed to delete session file: {:?}", path))?;
+                .with_context(|| format!("Failed to delete session file: {path:?}"))?;
         }
         Ok(())
     }

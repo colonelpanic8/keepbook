@@ -61,8 +61,7 @@ impl FrankfurterRateSource {
     ) -> Result<HashMap<String, f64>> {
         let symbols = currencies.join(",");
         let url = format!(
-            "{}/{}?from=EUR&to={}",
-            FRANKFURTER_BASE_URL, date, symbols
+            "{FRANKFURTER_BASE_URL}/{date}?from=EUR&to={symbols}"
         );
 
         let response = self
@@ -121,14 +120,14 @@ impl FxRateSource for FrankfurterRateSource {
             rates
                 .get(&quote_upper)
                 .copied()
-                .ok_or_else(|| anyhow!("Quote currency {} not found in response", quote_upper))?
+                .ok_or_else(|| anyhow!("Quote currency {quote_upper} not found in response"))?
         } else if quote_upper == "EUR" {
             // Inverse rate: base/EUR = 1 / (EUR/base)
             let rates = self.fetch_eur_rates(&[&base_upper], date).await?;
             let eur_to_base = rates
                 .get(&base_upper)
                 .copied()
-                .ok_or_else(|| anyhow!("Base currency {} not found in response", base_upper))?;
+                .ok_or_else(|| anyhow!("Base currency {base_upper} not found in response"))?;
             1.0 / eur_to_base
         } else {
             // Cross-rate: base/quote via EUR
@@ -138,11 +137,11 @@ impl FxRateSource for FrankfurterRateSource {
             let eur_to_base = rates
                 .get(&base_upper)
                 .copied()
-                .ok_or_else(|| anyhow!("Base currency {} not found in response", base_upper))?;
+                .ok_or_else(|| anyhow!("Base currency {base_upper} not found in response"))?;
             let eur_to_quote = rates
                 .get(&quote_upper)
                 .copied()
-                .ok_or_else(|| anyhow!("Quote currency {} not found in response", quote_upper))?;
+                .ok_or_else(|| anyhow!("Quote currency {quote_upper} not found in response"))?;
             Self::compute_cross_rate(eur_to_base, eur_to_quote)
         };
 

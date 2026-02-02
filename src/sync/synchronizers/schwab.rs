@@ -250,7 +250,7 @@ impl InteractiveAuth for SchwabSynchronizer {
             .arg("--no-first-run")
             .arg("--no-default-browser-check")
             .build()
-            .map_err(|e| anyhow::anyhow!("Failed to configure browser: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to configure browser: {e}"))?;
 
         let (browser, mut handler) = Browser::launch(config)
             .await
@@ -270,7 +270,7 @@ impl InteractiveAuth for SchwabSynchronizer {
 
         // Enable fetch domain for request interception
         let patterns = vec![RequestPattern {
-            url_pattern: Some(format!("*{}*", SCHWAB_API_DOMAIN)),
+            url_pattern: Some(format!("*{SCHWAB_API_DOMAIN}*")),
             resource_type: None,
             request_stage: Some(RequestStage::Request),
         }];

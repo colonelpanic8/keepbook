@@ -30,7 +30,7 @@ async fn test_coingecko_live_btc() {
             assert_eq!(price_point.quote_currency.to_lowercase(), "usd");
         }
         Ok(None) => panic!("No price data returned for BTC"),
-        Err(e) => panic!("Error fetching BTC price: {}", e),
+        Err(e) => panic!("Error fetching BTC price: {e}"),
     }
 }
 
@@ -56,6 +56,6 @@ async fn test_coingecko_live_eth() {
             assert!(!price_point.price.is_empty());
         }
         Ok(None) => panic!("No price data returned for ETH"),
-        Err(e) => panic!("Error fetching ETH price: {}", e),
+        Err(e) => panic!("Error fetching ETH price: {e}"),
     }
 }

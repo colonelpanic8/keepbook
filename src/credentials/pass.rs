@@ -169,7 +169,7 @@ impl std::fmt::Display for PassEntry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Write password line first
         if let Some(ref password) = self.password {
-            writeln!(f, "{}", password)?;
+            writeln!(f, "{password}")?;
         }
 
         // Write other fields (excluding "password" since it's the first line)
@@ -177,7 +177,7 @@ impl std::fmt::Display for PassEntry {
             if key != "password" {
                 // Escape newlines in values
                 let escaped = value.replace('\n', "\\n");
-                writeln!(f, "{}: {}", key, escaped)?;
+                writeln!(f, "{key}: {escaped}")?;
             }
         }
 
