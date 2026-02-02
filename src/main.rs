@@ -261,9 +261,11 @@ struct AllOutput {
 #[tokio::main]
 async fn main() -> Result<()> {
     // Initialize structured logging to stderr
-    // Use RUST_LOG env var for filtering (default: warn)
+    // Use RUST_LOG env var for filtering (default: info, suppress noisy chromiumoxide errors)
     tracing_subscriber::registry()
-        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
+        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+            EnvFilter::new("info,chromiumoxide=warn,chromiumoxide::conn=off,chromiumoxide::handler=off")
+        }))
         .with(
             fmt::layer()
                 .with_writer(std::io::stderr)
