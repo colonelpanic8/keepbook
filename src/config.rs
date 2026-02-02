@@ -3,9 +3,43 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
+use crate::duration::deserialize_duration;
+
 /// Default reporting currency.
 fn default_reporting_currency() -> String {
     "USD".to_string()
+}
+
+/// Default balance staleness (14 days).
+fn default_balance_staleness() -> std::time::Duration {
+    std::time::Duration::from_secs(14 * 24 * 60 * 60)
+}
+
+/// Default price staleness (24 hours).
+fn default_price_staleness() -> std::time::Duration {
+    std::time::Duration::from_secs(24 * 60 * 60)
+}
+
+/// Refresh/staleness configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RefreshConfig {
+    /// How old balance data can be before it's considered stale.
+    #[serde(default = "default_balance_staleness", deserialize_with = "deserialize_duration")]
+    pub balance_staleness: std::time::Duration,
+
+    /// How old price data can be before it's considered stale.
+    #[serde(default = "default_price_staleness", deserialize_with = "deserialize_duration")]
+    pub price_staleness: std::time::Duration,
+}
+
+impl Default for RefreshConfig {
+    fn default() -> Self {
+        Self {
+            balance_staleness: default_balance_staleness(),
+            price_staleness: default_price_staleness(),
+        }
+    }
 }
 
 /// Application configuration.
@@ -19,6 +53,10 @@ pub struct Config {
     /// Currency for reporting all values (e.g., "USD")
     #[serde(default = "default_reporting_currency")]
     pub reporting_currency: String,
+
+    /// Refresh/staleness settings.
+    #[serde(default)]
+    pub refresh: RefreshConfig,
 }
 
 impl Default for Config {
@@ -26,6 +64,7 @@ impl Default for Config {
         Self {
             data_dir: None,
             reporting_currency: default_reporting_currency(),
+            refresh: RefreshConfig::default(),
         }
     }
 }
@@ -72,6 +111,9 @@ pub struct ResolvedConfig {
 
     /// Currency for reporting all values (e.g., "USD")
     pub reporting_currency: String,
+
+    /// Refresh/staleness settings.
+    pub refresh: RefreshConfig,
 }
 
 impl ResolvedConfig {
@@ -93,6 +135,7 @@ impl ResolvedConfig {
         Ok(Self {
             data_dir,
             reporting_currency: config.reporting_currency,
+            refresh: config.refresh,
         })
     }
 
@@ -121,6 +164,7 @@ impl ResolvedConfig {
             Ok(Self {
                 data_dir: config_dir.to_path_buf(),
                 reporting_currency: default_reporting_currency(),
+                refresh: RefreshConfig::default(),
             })
         }
     }
@@ -193,5 +237,29 @@ mod tests {
         assert_eq!(config.data_dir, None);
 
         Ok(())
+    }
+
+    #[test]
+    fn test_load_refresh_config() -> Result<()> {
+        let dir = TempDir::new()?;
+        let config_path = dir.path().join("keepbook.toml");
+
+        let mut file = std::fs::File::create(&config_path)?;
+        writeln!(file, "[refresh]")?;
+        writeln!(file, "balance_staleness = \"7d\"")?;
+        writeln!(file, "price_staleness = \"1h\"")?;
+
+        let config = Config::load(&config_path)?;
+        assert_eq!(config.refresh.balance_staleness, std::time::Duration::from_secs(7 * 24 * 60 * 60));
+        assert_eq!(config.refresh.price_staleness, std::time::Duration::from_secs(60 * 60));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_default_refresh_config() {
+        let config = Config::default();
+        assert_eq!(config.refresh.balance_staleness, std::time::Duration::from_secs(14 * 24 * 60 * 60));
+        assert_eq!(config.refresh.price_staleness, std::time::Duration::from_secs(24 * 60 * 60));
     }
 }
