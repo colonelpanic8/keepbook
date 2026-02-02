@@ -103,7 +103,7 @@ impl CoinGeckoPriceSource {
             "DOGE" => "dogecoin",
             "SOL" => "solana",
             "DOT" => "polkadot",
-            "MATIC" => "matic-network",
+            "MATIC" | "POL" => "matic-network",
             "LTC" => "litecoin",
             "SHIB" => "shiba-inu",
             "TRX" => "tron",

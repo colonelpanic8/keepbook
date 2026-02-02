@@ -397,11 +397,48 @@ async fn main() -> Result<()> {
                     include_detail: detail,
                 };
 
-                // Setup service
+                // Setup market data service
                 let store = Arc::new(keepbook::market_data::JsonlMarketDataStore::new(
                     &config.data_dir,
                 ));
-                let market_data = Arc::new(keepbook::market_data::MarketDataService::new(store, None));
+
+                // Configure price providers if refresh is enabled
+                let market_data = if refresh || force_refresh {
+                    use keepbook::market_data::{
+                        CryptoPriceRouter, EquityPriceRouter, FxRateRouter,
+                    };
+
+                    // Load configured price sources from registry
+                    let mut registry = PriceSourceRegistry::new(&config.data_dir);
+                    registry.load()?;
+
+                    // Build routers from configured sources
+                    let equity_sources = registry.build_equity_sources().await?;
+                    let crypto_sources = registry.build_crypto_sources().await?;
+                    let fx_sources = registry.build_fx_sources().await?;
+
+                    let mut service = keepbook::market_data::MarketDataService::new(store, None);
+
+                    if !equity_sources.is_empty() {
+                        let equity_router = EquityPriceRouter::new(equity_sources);
+                        service = service.with_equity_router(Arc::new(equity_router));
+                    }
+
+                    if !crypto_sources.is_empty() {
+                        let crypto_router = CryptoPriceRouter::new(crypto_sources);
+                        service = service.with_crypto_router(Arc::new(crypto_router));
+                    }
+
+                    if !fx_sources.is_empty() {
+                        let fx_router = FxRateRouter::new(fx_sources);
+                        service = service.with_fx_router(Arc::new(fx_router));
+                    }
+
+                    Arc::new(service)
+                } else {
+                    Arc::new(keepbook::market_data::MarketDataService::new(store, None))
+                };
+
                 let storage_arc: Arc<dyn keepbook::storage::Storage> = Arc::new(storage);
                 let service = PortfolioService::new(storage_arc, market_data);
 
