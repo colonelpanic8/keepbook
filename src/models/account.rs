@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use super::Id;
+use crate::duration::deserialize_duration_opt;
 
 /// An individual financial account (checking, savings, credit card, brokerage, etc.)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,4 +31,13 @@ impl Account {
             synchronizer_data: serde_json::Value::Null,
         }
     }
+}
+
+/// Optional account configuration (stored in account_config.toml).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AccountConfig {
+    /// Override balance staleness for this account.
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_duration_opt")]
+    pub balance_staleness: Option<std::time::Duration>,
 }

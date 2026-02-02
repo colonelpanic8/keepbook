@@ -5,7 +5,7 @@ use tokio::fs;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use crate::credentials::CredentialStore;
-use crate::models::{Account, Balance, Connection, ConnectionConfig, ConnectionState, Id, Transaction};
+use crate::models::{Account, AccountConfig, Balance, Connection, ConnectionConfig, ConnectionState, Id, Transaction};
 use super::Storage;
 
 /// JSON file-based storage implementation.
@@ -97,6 +97,23 @@ impl JsonFileStorage {
 
     fn account_file(&self, id: &Id) -> PathBuf {
         self.account_dir(id).join("account.json")
+    }
+
+    fn account_config_file(&self, id: &Id) -> PathBuf {
+        self.account_dir(id).join("account_config.toml")
+    }
+
+    /// Load optional account config.
+    pub fn get_account_config(&self, id: &Id) -> Result<Option<AccountConfig>> {
+        let path = self.account_config_file(id);
+        if !path.exists() {
+            return Ok(None);
+        }
+        let content = std::fs::read_to_string(&path)
+            .with_context(|| format!("Failed to read {}", path.display()))?;
+        let config: AccountConfig = toml::from_str(&content)
+            .with_context(|| format!("Failed to parse {}", path.display()))?;
+        Ok(Some(config))
     }
 
     fn balances_file(&self, account_id: &Id) -> PathBuf {

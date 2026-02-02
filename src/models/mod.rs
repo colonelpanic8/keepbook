@@ -6,7 +6,7 @@ mod id;
 mod transaction;
 
 pub use asset::Asset;
-pub use account::Account;
+pub use account::{Account, AccountConfig};
 pub use balance::Balance;
 pub use connection::{Connection, ConnectionConfig, ConnectionState, ConnectionStatus, LastSync, SyncStatus};
 pub use id::Id;
