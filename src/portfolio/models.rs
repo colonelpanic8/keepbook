@@ -78,7 +78,9 @@ pub struct AssetSummary {
     pub fx_rate: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fx_date: Option<NaiveDate>,
-    pub value_in_base: String,
+    /// Value in base currency. None if price data unavailable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value_in_base: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub holdings: Option<Vec<AccountHolding>>,
 }
@@ -96,5 +98,7 @@ pub struct AccountSummary {
     pub account_id: String,
     pub account_name: String,
     pub connection_name: String,
-    pub value_in_base: String,
+    /// Value in base currency. None if any asset lacks price data.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value_in_base: Option<String>,
 }

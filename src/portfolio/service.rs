@@ -23,7 +23,8 @@ pub struct PortfolioService {
 
 /// Valuation result for an asset.
 struct AssetValuation {
-    value: Decimal,
+    /// The value in target currency. None if price data unavailable.
+    value: Option<Decimal>,
     price: Option<String>,
     price_date: Option<NaiveDate>,
     fx_rate: Option<String>,
@@ -90,7 +91,10 @@ impl PortfolioService {
                 .value_asset(&asset, *total_amount, &query.currency, query.as_of_date)
                 .await?;
 
-            total_value += valuation.value;
+            // Only add to total if we have a value
+            if let Some(v) = valuation.value {
+                total_value += v;
+            }
 
             // Build holdings detail if requested
             let holdings_detail = if query.include_detail {
@@ -119,31 +123,43 @@ impl PortfolioService {
                 price_date: valuation.price_date,
                 fx_rate: valuation.fx_rate,
                 fx_date: valuation.fx_date,
-                value_in_base: valuation.value.normalize().to_string(),
+                value_in_base: valuation.value.map(|v| v.normalize().to_string()),
                 holdings: holdings_detail,
             });
         }
 
         // 5. Aggregate by account (for by_account summary)
-        let mut by_account_values: HashMap<Id, Decimal> = HashMap::new();
+        // Track (sum, has_missing_values) per account
+        let mut by_account_values: HashMap<Id, (Decimal, bool)> = HashMap::new();
         for (account_id, balance) in &filtered_balances {
             let amount = Decimal::from_str(&balance.amount)?;
             let valuation = self
                 .value_asset(&balance.asset, amount, &query.currency, query.as_of_date)
                 .await?;
-            *by_account_values.entry(account_id.clone()).or_default() += valuation.value;
+            let entry = by_account_values
+                .entry(account_id.clone())
+                .or_insert((Decimal::ZERO, false));
+            match valuation.value {
+                Some(v) => entry.0 += v,
+                None => entry.1 = true, // Mark as having missing values
+            }
         }
 
         let mut account_summaries: Vec<AccountSummary> = by_account_values
             .into_iter()
-            .filter_map(|(account_id, value)| {
+            .filter_map(|(account_id, (value, has_missing))| {
                 let account = account_map.get(&account_id)?;
                 let connection = connection_map.get(&account.connection_id)?;
                 Some(AccountSummary {
                     account_id: account_id.to_string(),
                     account_name: account.name.clone(),
                     connection_name: connection.name().to_string(),
-                    value_in_base: value.normalize().to_string(),
+                    // Show value only if no assets are missing prices
+                    value_in_base: if has_missing {
+                        None
+                    } else {
+                        Some(value.normalize().to_string())
+                    },
                 })
             })
             .collect();
@@ -185,7 +201,7 @@ impl PortfolioService {
                 if iso_code.eq_ignore_ascii_case(target_currency) {
                     // Same currency, no conversion needed
                     Ok(AssetValuation {
-                        value: amount,
+                        value: Some(amount),
                         price: None,
                         price_date: None,
                         fx_rate: None,
@@ -193,29 +209,43 @@ impl PortfolioService {
                     })
                 } else {
                     // Need FX conversion
-                    let rate = self
+                    match self
                         .market_data
                         .fx_close(iso_code, target_currency, as_of_date)
-                        .await?;
-                    let fx_rate = Decimal::from_str(&rate.rate)?;
-                    Ok(AssetValuation {
-                        value: amount * fx_rate,
-                        price: None,
-                        price_date: None,
-                        fx_rate: Some(fx_rate.normalize().to_string()),
-                        fx_date: Some(rate.as_of_date),
-                    })
+                        .await
+                    {
+                        Ok(rate) => {
+                            let fx_rate = Decimal::from_str(&rate.rate)?;
+                            Ok(AssetValuation {
+                                value: Some(amount * fx_rate),
+                                price: None,
+                                price_date: None,
+                                fx_rate: Some(fx_rate.normalize().to_string()),
+                                fx_date: Some(rate.as_of_date),
+                            })
+                        }
+                        Err(_) => {
+                            // No FX rate available
+                            Ok(AssetValuation {
+                                value: None,
+                                price: None,
+                                price_date: None,
+                                fx_rate: None,
+                                fx_date: None,
+                            })
+                        }
+                    }
                 }
             }
             Asset::Equity { .. } | Asset::Crypto { .. } => {
-                // Get price - gracefully handle missing prices by returning zero value
+                // Get price - return None value if price unavailable
                 let price_result = self.market_data.price_close(asset, as_of_date).await;
                 let price_point = match price_result {
                     Ok(p) => p,
                     Err(_) => {
-                        // No price available, value is 0
+                        // No price available
                         return Ok(AssetValuation {
-                            value: Decimal::ZERO,
+                            value: None,
                             price: None,
                             price_date: None,
                             fx_rate: None,
@@ -229,25 +259,39 @@ impl PortfolioService {
                 // Convert to target currency if needed
                 if price_point.quote_currency.eq_ignore_ascii_case(target_currency) {
                     Ok(AssetValuation {
-                        value: value_in_quote,
+                        value: Some(value_in_quote),
                         price: Some(price.normalize().to_string()),
                         price_date: Some(price_point.as_of_date),
                         fx_rate: None,
                         fx_date: None,
                     })
                 } else {
-                    let rate = self
+                    match self
                         .market_data
                         .fx_close(&price_point.quote_currency, target_currency, as_of_date)
-                        .await?;
-                    let fx_rate = Decimal::from_str(&rate.rate)?;
-                    Ok(AssetValuation {
-                        value: value_in_quote * fx_rate,
-                        price: Some(price.normalize().to_string()),
-                        price_date: Some(price_point.as_of_date),
-                        fx_rate: Some(fx_rate.normalize().to_string()),
-                        fx_date: Some(rate.as_of_date),
-                    })
+                        .await
+                    {
+                        Ok(rate) => {
+                            let fx_rate = Decimal::from_str(&rate.rate)?;
+                            Ok(AssetValuation {
+                                value: Some(value_in_quote * fx_rate),
+                                price: Some(price.normalize().to_string()),
+                                price_date: Some(price_point.as_of_date),
+                                fx_rate: Some(fx_rate.normalize().to_string()),
+                                fx_date: Some(rate.as_of_date),
+                            })
+                        }
+                        Err(_) => {
+                            // Have price but no FX rate
+                            Ok(AssetValuation {
+                                value: None,
+                                price: Some(price.normalize().to_string()),
+                                price_date: Some(price_point.as_of_date),
+                                fx_rate: None,
+                                fx_date: None,
+                            })
+                        }
+                    }
                 }
             }
         }
@@ -371,7 +415,7 @@ mod tests {
         assert_eq!(by_asset[0].total_amount, "10");
         assert_eq!(by_asset[0].price, Some("200".to_string()));
         assert_eq!(by_asset[0].fx_rate, Some("0.91".to_string()));
-        assert_eq!(by_asset[0].value_in_base, "1820");
+        assert_eq!(by_asset[0].value_in_base, Some("1820".to_string()));
 
         Ok(())
     }
