@@ -441,7 +441,8 @@ async fn main() -> Result<()> {
             } => {
                 use keepbook::portfolio::{Grouping, PortfolioQuery, PortfolioService};
                 use keepbook::staleness::{
-                    check_balance_staleness, log_balance_staleness, resolve_balance_staleness,
+                    check_balance_staleness, check_price_staleness, log_balance_staleness,
+                    log_price_staleness, resolve_balance_staleness,
                 };
 
                 // Parse date
@@ -500,6 +501,44 @@ async fn main() -> Result<()> {
                     // Add to sync list if stale (or force)
                     if should_refresh_balances && (ignore_staleness || check.is_stale) {
                         connections_to_sync.push(connection.clone());
+                    }
+                }
+
+                // Check price staleness for dry-run
+                if dry_run {
+                    use keepbook::market_data::{AssetId, MarketDataStore, PriceKind};
+                    use std::collections::HashSet;
+
+                    // Load balances to find unique assets that need prices
+                    let balances = storage.get_latest_balances().await?;
+                    let mut seen_assets: HashSet<String> = HashSet::new();
+
+                    for (_, balance) in &balances {
+                        match &balance.asset {
+                            keepbook::models::Asset::Equity { .. }
+                            | keepbook::models::Asset::Crypto { .. } => {
+                                let asset_id = AssetId::from_asset(&balance.asset);
+                                let asset_key = asset_id.to_string();
+
+                                if seen_assets.contains(&asset_key) {
+                                    continue;
+                                }
+                                seen_assets.insert(asset_key.clone());
+
+                                // Check cached price
+                                let cached_price = store
+                                    .get_price(&asset_id, query.as_of_date, PriceKind::Close)
+                                    .await?;
+                                let check = check_price_staleness(
+                                    cached_price.as_ref(),
+                                    config.refresh.price_staleness,
+                                );
+                                log_price_staleness(&asset_key, &check);
+                            }
+                            keepbook::models::Asset::Currency { .. } => {
+                                // Currency doesn't need price lookup (only FX)
+                            }
+                        }
                     }
                 }
 
