@@ -263,7 +263,7 @@ async fn main() -> Result<()> {
     // Initialize structured logging to stderr
     // Use RUST_LOG env var for filtering (default: warn)
     tracing_subscriber::registry()
-        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn")))
+        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
         .with(
             fmt::layer()
                 .with_writer(std::io::stderr)
