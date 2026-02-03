@@ -5,7 +5,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use chrono::Utc;
 use clap::{Parser, Subcommand};
-use keepbook::config::ResolvedConfig;
+use keepbook::config::{default_config_path, ResolvedConfig};
 use keepbook::market_data::{JsonlMarketDataStore, MarketDataStore, PriceSourceRegistry};
 use keepbook::models::{Account, Asset, AssetBalance, BalanceSnapshot, Connection, ConnectionConfig, ConnectionState, Id};
 use keepbook::storage::{JsonFileStorage, Storage};
@@ -19,7 +19,7 @@ use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 #[command(about = "Personal finance manager")]
 struct Cli {
     /// Path to config file
-    #[arg(short, long, default_value = "keepbook.toml")]
+    #[arg(short, long, default_value_os_t = default_config_path())]
     config: PathBuf,
 
     #[command(subcommand)]
@@ -51,9 +51,9 @@ enum Command {
     #[command(subcommand)]
     Sync(SyncCommand),
 
-    /// Schwab-specific commands
+    /// Authentication commands for synchronizers
     #[command(subcommand)]
-    Schwab(SchwabCommand),
+    Auth(AuthCommand),
 
     /// Portfolio commands
     #[command(subcommand)]
@@ -122,7 +122,14 @@ enum SyncCommand {
 }
 
 #[derive(Subcommand)]
-enum SchwabCommand {
+enum AuthCommand {
+    /// Schwab authentication commands
+    #[command(subcommand)]
+    Schwab(SchwabAuthCommand),
+}
+
+#[derive(Subcommand)]
+enum SchwabAuthCommand {
     /// Login via browser to capture session
     Login {
         /// Connection ID or name (optional if only one Schwab connection)
@@ -389,7 +396,7 @@ async fn main() -> Result<()> {
             SyncCommand::Symlinks => {
                 let (conn_created, acct_created, warnings) = storage.rebuild_all_symlinks().await?;
                 for warning in &warnings {
-                    eprintln!("Warning: {}", warning);
+                    eprintln!("Warning: {warning}");
                 }
                 let result = serde_json::json!({
                     "connection_symlinks_created": conn_created,
@@ -400,11 +407,13 @@ async fn main() -> Result<()> {
             }
         },
 
-        Some(Command::Schwab(schwab_cmd)) => match schwab_cmd {
-            SchwabCommand::Login { id_or_name } => {
-                let result = schwab_login(&storage, id_or_name.as_deref()).await?;
-                println!("{}", serde_json::to_string_pretty(&result)?);
-            }
+        Some(Command::Auth(auth_cmd)) => match auth_cmd {
+            AuthCommand::Schwab(schwab_cmd) => match schwab_cmd {
+                SchwabAuthCommand::Login { id_or_name } => {
+                    let result = schwab_login(&storage, id_or_name.as_deref()).await?;
+                    println!("{}", serde_json::to_string_pretty(&result)?);
+                }
+            },
         },
 
         Some(Command::List(list_cmd)) => match list_cmd {

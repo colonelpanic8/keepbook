@@ -116,6 +116,26 @@ pub struct ResolvedConfig {
     pub refresh: RefreshConfig,
 }
 
+/// Returns the default config file path.
+///
+/// Resolution order:
+/// 1. `./keepbook.toml` if it exists in current directory
+/// 2. `~/.local/share/keepbook/keepbook.toml` (XDG data directory)
+pub fn default_config_path() -> PathBuf {
+    let local_config = PathBuf::from("keepbook.toml");
+    if local_config.exists() {
+        return local_config;
+    }
+
+    // XDG data directory fallback
+    if let Some(data_dir) = dirs::data_dir() {
+        return data_dir.join("keepbook").join("keepbook.toml");
+    }
+
+    // Final fallback to local
+    local_config
+}
+
 impl ResolvedConfig {
     /// Load and resolve config from a file path.
     ///
