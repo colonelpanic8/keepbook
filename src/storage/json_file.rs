@@ -339,6 +339,77 @@ impl JsonFileStorage {
 
         Ok(())
     }
+
+    /// Rebuild all symlinks in connections/by-name/ directory.
+    /// Removes stale symlinks and creates symlinks for all connections by name.
+    /// Returns the number of symlinks created and warnings for collisions.
+    pub async fn rebuild_connection_symlinks(&self) -> Result<(usize, Vec<String>)> {
+        let by_name_dir = self.connections_by_name_dir();
+
+        // Create by-name directory if needed
+        fs::create_dir_all(&by_name_dir)
+            .await
+            .context("Failed to create connections/by-name directory")?;
+
+        // Remove all existing symlinks in by-name/
+        let mut entries = match fs::read_dir(&by_name_dir).await {
+            Ok(e) => e,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Ok((0, Vec::new()));
+            }
+            Err(e) => return Err(e).context("Failed to read by-name directory"),
+        };
+
+        while let Some(entry) = entries.next_entry().await? {
+            if let Ok(file_type) = entry.file_type().await {
+                if file_type.is_symlink() {
+                    let _ = fs::remove_file(entry.path()).await;
+                }
+            }
+        }
+
+        // Load all connections and create symlinks
+        let connections = self.list_connections().await?;
+        let mut created = 0;
+        let mut warnings = Vec::new();
+        let mut seen_names: std::collections::HashMap<String, Id> = std::collections::HashMap::new();
+
+        for conn in connections {
+            let name = conn.name();
+            let Some(sanitized) = Self::sanitize_name(name) else {
+                warnings.push(format!("Skipped connection with empty name (id: {})", conn.id()));
+                continue;
+            };
+
+            if let Some(existing_id) = seen_names.get(&sanitized) {
+                warnings.push(format!(
+                    "Skipped duplicate connection name \"{}\" (id: {}, conflicts with {})",
+                    sanitized, conn.id(), existing_id
+                ));
+                continue;
+            }
+
+            let link_path = by_name_dir.join(&sanitized);
+            let target = PathBuf::from("..").join(conn.id().to_string());
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::symlink;
+                if let Err(e) = symlink(&target, &link_path) {
+                    warnings.push(format!(
+                        "Failed to create symlink for \"{}\": {}",
+                        sanitized, e
+                    ));
+                    continue;
+                }
+            }
+
+            seen_names.insert(sanitized, conn.id().clone());
+            created += 1;
+        }
+
+        Ok((created, warnings))
+    }
 }
 
 #[async_trait::async_trait]
