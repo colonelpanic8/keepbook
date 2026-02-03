@@ -17,6 +17,8 @@ pub struct MarketDataService {
     crypto_router: Option<Arc<CryptoPriceRouter>>,
     fx_router: Option<Arc<FxRateRouter>>,
     lookback_days: u32,
+    /// How old a quote can be before we fetch a new one. None means always fetch.
+    quote_staleness: Option<std::time::Duration>,
 }
 
 impl MarketDataService {
@@ -31,6 +33,7 @@ impl MarketDataService {
             crypto_router: None,
             fx_router: None,
             lookback_days: 7,
+            quote_staleness: None,
         }
     }
 
@@ -51,6 +54,11 @@ impl MarketDataService {
 
     pub fn with_lookback_days(mut self, days: u32) -> Self {
         self.lookback_days = days;
+        self
+    }
+
+    pub fn with_quote_staleness(mut self, staleness: std::time::Duration) -> Self {
+        self.quote_staleness = Some(staleness);
         self
     }
 
@@ -95,11 +103,40 @@ impl MarketDataService {
 
     /// Get the latest available price for an asset.
     /// Tries real-time quote first, falls back to historical close.
+    /// If quote_staleness is set, returns cached quote if it's fresh enough.
     pub async fn price_latest(&self, asset: &Asset, date: NaiveDate) -> Result<PricePoint> {
         let asset_id = AssetId::from_asset(asset);
         debug!(asset_id = %asset_id, "looking up latest price (quote or close)");
 
-        // First, try to get a live quote
+        // Check for a cached quote first if staleness is configured
+        if let Some(staleness) = self.quote_staleness {
+            if let Some(cached) = self
+                .store
+                .get_price(&asset_id, date, PriceKind::Quote)
+                .await?
+            {
+                let age = (chrono::Utc::now() - cached.timestamp)
+                    .to_std()
+                    .unwrap_or(std::time::Duration::MAX);
+                if age < staleness {
+                    debug!(
+                        asset_id = %asset_id,
+                        price = %cached.price,
+                        age_secs = age.as_secs(),
+                        "returning cached quote (still fresh)"
+                    );
+                    return Ok(cached);
+                }
+                debug!(
+                    asset_id = %asset_id,
+                    age_secs = age.as_secs(),
+                    staleness_secs = staleness.as_secs(),
+                    "cached quote is stale, fetching new one"
+                );
+            }
+        }
+
+        // Try to get a live quote
         if let Some(price) = self.fetch_quote_from_sources(asset, &asset_id).await? {
             info!(
                 asset_id = %asset_id,

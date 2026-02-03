@@ -587,7 +587,8 @@ async fn main() -> Result<()> {
                     let crypto_sources = registry.build_crypto_sources().await?;
                     let fx_sources = registry.build_fx_sources().await?;
 
-                    let mut service = keepbook::market_data::MarketDataService::new(store, None);
+                    let mut service = keepbook::market_data::MarketDataService::new(store, None)
+                        .with_quote_staleness(config.refresh.price_staleness);
 
                     if !equity_sources.is_empty() {
                         let equity_router = EquityPriceRouter::new(equity_sources);
