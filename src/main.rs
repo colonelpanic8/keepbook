@@ -117,6 +117,8 @@ enum SyncCommand {
         #[arg(long)]
         if_stale: bool,
     },
+    /// Rebuild all symlinks (connections/by-name and account directories)
+    Symlinks,
 }
 
 #[derive(Subcommand)]
@@ -383,6 +385,18 @@ async fn main() -> Result<()> {
                     let result = sync_all(&storage, &config).await?;
                     println!("{}", serde_json::to_string_pretty(&result)?);
                 }
+            }
+            SyncCommand::Symlinks => {
+                let (conn_created, acct_created, warnings) = storage.rebuild_all_symlinks().await?;
+                for warning in &warnings {
+                    eprintln!("Warning: {}", warning);
+                }
+                let result = serde_json::json!({
+                    "connection_symlinks_created": conn_created,
+                    "account_symlinks_created": acct_created,
+                    "warnings": warnings.len()
+                });
+                println!("{}", serde_json::to_string_pretty(&result)?);
             }
         },
 
