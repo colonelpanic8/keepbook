@@ -7,7 +7,7 @@ use anyhow::Result;
 use tokio::sync::Mutex;
 
 use crate::credentials::CredentialStore;
-use crate::models::{Account, Asset, Balance, Connection, Id, Transaction};
+use crate::models::{Account, BalanceSnapshot, Connection, Id, Transaction};
 
 use super::Storage;
 
@@ -15,7 +15,7 @@ use super::Storage;
 pub struct MemoryStorage {
     connections: Mutex<HashMap<Id, Connection>>,
     accounts: Mutex<HashMap<Id, Account>>,
-    balances: Mutex<HashMap<Id, Vec<Balance>>>,
+    balances: Mutex<HashMap<Id, Vec<BalanceSnapshot>>>,
     transactions: Mutex<HashMap<Id, Vec<Transaction>>>,
 }
 
@@ -27,11 +27,6 @@ impl MemoryStorage {
             balances: Mutex::new(HashMap::new()),
             transactions: Mutex::new(HashMap::new()),
         }
-    }
-
-    /// Convenience method for tests to save a single balance.
-    pub async fn save_balance(&self, account_id: &Id, balance: &Balance) -> Result<()> {
-        self.append_balances(account_id, &[balance.clone()]).await
     }
 }
 
@@ -89,41 +84,29 @@ impl Storage for MemoryStorage {
         Ok(accounts.remove(id).is_some())
     }
 
-    async fn get_balances(&self, account_id: &Id) -> Result<Vec<Balance>> {
+    async fn get_balance_snapshots(&self, account_id: &Id) -> Result<Vec<BalanceSnapshot>> {
         let balances = self.balances.lock().await;
         Ok(balances.get(account_id).cloned().unwrap_or_default())
     }
 
-    async fn append_balances(&self, account_id: &Id, new_balances: &[Balance]) -> Result<()> {
+    async fn append_balance_snapshot(&self, account_id: &Id, snapshot: &BalanceSnapshot) -> Result<()> {
         let mut balances = self.balances.lock().await;
         balances
             .entry(account_id.clone())
             .or_default()
-            .extend(new_balances.iter().cloned());
+            .push(snapshot.clone());
         Ok(())
     }
 
-    async fn get_latest_balances(&self) -> Result<Vec<(Id, Balance)>> {
+    async fn get_latest_balances(&self) -> Result<Vec<(Id, BalanceSnapshot)>> {
         let accounts = self.accounts.lock().await;
         let balances = self.balances.lock().await;
 
         let mut results = Vec::new();
         for account_id in accounts.keys() {
-            if let Some(account_balances) = balances.get(account_id) {
-                // Group by asset, keep most recent
-                let mut latest: HashMap<Asset, Balance> = HashMap::new();
-                for balance in account_balances {
-                    latest
-                        .entry(balance.asset.clone())
-                        .and_modify(|existing| {
-                            if balance.timestamp > existing.timestamp {
-                                *existing = balance.clone();
-                            }
-                        })
-                        .or_insert(balance.clone());
-                }
-                for balance in latest.into_values() {
-                    results.push((account_id.clone(), balance));
+            if let Some(snapshots) = balances.get(account_id) {
+                if let Some(latest) = snapshots.iter().max_by_key(|s| s.timestamp) {
+                    results.push((account_id.clone(), latest.clone()));
                 }
             }
         }
@@ -131,17 +114,15 @@ impl Storage for MemoryStorage {
         Ok(results)
     }
 
-    async fn get_latest_balances_for_connection(&self, connection_id: &Id) -> Result<Vec<(Id, Balance)>> {
+    async fn get_latest_balances_for_connection(&self, connection_id: &Id) -> Result<Vec<(Id, BalanceSnapshot)>> {
         let connections = self.connections.lock().await;
         let accounts = self.accounts.lock().await;
         let balances = self.balances.lock().await;
 
-        let connection = connections.get(connection_id);
-        if connection.is_none() {
+        if connections.get(connection_id).is_none() {
             return Ok(Vec::new());
         }
 
-        // Find all accounts for this connection
         let account_ids: Vec<Id> = accounts
             .values()
             .filter(|a| &a.connection_id == connection_id)
@@ -150,20 +131,9 @@ impl Storage for MemoryStorage {
 
         let mut results = Vec::new();
         for account_id in account_ids {
-            if let Some(account_balances) = balances.get(&account_id) {
-                let mut latest: HashMap<Asset, Balance> = HashMap::new();
-                for balance in account_balances {
-                    latest
-                        .entry(balance.asset.clone())
-                        .and_modify(|existing| {
-                            if balance.timestamp > existing.timestamp {
-                                *existing = balance.clone();
-                            }
-                        })
-                        .or_insert(balance.clone());
-                }
-                for balance in latest.into_values() {
-                    results.push((account_id.clone(), balance));
+            if let Some(snapshots) = balances.get(&account_id) {
+                if let Some(latest) = snapshots.iter().max_by_key(|s| s.timestamp) {
+                    results.push((account_id.clone(), latest.clone()));
                 }
             }
         }
@@ -171,25 +141,11 @@ impl Storage for MemoryStorage {
         Ok(results)
     }
 
-    async fn get_latest_balances_for_account(&self, account_id: &Id) -> Result<Vec<Balance>> {
+    async fn get_latest_balance_snapshot(&self, account_id: &Id) -> Result<Option<BalanceSnapshot>> {
         let balances = self.balances.lock().await;
-
-        if let Some(account_balances) = balances.get(account_id) {
-            let mut latest: HashMap<Asset, Balance> = HashMap::new();
-            for balance in account_balances {
-                latest
-                    .entry(balance.asset.clone())
-                    .and_modify(|existing| {
-                        if balance.timestamp > existing.timestamp {
-                            *existing = balance.clone();
-                        }
-                    })
-                    .or_insert(balance.clone());
-            }
-            Ok(latest.into_values().collect())
-        } else {
-            Ok(Vec::new())
-        }
+        Ok(balances
+            .get(account_id)
+            .and_then(|snapshots| snapshots.iter().max_by_key(|s| s.timestamp).cloned()))
     }
 
     async fn get_transactions(&self, account_id: &Id) -> Result<Vec<Transaction>> {
