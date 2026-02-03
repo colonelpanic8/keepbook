@@ -39,6 +39,10 @@ impl JsonFileStorage {
         self.base_path.join("connections")
     }
 
+    fn connections_by_name_dir(&self) -> PathBuf {
+        self.connections_dir().join("by-name")
+    }
+
     fn accounts_dir(&self) -> PathBuf {
         self.base_path.join("accounts")
     }
