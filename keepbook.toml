@@ -1,4 +1,0 @@
-data_dir = "data"
-
-[refresh]
-price_staleness = "1h"
