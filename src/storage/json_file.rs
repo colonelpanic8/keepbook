@@ -475,6 +475,8 @@ impl Storage for JsonFileStorage {
         // Only save state - config is human-managed
         self.write_json(&self.connection_state_file(conn.id()), &conn.state).await?;
         self.update_account_symlinks(conn).await?;
+        // Rebuild connection by-name symlinks (handles creates and name changes)
+        let _ = self.rebuild_connection_symlinks().await;
         Ok(())
     }
 
@@ -484,6 +486,8 @@ impl Storage for JsonFileStorage {
             fs::remove_dir_all(&dir)
                 .await
                 .with_context(|| format!("Failed to delete connection directory: {}", dir.display()))?;
+            // Rebuild symlinks to remove stale one
+            let _ = self.rebuild_connection_symlinks().await;
             Ok(true)
         } else {
             Ok(false)
