@@ -7,7 +7,7 @@ use chrono::Utc;
 use clap::{Parser, Subcommand};
 use keepbook::config::ResolvedConfig;
 use keepbook::market_data::{JsonlMarketDataStore, MarketDataStore, PriceSourceRegistry};
-use keepbook::models::{Account, Asset, Balance, Connection, ConnectionConfig, ConnectionState, Id};
+use keepbook::models::{Account, Asset, AssetBalance, BalanceSnapshot, Connection, ConnectionConfig, ConnectionState, Id};
 use keepbook::storage::{JsonFileStorage, Storage};
 use keepbook::sync::synchronizers::{CoinbaseSynchronizer, SchwabSynchronizer};
 use keepbook::sync::{AuthStatus, InteractiveAuth};
@@ -512,54 +512,56 @@ async fn main() -> Result<()> {
                     use std::collections::HashSet;
 
                     // Load balances to find unique assets that need prices
-                    let balances = storage.get_latest_balances().await?;
+                    let snapshots = storage.get_latest_balances().await?;
                     let mut seen_assets: HashSet<String> = HashSet::new();
 
-                    for (_, balance) in &balances {
-                        match &balance.asset {
-                            keepbook::models::Asset::Equity { .. }
-                            | keepbook::models::Asset::Crypto { .. } => {
-                                let asset_id = AssetId::from_asset(&balance.asset);
-                                let asset_key = asset_id.to_string();
+                    for (_, snapshot) in &snapshots {
+                        for asset_balance in &snapshot.balances {
+                            match &asset_balance.asset {
+                                keepbook::models::Asset::Equity { .. }
+                                | keepbook::models::Asset::Crypto { .. } => {
+                                    let asset_id = AssetId::from_asset(&asset_balance.asset);
+                                    let asset_key = asset_id.to_string();
 
-                                if seen_assets.contains(&asset_key) {
-                                    continue;
-                                }
-                                seen_assets.insert(asset_key.clone());
+                                    if seen_assets.contains(&asset_key) {
+                                        continue;
+                                    }
+                                    seen_assets.insert(asset_key.clone());
 
-                                // Find most recent cached price (quote or close, with lookback)
-                                let mut cached_price = None;
+                                    // Find most recent cached price (quote or close, with lookback)
+                                    let mut cached_price = None;
 
-                                // Try Quote for today first
-                                if let Some(p) = store
-                                    .get_price(&asset_id, query.as_of_date, PriceKind::Quote)
-                                    .await?
-                                {
-                                    cached_price = Some(p);
-                                }
+                                    // Try Quote for today first
+                                    if let Some(p) = store
+                                        .get_price(&asset_id, query.as_of_date, PriceKind::Quote)
+                                        .await?
+                                    {
+                                        cached_price = Some(p);
+                                    }
 
-                                // If no quote, try Close with lookback (7 days)
-                                if cached_price.is_none() {
-                                    for offset in 0..=7i64 {
-                                        let target_date = query.as_of_date - chrono::Duration::days(offset);
-                                        if let Some(p) = store
-                                            .get_price(&asset_id, target_date, PriceKind::Close)
-                                            .await?
-                                        {
-                                            cached_price = Some(p);
-                                            break;
+                                    // If no quote, try Close with lookback (7 days)
+                                    if cached_price.is_none() {
+                                        for offset in 0..=7i64 {
+                                            let target_date = query.as_of_date - chrono::Duration::days(offset);
+                                            if let Some(p) = store
+                                                .get_price(&asset_id, target_date, PriceKind::Close)
+                                                .await?
+                                            {
+                                                cached_price = Some(p);
+                                                break;
+                                            }
                                         }
                                     }
-                                }
 
-                                let check = check_price_staleness(
-                                    cached_price.as_ref(),
-                                    config.refresh.price_staleness,
-                                );
-                                log_price_staleness(&asset_key, &check);
-                            }
-                            keepbook::models::Asset::Currency { .. } => {
-                                // Currency doesn't need price lookup (only FX)
+                                    let check = check_price_staleness(
+                                        cached_price.as_ref(),
+                                        config.refresh.price_staleness,
+                                    );
+                                    log_price_staleness(&asset_key, &check);
+                                }
+                                keepbook::models::Asset::Currency { .. } => {
+                                    // Currency doesn't need price lookup (only FX)
+                                }
                             }
                         }
                     }
@@ -696,14 +698,17 @@ fn list_price_sources(data_dir: &std::path::Path) -> Result<Vec<PriceSourceOutpu
 }
 
 async fn list_balances(storage: &JsonFileStorage) -> Result<Vec<BalanceOutput>> {
-    let balances = storage.get_latest_balances().await?;
-    Ok(balances
+    let snapshots = storage.get_latest_balances().await?;
+    Ok(snapshots
         .into_iter()
-        .map(|(account_id, balance)| BalanceOutput {
-            account_id: account_id.to_string(),
-            asset: serde_json::to_value(&balance.asset).unwrap_or_default(),
-            amount: balance.amount.clone(),
-            timestamp: balance.timestamp.to_rfc3339(),
+        .flat_map(|(account_id, snapshot)| {
+            let ts = snapshot.timestamp;
+            snapshot.balances.into_iter().map(move |ab| BalanceOutput {
+                account_id: account_id.to_string(),
+                asset: serde_json::to_value(&ab.asset).unwrap_or_default(),
+                amount: ab.amount,
+                timestamp: ts.to_rfc3339(),
+            })
         })
         .collect())
 }
@@ -864,11 +869,12 @@ async fn set_balance(
     // Parse asset string (formats: "USD", "equity:AAPL", "crypto:BTC")
     let asset = parse_asset(asset_str)?;
 
-    // Create balance
-    let balance = Balance::new(asset.clone(), amount);
+    // Create balance snapshot with single asset
+    let asset_balance = AssetBalance::new(asset.clone(), amount);
+    let snapshot = BalanceSnapshot::now(vec![asset_balance]);
 
-    // Append balance
-    storage.append_balances(&id, &[balance.clone()]).await?;
+    // Append balance snapshot
+    storage.append_balance_snapshot(&id, &snapshot).await?;
 
     Ok(serde_json::json!({
         "success": true,
@@ -876,7 +882,7 @@ async fn set_balance(
             "account_id": account_id,
             "asset": serde_json::to_value(&asset)?,
             "amount": amount,
-            "timestamp": balance.timestamp.to_rfc3339()
+            "timestamp": snapshot.timestamp.to_rfc3339()
         }
     }))
 }
