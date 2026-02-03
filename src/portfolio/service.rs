@@ -429,7 +429,7 @@ impl PortfolioService {
 mod tests {
     use super::*;
     use crate::market_data::{MarketDataStore, MemoryMarketDataStore};
-    use crate::models::{Account, Asset, Balance, ConnectionConfig, Connection};
+    use crate::models::{Account, Asset, AssetBalance, BalanceSnapshot, ConnectionConfig, Connection};
     use crate::storage::MemoryStorage;
     use chrono::{TimeZone, Utc};
     use super::super::Grouping;
@@ -449,9 +449,11 @@ mod tests {
         let account = Account::new("Checking", connection.id().clone());
         storage.save_account(&account).await?;
 
-        let balance = Balance::new(Asset::currency("USD"), "1000.00")
-            .with_timestamp(Utc.with_ymd_and_hms(2026, 2, 1, 12, 0, 0).unwrap());
-        storage.save_balance(&account.id, &balance).await?;
+        let snapshot = BalanceSnapshot::new(
+            Utc.with_ymd_and_hms(2026, 2, 1, 12, 0, 0).unwrap(),
+            vec![AssetBalance::new(Asset::currency("USD"), "1000.00")],
+        );
+        storage.append_balance_snapshot(&account.id, &snapshot).await?;
 
         // Setup market data (no prices needed for USD->USD)
         let store = Arc::new(MemoryMarketDataStore::new());
@@ -490,9 +492,11 @@ mod tests {
         storage.save_account(&account).await?;
 
         // 10 shares of AAPL
-        let balance = Balance::new(Asset::equity("AAPL"), "10")
-            .with_timestamp(Utc.with_ymd_and_hms(2026, 2, 1, 12, 0, 0).unwrap());
-        storage.save_balance(&account.id, &balance).await?;
+        let snapshot = BalanceSnapshot::new(
+            Utc.with_ymd_and_hms(2026, 2, 1, 12, 0, 0).unwrap(),
+            vec![AssetBalance::new(Asset::equity("AAPL"), "10")],
+        );
+        storage.append_balance_snapshot(&account.id, &snapshot).await?;
 
         // Setup market data with AAPL at $200 and USD/EUR at 0.91
         let store = Arc::new(MemoryMarketDataStore::new());
@@ -567,12 +571,16 @@ mod tests {
         storage.save_account(&account2).await?;
 
         // Add USD balances to both accounts
-        let balance1 = Balance::new(Asset::currency("USD"), "1000")
-            .with_timestamp(Utc.with_ymd_and_hms(2026, 2, 1, 12, 0, 0).unwrap());
-        let balance2 = Balance::new(Asset::currency("USD"), "2000")
-            .with_timestamp(Utc.with_ymd_and_hms(2026, 2, 1, 14, 0, 0).unwrap());
-        storage.save_balance(&account1.id, &balance1).await?;
-        storage.save_balance(&account2.id, &balance2).await?;
+        let snapshot1 = BalanceSnapshot::new(
+            Utc.with_ymd_and_hms(2026, 2, 1, 12, 0, 0).unwrap(),
+            vec![AssetBalance::new(Asset::currency("USD"), "1000")],
+        );
+        let snapshot2 = BalanceSnapshot::new(
+            Utc.with_ymd_and_hms(2026, 2, 1, 14, 0, 0).unwrap(),
+            vec![AssetBalance::new(Asset::currency("USD"), "2000")],
+        );
+        storage.append_balance_snapshot(&account1.id, &snapshot1).await?;
+        storage.append_balance_snapshot(&account2.id, &snapshot2).await?;
 
         let store = Arc::new(MemoryMarketDataStore::new());
         let market_data = Arc::new(MarketDataService::new(store, None));

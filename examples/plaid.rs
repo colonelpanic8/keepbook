@@ -10,11 +10,11 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDate, Utc};
 use keepbook::models::{
-    Account, Asset, Balance, Connection, ConnectionConfig, ConnectionStatus, Id, LastSync, SyncStatus, Transaction,
+    Account, Asset, AssetBalance, Connection, ConnectionConfig, ConnectionStatus, Id, LastSync, SyncStatus, Transaction,
     TransactionStatus,
 };
 use keepbook::storage::{JsonFileStorage, Storage};
-use keepbook::sync::{SyncedBalance, SyncResult};
+use keepbook::sync::{SyncedAssetBalance, SyncResult};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
@@ -269,7 +269,7 @@ impl PlaidSynchronizer {
             });
 
         let mut accounts = Vec::new();
-        let mut balances: Vec<(Id, Vec<SyncedBalance>)> = Vec::new();
+        let mut balances: Vec<(Id, Vec<SyncedAssetBalance>)> = Vec::new();
         let mut transactions: Vec<(Id, Vec<Transaction>)> = Vec::new();
 
         // Build a map of account_id -> transactions
@@ -316,7 +316,7 @@ impl PlaidSynchronizer {
             };
 
             // Record current balance
-            let balance = Balance::new(
+            let asset_balance = AssetBalance::new(
                 asset.clone(),
                 plaid_account
                     .balances
@@ -360,7 +360,7 @@ impl PlaidSynchronizer {
                 .unwrap_or_default();
 
             accounts.push(account);
-            balances.push((account_id.clone(), vec![SyncedBalance::new(balance)]));
+            balances.push((account_id.clone(), vec![SyncedAssetBalance::new(asset_balance)]));
             transactions.push((account_id, account_transactions));
         }
 
