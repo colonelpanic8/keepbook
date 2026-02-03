@@ -26,14 +26,13 @@ impl JsonlMarketDataStore {
 
     fn prices_dir(&self, asset_id: &AssetId) -> PathBuf {
         self.base_path
-            .join("market")
             .join("prices")
             .join(asset_id.to_string())
     }
 
     fn fx_dir(&self, base: &str, quote: &str) -> PathBuf {
         let pair = format!("{}-{}", sanitize_code(base), sanitize_code(quote));
-        self.base_path.join("market").join("fx").join(pair)
+        self.base_path.join("fx").join(pair)
     }
 
     fn price_file(&self, asset_id: &AssetId, date: NaiveDate) -> PathBuf {
