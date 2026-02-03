@@ -106,10 +106,10 @@ impl<S: Storage + Send + Sync> SyncOrchestrator<S> {
         date: NaiveDate,
         force: bool,
     ) -> Result<PriceRefreshResult> {
-        let balances = self.storage.get_latest_balances().await?;
-        let assets: HashSet<Asset> = balances
+        let snapshots = self.storage.get_latest_balances().await?;
+        let assets: HashSet<Asset> = snapshots
             .into_iter()
-            .map(|(_, b)| b.asset)
+            .flat_map(|(_, snapshot)| snapshot.balances.into_iter().map(|ab| ab.asset))
             .collect();
         self.ensure_prices(&assets, date, force).await
     }
@@ -121,10 +121,10 @@ impl<S: Storage + Send + Sync> SyncOrchestrator<S> {
         date: NaiveDate,
         force: bool,
     ) -> Result<PriceRefreshResult> {
-        let balances = self.storage.get_latest_balances_for_connection(connection_id).await?;
-        let assets: HashSet<Asset> = balances
+        let snapshots = self.storage.get_latest_balances_for_connection(connection_id).await?;
+        let assets: HashSet<Asset> = snapshots
             .into_iter()
-            .map(|(_, b)| b.asset)
+            .flat_map(|(_, snapshot)| snapshot.balances.into_iter().map(|ab| ab.asset))
             .collect();
         self.ensure_prices(&assets, date, force).await
     }
@@ -136,11 +136,10 @@ impl<S: Storage + Send + Sync> SyncOrchestrator<S> {
         date: NaiveDate,
         force: bool,
     ) -> Result<PriceRefreshResult> {
-        let balances = self.storage.get_latest_balances_for_account(account_id).await?;
-        let assets: HashSet<Asset> = balances
-            .into_iter()
-            .map(|b| b.asset)
-            .collect();
+        let snapshot = self.storage.get_latest_balance_snapshot(account_id).await?;
+        let assets: HashSet<Asset> = snapshot
+            .map(|s| s.balances.into_iter().map(|ab| ab.asset).collect())
+            .unwrap_or_default();
         self.ensure_prices(&assets, date, force).await
     }
 
@@ -169,7 +168,7 @@ impl<S: Storage + Send + Sync> SyncOrchestrator<S> {
         // 4. Collect assets that need prices
         let assets: HashSet<Asset> = result.balances
             .iter()
-            .flat_map(|(_, sbs)| sbs.iter().map(|sb| sb.balance.asset.clone()))
+            .flat_map(|(_, sbs)| sbs.iter().map(|sb| sb.asset_balance.asset.clone()))
             .collect();
 
         // 5. Fetch missing prices
