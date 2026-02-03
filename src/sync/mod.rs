@@ -7,19 +7,19 @@ pub use synchronizers::create_synchronizer;
 
 use anyhow::Result;
 use crate::market_data::PricePoint;
-use crate::models::{Account, Balance, Connection, Id, Transaction};
+use crate::models::{Account, AssetBalance, BalanceSnapshot, Connection, Id, Transaction};
 use crate::storage::Storage;
 
-/// A balance paired with optional price data from the synchronizer.
+/// An asset balance paired with optional price data from the synchronizer.
 #[derive(Debug, Clone)]
-pub struct SyncedBalance {
-    pub balance: Balance,
+pub struct SyncedAssetBalance {
+    pub asset_balance: AssetBalance,
     pub price: Option<PricePoint>,
 }
 
-impl SyncedBalance {
-    pub fn new(balance: Balance) -> Self {
-        Self { balance, price: None }
+impl SyncedAssetBalance {
+    pub fn new(asset_balance: AssetBalance) -> Self {
+        Self { asset_balance, price: None }
     }
 
     pub fn with_price(mut self, price: PricePoint) -> Self {
@@ -32,7 +32,7 @@ impl SyncedBalance {
 pub struct SyncResult {
     pub connection: Connection,
     pub accounts: Vec<Account>,
-    pub balances: Vec<(Id, Vec<SyncedBalance>)>,
+    pub balances: Vec<(Id, Vec<SyncedAssetBalance>)>,
     pub transactions: Vec<(Id, Vec<Transaction>)>,
 }
 
@@ -46,12 +46,13 @@ impl SyncResult {
         }
 
         for (account_id, synced_balances) in &self.balances {
-            let balances: Vec<Balance> = synced_balances
-                .iter()
-                .map(|sb| sb.balance.clone())
-                .collect();
-            if !balances.is_empty() {
-                storage.append_balances(account_id, &balances).await?;
+            if !synced_balances.is_empty() {
+                let asset_balances: Vec<AssetBalance> = synced_balances
+                    .iter()
+                    .map(|sb| sb.asset_balance.clone())
+                    .collect();
+                let snapshot = BalanceSnapshot::now(asset_balances);
+                storage.append_balance_snapshot(account_id, &snapshot).await?;
             }
         }
 
