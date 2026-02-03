@@ -20,11 +20,7 @@ pub trait EquityPriceSource: Send + Sync {
 
     /// Fetch real-time or delayed quote (current price).
     /// Default implementation returns None (not supported).
-    async fn fetch_quote(
-        &self,
-        _asset: &Asset,
-        _asset_id: &AssetId,
-    ) -> Result<Option<PricePoint>> {
+    async fn fetch_quote(&self, _asset: &Asset, _asset_id: &AssetId) -> Result<Option<PricePoint>> {
         Ok(None)
     }
 
@@ -43,11 +39,7 @@ pub trait CryptoPriceSource: Send + Sync {
 
     /// Fetch real-time or delayed quote (current price).
     /// Default implementation returns None (not supported).
-    async fn fetch_quote(
-        &self,
-        _asset: &Asset,
-        _asset_id: &AssetId,
-    ) -> Result<Option<PricePoint>> {
+    async fn fetch_quote(&self, _asset: &Asset, _asset_id: &AssetId) -> Result<Option<PricePoint>> {
         Ok(None)
     }
 
@@ -56,8 +48,12 @@ pub trait CryptoPriceSource: Send + Sync {
 
 #[async_trait::async_trait]
 pub trait FxRateSource: Send + Sync {
-    async fn fetch_close(&self, base: &str, quote: &str, date: NaiveDate)
-        -> Result<Option<FxRatePoint>>;
+    async fn fetch_close(
+        &self,
+        base: &str,
+        quote: &str,
+        date: NaiveDate,
+    ) -> Result<Option<FxRatePoint>>;
 
     fn name(&self) -> &str;
 }
@@ -311,7 +307,12 @@ impl FxRateRouter {
                     return Ok(Some(rate));
                 }
                 Ok(None) => {
-                    debug!(source = source.name(), base = base, quote = quote, "no rate from source");
+                    debug!(
+                        source = source.name(),
+                        base = base,
+                        quote = quote,
+                        "no rate from source"
+                    );
                     continue;
                 }
                 Err(e) => {

@@ -19,6 +19,10 @@ path = "examples/plaid.rs"
 name = "eodhd_test"
 path = "examples/eodhd_test.rs"
 
+[[example]]
+name = "chase_browser_poc"
+path = "examples/chase_browser_poc.rs"
+
 [dependencies]
 # Async runtime
 tokio = { version = "1", features = ["full"] }

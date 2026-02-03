@@ -25,7 +25,10 @@ async fn test_coingecko_live_btc() {
 
     match result {
         Ok(Some(price_point)) => {
-            println!("BTC price on {}: {} {}", date, price_point.price, price_point.quote_currency);
+            println!(
+                "BTC price on {}: {} {}",
+                date, price_point.price, price_point.quote_currency
+            );
             assert!(!price_point.price.is_empty());
             assert_eq!(price_point.quote_currency.to_lowercase(), "usd");
         }
@@ -52,7 +55,10 @@ async fn test_coingecko_live_eth() {
 
     match result {
         Ok(Some(price_point)) => {
-            println!("ETH price on {}: {} {}", date, price_point.price, price_point.quote_currency);
+            println!(
+                "ETH price on {}: {} {}",
+                date, price_point.price, price_point.quote_currency
+            );
             assert!(!price_point.price.is_empty());
         }
         Ok(None) => panic!("No price data returned for ETH"),

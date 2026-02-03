@@ -6,9 +6,9 @@ pub use json_file::JsonFileStorage;
 #[cfg(test)]
 pub use memory::MemoryStorage;
 
-use anyhow::Result;
 use crate::credentials::CredentialStore;
 use crate::models::{Account, BalanceSnapshot, Connection, Id, Transaction};
+use anyhow::Result;
 
 /// Storage trait for persisting financial data.
 #[async_trait::async_trait]
@@ -29,16 +29,24 @@ pub trait Storage: Send + Sync {
 
     // Balance Snapshots
     async fn get_balance_snapshots(&self, account_id: &Id) -> Result<Vec<BalanceSnapshot>>;
-    async fn append_balance_snapshot(&self, account_id: &Id, snapshot: &BalanceSnapshot) -> Result<()>;
+    async fn append_balance_snapshot(
+        &self,
+        account_id: &Id,
+        snapshot: &BalanceSnapshot,
+    ) -> Result<()>;
 
     /// Get the most recent balance snapshot for a specific account.
-    async fn get_latest_balance_snapshot(&self, account_id: &Id) -> Result<Option<BalanceSnapshot>>;
+    async fn get_latest_balance_snapshot(&self, account_id: &Id)
+        -> Result<Option<BalanceSnapshot>>;
 
     /// Get the most recent balance snapshot for each account across all accounts.
     async fn get_latest_balances(&self) -> Result<Vec<(Id, BalanceSnapshot)>>;
 
     /// Get the most recent balance snapshot for each account belonging to a connection.
-    async fn get_latest_balances_for_connection(&self, connection_id: &Id) -> Result<Vec<(Id, BalanceSnapshot)>>;
+    async fn get_latest_balances_for_connection(
+        &self,
+        connection_id: &Id,
+    ) -> Result<Vec<(Id, BalanceSnapshot)>>;
 
     // Transactions
     async fn get_transactions(&self, account_id: &Id) -> Result<Vec<Transaction>>;

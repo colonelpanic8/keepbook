@@ -30,7 +30,10 @@ pub struct BalanceSnapshot {
 
 impl BalanceSnapshot {
     pub fn new(timestamp: DateTime<Utc>, balances: Vec<AssetBalance>) -> Self {
-        Self { timestamp, balances }
+        Self {
+            timestamp,
+            balances,
+        }
     }
 
     pub fn now(balances: Vec<AssetBalance>) -> Self {

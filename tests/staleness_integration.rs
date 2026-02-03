@@ -13,7 +13,10 @@ price_staleness = "1h"
 "#;
 
     let config: keepbook::config::Config = toml::from_str(toml).unwrap();
-    assert_eq!(config.refresh.balance_staleness, Duration::from_secs(7 * 24 * 60 * 60));
+    assert_eq!(
+        config.refresh.balance_staleness,
+        Duration::from_secs(7 * 24 * 60 * 60)
+    );
     assert_eq!(config.refresh.price_staleness, Duration::from_secs(60 * 60));
 }
 
@@ -26,7 +29,10 @@ balance_staleness = "3d"
 "#;
 
     let config: keepbook::models::ConnectionConfig = toml::from_str(toml).unwrap();
-    assert_eq!(config.balance_staleness, Some(Duration::from_secs(3 * 24 * 60 * 60)));
+    assert_eq!(
+        config.balance_staleness,
+        Some(Duration::from_secs(3 * 24 * 60 * 60))
+    );
 }
 
 #[test]
@@ -38,9 +44,15 @@ data_dir = "data"
 
     let config: keepbook::config::Config = toml::from_str(toml).unwrap();
     // Default balance_staleness is 14 days
-    assert_eq!(config.refresh.balance_staleness, Duration::from_secs(14 * 24 * 60 * 60));
+    assert_eq!(
+        config.refresh.balance_staleness,
+        Duration::from_secs(14 * 24 * 60 * 60)
+    );
     // Default price_staleness is 24 hours
-    assert_eq!(config.refresh.price_staleness, Duration::from_secs(24 * 60 * 60));
+    assert_eq!(
+        config.refresh.price_staleness,
+        Duration::from_secs(24 * 60 * 60)
+    );
 }
 
 #[test]
@@ -54,9 +66,15 @@ balance_staleness = "7d"
 "#;
 
     let config: keepbook::config::Config = toml::from_str(toml).unwrap();
-    assert_eq!(config.refresh.balance_staleness, Duration::from_secs(7 * 24 * 60 * 60));
+    assert_eq!(
+        config.refresh.balance_staleness,
+        Duration::from_secs(7 * 24 * 60 * 60)
+    );
     // price_staleness should use default (24 hours)
-    assert_eq!(config.refresh.price_staleness, Duration::from_secs(24 * 60 * 60));
+    assert_eq!(
+        config.refresh.price_staleness,
+        Duration::from_secs(24 * 60 * 60)
+    );
 }
 
 #[test]
@@ -77,7 +95,10 @@ balance_staleness = "2d"
 "#;
 
     let config: keepbook::models::AccountConfig = toml::from_str(toml).unwrap();
-    assert_eq!(config.balance_staleness, Some(Duration::from_secs(2 * 24 * 60 * 60)));
+    assert_eq!(
+        config.balance_staleness,
+        Some(Duration::from_secs(2 * 24 * 60 * 60))
+    );
 }
 
 #[test]
@@ -102,7 +123,10 @@ balance_staleness = "12h"
 price_staleness = "30m"
 "#;
     let config: keepbook::config::Config = toml::from_str(toml).unwrap();
-    assert_eq!(config.refresh.balance_staleness, Duration::from_secs(12 * 60 * 60));
+    assert_eq!(
+        config.refresh.balance_staleness,
+        Duration::from_secs(12 * 60 * 60)
+    );
     assert_eq!(config.refresh.price_staleness, Duration::from_secs(30 * 60));
 }
 
@@ -128,7 +152,10 @@ balance_staleness = "14d"
 "#;
 
     let config: keepbook::models::ConnectionConfig = toml::from_str(toml).unwrap();
-    assert_eq!(config.balance_staleness, Some(Duration::from_secs(14 * 24 * 60 * 60)));
+    assert_eq!(
+        config.balance_staleness,
+        Some(Duration::from_secs(14 * 24 * 60 * 60))
+    );
 }
 
 #[test]
@@ -141,5 +168,8 @@ balance_staleness = "2w"
 "#;
 
     let result: Result<keepbook::models::ConnectionConfig, _> = toml::from_str(toml);
-    assert!(result.is_err(), "Invalid duration format 'w' should be rejected");
+    assert!(
+        result.is_err(),
+        "Invalid duration format 'w' should be rejected"
+    );
 }

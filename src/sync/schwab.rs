@@ -110,7 +110,8 @@ pub struct Position {
 }
 
 impl SchwabClient {
-    const API_BASE: &'static str = "https://ausgateway.schwab.com/api/is.ClientSummaryExpWeb/V1/api";
+    const API_BASE: &'static str =
+        "https://ausgateway.schwab.com/api/is.ClientSummaryExpWeb/V1/api";
 
     /// Create a new Schwab client with session data.
     pub fn new(session: SessionData) -> Result<Self> {

@@ -73,8 +73,7 @@ impl PassCredentialStore {
             anyhow::bail!("pass command failed: {}", stderr.trim());
         }
 
-        let content =
-            String::from_utf8(output.stdout).context("Invalid UTF-8 in pass output")?;
+        let content = String::from_utf8(output.stdout).context("Invalid UTF-8 in pass output")?;
 
         Ok(PassEntry::parse(&content))
     }
@@ -122,7 +121,10 @@ impl CredentialStore for PassCredentialStore {
         let field = self.field_name(key);
         let entry = self.read_entry()?;
 
-        Ok(entry.fields.get(field).map(|v| SecretString::from(v.clone())))
+        Ok(entry
+            .fields
+            .get(field)
+            .map(|v| SecretString::from(v.clone())))
     }
 
     async fn set(&self, key: &str, value: SecretString) -> Result<()> {
@@ -204,7 +206,11 @@ mod tests {
             entry.fields.get("key-name"),
             Some(&"organizations/abc".to_string())
         );
-        assert!(entry.fields.get("private-key").unwrap().contains("BEGIN EC PRIVATE KEY"));
+        assert!(entry
+            .fields
+            .get("private-key")
+            .unwrap()
+            .contains("BEGIN EC PRIVATE KEY"));
         assert!(entry.fields.get("private-key").unwrap().contains('\n'));
     }
 

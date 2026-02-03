@@ -8,11 +8,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use chrono::Utc;
 use chromiumoxide::browser::{Browser, BrowserConfig};
 use chromiumoxide::cdp::browser_protocol::fetch::{
     self, EventRequestPaused, RequestPattern, RequestStage,
 };
+use chrono::Utc;
 use futures::StreamExt;
 use tokio::sync::Mutex;
 
@@ -22,7 +22,7 @@ use crate::models::{
     Account, Asset, AssetBalance, Connection, ConnectionStatus, Id, LastSync, SyncStatus,
 };
 use crate::storage::Storage;
-use crate::sync::schwab::{SchwabClient, Position};
+use crate::sync::schwab::{Position, SchwabClient};
 use crate::sync::{AuthStatus, InteractiveAuth, SyncResult, SyncedAssetBalance, Synchronizer};
 
 const SCHWAB_LOGIN_URL: &str = "https://client.schwab.com/Login/SignOn/CustomerCenterLogin.aspx";
@@ -36,7 +36,10 @@ pub struct SchwabSynchronizer {
 
 impl SchwabSynchronizer {
     /// Create a new Schwab synchronizer for a connection.
-    pub async fn from_connection<S: Storage>(connection: &Connection, _storage: &S) -> Result<Self> {
+    pub async fn from_connection<S: Storage>(
+        connection: &Connection,
+        _storage: &S,
+    ) -> Result<Self> {
         let session_cache = SessionCache::new()?;
 
         Ok(Self {
@@ -130,7 +133,8 @@ impl SchwabSynchronizer {
                     }
 
                     let asset = Asset::equity(&position.default_symbol);
-                    let asset_balance = AssetBalance::new(asset.clone(), position.quantity.to_string());
+                    let asset_balance =
+                        AssetBalance::new(asset.clone(), position.quantity.to_string());
 
                     let price_point = PricePoint {
                         asset_id: AssetId::from_asset(&asset),
@@ -141,7 +145,8 @@ impl SchwabSynchronizer {
                         kind: PriceKind::Close,
                         source: "schwab".to_string(),
                     };
-                    account_balances.push(SyncedAssetBalance::new(asset_balance).with_price(price_point));
+                    account_balances
+                        .push(SyncedAssetBalance::new(asset_balance).with_price(price_point));
                 }
 
                 // Add actual cash balance from account balances (not from CASH position)
@@ -263,9 +268,7 @@ impl InteractiveAuth for SchwabSynchronizer {
             .context("Failed to launch browser")?;
 
         // Spawn the handler task
-        let handler_task = tokio::spawn(async move {
-            while (handler.next().await).is_some() {}
-        });
+        let handler_task = tokio::spawn(async move { while (handler.next().await).is_some() {} });
 
         // Create a new page
         let page = browser.new_page("about:blank").await?;
@@ -407,10 +410,7 @@ fn find_chrome() -> Option<String> {
         }
     }
 
-    if let Ok(output) = std::process::Command::new("which")
-        .arg("chromium")
-        .output()
-    {
+    if let Ok(output) = std::process::Command::new("which").arg("chromium").output() {
         if output.status.success() {
             let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if !path.is_empty() {

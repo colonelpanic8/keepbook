@@ -38,7 +38,10 @@ impl Default for MemoryStorage {
 
 #[async_trait::async_trait]
 impl Storage for MemoryStorage {
-    fn get_credential_store(&self, _connection_id: &Id) -> Result<Option<Box<dyn CredentialStore>>> {
+    fn get_credential_store(
+        &self,
+        _connection_id: &Id,
+    ) -> Result<Option<Box<dyn CredentialStore>>> {
         Ok(None)
     }
 
@@ -89,7 +92,11 @@ impl Storage for MemoryStorage {
         Ok(balances.get(account_id).cloned().unwrap_or_default())
     }
 
-    async fn append_balance_snapshot(&self, account_id: &Id, snapshot: &BalanceSnapshot) -> Result<()> {
+    async fn append_balance_snapshot(
+        &self,
+        account_id: &Id,
+        snapshot: &BalanceSnapshot,
+    ) -> Result<()> {
         let mut balances = self.balances.lock().await;
         balances
             .entry(account_id.clone())
@@ -114,7 +121,10 @@ impl Storage for MemoryStorage {
         Ok(results)
     }
 
-    async fn get_latest_balances_for_connection(&self, connection_id: &Id) -> Result<Vec<(Id, BalanceSnapshot)>> {
+    async fn get_latest_balances_for_connection(
+        &self,
+        connection_id: &Id,
+    ) -> Result<Vec<(Id, BalanceSnapshot)>> {
         let connections = self.connections.lock().await;
         let accounts = self.accounts.lock().await;
         let balances = self.balances.lock().await;
@@ -141,7 +151,10 @@ impl Storage for MemoryStorage {
         Ok(results)
     }
 
-    async fn get_latest_balance_snapshot(&self, account_id: &Id) -> Result<Option<BalanceSnapshot>> {
+    async fn get_latest_balance_snapshot(
+        &self,
+        account_id: &Id,
+    ) -> Result<Option<BalanceSnapshot>> {
         let balances = self.balances.lock().await;
         Ok(balances
             .get(account_id)

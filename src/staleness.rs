@@ -19,15 +19,27 @@ pub struct StalenessCheck {
 
 impl StalenessCheck {
     pub fn stale(age: Duration, threshold: Duration) -> Self {
-        Self { is_stale: true, age: Some(age), threshold }
+        Self {
+            is_stale: true,
+            age: Some(age),
+            threshold,
+        }
     }
 
     pub fn fresh(age: Duration, threshold: Duration) -> Self {
-        Self { is_stale: false, age: Some(age), threshold }
+        Self {
+            is_stale: false,
+            age: Some(age),
+            threshold,
+        }
     }
 
     pub fn missing(threshold: Duration) -> Self {
-        Self { is_stale: true, age: None, threshold }
+        Self {
+            is_stale: true,
+            age: None,
+            threshold,
+        }
     }
 }
 
@@ -84,7 +96,8 @@ pub fn check_price_staleness(price: Option<&PricePoint>, threshold: Duration) ->
 /// Log staleness check results for a connection's balances.
 pub fn log_balance_staleness(connection_name: &str, check: &StalenessCheck) {
     let status = if check.is_stale { "stale" } else { "fresh" };
-    let age_str = check.age
+    let age_str = check
+        .age
         .map(crate::duration::format_duration)
         .unwrap_or_else(|| "never".to_string());
     let threshold_str = crate::duration::format_duration(check.threshold);
@@ -101,7 +114,8 @@ pub fn log_balance_staleness(connection_name: &str, check: &StalenessCheck) {
 /// Log price staleness check results.
 pub fn log_price_staleness(asset_id: &str, check: &StalenessCheck) {
     let status = if check.is_stale { "stale" } else { "fresh" };
-    let age_str = check.age
+    let age_str = check
+        .age
         .map(crate::duration::format_duration)
         .unwrap_or_else(|| "never".to_string());
     let threshold_str = crate::duration::format_duration(check.threshold);

@@ -288,7 +288,8 @@ mod tests {
 
     #[test]
     fn test_parse_empty_response() {
-        let data: Vec<EodhdEodResponse> = serde_json::from_str(SAMPLE_EODHD_RESPONSE_EMPTY).unwrap();
+        let data: Vec<EodhdEodResponse> =
+            serde_json::from_str(SAMPLE_EODHD_RESPONSE_EMPTY).unwrap();
         assert!(data.is_empty());
     }
 
@@ -346,25 +347,46 @@ mod tests {
     #[test]
     fn test_build_symbol_us() {
         assert_eq!(EodhdPriceSource::build_symbol("AAPL", None), "AAPL.US");
-        assert_eq!(EodhdPriceSource::build_symbol("AAPL", Some("NYSE")), "AAPL.US");
+        assert_eq!(
+            EodhdPriceSource::build_symbol("AAPL", Some("NYSE")),
+            "AAPL.US"
+        );
         assert_eq!(
             EodhdPriceSource::build_symbol("AAPL", Some("NASDAQ")),
             "AAPL.US"
         );
-        assert_eq!(EodhdPriceSource::build_symbol("AAPL", Some("XNYS")), "AAPL.US");
-        assert_eq!(EodhdPriceSource::build_symbol("AAPL", Some("XNAS")), "AAPL.US");
+        assert_eq!(
+            EodhdPriceSource::build_symbol("AAPL", Some("XNYS")),
+            "AAPL.US"
+        );
+        assert_eq!(
+            EodhdPriceSource::build_symbol("AAPL", Some("XNAS")),
+            "AAPL.US"
+        );
     }
 
     #[test]
     fn test_build_symbol_uk() {
-        assert_eq!(EodhdPriceSource::build_symbol("VOD", Some("LSE")), "VOD.LSE");
-        assert_eq!(EodhdPriceSource::build_symbol("VOD", Some("XLON")), "VOD.LSE");
+        assert_eq!(
+            EodhdPriceSource::build_symbol("VOD", Some("LSE")),
+            "VOD.LSE"
+        );
+        assert_eq!(
+            EodhdPriceSource::build_symbol("VOD", Some("XLON")),
+            "VOD.LSE"
+        );
     }
 
     #[test]
     fn test_build_symbol_germany() {
-        assert_eq!(EodhdPriceSource::build_symbol("SAP", Some("XETRA")), "SAP.XETRA");
-        assert_eq!(EodhdPriceSource::build_symbol("SAP", Some("XETR")), "SAP.XETRA");
+        assert_eq!(
+            EodhdPriceSource::build_symbol("SAP", Some("XETRA")),
+            "SAP.XETRA"
+        );
+        assert_eq!(
+            EodhdPriceSource::build_symbol("SAP", Some("XETR")),
+            "SAP.XETRA"
+        );
         assert_eq!(
             EodhdPriceSource::build_symbol("SAP", Some("FRANKFURT")),
             "SAP.F"
@@ -374,22 +396,55 @@ mod tests {
     #[test]
     fn test_build_symbol_case_insensitive() {
         assert_eq!(EodhdPriceSource::build_symbol("aapl", None), "AAPL.US");
-        assert_eq!(EodhdPriceSource::build_symbol("Aapl", Some("nyse")), "AAPL.US");
+        assert_eq!(
+            EodhdPriceSource::build_symbol("Aapl", Some("nyse")),
+            "AAPL.US"
+        );
     }
 
     #[test]
     fn test_quote_currency_mapping() {
         assert_eq!(EodhdPriceSource::quote_currency_for_exchange(None), "USD");
-        assert_eq!(EodhdPriceSource::quote_currency_for_exchange(Some("NYSE")), "USD");
-        assert_eq!(EodhdPriceSource::quote_currency_for_exchange(Some("LSE")), "GBP");
-        assert_eq!(EodhdPriceSource::quote_currency_for_exchange(Some("XETRA")), "EUR");
-        assert_eq!(EodhdPriceSource::quote_currency_for_exchange(Some("TSE")), "JPY");
-        assert_eq!(EodhdPriceSource::quote_currency_for_exchange(Some("HKEX")), "HKD");
-        assert_eq!(EodhdPriceSource::quote_currency_for_exchange(Some("ASX")), "AUD");
-        assert_eq!(EodhdPriceSource::quote_currency_for_exchange(Some("TSX")), "CAD");
-        assert_eq!(EodhdPriceSource::quote_currency_for_exchange(Some("SIX")), "CHF");
-        assert_eq!(EodhdPriceSource::quote_currency_for_exchange(Some("SGX")), "SGD");
-        assert_eq!(EodhdPriceSource::quote_currency_for_exchange(Some("BSE")), "INR");
+        assert_eq!(
+            EodhdPriceSource::quote_currency_for_exchange(Some("NYSE")),
+            "USD"
+        );
+        assert_eq!(
+            EodhdPriceSource::quote_currency_for_exchange(Some("LSE")),
+            "GBP"
+        );
+        assert_eq!(
+            EodhdPriceSource::quote_currency_for_exchange(Some("XETRA")),
+            "EUR"
+        );
+        assert_eq!(
+            EodhdPriceSource::quote_currency_for_exchange(Some("TSE")),
+            "JPY"
+        );
+        assert_eq!(
+            EodhdPriceSource::quote_currency_for_exchange(Some("HKEX")),
+            "HKD"
+        );
+        assert_eq!(
+            EodhdPriceSource::quote_currency_for_exchange(Some("ASX")),
+            "AUD"
+        );
+        assert_eq!(
+            EodhdPriceSource::quote_currency_for_exchange(Some("TSX")),
+            "CAD"
+        );
+        assert_eq!(
+            EodhdPriceSource::quote_currency_for_exchange(Some("SIX")),
+            "CHF"
+        );
+        assert_eq!(
+            EodhdPriceSource::quote_currency_for_exchange(Some("SGX")),
+            "SGD"
+        );
+        assert_eq!(
+            EodhdPriceSource::quote_currency_for_exchange(Some("BSE")),
+            "INR"
+        );
     }
 
     #[test]

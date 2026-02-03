@@ -28,7 +28,11 @@ pub struct PriceRefreshResult {
 }
 
 impl<S: Storage> SyncOrchestrator<S> {
-    pub fn new(storage: Arc<S>, market_data: MarketDataService, reporting_currency: String) -> Self {
+    pub fn new(
+        storage: Arc<S>,
+        market_data: MarketDataService,
+        reporting_currency: String,
+    ) -> Self {
         Self {
             storage,
             market_data,
@@ -48,7 +52,7 @@ impl<S: Storage + Send + Sync> SyncOrchestrator<S> {
         &self,
         assets: &HashSet<Asset>,
         date: NaiveDate,
-        _force: bool,  // TODO: implement force refresh
+        _force: bool, // TODO: implement force refresh
     ) -> Result<PriceRefreshResult> {
         let mut result = PriceRefreshResult::default();
         let mut needed_fx_pairs: HashSet<(String, String)> = HashSet::new();
@@ -70,7 +74,9 @@ impl<S: Storage + Send + Sync> SyncOrchestrator<S> {
                         Ok(price) => {
                             result.fetched += 1;
                             // Check if we need FX conversion
-                            if price.quote_currency.to_uppercase() != self.reporting_currency.to_uppercase() {
+                            if price.quote_currency.to_uppercase()
+                                != self.reporting_currency.to_uppercase()
+                            {
                                 needed_fx_pairs.insert((
                                     price.quote_currency.to_uppercase(),
                                     self.reporting_currency.to_uppercase(),
@@ -121,7 +127,10 @@ impl<S: Storage + Send + Sync> SyncOrchestrator<S> {
         date: NaiveDate,
         force: bool,
     ) -> Result<PriceRefreshResult> {
-        let snapshots = self.storage.get_latest_balances_for_connection(connection_id).await?;
+        let snapshots = self
+            .storage
+            .get_latest_balances_for_connection(connection_id)
+            .await?;
         let assets: HashSet<Asset> = snapshots
             .into_iter()
             .flat_map(|(_, snapshot)| snapshot.balances.into_iter().map(|ab| ab.asset))
@@ -166,7 +175,8 @@ impl<S: Storage + Send + Sync> SyncOrchestrator<S> {
         }
 
         // 4. Collect assets that need prices
-        let assets: HashSet<Asset> = result.balances
+        let assets: HashSet<Asset> = result
+            .balances
             .iter()
             .flat_map(|(_, sbs)| sbs.iter().map(|sb| sb.asset_balance.asset.clone()))
             .collect();

@@ -73,8 +73,13 @@ impl CoinGeckoPriceSource {
     }
 
     /// Adds a single custom mapping from symbol to CoinGecko ID.
-    pub fn with_mapping(mut self, symbol: impl Into<String>, coingecko_id: impl Into<String>) -> Self {
-        self.custom_mappings.insert(symbol.into().to_uppercase(), coingecko_id.into());
+    pub fn with_mapping(
+        mut self,
+        symbol: impl Into<String>,
+        coingecko_id: impl Into<String>,
+    ) -> Self {
+        self.custom_mappings
+            .insert(symbol.into().to_uppercase(), coingecko_id.into());
         self
     }
 
@@ -181,16 +186,17 @@ impl CoinGeckoPriceSource {
             .client
             .get(&url)
             .header("Accept", "application/json")
-            .header("User-Agent", "keepbook/0.1.0 (https://github.com/keepbook/keepbook)")
+            .header(
+                "User-Agent",
+                "keepbook/0.1.0 (https://github.com/keepbook/keepbook)",
+            )
             .send()
             .await?;
 
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(anyhow!(
-                "CoinGecko API error: {status} - {body}"
-            ));
+            return Err(anyhow!("CoinGecko API error: {status} - {body}"));
         }
 
         let data: CoinHistoryResponse = response.json().await?;
@@ -252,11 +258,7 @@ impl CryptoPriceSource for CoinGeckoPriceSource {
         }))
     }
 
-    async fn fetch_quote(
-        &self,
-        asset: &Asset,
-        asset_id: &AssetId,
-    ) -> Result<Option<PricePoint>> {
+    async fn fetch_quote(&self, asset: &Asset, asset_id: &AssetId) -> Result<Option<PricePoint>> {
         // Extract symbol and network from the asset
         let (symbol, network) = match asset {
             Asset::Crypto { symbol, network } => (symbol.as_str(), network.as_deref()),
@@ -279,7 +281,10 @@ impl CryptoPriceSource for CoinGeckoPriceSource {
             .client
             .get(&url)
             .header("Accept", "application/json")
-            .header("User-Agent", "keepbook/0.1.0 (https://github.com/keepbook/keepbook)")
+            .header(
+                "User-Agent",
+                "keepbook/0.1.0 (https://github.com/keepbook/keepbook)",
+            )
             .send()
             .await?;
 
@@ -385,8 +390,7 @@ mod tests {
     #[test]
     fn test_parse_no_market_data_response() {
         let response: CoinHistoryResponse =
-            serde_json::from_str(SAMPLE_NO_MARKET_DATA_RESPONSE)
-                .expect("Failed to parse response");
+            serde_json::from_str(SAMPLE_NO_MARKET_DATA_RESPONSE).expect("Failed to parse response");
 
         assert_eq!(response.id, "bitcoin");
         assert!(response.market_data.is_none());
@@ -453,8 +457,7 @@ mod tests {
 
     #[test]
     fn test_custom_mapping_overrides_default() {
-        let provider = CoinGeckoPriceSource::new()
-            .with_mapping("BTC", "wrapped-bitcoin"); // Override BTC mapping
+        let provider = CoinGeckoPriceSource::new().with_mapping("BTC", "wrapped-bitcoin"); // Override BTC mapping
 
         assert_eq!(
             provider.symbol_to_coingecko_id("BTC", None),
@@ -470,8 +473,7 @@ mod tests {
 
     #[test]
     fn test_custom_mapping_for_new_symbol() {
-        let provider = CoinGeckoPriceSource::new()
-            .with_mapping("MYCOIN", "my-custom-coin-id");
+        let provider = CoinGeckoPriceSource::new().with_mapping("MYCOIN", "my-custom-coin-id");
 
         assert_eq!(
             provider.symbol_to_coingecko_id("MYCOIN", None),
@@ -553,8 +555,8 @@ mod tests {
 
         // Test that common cryptocurrencies are mapped
         let major_cryptos = vec![
-            "BTC", "ETH", "USDT", "USDC", "BNB", "XRP", "ADA", "DOGE", "SOL", "DOT",
-            "MATIC", "LTC", "SHIB", "AVAX", "DAI", "LINK", "ATOM", "UNI",
+            "BTC", "ETH", "USDT", "USDC", "BNB", "XRP", "ADA", "DOGE", "SOL", "DOT", "MATIC",
+            "LTC", "SHIB", "AVAX", "DAI", "LINK", "ATOM", "UNI",
         ];
 
         for symbol in major_cryptos {

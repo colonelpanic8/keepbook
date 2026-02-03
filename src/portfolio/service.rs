@@ -121,8 +121,10 @@ impl PortfolioService {
 
         let account_map: HashMap<Id, Account> =
             accounts.into_iter().map(|a| (a.id.clone(), a)).collect();
-        let connection_map: HashMap<Id, Connection> =
-            connections.into_iter().map(|c| (c.id().clone(), c)).collect();
+        let connection_map: HashMap<Id, Connection> = connections
+            .into_iter()
+            .map(|c| (c.id().clone(), c))
+            .collect();
 
         let all_snapshots = self.storage.get_latest_balances().await?;
         let as_of_datetime = as_of_date.and_hms_opt(23, 59, 59).unwrap().and_utc();
@@ -208,7 +210,9 @@ impl PortfolioService {
             let asset: Asset = serde_json::from_str(asset_key)?;
             let valuation = price_cache.get(asset_key).unwrap();
 
-            let asset_value = valuation.value.map(|unit_price| unit_price * agg.total_amount);
+            let asset_value = valuation
+                .value
+                .map(|unit_price| unit_price * agg.total_amount);
             if let Some(v) = asset_value {
                 total_value += v;
             }
@@ -382,7 +386,10 @@ impl PortfolioService {
                 let value_in_quote = amount * price;
 
                 // Convert to target currency if needed
-                if price_point.quote_currency.eq_ignore_ascii_case(target_currency) {
+                if price_point
+                    .quote_currency
+                    .eq_ignore_ascii_case(target_currency)
+                {
                     Ok(AssetValuation {
                         value: Some(value_in_quote),
                         price: Some(price.normalize().to_string()),
@@ -428,12 +435,14 @@ impl PortfolioService {
 
 #[cfg(test)]
 mod tests {
+    use super::super::Grouping;
     use super::*;
     use crate::market_data::{MarketDataStore, MemoryMarketDataStore};
-    use crate::models::{Account, Asset, AssetBalance, BalanceSnapshot, ConnectionConfig, Connection};
+    use crate::models::{
+        Account, Asset, AssetBalance, BalanceSnapshot, Connection, ConnectionConfig,
+    };
     use crate::storage::MemoryStorage;
     use chrono::{TimeZone, Utc};
-    use super::super::Grouping;
 
     #[tokio::test]
     async fn calculate_single_currency_holding() -> Result<()> {
@@ -454,7 +463,9 @@ mod tests {
             Utc.with_ymd_and_hms(2026, 2, 1, 12, 0, 0).unwrap(),
             vec![AssetBalance::new(Asset::currency("USD"), "1000.00")],
         );
-        storage.append_balance_snapshot(&account.id, &snapshot).await?;
+        storage
+            .append_balance_snapshot(&account.id, &snapshot)
+            .await?;
 
         // Setup market data (no prices needed for USD->USD)
         let store = Arc::new(MemoryMarketDataStore::new());
@@ -497,7 +508,9 @@ mod tests {
             Utc.with_ymd_and_hms(2026, 2, 1, 12, 0, 0).unwrap(),
             vec![AssetBalance::new(Asset::equity("AAPL"), "10")],
         );
-        storage.append_balance_snapshot(&account.id, &snapshot).await?;
+        storage
+            .append_balance_snapshot(&account.id, &snapshot)
+            .await?;
 
         // Setup market data with AAPL at $200 and USD/EUR at 0.91
         let store = Arc::new(MemoryMarketDataStore::new());
@@ -580,8 +593,12 @@ mod tests {
             Utc.with_ymd_and_hms(2026, 2, 1, 14, 0, 0).unwrap(),
             vec![AssetBalance::new(Asset::currency("USD"), "2000")],
         );
-        storage.append_balance_snapshot(&account1.id, &snapshot1).await?;
-        storage.append_balance_snapshot(&account2.id, &snapshot2).await?;
+        storage
+            .append_balance_snapshot(&account1.id, &snapshot1)
+            .await?;
+        storage
+            .append_balance_snapshot(&account2.id, &snapshot2)
+            .await?;
 
         let store = Arc::new(MemoryMarketDataStore::new());
         let market_data = Arc::new(MarketDataService::new(store, None));

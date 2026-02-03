@@ -30,11 +30,7 @@ pub struct Transaction {
 }
 
 impl Transaction {
-    pub fn new(
-        amount: impl Into<String>,
-        asset: Asset,
-        description: impl Into<String>,
-    ) -> Self {
+    pub fn new(amount: impl Into<String>, asset: Asset, description: impl Into<String>) -> Self {
         Self {
             id: Id::new(),
             timestamp: Utc::now(),

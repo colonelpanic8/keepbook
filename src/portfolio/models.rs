@@ -4,18 +4,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::models::Asset;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Grouping {
     Asset,
     Account,
+    #[default]
     Both,
-}
-
-impl Default for Grouping {
-    fn default() -> Self {
-        Self::Both
-    }
 }
 
 #[derive(Debug, Clone)]

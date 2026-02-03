@@ -193,7 +193,10 @@ type = "eodhd"
 
         let result = PriceSourceConfig::load(file.path());
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("requires credentials"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("requires credentials"));
     }
 
     #[test]

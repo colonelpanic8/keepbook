@@ -155,9 +155,7 @@ impl EquityPriceSource for MarketstackPriceSource {
             if status.as_u16() == 404 {
                 return Ok(None);
             }
-            return Err(anyhow!(
-                "Marketstack API error: {status} - {body}"
-            ));
+            return Err(anyhow!("Marketstack API error: {status} - {body}"));
         }
 
         let eod_response: EodResponse = response.json().await?;

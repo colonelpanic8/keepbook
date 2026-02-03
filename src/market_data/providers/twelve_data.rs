@@ -92,9 +92,7 @@ impl TwelveDataPriceSource {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            anyhow::bail!(
-                "Twelve Data API error: status={status}, body={body}"
-            );
+            anyhow::bail!("Twelve Data API error: status={status}, body={body}");
         }
 
         let body = response
@@ -183,11 +181,7 @@ impl EquityPriceSource for TwelveDataPriceSource {
         }))
     }
 
-    async fn fetch_quote(
-        &self,
-        asset: &Asset,
-        asset_id: &AssetId,
-    ) -> Result<Option<PricePoint>> {
+    async fn fetch_quote(&self, asset: &Asset, asset_id: &AssetId) -> Result<Option<PricePoint>> {
         let (ticker, exchange) = match asset {
             Asset::Equity { ticker, exchange } => (ticker.as_str(), exchange.as_deref()),
             _ => return Ok(None),

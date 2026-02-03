@@ -25,11 +25,17 @@ fn default_price_staleness() -> std::time::Duration {
 #[serde(default)]
 pub struct RefreshConfig {
     /// How old balance data can be before it's considered stale.
-    #[serde(default = "default_balance_staleness", deserialize_with = "deserialize_duration")]
+    #[serde(
+        default = "default_balance_staleness",
+        deserialize_with = "deserialize_duration"
+    )]
     pub balance_staleness: std::time::Duration,
 
     /// How old price data can be before it's considered stale.
-    #[serde(default = "default_price_staleness", deserialize_with = "deserialize_duration")]
+    #[serde(
+        default = "default_price_staleness",
+        deserialize_with = "deserialize_duration"
+    )]
     pub price_staleness: std::time::Duration,
 }
 
@@ -270,8 +276,14 @@ mod tests {
         writeln!(file, "price_staleness = \"1h\"")?;
 
         let config = Config::load(&config_path)?;
-        assert_eq!(config.refresh.balance_staleness, std::time::Duration::from_secs(7 * 24 * 60 * 60));
-        assert_eq!(config.refresh.price_staleness, std::time::Duration::from_secs(60 * 60));
+        assert_eq!(
+            config.refresh.balance_staleness,
+            std::time::Duration::from_secs(7 * 24 * 60 * 60)
+        );
+        assert_eq!(
+            config.refresh.price_staleness,
+            std::time::Duration::from_secs(60 * 60)
+        );
 
         Ok(())
     }
@@ -279,7 +291,13 @@ mod tests {
     #[test]
     fn test_default_refresh_config() {
         let config = Config::default();
-        assert_eq!(config.refresh.balance_staleness, std::time::Duration::from_secs(14 * 24 * 60 * 60));
-        assert_eq!(config.refresh.price_staleness, std::time::Duration::from_secs(24 * 60 * 60));
+        assert_eq!(
+            config.refresh.balance_staleness,
+            std::time::Duration::from_secs(14 * 24 * 60 * 60)
+        );
+        assert_eq!(
+            config.refresh.price_staleness,
+            std::time::Duration::from_secs(24 * 60 * 60)
+        );
     }
 }

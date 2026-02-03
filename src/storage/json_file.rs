@@ -5,9 +5,12 @@ use tokio::fs;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tracing::warn;
 
-use crate::credentials::CredentialStore;
-use crate::models::{Account, AccountConfig, BalanceSnapshot, Connection, ConnectionConfig, ConnectionState, Id, Transaction};
 use super::Storage;
+use crate::credentials::CredentialStore;
+use crate::models::{
+    Account, AccountConfig, BalanceSnapshot, Connection, ConnectionConfig, ConnectionState, Id,
+    Transaction,
+};
 
 /// JSON file-based storage implementation.
 ///
@@ -73,7 +76,10 @@ impl JsonFileStorage {
     ///
     /// First checks the connection's config for inline credentials,
     /// then falls back to a separate credentials.toml file for backwards compatibility.
-    pub fn get_credential_store(&self, connection_id: &Id) -> Result<Option<Box<dyn CredentialStore>>> {
+    pub fn get_credential_store(
+        &self,
+        connection_id: &Id,
+    ) -> Result<Option<Box<dyn CredentialStore>>> {
         // First try to load from connection config
         let config_path = self.connection_config_file(connection_id);
         if config_path.exists() {
@@ -153,7 +159,10 @@ impl JsonFileStorage {
         Ok(())
     }
 
-    async fn read_json<T: for<'de> serde::Deserialize<'de>>(&self, path: &Path) -> Result<Option<T>> {
+    async fn read_json<T: for<'de> serde::Deserialize<'de>>(
+        &self,
+        path: &Path,
+    ) -> Result<Option<T>> {
         match fs::read_to_string(path).await {
             Ok(content) => {
                 let value = serde_json::from_str(&content)
@@ -174,7 +183,10 @@ impl JsonFileStorage {
         Ok(())
     }
 
-    fn read_toml_sync<T: for<'de> serde::Deserialize<'de>>(&self, path: &Path) -> Result<Option<T>> {
+    fn read_toml_sync<T: for<'de> serde::Deserialize<'de>>(
+        &self,
+        path: &Path,
+    ) -> Result<Option<T>> {
         match std::fs::read_to_string(path) {
             Ok(content) => {
                 let value = toml::from_str(&content)
@@ -317,7 +329,8 @@ impl JsonFileStorage {
             let Some(sanitized) = Self::sanitize_name(&account.name) else {
                 warn!(
                     "Skipped account with empty name (id: {}, connection: {})",
-                    account_id, conn.id()
+                    account_id,
+                    conn.id()
                 );
                 continue;
             };
@@ -325,7 +338,9 @@ impl JsonFileStorage {
             if seen_names.contains(&sanitized) {
                 warn!(
                     "Skipped duplicate account name \"{}\" (id: {}, connection: {})",
-                    sanitized, account_id, conn.id()
+                    sanitized,
+                    account_id,
+                    conn.id()
                 );
                 continue;
             }
@@ -385,19 +400,25 @@ impl JsonFileStorage {
         let connections = self.list_connections().await?;
         let mut created = 0;
         let mut warnings = Vec::new();
-        let mut seen_names: std::collections::HashMap<String, Id> = std::collections::HashMap::new();
+        let mut seen_names: std::collections::HashMap<String, Id> =
+            std::collections::HashMap::new();
 
         for conn in connections {
             let name = conn.name();
             let Some(sanitized) = Self::sanitize_name(name) else {
-                warnings.push(format!("Skipped connection with empty name (id: {})", conn.id()));
+                warnings.push(format!(
+                    "Skipped connection with empty name (id: {})",
+                    conn.id()
+                ));
                 continue;
             };
 
             if let Some(existing_id) = seen_names.get(&sanitized) {
                 warnings.push(format!(
                     "Skipped duplicate connection name \"{}\" (id: {}, conflicts with {})",
-                    sanitized, conn.id(), existing_id
+                    sanitized,
+                    conn.id(),
+                    existing_id
                 ));
                 continue;
             }
@@ -436,7 +457,8 @@ impl JsonFileStorage {
             if let Err(e) = self.update_account_symlinks(&conn).await {
                 warnings.push(format!(
                     "Failed to update account symlinks for connection {}: {}",
-                    conn.id(), e
+                    conn.id(),
+                    e
                 ));
                 continue;
             }
@@ -473,7 +495,8 @@ impl Storage for JsonFileStorage {
 
     async fn save_connection(&self, conn: &Connection) -> Result<()> {
         // Only save state - config is human-managed
-        self.write_json(&self.connection_state_file(conn.id()), &conn.state).await?;
+        self.write_json(&self.connection_state_file(conn.id()), &conn.state)
+            .await?;
         self.update_account_symlinks(conn).await?;
         // Rebuild connection by-name symlinks (handles creates and name changes)
         let _ = self.rebuild_connection_symlinks().await;
@@ -483,9 +506,9 @@ impl Storage for JsonFileStorage {
     async fn delete_connection(&self, id: &Id) -> Result<bool> {
         let dir = self.connection_dir(id);
         if dir.exists() {
-            fs::remove_dir_all(&dir)
-                .await
-                .with_context(|| format!("Failed to delete connection directory: {}", dir.display()))?;
+            fs::remove_dir_all(&dir).await.with_context(|| {
+                format!("Failed to delete connection directory: {}", dir.display())
+            })?;
             // Rebuild symlinks to remove stale one
             let _ = self.rebuild_connection_symlinks().await;
             Ok(true)
@@ -512,15 +535,16 @@ impl Storage for JsonFileStorage {
     }
 
     async fn save_account(&self, account: &Account) -> Result<()> {
-        self.write_json(&self.account_file(&account.id), account).await
+        self.write_json(&self.account_file(&account.id), account)
+            .await
     }
 
     async fn delete_account(&self, id: &Id) -> Result<bool> {
         let dir = self.account_dir(id);
         if dir.exists() {
-            fs::remove_dir_all(&dir)
-                .await
-                .with_context(|| format!("Failed to delete account directory: {}", dir.display()))?;
+            fs::remove_dir_all(&dir).await.with_context(|| {
+                format!("Failed to delete account directory: {}", dir.display())
+            })?;
             Ok(true)
         } else {
             Ok(false)
@@ -531,8 +555,13 @@ impl Storage for JsonFileStorage {
         self.read_jsonl(&self.balances_file(account_id)).await
     }
 
-    async fn append_balance_snapshot(&self, account_id: &Id, snapshot: &BalanceSnapshot) -> Result<()> {
-        self.append_jsonl(&self.balances_file(account_id), &[snapshot]).await
+    async fn append_balance_snapshot(
+        &self,
+        account_id: &Id,
+        snapshot: &BalanceSnapshot,
+    ) -> Result<()> {
+        self.append_jsonl(&self.balances_file(account_id), &[snapshot])
+            .await
     }
 
     async fn get_transactions(&self, account_id: &Id) -> Result<Vec<Transaction>> {
@@ -540,16 +569,25 @@ impl Storage for JsonFileStorage {
     }
 
     async fn append_transactions(&self, account_id: &Id, txns: &[Transaction]) -> Result<()> {
-        self.append_jsonl(&self.transactions_file(account_id), txns).await
+        self.append_jsonl(&self.transactions_file(account_id), txns)
+            .await
     }
 
-    async fn get_latest_balance_snapshot(&self, account_id: &Id) -> Result<Option<BalanceSnapshot>> {
+    async fn get_latest_balance_snapshot(
+        &self,
+        account_id: &Id,
+    ) -> Result<Option<BalanceSnapshot>> {
         let snapshots = self.get_balance_snapshots(account_id).await?;
         Ok(snapshots.into_iter().max_by_key(|s| s.timestamp))
     }
 
-    async fn get_latest_balances_for_connection(&self, connection_id: &Id) -> Result<Vec<(Id, BalanceSnapshot)>> {
-        let connection = self.get_connection(connection_id).await?
+    async fn get_latest_balances_for_connection(
+        &self,
+        connection_id: &Id,
+    ) -> Result<Vec<(Id, BalanceSnapshot)>> {
+        let connection = self
+            .get_connection(connection_id)
+            .await?
             .ok_or_else(|| anyhow::anyhow!("Connection not found"))?;
 
         let mut results = Vec::new();
@@ -567,7 +605,9 @@ impl Storage for JsonFileStorage {
 
         let mut results = Vec::new();
         for connection in connections {
-            let connection_snapshots = self.get_latest_balances_for_connection(connection.id()).await?;
+            let connection_snapshots = self
+                .get_latest_balances_for_connection(connection.id())
+                .await?;
             results.extend(connection_snapshots);
         }
 

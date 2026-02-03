@@ -34,7 +34,11 @@ async fn main() -> anyhow::Result<()> {
 
     // Get API key from pass
     let api_key = get_api_key_from_pass()?;
-    println!("API key retrieved from pass: {}...{}", &api_key[..8], &api_key[api_key.len()-4..]);
+    println!(
+        "API key retrieved from pass: {}...{}",
+        &api_key[..8],
+        &api_key[api_key.len() - 4..]
+    );
 
     // Create provider
     let provider = EodhdPriceSource::new(&api_key);
@@ -54,7 +58,10 @@ async fn main() -> anyhow::Result<()> {
     match provider.fetch_close(&asset, &asset_id, test_date).await {
         Ok(Some(price_point)) => {
             println!("SUCCESS! Got PricePoint:");
-            println!("  Price: {} {}", price_point.price, price_point.quote_currency);
+            println!(
+                "  Price: {} {}",
+                price_point.price, price_point.quote_currency
+            );
             println!("  As of date: {}", price_point.as_of_date);
             println!("  Kind: {:?}", price_point.kind);
             println!("  Source: {}", price_point.source);
@@ -82,10 +89,16 @@ async fn main() -> anyhow::Result<()> {
     println!("  Asset: {uk_asset:?}");
     println!("  Date: {test_date}\n");
 
-    match provider.fetch_close(&uk_asset, &uk_asset_id, test_date).await {
+    match provider
+        .fetch_close(&uk_asset, &uk_asset_id, test_date)
+        .await
+    {
         Ok(Some(price_point)) => {
             println!("SUCCESS! Got PricePoint:");
-            println!("  Price: {} {}", price_point.price, price_point.quote_currency);
+            println!(
+                "  Price: {} {}",
+                price_point.price, price_point.quote_currency
+            );
             println!("  As of date: {}", price_point.as_of_date);
             println!("  Kind: {:?}", price_point.kind);
             println!("  Source: {}", price_point.source);

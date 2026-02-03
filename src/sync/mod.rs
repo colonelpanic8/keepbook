@@ -5,10 +5,10 @@ pub mod synchronizers;
 pub use orchestrator::{PriceRefreshResult, SyncOrchestrator};
 pub use synchronizers::create_synchronizer;
 
-use anyhow::Result;
 use crate::market_data::PricePoint;
 use crate::models::{Account, AssetBalance, BalanceSnapshot, Connection, Id, Transaction};
 use crate::storage::Storage;
+use anyhow::Result;
 
 /// An asset balance paired with optional price data from the synchronizer.
 #[derive(Debug, Clone)]
@@ -19,7 +19,10 @@ pub struct SyncedAssetBalance {
 
 impl SyncedAssetBalance {
     pub fn new(asset_balance: AssetBalance) -> Self {
-        Self { asset_balance, price: None }
+        Self {
+            asset_balance,
+            price: None,
+        }
     }
 
     pub fn with_price(mut self, price: PricePoint) -> Self {
@@ -52,7 +55,9 @@ impl SyncResult {
                     .map(|sb| sb.asset_balance.clone())
                     .collect();
                 let snapshot = BalanceSnapshot::now(asset_balances);
-                storage.append_balance_snapshot(account_id, &snapshot).await?;
+                storage
+                    .append_balance_snapshot(account_id, &snapshot)
+                    .await?;
             }
         }
 

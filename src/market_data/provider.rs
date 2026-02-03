@@ -13,8 +13,12 @@ pub trait MarketDataSource: Send + Sync {
         date: NaiveDate,
     ) -> Result<Option<PricePoint>>;
 
-    async fn fetch_fx_rate(&self, base: &str, quote: &str, date: NaiveDate)
-        -> Result<Option<FxRatePoint>>;
+    async fn fetch_fx_rate(
+        &self,
+        base: &str,
+        quote: &str,
+        date: NaiveDate,
+    ) -> Result<Option<FxRatePoint>>;
 
     fn name(&self) -> &str;
 }

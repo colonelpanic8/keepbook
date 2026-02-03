@@ -60,9 +60,7 @@ impl FrankfurterRateSource {
         date: NaiveDate,
     ) -> Result<HashMap<String, f64>> {
         let symbols = currencies.join(",");
-        let url = format!(
-            "{FRANKFURTER_BASE_URL}/{date}?from=EUR&to={symbols}"
-        );
+        let url = format!("{FRANKFURTER_BASE_URL}/{date}?from=EUR&to={symbols}");
 
         let response = self
             .client

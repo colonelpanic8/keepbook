@@ -25,9 +25,7 @@ impl JsonlMarketDataStore {
     }
 
     fn prices_dir(&self, asset_id: &AssetId) -> PathBuf {
-        self.base_path
-            .join("prices")
-            .join(asset_id.to_string())
+        self.base_path.join("prices").join(asset_id.to_string())
     }
 
     fn fx_dir(&self, base: &str, quote: &str) -> PathBuf {
@@ -148,8 +146,8 @@ impl MarketDataStore for JsonlMarketDataStore {
         }
 
         for ((asset_id, year), items) in grouped {
-            let date = NaiveDate::from_ymd_opt(year, 1, 1)
-                .context("Invalid price date for storage")?;
+            let date =
+                NaiveDate::from_ymd_opt(year, 1, 1).context("Invalid price date for storage")?;
             let path = self.price_file(&AssetId::from(asset_id), date);
             self.append_jsonl(&path, &items).await?;
         }
@@ -178,13 +176,17 @@ impl MarketDataStore for JsonlMarketDataStore {
             std::collections::HashMap::new();
 
         for rate in rates {
-            let key = (rate.base.clone(), rate.quote.clone(), rate.as_of_date.year());
+            let key = (
+                rate.base.clone(),
+                rate.quote.clone(),
+                rate.as_of_date.year(),
+            );
             grouped.entry(key).or_default().push(rate.clone());
         }
 
         for ((base, quote, year), items) in grouped {
-            let date = NaiveDate::from_ymd_opt(year, 1, 1)
-                .context("Invalid FX date for storage")?;
+            let date =
+                NaiveDate::from_ymd_opt(year, 1, 1).context("Invalid FX date for storage")?;
             let path = self.fx_file(&base, &quote, date);
             self.append_jsonl(&path, &items).await?;
         }

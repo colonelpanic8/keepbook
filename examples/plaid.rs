@@ -10,11 +10,11 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDate, Utc};
 use keepbook::models::{
-    Account, Asset, AssetBalance, Connection, ConnectionConfig, ConnectionStatus, Id, LastSync, SyncStatus, Transaction,
-    TransactionStatus,
+    Account, Asset, AssetBalance, Connection, ConnectionConfig, ConnectionStatus, Id, LastSync,
+    SyncStatus, Transaction, TransactionStatus,
 };
 use keepbook::storage::{JsonFileStorage, Storage};
-use keepbook::sync::{SyncedAssetBalance, SyncResult};
+use keepbook::sync::{SyncResult, SyncedAssetBalance};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
@@ -64,8 +64,7 @@ impl PlaidSynchronizer {
             anyhow::bail!("pass command failed");
         }
 
-        let content =
-            String::from_utf8(output.stdout).context("Invalid UTF-8 in pass output")?;
+        let content = String::from_utf8(output.stdout).context("Invalid UTF-8 in pass output")?;
 
         let mut client_id = None;
         let mut secret = None;
@@ -107,7 +106,10 @@ impl PlaidSynchronizer {
             .context("HTTP request failed")?;
 
         let status = response.status();
-        let body_text = response.text().await.context("Failed to read response body")?;
+        let body_text = response
+            .text()
+            .await
+            .context("Failed to read response body")?;
 
         if !status.is_success() {
             anyhow::bail!("Plaid API request failed ({status}): {body_text}");
@@ -326,41 +328,47 @@ impl PlaidSynchronizer {
             );
 
             // Convert Plaid transactions to our format
-            let account_transactions: Vec<Transaction> = tx_by_account
-                .get(&plaid_account.account_id)
-                .map(|txs| {
-                    txs.iter()
-                        .filter_map(|tx| {
-                            let timestamp = NaiveDate::parse_from_str(&tx.date, "%Y-%m-%d")
-                                .ok()?
-                                .and_hms_opt(12, 0, 0)?;
-                            let timestamp = DateTime::from_naive_utc_and_offset(timestamp, Utc);
+            let account_transactions: Vec<Transaction> =
+                tx_by_account
+                    .get(&plaid_account.account_id)
+                    .map(|txs| {
+                        txs.iter()
+                            .filter_map(|tx| {
+                                let timestamp = NaiveDate::parse_from_str(&tx.date, "%Y-%m-%d")
+                                    .ok()?
+                                    .and_hms_opt(12, 0, 0)?;
+                                let timestamp = DateTime::from_naive_utc_and_offset(timestamp, Utc);
 
-                            Some(
-                                Transaction::new(
-                                    (-tx.amount).to_string(),
-                                    Asset::currency(tx.iso_currency_code.as_deref().unwrap_or("USD")),
-                                    &tx.name,
+                                Some(
+                                    Transaction::new(
+                                        (-tx.amount).to_string(),
+                                        Asset::currency(
+                                            tx.iso_currency_code.as_deref().unwrap_or("USD"),
+                                        ),
+                                        &tx.name,
+                                    )
+                                    .with_timestamp(timestamp)
+                                    .with_status(if tx.pending {
+                                        TransactionStatus::Pending
+                                    } else {
+                                        TransactionStatus::Posted
+                                    })
+                                    .with_synchronizer_data(serde_json::json!({
+                                        "plaid_transaction_id": tx.transaction_id,
+                                        "category": tx.category,
+                                        "merchant_name": tx.merchant_name,
+                                    })),
                                 )
-                                .with_timestamp(timestamp)
-                                .with_status(if tx.pending {
-                                    TransactionStatus::Pending
-                                } else {
-                                    TransactionStatus::Posted
-                                })
-                                .with_synchronizer_data(serde_json::json!({
-                                    "plaid_transaction_id": tx.transaction_id,
-                                    "category": tx.category,
-                                    "merchant_name": tx.merchant_name,
-                                })),
-                            )
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
 
             accounts.push(account);
-            balances.push((account_id.clone(), vec![SyncedAssetBalance::new(asset_balance)]));
+            balances.push((
+                account_id.clone(),
+                vec![SyncedAssetBalance::new(asset_balance)],
+            ));
             transactions.push((account_id, account_transactions));
         }
 
@@ -454,7 +462,9 @@ async fn setup(storage: &JsonFileStorage, synchronizer: &PlaidSynchronizer) -> R
 
     println!("\nSync complete!");
     println!("Saved {} accounts", result.accounts.len());
-    println!("\nPlaid setup complete! You can now run 'cargo run --example plaid -- sync' to sync.");
+    println!(
+        "\nPlaid setup complete! You can now run 'cargo run --example plaid -- sync' to sync."
+    );
 
     Ok(())
 }
@@ -465,9 +475,8 @@ async fn sync(storage: &JsonFileStorage, synchronizer: &PlaidSynchronizer) -> Re
         .into_iter()
         .find(|c| c.synchronizer() == "plaid");
 
-    let mut connection = connection.context(
-        "No Plaid connection found. Run 'cargo run --example plaid -- setup' first.",
-    )?;
+    let mut connection = connection
+        .context("No Plaid connection found. Run 'cargo run --example plaid -- setup' first.")?;
 
     println!("Connection: {} ({})", connection.name(), connection.id());
 

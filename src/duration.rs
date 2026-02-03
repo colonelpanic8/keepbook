@@ -75,11 +75,11 @@ pub fn format_duration(d: Duration) -> String {
     const SECS_PER_HOUR: u64 = 60 * 60;
     const SECS_PER_MINUTE: u64 = 60;
 
-    if secs >= SECS_PER_DAY && secs % SECS_PER_DAY == 0 {
+    if secs >= SECS_PER_DAY && secs.is_multiple_of(SECS_PER_DAY) {
         format!("{}d", secs / SECS_PER_DAY)
-    } else if secs >= SECS_PER_HOUR && secs % SECS_PER_HOUR == 0 {
+    } else if secs >= SECS_PER_HOUR && secs.is_multiple_of(SECS_PER_HOUR) {
         format!("{}h", secs / SECS_PER_HOUR)
-    } else if secs >= SECS_PER_MINUTE && secs % SECS_PER_MINUTE == 0 {
+    } else if secs >= SECS_PER_MINUTE && secs.is_multiple_of(SECS_PER_MINUTE) {
         format!("{}m", secs / SECS_PER_MINUTE)
     } else {
         format!("{secs}s")
@@ -146,15 +146,27 @@ mod tests {
     #[test]
     fn test_parse_days() {
         assert_eq!(parse_duration("1d").unwrap(), Duration::from_secs(86400));
-        assert_eq!(parse_duration("14d").unwrap(), Duration::from_secs(14 * 86400));
-        assert_eq!(parse_duration("365d").unwrap(), Duration::from_secs(365 * 86400));
+        assert_eq!(
+            parse_duration("14d").unwrap(),
+            Duration::from_secs(14 * 86400)
+        );
+        assert_eq!(
+            parse_duration("365d").unwrap(),
+            Duration::from_secs(365 * 86400)
+        );
     }
 
     #[test]
     fn test_parse_hours() {
         assert_eq!(parse_duration("1h").unwrap(), Duration::from_secs(3600));
-        assert_eq!(parse_duration("24h").unwrap(), Duration::from_secs(24 * 3600));
-        assert_eq!(parse_duration("48h").unwrap(), Duration::from_secs(48 * 3600));
+        assert_eq!(
+            parse_duration("24h").unwrap(),
+            Duration::from_secs(24 * 3600)
+        );
+        assert_eq!(
+            parse_duration("48h").unwrap(),
+            Duration::from_secs(48 * 3600)
+        );
     }
 
     #[test]
@@ -181,9 +193,18 @@ mod tests {
 
     #[test]
     fn test_whitespace_handling() {
-        assert_eq!(parse_duration("  1d  ").unwrap(), Duration::from_secs(86400));
-        assert_eq!(parse_duration("\t24h\n").unwrap(), Duration::from_secs(24 * 3600));
-        assert_eq!(parse_duration(" 30m ").unwrap(), Duration::from_secs(30 * 60));
+        assert_eq!(
+            parse_duration("  1d  ").unwrap(),
+            Duration::from_secs(86400)
+        );
+        assert_eq!(
+            parse_duration("\t24h\n").unwrap(),
+            Duration::from_secs(24 * 3600)
+        );
+        assert_eq!(
+            parse_duration(" 30m ").unwrap(),
+            Duration::from_secs(30 * 60)
+        );
     }
 
     #[test]

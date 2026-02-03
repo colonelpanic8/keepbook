@@ -63,9 +63,7 @@ impl CredentialConfig {
     /// Build a credential store from this configuration.
     pub fn build(&self) -> Box<dyn CredentialStore> {
         match self {
-            CredentialConfig::Pass { config } => {
-                Box::new(PassCredentialStore::new(config.clone()))
-            }
+            CredentialConfig::Pass { config } => Box::new(PassCredentialStore::new(config.clone())),
         }
     }
 }

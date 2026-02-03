@@ -16,7 +16,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::credentials::CredentialStore;
 use crate::models::{
-    Account, Asset, AssetBalance, Connection, ConnectionStatus, Id, LastSync, SyncStatus, Transaction,
+    Account, Asset, AssetBalance, Connection, ConnectionStatus, Id, LastSync, SyncStatus,
+    Transaction,
 };
 use crate::storage::Storage;
 use crate::sync::{SyncResult, SyncedAssetBalance, Synchronizer};
@@ -61,10 +62,7 @@ impl CoinbaseSynchronizer {
             .await?
             .context("Missing private-key in credentials")?;
 
-        Ok(Self::new(
-            key_name.expose_secret().to_string(),
-            private_key,
-        ))
+        Ok(Self::new(key_name.expose_secret().to_string(), private_key))
     }
 
     fn generate_jwt(&self, method: &str, path: &str) -> Result<String> {
@@ -124,7 +122,10 @@ impl CoinbaseSynchronizer {
             .context("HTTP request failed")?;
 
         let status = response.status();
-        let body = response.text().await.context("Failed to read response body")?;
+        let body = response
+            .text()
+            .await
+            .context("Failed to read response body")?;
 
         if !status.is_success() {
             anyhow::bail!("API request failed ({status}): {body}");
@@ -167,7 +168,8 @@ impl CoinbaseSynchronizer {
         let mut accounts = Vec::new();
 
         // Get portfolios and their breakdowns
-        let portfolios: PortfoliosResponse = self.request("GET", "/api/v3/brokerage/portfolios").await?;
+        let portfolios: PortfoliosResponse =
+            self.request("GET", "/api/v3/brokerage/portfolios").await?;
 
         for p in portfolios.portfolios {
             let path = format!("/api/v3/brokerage/portfolios/{}", p.uuid);
@@ -284,7 +286,8 @@ impl CoinbaseSynchronizer {
             };
 
             // Record current balance
-            let asset_balance = AssetBalance::new(asset.clone(), &cb_account.available_balance.value);
+            let asset_balance =
+                AssetBalance::new(asset.clone(), &cb_account.available_balance.value);
 
             let account_transactions: Vec<Transaction> = cb_transactions
                 .into_iter()
@@ -309,7 +312,10 @@ impl CoinbaseSynchronizer {
                 .collect();
 
             accounts.push(account);
-            balances.push((account_id.clone(), vec![SyncedAssetBalance::new(asset_balance)]));
+            balances.push((
+                account_id.clone(),
+                vec![SyncedAssetBalance::new(asset_balance)],
+            ));
             transactions.push((account_id, account_transactions));
         }
 

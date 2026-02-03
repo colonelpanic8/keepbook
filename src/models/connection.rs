@@ -18,7 +18,11 @@ pub struct ConnectionConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credentials: Option<CredentialConfig>,
     /// Override balance staleness for this connection.
-    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_duration_opt")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_duration_opt"
+    )]
     pub balance_staleness: Option<std::time::Duration>,
 }
 

@@ -93,9 +93,7 @@ impl MarketDataStore for MemoryMarketDataStore {
         kind: PriceKind,
     ) -> Result<Option<PricePoint>> {
         let prices = self.prices.lock().await;
-        Ok(prices
-            .get(&(asset_id.clone(), date, kind))
-            .cloned())
+        Ok(prices.get(&(asset_id.clone(), date, kind)).cloned())
     }
 
     async fn put_prices(&self, prices: &[PricePoint]) -> Result<()> {

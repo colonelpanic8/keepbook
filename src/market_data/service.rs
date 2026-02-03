@@ -109,7 +109,9 @@ impl MarketDataService {
                 return Ok(price);
             }
 
-            if let Some(price) = self.fetch_price_from_sources(asset, &asset_id, target_date).await?
+            if let Some(price) = self
+                .fetch_price_from_sources(asset, &asset_id, target_date)
+                .await?
             {
                 info!(
                     asset_id = %asset_id,
@@ -118,7 +120,7 @@ impl MarketDataService {
                     source = %price.source,
                     "price fetched and stored"
                 );
-                self.store.put_prices(&[price.clone()]).await?;
+                self.store.put_prices(std::slice::from_ref(&price)).await?;
                 return Ok(price);
             }
         }
@@ -172,7 +174,7 @@ impl MarketDataService {
                 kind = ?price.kind,
                 "live quote fetched and stored"
             );
-            self.store.put_prices(&[price.clone()]).await?;
+            self.store.put_prices(std::slice::from_ref(&price)).await?;
             return Ok(price);
         }
 
@@ -210,7 +212,7 @@ impl MarketDataService {
                     source = %rate.source,
                     "FX rate fetched and stored"
                 );
-                self.store.put_fx_rates(&[rate.clone()]).await?;
+                self.store.put_fx_rates(std::slice::from_ref(&rate)).await?;
                 return Ok(rate);
             }
         }
@@ -233,7 +235,7 @@ impl MarketDataService {
 
     /// Store a price point directly (e.g., from a synchronizer).
     pub async fn store_price(&self, price: &PricePoint) -> Result<()> {
-        self.store.put_prices(&[price.clone()]).await
+        self.store.put_prices(std::slice::from_ref(price)).await
     }
 
     async fn fetch_quote_from_sources(

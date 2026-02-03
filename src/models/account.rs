@@ -38,6 +38,10 @@ impl Account {
 #[serde(default)]
 pub struct AccountConfig {
     /// Override balance staleness for this account.
-    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_duration_opt")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_duration_opt"
+    )]
     pub balance_staleness: Option<std::time::Duration>,
 }

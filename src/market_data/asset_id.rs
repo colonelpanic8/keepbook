@@ -15,17 +15,37 @@ impl AssetId {
             Asset::Currency { iso_code } => {
                 format!("currency/{}", iso_code.trim().to_uppercase())
             }
-            Asset::Equity { ticker, exchange: None } => {
+            Asset::Equity {
+                ticker,
+                exchange: None,
+            } => {
                 format!("equity/{}", ticker.trim().to_uppercase())
             }
-            Asset::Equity { ticker, exchange: Some(ex) } => {
-                format!("equity/{}/{}", ticker.trim().to_uppercase(), ex.trim().to_uppercase())
+            Asset::Equity {
+                ticker,
+                exchange: Some(ex),
+            } => {
+                format!(
+                    "equity/{}/{}",
+                    ticker.trim().to_uppercase(),
+                    ex.trim().to_uppercase()
+                )
             }
-            Asset::Crypto { symbol, network: None } => {
+            Asset::Crypto {
+                symbol,
+                network: None,
+            } => {
                 format!("crypto/{}", symbol.trim().to_uppercase())
             }
-            Asset::Crypto { symbol, network: Some(net) } => {
-                format!("crypto/{}/{}", symbol.trim().to_uppercase(), net.trim().to_lowercase())
+            Asset::Crypto {
+                symbol,
+                network: Some(net),
+            } => {
+                format!(
+                    "crypto/{}/{}",
+                    symbol.trim().to_uppercase(),
+                    net.trim().to_lowercase()
+                )
             }
         };
         Self(id)

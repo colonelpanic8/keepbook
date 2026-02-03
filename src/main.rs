@@ -7,7 +7,10 @@ use chrono::Utc;
 use clap::{CommandFactory, Parser, Subcommand};
 use keepbook::config::{default_config_path, ResolvedConfig};
 use keepbook::market_data::{JsonlMarketDataStore, MarketDataStore, PriceSourceRegistry};
-use keepbook::models::{Account, Asset, AssetBalance, BalanceSnapshot, Connection, ConnectionConfig, ConnectionState, Id};
+use keepbook::models::{
+    Account, Asset, AssetBalance, BalanceSnapshot, Connection, ConnectionConfig, ConnectionState,
+    Id,
+};
 use keepbook::storage::{JsonFileStorage, Storage};
 use keepbook::sync::synchronizers::{CoinbaseSynchronizer, SchwabSynchronizer};
 use keepbook::sync::{AuthStatus, InteractiveAuth};
@@ -273,7 +276,9 @@ async fn main() -> Result<()> {
     // Use RUST_LOG env var for filtering (default: info, suppress noisy chromiumoxide errors)
     tracing_subscriber::registry()
         .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-            EnvFilter::new("info,chromiumoxide=warn,chromiumoxide::conn=off,chromiumoxide::handler=off")
+            EnvFilter::new(
+                "info,chromiumoxide=warn,chromiumoxide::conn=off,chromiumoxide::handler=off",
+            )
         }))
         .with(
             fmt::layer()
@@ -303,7 +308,11 @@ async fn main() -> Result<()> {
                 let result = add_connection(&storage, &name).await?;
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
-            AddCommand::Account { connection, name, tag } => {
+            AddCommand::Account {
+                connection,
+                name,
+                tag,
+            } => {
                 let result = add_account(&storage, &connection, &name, tag).await?;
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
@@ -317,14 +326,21 @@ async fn main() -> Result<()> {
         },
 
         Some(Command::Set(set_cmd)) => match set_cmd {
-            SetCommand::Balance { account, asset, amount } => {
+            SetCommand::Balance {
+                account,
+                asset,
+                amount,
+            } => {
                 let result = set_balance(&storage, &account, &asset, &amount).await?;
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
         },
 
         Some(Command::Sync(sync_cmd)) => match sync_cmd {
-            SyncCommand::Connection { id_or_name, if_stale } => {
+            SyncCommand::Connection {
+                id_or_name,
+                if_stale,
+            } => {
                 if if_stale {
                     use keepbook::staleness::{check_balance_staleness, resolve_balance_staleness};
 
@@ -358,7 +374,8 @@ async fn main() -> Result<()> {
                     let mut results = Vec::new();
 
                     for connection in connections {
-                        let threshold = resolve_balance_staleness(None, &connection, &config.refresh);
+                        let threshold =
+                            resolve_balance_staleness(None, &connection, &config.refresh);
                         let check = check_balance_staleness(&connection, threshold);
 
                         if check.is_stale {
@@ -565,7 +582,8 @@ async fn main() -> Result<()> {
                                     // If no quote, try Close with lookback (7 days)
                                     if cached_price.is_none() {
                                         for offset in 0..=7i64 {
-                                            let target_date = query.as_of_date - chrono::Duration::days(offset);
+                                            let target_date =
+                                                query.as_of_date - chrono::Duration::days(offset);
                                             if let Some(p) = store
                                                 .get_price(&asset_id, target_date, PriceKind::Close)
                                                 .await?
@@ -752,7 +770,12 @@ async fn remove_connection(storage: &JsonFileStorage, id_str: &str) -> Result<se
     };
 
     let name = conn.config.name.clone();
-    let account_ids: Vec<String> = conn.state.account_ids.iter().map(|a| a.to_string()).collect();
+    let account_ids: Vec<String> = conn
+        .state
+        .account_ids
+        .iter()
+        .map(|a| a.to_string())
+        .collect();
 
     // Delete all accounts belonging to this connection
     let mut deleted_accounts = 0;
@@ -901,7 +924,10 @@ fn parse_asset(s: &str) -> Result<Asset> {
 }
 
 /// Find a connection by ID first, then by name
-async fn find_connection(storage: &JsonFileStorage, id_or_name: &str) -> Result<Option<Connection>> {
+async fn find_connection(
+    storage: &JsonFileStorage,
+    id_or_name: &str,
+) -> Result<Option<Connection>> {
     // Try by ID first
     let id = Id::from_string(id_or_name);
     if let Some(conn) = storage.get_connection(&id).await? {
@@ -920,7 +946,11 @@ async fn find_connection(storage: &JsonFileStorage, id_or_name: &str) -> Result<
 }
 
 /// Sync a specific connection
-async fn sync_connection(storage: &JsonFileStorage, id_or_name: &str, config: &ResolvedConfig) -> Result<serde_json::Value> {
+async fn sync_connection(
+    storage: &JsonFileStorage,
+    id_or_name: &str,
+    config: &ResolvedConfig,
+) -> Result<serde_json::Value> {
     let mut connection = find_connection(storage, id_or_name)
         .await?
         .context(format!("Connection not found: {id_or_name}"))?;
@@ -973,7 +1003,9 @@ async fn sync_connection(storage: &JsonFileStorage, id_or_name: &str, config: &R
         }
 
         // Now sync
-        let result = synchronizer.sync_with_storage(&mut connection, storage).await?;
+        let result = synchronizer
+            .sync_with_storage(&mut connection, storage)
+            .await?;
         result.save(storage).await?;
 
         // Store prices from sync result
@@ -994,7 +1026,9 @@ async fn sync_connection(storage: &JsonFileStorage, id_or_name: &str, config: &R
     // Handle Coinbase
     if synchronizer_type == "coinbase" {
         let synchronizer = CoinbaseSynchronizer::from_connection(&connection, storage).await?;
-        let result = synchronizer.sync_with_storage(&mut connection, storage).await?;
+        let result = synchronizer
+            .sync_with_storage(&mut connection, storage)
+            .await?;
         result.save(storage).await?;
 
         // Coinbase doesn't provide prices, so fetch them from configured sources
@@ -1012,18 +1046,25 @@ async fn sync_connection(storage: &JsonFileStorage, id_or_name: &str, config: &R
         }));
     }
 
-    Err(anyhow::anyhow!("Unknown synchronizer type: {synchronizer_type}"))
+    Err(anyhow::anyhow!(
+        "Unknown synchronizer type: {synchronizer_type}"
+    ))
 }
 
 /// Store prices from a sync result into the market data store
-async fn store_sync_prices(result: &keepbook::sync::SyncResult, config: &ResolvedConfig) -> Result<usize> {
+async fn store_sync_prices(
+    result: &keepbook::sync::SyncResult,
+    config: &ResolvedConfig,
+) -> Result<usize> {
     let market_data_store = JsonlMarketDataStore::new(&config.data_dir);
     let mut count = 0;
 
     for (_, synced_balances) in &result.balances {
         for sb in synced_balances {
             if let Some(price) = &sb.price {
-                market_data_store.put_prices(&[price.clone()]).await?;
+                market_data_store
+                    .put_prices(std::slice::from_ref(price))
+                    .await?;
                 count += 1;
             }
         }
@@ -1033,7 +1074,10 @@ async fn store_sync_prices(result: &keepbook::sync::SyncResult, config: &Resolve
 }
 
 /// Fetch prices for crypto assets from configured price sources
-async fn fetch_crypto_prices(result: &keepbook::sync::SyncResult, config: &ResolvedConfig) -> Result<usize> {
+async fn fetch_crypto_prices(
+    result: &keepbook::sync::SyncResult,
+    config: &ResolvedConfig,
+) -> Result<usize> {
     use keepbook::market_data::CryptoPriceRouter;
     use std::collections::HashSet;
 
@@ -1053,7 +1097,8 @@ async fn fetch_crypto_prices(result: &keepbook::sync::SyncResult, config: &Resol
         .with_crypto_router(crypto_router);
 
     // Collect unique crypto assets from sync result
-    let assets: HashSet<Asset> = result.balances
+    let assets: HashSet<Asset> = result
+        .balances
         .iter()
         .flat_map(|(_, sbs)| sbs.iter().map(|sb| sb.asset_balance.asset.clone()))
         .filter(|a| matches!(a, Asset::Crypto { .. }))
@@ -1096,7 +1141,10 @@ async fn sync_all(storage: &JsonFileStorage, config: &ResolvedConfig) -> Result<
 }
 
 /// Schwab login command
-async fn schwab_login(storage: &JsonFileStorage, id_or_name: Option<&str>) -> Result<serde_json::Value> {
+async fn schwab_login(
+    storage: &JsonFileStorage,
+    id_or_name: Option<&str>,
+) -> Result<serde_json::Value> {
     // Find Schwab connection(s)
     let connections = storage.list_connections().await?;
     let schwab_connections: Vec<_> = connections
@@ -1106,12 +1154,10 @@ async fn schwab_login(storage: &JsonFileStorage, id_or_name: Option<&str>) -> Re
 
     let connection = match (id_or_name, schwab_connections.len()) {
         // Explicit ID/name provided
-        (Some(id_or_name), _) => {
-            find_connection(storage, id_or_name)
-                .await?
-                .filter(|c| c.config.synchronizer == "schwab")
-                .context(format!("Schwab connection not found: {id_or_name}"))?
-        }
+        (Some(id_or_name), _) => find_connection(storage, id_or_name)
+            .await?
+            .filter(|c| c.config.synchronizer == "schwab")
+            .context(format!("Schwab connection not found: {id_or_name}"))?,
         // No ID, exactly one Schwab connection
         (None, 1) => schwab_connections.into_iter().next().unwrap(),
         // No ID, no Schwab connections
@@ -1142,4 +1188,3 @@ async fn schwab_login(storage: &JsonFileStorage, id_or_name: Option<&str>) -> Re
         "message": "Session captured successfully"
     }))
 }
-

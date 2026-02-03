@@ -109,8 +109,8 @@ impl SessionCache {
     /// Save session data for a connection.
     pub fn set(&self, connection_id: &str, session: &SessionData) -> Result<()> {
         let path = self.session_file(connection_id);
-        let content = serde_json::to_string_pretty(session)
-            .context("Failed to serialize session")?;
+        let content =
+            serde_json::to_string_pretty(session).context("Failed to serialize session")?;
 
         std::fs::write(&path, content)
             .with_context(|| format!("Failed to write session file: {path:?}"))?;

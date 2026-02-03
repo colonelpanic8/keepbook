@@ -385,7 +385,10 @@ mod tests {
     #[test]
     fn test_format_symbol_unknown_exchange() {
         let provider = AlphaVantagePriceSource::new("test_key");
-        assert_eq!(provider.format_symbol("ticker", Some("UNKNOWN")), "TICKER.UNKNOWN");
+        assert_eq!(
+            provider.format_symbol("ticker", Some("UNKNOWN")),
+            "TICKER.UNKNOWN"
+        );
     }
 
     #[test]

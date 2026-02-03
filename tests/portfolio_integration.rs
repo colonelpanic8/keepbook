@@ -19,7 +19,12 @@ reporting_currency = "USD"
     )?;
 
     let output = Command::new(env!("CARGO_BIN_EXE_keepbook"))
-        .args(["--config", config_path.to_str().unwrap(), "portfolio", "snapshot"])
+        .args([
+            "--config",
+            config_path.to_str().unwrap(),
+            "portfolio",
+            "snapshot",
+        ])
         .output()?;
 
     assert!(output.status.success(), "Command failed: {output:?}");
