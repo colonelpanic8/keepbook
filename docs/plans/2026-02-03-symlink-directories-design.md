@@ -1,5 +1,7 @@
 # Symlink Directories for Connections and Accounts
 
+**Status:** Implemented
+
 ## Overview
 
 Add human-readable symlink directories for navigating connections and accounts by name instead of UUID.
