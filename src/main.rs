@@ -997,8 +997,8 @@ async fn sync_connection(storage: &JsonFileStorage, id_or_name: &str, config: &R
         let result = synchronizer.sync_with_storage(&mut connection, storage).await?;
         result.save(storage).await?;
 
-        // Store prices from sync result
-        let prices_stored = store_sync_prices(&result, config).await?;
+        // Coinbase doesn't provide prices, so fetch them from configured sources
+        let prices_fetched = fetch_crypto_prices(&result, config).await.unwrap_or(0);
 
         return Ok(serde_json::json!({
             "success": true,
@@ -1007,7 +1007,7 @@ async fn sync_connection(storage: &JsonFileStorage, id_or_name: &str, config: &R
                 "name": conn_name
             },
             "accounts_synced": result.accounts.len(),
-            "prices_stored": prices_stored,
+            "prices_stored": prices_fetched,
             "last_sync": result.connection.state.last_sync.as_ref().map(|ls| ls.at.to_rfc3339())
         }));
     }
@@ -1026,6 +1026,46 @@ async fn store_sync_prices(result: &keepbook::sync::SyncResult, config: &Resolve
                 market_data_store.put_prices(&[price.clone()]).await?;
                 count += 1;
             }
+        }
+    }
+
+    Ok(count)
+}
+
+/// Fetch prices for crypto assets from configured price sources
+async fn fetch_crypto_prices(result: &keepbook::sync::SyncResult, config: &ResolvedConfig) -> Result<usize> {
+    use keepbook::market_data::CryptoPriceRouter;
+    use std::collections::HashSet;
+
+    // Load crypto price sources from registry
+    let mut registry = PriceSourceRegistry::new(&config.data_dir);
+    registry.load()?;
+    let crypto_sources = registry.build_crypto_sources().await?;
+
+    if crypto_sources.is_empty() {
+        tracing::debug!("No crypto price sources configured, skipping price fetch");
+        return Ok(0);
+    }
+
+    let crypto_router = Arc::new(CryptoPriceRouter::new(crypto_sources));
+    let store = Arc::new(JsonlMarketDataStore::new(&config.data_dir));
+    let market_data = keepbook::market_data::MarketDataService::new(store, None)
+        .with_crypto_router(crypto_router);
+
+    // Collect unique crypto assets from sync result
+    let assets: HashSet<Asset> = result.balances
+        .iter()
+        .flat_map(|(_, sbs)| sbs.iter().map(|sb| sb.asset_balance.asset.clone()))
+        .filter(|a| matches!(a, Asset::Crypto { .. }))
+        .collect();
+
+    let date = chrono::Utc::now().date_naive();
+    let mut count = 0;
+
+    for asset in assets {
+        match market_data.price_close(&asset, date).await {
+            Ok(_) => count += 1,
+            Err(e) => tracing::warn!(asset = ?asset, error = %e, "Failed to fetch price"),
         }
     }
 
