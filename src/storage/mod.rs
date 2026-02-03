@@ -8,7 +8,7 @@ pub use memory::MemoryStorage;
 
 use anyhow::Result;
 use crate::credentials::CredentialStore;
-use crate::models::{Account, Balance, Connection, Id, Transaction};
+use crate::models::{Account, BalanceSnapshot, Connection, Id, Transaction};
 
 /// Storage trait for persisting financial data.
 #[async_trait::async_trait]
@@ -27,18 +27,18 @@ pub trait Storage: Send + Sync {
     async fn save_account(&self, account: &Account) -> Result<()>;
     async fn delete_account(&self, id: &Id) -> Result<bool>;
 
-    // Balances
-    async fn get_balances(&self, account_id: &Id) -> Result<Vec<Balance>>;
-    async fn append_balances(&self, account_id: &Id, balances: &[Balance]) -> Result<()>;
+    // Balance Snapshots
+    async fn get_balance_snapshots(&self, account_id: &Id) -> Result<Vec<BalanceSnapshot>>;
+    async fn append_balance_snapshot(&self, account_id: &Id, snapshot: &BalanceSnapshot) -> Result<()>;
 
-    /// Get the most recent balance for each (account, asset) pair across all accounts.
-    async fn get_latest_balances(&self) -> Result<Vec<(Id, Balance)>>;
+    /// Get the most recent balance snapshot for a specific account.
+    async fn get_latest_balance_snapshot(&self, account_id: &Id) -> Result<Option<BalanceSnapshot>>;
 
-    /// Get the most recent balance for each asset in accounts belonging to a connection.
-    async fn get_latest_balances_for_connection(&self, connection_id: &Id) -> Result<Vec<(Id, Balance)>>;
+    /// Get the most recent balance snapshot for each account across all accounts.
+    async fn get_latest_balances(&self) -> Result<Vec<(Id, BalanceSnapshot)>>;
 
-    /// Get the most recent balance for each asset in a specific account.
-    async fn get_latest_balances_for_account(&self, account_id: &Id) -> Result<Vec<Balance>>;
+    /// Get the most recent balance snapshot for each account belonging to a connection.
+    async fn get_latest_balances_for_connection(&self, connection_id: &Id) -> Result<Vec<(Id, BalanceSnapshot)>>;
 
     // Transactions
     async fn get_transactions(&self, account_id: &Id) -> Result<Vec<Transaction>>;
