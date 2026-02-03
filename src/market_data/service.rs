@@ -62,6 +62,33 @@ impl MarketDataService {
         self
     }
 
+    /// Get price from store only, no external fetching.
+    /// Returns the most recent price by timestamp for the given date (with lookback).
+    pub async fn price_from_store(&self, asset: &Asset, date: NaiveDate) -> Result<Option<PricePoint>> {
+        let asset_id = AssetId::from_asset(asset);
+        debug!(asset_id = %asset_id, date = %date, "looking up price from store only");
+
+        for offset in 0..=self.lookback_days {
+            let target_date = date - Duration::days(offset as i64);
+            if let Some(price) = self
+                .store
+                .get_price(&asset_id, target_date, PriceKind::Close)
+                .await?
+            {
+                debug!(
+                    asset_id = %asset_id,
+                    date = %target_date,
+                    price = %price.price,
+                    source = %price.source,
+                    "price found in store"
+                );
+                return Ok(Some(price));
+            }
+        }
+
+        Ok(None)
+    }
+
     pub async fn price_close(&self, asset: &Asset, date: NaiveDate) -> Result<PricePoint> {
         let asset_id = AssetId::from_asset(asset);
         debug!(asset_id = %asset_id, date = %date, "looking up close price");
