@@ -134,13 +134,70 @@ impl CoinbaseSynchronizer {
     }
 
     async fn get_accounts(&self) -> Result<Vec<CoinbaseAccount>> {
-        #[derive(Deserialize)]
-        struct Response {
-            accounts: Vec<CoinbaseAccount>,
+        // Use portfolios breakdown to get all positions including ETH/BTC
+        // The accounts endpoint doesn't return all wallets for some reason
+        #[derive(Debug, Deserialize)]
+        struct Portfolio {
+            uuid: String,
+            #[allow(dead_code)]
+            name: String,
+        }
+        #[derive(Debug, Deserialize)]
+        struct PortfoliosResponse {
+            portfolios: Vec<Portfolio>,
+        }
+        #[derive(Debug, Deserialize)]
+        struct SpotPosition {
+            asset: String,
+            account_uuid: String,
+            total_balance_crypto: f64,
+            #[serde(default)]
+            is_cash: bool,
+        }
+        #[derive(Debug, Deserialize)]
+        struct PortfolioBreakdown {
+            #[serde(default)]
+            spot_positions: Vec<SpotPosition>,
+        }
+        #[derive(Debug, Deserialize)]
+        struct BreakdownResponse {
+            breakdown: PortfolioBreakdown,
         }
 
-        let resp: Response = self.request("GET", "/api/v3/brokerage/accounts").await?;
-        Ok(resp.accounts)
+        let mut accounts = Vec::new();
+
+        // Get portfolios and their breakdowns
+        let portfolios: PortfoliosResponse = self.request("GET", "/api/v3/brokerage/portfolios").await?;
+
+        for p in portfolios.portfolios {
+            let path = format!("/api/v3/brokerage/portfolios/{}", p.uuid);
+            let breakdown: BreakdownResponse = self.request("GET", &path).await?;
+
+            for pos in breakdown.breakdown.spot_positions {
+                // Skip fiat currencies (USD, etc) - they're handled differently
+                if pos.is_cash {
+                    continue;
+                }
+
+                accounts.push(CoinbaseAccount {
+                    uuid: pos.account_uuid,
+                    name: format!("{} Wallet", pos.asset),
+                    currency: pos.asset,
+                    available_balance: CoinbaseBalance {
+                        value: pos.total_balance_crypto.to_string(),
+                        currency: String::new(), // Not used
+                    },
+                    account_type: "ACCOUNT_TYPE_CRYPTO".to_string(),
+                });
+            }
+        }
+
+        tracing::info!(
+            total_accounts = accounts.len(),
+            "coinbase portfolios API returned accounts"
+        );
+
+        Ok(accounts)
     }
 
     async fn get_transactions(&self, account_id: &str) -> Result<Vec<CoinbaseTransaction>> {
@@ -179,6 +236,13 @@ impl CoinbaseSynchronizer {
             let account_id = Id::from_string(&cb_account.uuid);
             let asset = Asset::crypto(&cb_account.currency);
             let balance_amount: f64 = cb_account.available_balance.value.parse().unwrap_or(0.0);
+
+            tracing::debug!(
+                name = %cb_account.name,
+                currency = %cb_account.currency,
+                balance = %balance_amount,
+                "processing coinbase account"
+            );
 
             // Check if account already exists
             let existing = existing_ids.contains(&cb_account.uuid);
