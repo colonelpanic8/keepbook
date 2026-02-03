@@ -19,11 +19,11 @@ use tokio::sync::Mutex;
 use crate::credentials::{SessionCache, SessionData};
 use crate::market_data::{AssetId, PriceKind, PricePoint};
 use crate::models::{
-    Account, Asset, Balance, Connection, ConnectionStatus, Id, LastSync, SyncStatus,
+    Account, Asset, AssetBalance, Connection, ConnectionStatus, Id, LastSync, SyncStatus,
 };
 use crate::storage::Storage;
 use crate::sync::schwab::{SchwabClient, Position};
-use crate::sync::{AuthStatus, InteractiveAuth, SyncResult, SyncedBalance, Synchronizer};
+use crate::sync::{AuthStatus, InteractiveAuth, SyncResult, SyncedAssetBalance, Synchronizer};
 
 const SCHWAB_LOGIN_URL: &str = "https://client.schwab.com/Login/SignOn/CustomerCenterLogin.aspx";
 const SCHWAB_API_DOMAIN: &str = "ausgateway.schwab.com";
@@ -86,7 +86,7 @@ impl SchwabSynchronizer {
 
         // Build sync result
         let mut accounts = Vec::new();
-        let mut balances: Vec<(Id, Vec<SyncedBalance>)> = Vec::new();
+        let mut balances: Vec<(Id, Vec<SyncedAssetBalance>)> = Vec::new();
 
         for schwab_account in accounts_resp.accounts {
             // Use Schwab's account_id to generate a stable, filesystem-safe ID
@@ -117,7 +117,7 @@ impl SchwabSynchronizer {
                 }),
             };
 
-            let mut account_balances = vec![];
+            let mut account_balances: Vec<SyncedAssetBalance> = vec![];
 
             // For brokerage accounts, use individual positions (skip CASH position, use balances.cash)
             // For non-brokerage (bank) accounts, use the total balance
@@ -130,7 +130,7 @@ impl SchwabSynchronizer {
                     }
 
                     let asset = Asset::equity(&position.default_symbol);
-                    let balance = Balance::new(asset.clone(), position.quantity.to_string());
+                    let asset_balance = AssetBalance::new(asset.clone(), position.quantity.to_string());
 
                     let price_point = PricePoint {
                         asset_id: AssetId::from_asset(&asset),
@@ -141,23 +141,21 @@ impl SchwabSynchronizer {
                         kind: PriceKind::Close,
                         source: "schwab".to_string(),
                     };
-                    account_balances.push(SyncedBalance::new(balance).with_price(price_point));
+                    account_balances.push(SyncedAssetBalance::new(asset_balance).with_price(price_point));
                 }
 
                 // Add actual cash balance from account balances (not from CASH position)
                 if let Some(bal) = &schwab_account.balances {
                     if let Some(cash) = bal.cash {
-                        if cash > 0.0 {
-                            account_balances.push(SyncedBalance::new(Balance::new(
-                                Asset::currency("USD"),
-                                cash.to_string(),
-                            )));
-                        }
+                        account_balances.push(SyncedAssetBalance::new(AssetBalance::new(
+                            Asset::currency("USD"),
+                            cash.to_string(),
+                        )));
                     }
                 }
             } else if let Some(bal) = &schwab_account.balances {
                 // Non-brokerage accounts (bank/checking): store total balance as USD
-                account_balances.push(SyncedBalance::new(Balance::new(
+                account_balances.push(SyncedAssetBalance::new(AssetBalance::new(
                     Asset::currency("USD"),
                     bal.balance.to_string(),
                 )));
