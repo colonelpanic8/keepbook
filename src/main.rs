@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use chrono::Utc;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use keepbook::config::{default_config_path, ResolvedConfig};
 use keepbook::market_data::{JsonlMarketDataStore, MarketDataStore, PriceSourceRegistry};
 use keepbook::models::{Account, Asset, AssetBalance, BalanceSnapshot, Connection, ConnectionConfig, ConnectionState, Id};
@@ -644,30 +644,7 @@ async fn main() -> Result<()> {
         },
 
         None => {
-            let output = serde_json::json!({
-                "name": "keepbook",
-                "version": env!("CARGO_PKG_VERSION"),
-                "config_file": cli.config.display().to_string(),
-                "data_directory": config.data_dir.display().to_string(),
-                "commands": [
-                    "config",
-                    "add connection <name>",
-                    "add account --connection <id> <name>",
-                    "set balance --account <id> --asset <asset> --amount <amount>",
-                    "list connections",
-                    "list accounts",
-                    "list price-sources",
-                    "list balances",
-                    "list transactions",
-                    "list all",
-                    "remove connection <id>",
-                    "sync connection <id-or-name>",
-                    "sync all",
-                    "schwab login [id-or-name]",
-                    "portfolio snapshot [options]"
-                ]
-            });
-            println!("{}", serde_json::to_string_pretty(&output)?);
+            Cli::command().print_help()?;
         }
     }
 
