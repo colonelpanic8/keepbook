@@ -423,6 +423,28 @@ impl JsonFileStorage {
 
         Ok((created, warnings))
     }
+
+    /// Rebuild all symlinks: connections/by-name/ and all connection accounts/ directories.
+    /// Returns (connections_created, accounts_created, warnings).
+    pub async fn rebuild_all_symlinks(&self) -> Result<(usize, usize, Vec<String>)> {
+        let (conn_created, mut warnings) = self.rebuild_connection_symlinks().await?;
+
+        let connections = self.list_connections().await?;
+        let mut account_created = 0;
+
+        for conn in connections {
+            if let Err(e) = self.update_account_symlinks(&conn).await {
+                warnings.push(format!(
+                    "Failed to update account symlinks for connection {}: {}",
+                    conn.id(), e
+                ));
+                continue;
+            }
+            account_created += conn.state.account_ids.len();
+        }
+
+        Ok((conn_created, account_created, warnings))
+    }
 }
 
 #[async_trait::async_trait]
