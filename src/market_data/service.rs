@@ -64,7 +64,11 @@ impl MarketDataService {
 
     /// Get price from store only, no external fetching.
     /// Returns the most recent price by timestamp for the given date (with lookback).
-    pub async fn price_from_store(&self, asset: &Asset, date: NaiveDate) -> Result<Option<PricePoint>> {
+    pub async fn price_from_store(
+        &self,
+        asset: &Asset,
+        date: NaiveDate,
+    ) -> Result<Option<PricePoint>> {
         let asset_id = AssetId::from_asset(asset);
         debug!(asset_id = %asset_id, date = %date, "looking up price from store only");
 
