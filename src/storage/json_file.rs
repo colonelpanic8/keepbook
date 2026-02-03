@@ -5,7 +5,7 @@ use tokio::fs;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use crate::credentials::CredentialStore;
-use crate::models::{Account, AccountConfig, Balance, Connection, ConnectionConfig, ConnectionState, Id, Transaction};
+use crate::models::{Account, AccountConfig, BalanceSnapshot, Connection, ConnectionConfig, ConnectionState, Id, Transaction};
 use super::Storage;
 
 /// JSON file-based storage implementation.
@@ -398,12 +398,12 @@ impl Storage for JsonFileStorage {
         }
     }
 
-    async fn get_balances(&self, account_id: &Id) -> Result<Vec<Balance>> {
+    async fn get_balance_snapshots(&self, account_id: &Id) -> Result<Vec<BalanceSnapshot>> {
         self.read_jsonl(&self.balances_file(account_id)).await
     }
 
-    async fn append_balances(&self, account_id: &Id, balances: &[Balance]) -> Result<()> {
-        self.append_jsonl(&self.balances_file(account_id), balances).await
+    async fn append_balance_snapshot(&self, account_id: &Id, snapshot: &BalanceSnapshot) -> Result<()> {
+        self.append_jsonl(&self.balances_file(account_id), &[snapshot]).await
     }
 
     async fn get_transactions(&self, account_id: &Id) -> Result<Vec<Transaction>> {
@@ -414,49 +414,32 @@ impl Storage for JsonFileStorage {
         self.append_jsonl(&self.transactions_file(account_id), txns).await
     }
 
-    async fn get_latest_balances_for_account(&self, account_id: &Id) -> Result<Vec<Balance>> {
-        use crate::models::Asset;
-
-        let balances = self.get_balances(account_id).await?;
-
-        // Group by asset, keep most recent
-        let mut latest: std::collections::HashMap<Asset, Balance> = std::collections::HashMap::new();
-        for balance in balances {
-            latest
-                .entry(balance.asset.clone())
-                .and_modify(|existing| {
-                    if balance.timestamp > existing.timestamp {
-                        *existing = balance.clone();
-                    }
-                })
-                .or_insert(balance);
-        }
-
-        Ok(latest.into_values().collect())
+    async fn get_latest_balance_snapshot(&self, account_id: &Id) -> Result<Option<BalanceSnapshot>> {
+        let snapshots = self.get_balance_snapshots(account_id).await?;
+        Ok(snapshots.into_iter().max_by_key(|s| s.timestamp))
     }
 
-    async fn get_latest_balances_for_connection(&self, connection_id: &Id) -> Result<Vec<(Id, Balance)>> {
+    async fn get_latest_balances_for_connection(&self, connection_id: &Id) -> Result<Vec<(Id, BalanceSnapshot)>> {
         let connection = self.get_connection(connection_id).await?
             .ok_or_else(|| anyhow::anyhow!("Connection not found"))?;
 
         let mut results = Vec::new();
         for account_id in &connection.state.account_ids {
-            let balances = self.get_latest_balances_for_account(account_id).await?;
-            for balance in balances {
-                results.push((account_id.clone(), balance));
+            if let Some(snapshot) = self.get_latest_balance_snapshot(account_id).await? {
+                results.push((account_id.clone(), snapshot));
             }
         }
 
         Ok(results)
     }
 
-    async fn get_latest_balances(&self) -> Result<Vec<(Id, Balance)>> {
+    async fn get_latest_balances(&self) -> Result<Vec<(Id, BalanceSnapshot)>> {
         let connections = self.list_connections().await?;
 
         let mut results = Vec::new();
         for connection in connections {
-            let connection_balances = self.get_latest_balances_for_connection(connection.id()).await?;
-            results.extend(connection_balances);
+            let connection_snapshots = self.get_latest_balances_for_connection(connection.id()).await?;
+            results.extend(connection_snapshots);
         }
 
         Ok(results)
