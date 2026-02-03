@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use tokio::fs;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tracing::warn;
 
 use crate::credentials::CredentialStore;
 use crate::models::{Account, AccountConfig, BalanceSnapshot, Connection, ConnectionConfig, ConnectionState, Id, Transaction};
@@ -284,7 +285,7 @@ impl JsonFileStorage {
     /// Update symlinks from connection's accounts/ dir to the actual account directories.
     ///
     /// Creates symlinks like:
-    ///   connections/{conn-id}/accounts/{account-id} -> ../../../accounts/{account-id}
+    ///   connections/{conn-id}/accounts/{account-name} -> ../../../accounts/{account-id}
     async fn update_account_symlinks(&self, conn: &Connection) -> Result<()> {
         let accounts_dir = self.connection_accounts_dir(conn.id());
 
@@ -293,48 +294,60 @@ impl JsonFileStorage {
             .await
             .context("Failed to create connection accounts directory")?;
 
-        // Get existing symlinks
-        let mut existing: std::collections::HashSet<String> = std::collections::HashSet::new();
+        // Remove all existing symlinks
         if let Ok(mut entries) = fs::read_dir(&accounts_dir).await {
             while let Ok(Some(entry)) = entries.next_entry().await {
                 if let Ok(file_type) = entry.file_type().await {
                     if file_type.is_symlink() {
-                        if let Some(name) = entry.file_name().to_str() {
-                            existing.insert(name.to_string());
-                        }
+                        let _ = fs::remove_file(entry.path()).await;
                     }
                 }
             }
         }
 
-        // Create symlinks for current account IDs
-        let current: std::collections::HashSet<String> = conn
-            .state
-            .account_ids
-            .iter()
-            .map(|id| id.to_string())
-            .collect();
+        // Load accounts and create symlinks by name
+        let mut seen_names: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-        // Remove stale symlinks
-        for stale in existing.difference(&current) {
-            let link_path = accounts_dir.join(stale);
-            let _ = fs::remove_file(&link_path).await;
-        }
+        for account_id in &conn.state.account_ids {
+            let account = match self.get_account(account_id).await? {
+                Some(a) => a,
+                None => continue,
+            };
 
-        // Create missing symlinks
-        for account_id in &current {
-            let link_path = accounts_dir.join(account_id);
-            if !link_path.exists() {
-                // Relative path: ../../../accounts/{account-id}
-                let target = PathBuf::from("../../../accounts").join(account_id);
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::symlink;
-                    // Ignore errors - symlink may already exist or target may not exist yet
-                    let _ = symlink(&target, &link_path);
-                }
-                // On non-Unix platforms, symlinks are skipped (Windows requires admin or developer mode)
+            let Some(sanitized) = Self::sanitize_name(&account.name) else {
+                warn!(
+                    "Skipped account with empty name (id: {}, connection: {})",
+                    account_id, conn.id()
+                );
+                continue;
+            };
+
+            if seen_names.contains(&sanitized) {
+                warn!(
+                    "Skipped duplicate account name \"{}\" (id: {}, connection: {})",
+                    sanitized, account_id, conn.id()
+                );
+                continue;
             }
+
+            let link_path = accounts_dir.join(&sanitized);
+            // Relative path: ../../../accounts/{account-id}
+            let target = PathBuf::from("../../../accounts").join(account_id.to_string());
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::symlink;
+                // Ignore errors - log them
+                if let Err(e) = symlink(&target, &link_path) {
+                    warn!(
+                        "Failed to create symlink for account \"{}\": {}",
+                        sanitized, e
+                    );
+                    continue;
+                }
+            }
+
+            seen_names.insert(sanitized);
         }
 
         Ok(())
