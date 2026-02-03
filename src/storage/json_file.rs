@@ -124,6 +124,21 @@ impl JsonFileStorage {
         self.account_dir(account_id).join("transactions.jsonl")
     }
 
+    /// Sanitize a name for use as a symlink filename.
+    /// Returns None if the result would be empty.
+    fn sanitize_name(name: &str) -> Option<String> {
+        let sanitized: String = name
+            .trim()
+            .chars()
+            .map(|c| if c == '/' || c == '\0' { '-' } else { c })
+            .collect();
+        if sanitized.is_empty() {
+            None
+        } else {
+            Some(sanitized)
+        }
+    }
+
     async fn ensure_dir(&self, path: &Path) -> Result<()> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
