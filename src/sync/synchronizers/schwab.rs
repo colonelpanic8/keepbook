@@ -264,7 +264,7 @@ impl InteractiveAuth for SchwabSynchronizer {
 
         // Spawn the handler task
         let handler_task = tokio::spawn(async move {
-            while let Some(_) = handler.next().await {}
+            while (handler.next().await).is_some() {}
         });
 
         // Create a new page

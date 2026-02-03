@@ -9,6 +9,12 @@ use uuid::Uuid;
 #[serde(transparent)]
 pub struct Id(String);
 
+impl Default for Id {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Id {
     /// Namespace UUID for generating deterministic IDs from external identifiers.
     const NAMESPACE: Uuid = Uuid::from_u128(0x6ba7b810_9dad_11d1_80b4_00c04fd430c8);

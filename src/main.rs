@@ -321,7 +321,7 @@ async fn main() -> Result<()> {
 
                     let connection = find_connection(&storage, &id_or_name)
                         .await?
-                        .context(format!("Connection not found: {}", id_or_name))?;
+                        .context(format!("Connection not found: {id_or_name}"))?;
 
                     let threshold = resolve_balance_staleness(None, &connection, &config.refresh);
                     let check = check_balance_staleness(&connection, threshold);
@@ -570,7 +570,7 @@ async fn main() -> Result<()> {
                 // Sync stale connections
                 if !connections_to_sync.is_empty() {
                     for connection in &connections_to_sync {
-                        let _ = sync_connection(&storage, &connection.id().to_string(), &config).await;
+                        let _ = sync_connection(&storage, connection.id().as_ref(), &config).await;
                     }
                 }
 

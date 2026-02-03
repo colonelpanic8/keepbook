@@ -105,7 +105,7 @@ impl CoinbaseSynchronizer {
         // Sign the message
         let signature: Signature = signing_key.sign(message.as_bytes());
         let sig_bytes = signature.to_bytes();
-        let sig_b64 = URL_SAFE_NO_PAD.encode(&sig_bytes);
+        let sig_b64 = URL_SAFE_NO_PAD.encode(sig_bytes);
 
         Ok(format!("{message}.{sig_b64}"))
     }

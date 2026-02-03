@@ -34,6 +34,7 @@ struct AssetValuation {
 /// Represents a single asset holding from a snapshot.
 struct AssetHolding {
     account_id: Id,
+    #[allow(dead_code)]
     asset: Asset,
     amount: String,
     timestamp: DateTime<Utc>,
