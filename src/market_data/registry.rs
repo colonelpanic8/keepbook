@@ -8,10 +8,12 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 
 use super::providers::{
-    AlphaVantagePriceSource, CoinCapPriceSource, CoinGeckoPriceSource, EodhdPriceSource,
-    FrankfurterRateSource, MarketstackPriceSource, TwelveDataPriceSource,
+    AlphaVantagePriceSource, CoinCapPriceSource, CoinGeckoPriceSource,
+    CryptoComparePriceSource, EodhdPriceSource, FrankfurterRateSource, MarketstackPriceSource,
+    TwelveDataPriceSource,
 };
 use super::providers::coincap::CoinCapConfig;
+use super::providers::cryptocompare::CryptoCompareConfig;
 use super::source_config::{LoadedPriceSource, PriceSourceConfig, PriceSourceType};
 use super::sources::{CryptoPriceSource, EquityPriceSource, FxRateSource};
 
@@ -133,9 +135,10 @@ impl PriceSourceRegistry {
                     Arc::new(source) as Arc<dyn EquityPriceSource>
                 }
                 // Skip non-equity sources
-                PriceSourceType::Coingecko | PriceSourceType::Coincap | PriceSourceType::Frankfurter => {
-                    continue
-                }
+                PriceSourceType::Coingecko
+                | PriceSourceType::Cryptocompare
+                | PriceSourceType::Coincap
+                | PriceSourceType::Frankfurter => continue,
             };
             sources.push(source);
         }
@@ -151,6 +154,28 @@ impl PriceSourceRegistry {
             let source = match loaded.config.source_type {
                 PriceSourceType::Coingecko => {
                     Arc::new(CoinGeckoPriceSource::new()) as Arc<dyn CryptoPriceSource>
+                }
+                PriceSourceType::Cryptocompare => {
+                    let mut provider = if let Some(credentials) = &loaded.config.credentials {
+                        let store = credentials.build();
+                        CryptoComparePriceSource::from_credentials(store.as_ref()).await?
+                    } else {
+                        CryptoComparePriceSource::new()
+                    };
+
+                    if let Some(config) = &loaded.config.config {
+                        let parsed: CryptoCompareConfig = config.clone().try_into().with_context(
+                            || {
+                                format!(
+                                    "Failed to parse config for CryptoCompare source {}",
+                                    loaded.name
+                                )
+                            },
+                        )?;
+                        provider = provider.with_config(parsed);
+                    }
+
+                    Arc::new(provider) as Arc<dyn CryptoPriceSource>
                 }
                 PriceSourceType::Coincap => {
                     let mut provider = if let Some(credentials) = &loaded.config.credentials {

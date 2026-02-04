@@ -23,6 +23,8 @@ pub enum PriceSourceType {
     Marketstack,
     /// CoinGecko crypto prices
     Coingecko,
+    /// CryptoCompare crypto prices
+    Cryptocompare,
     /// CoinCap crypto prices
     Coincap,
     /// Frankfurter/ECB FX rates
@@ -34,7 +36,7 @@ impl PriceSourceType {
     pub fn requires_credentials(&self) -> bool {
         match self {
             Self::Eodhd | Self::TwelveData | Self::AlphaVantage | Self::Marketstack => true,
-            Self::Coingecko | Self::Coincap | Self::Frankfurter => false,
+            Self::Coingecko | Self::Cryptocompare | Self::Coincap | Self::Frankfurter => false,
         }
     }
 
@@ -44,7 +46,7 @@ impl PriceSourceType {
             Self::Eodhd | Self::TwelveData | Self::AlphaVantage | Self::Marketstack => {
                 &[AssetCategory::Equity]
             }
-            Self::Coingecko | Self::Coincap => &[AssetCategory::Crypto],
+            Self::Coingecko | Self::Cryptocompare | Self::Coincap => &[AssetCategory::Crypto],
             Self::Frankfurter => &[AssetCategory::Fx],
         }
     }
