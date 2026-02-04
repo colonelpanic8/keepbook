@@ -1,4 +1,5 @@
 pub mod alpha_vantage;
+pub mod coincap;
 pub mod coingecko;
 pub mod eodhd;
 pub mod frankfurter;
@@ -6,6 +7,7 @@ pub mod marketstack;
 pub mod twelve_data;
 
 pub use alpha_vantage::AlphaVantagePriceSource;
+pub use coincap::CoinCapPriceSource;
 pub use coingecko::CoinGeckoPriceSource;
 pub use eodhd::EodhdPriceSource;
 pub use frankfurter::FrankfurterRateSource;
