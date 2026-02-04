@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use anyhow::{anyhow, Result};
-use chrono::{NaiveDate, Utc};
+use chrono::{Duration, NaiveDate, Utc};
 use serde::Deserialize;
 
 use crate::market_data::{AssetId, CryptoPriceSource, PriceKind, PricePoint};
@@ -218,6 +218,13 @@ impl CryptoPriceSource for CoinGeckoPriceSource {
         asset_id: &AssetId,
         date: NaiveDate,
     ) -> Result<Option<PricePoint>> {
+        // CoinGecko public API limits historical queries to the last 365 days.
+        // Avoid hammering the API for dates we know it can't satisfy.
+        let oldest_allowed = Utc::now().date_naive() - Duration::days(365);
+        if date < oldest_allowed {
+            return Ok(None);
+        }
+
         // Extract symbol and network from the asset
         let (symbol, network) = match asset {
             Asset::Crypto { symbol, network } => (symbol.as_str(), network.as_deref()),

@@ -4,7 +4,7 @@
 //! Note: Free tier is limited to 25 requests/day.
 
 use anyhow::{anyhow, Result};
-use chrono::{NaiveDate, Utc};
+use chrono::{Duration, NaiveDate, Utc};
 use reqwest::Client;
 use secrecy::ExposeSecret;
 use serde::Deserialize;
@@ -124,6 +124,11 @@ impl EquityPriceSource for AlphaVantagePriceSource {
         };
 
         let symbol = self.format_symbol(ticker, exchange);
+        let outputsize = if date < (Utc::now().date_naive() - Duration::days(120)) {
+            "full"
+        } else {
+            "compact"
+        };
 
         let response = self
             .client
@@ -131,7 +136,7 @@ impl EquityPriceSource for AlphaVantagePriceSource {
             .query(&[
                 ("function", "TIME_SERIES_DAILY"),
                 ("symbol", &symbol),
-                ("outputsize", "compact"), // compact = last 100 data points
+                ("outputsize", outputsize), // compact = last 100 data points
                 ("apikey", &self.api_key),
             ])
             .send()
