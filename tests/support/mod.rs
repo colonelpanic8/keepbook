@@ -1,8 +1,13 @@
+#![allow(dead_code)]
+
+use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
 
 use anyhow::Result;
 use async_trait::async_trait;
+use chrono::{DateTime, NaiveDate, Utc};
+use keepbook::market_data::{AssetId, FxRateKind, FxRatePoint, MarketDataSource, PriceKind, PricePoint};
 use keepbook::models::{
     Account, Asset, AssetBalance, Connection, ConnectionConfig, Transaction,
 };
@@ -132,4 +137,131 @@ pub fn mock_connection(name: impl Into<String>) -> Connection {
         credentials: None,
         balance_staleness: None,
     })
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct MockMarketDataSource {
+    prices: HashMap<(AssetId, NaiveDate), PricePoint>,
+    fx_rates: HashMap<(String, String, NaiveDate), FxRatePoint>,
+    fail_on_fetch: bool,
+}
+
+impl MockMarketDataSource {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_price(mut self, price: PricePoint) -> Self {
+        self.prices
+            .insert((price.asset_id.clone(), price.as_of_date), price);
+        self
+    }
+
+    pub fn with_fx_rate(mut self, rate: FxRatePoint) -> Self {
+        self.fx_rates
+            .insert((rate.base.clone(), rate.quote.clone(), rate.as_of_date), rate);
+        self
+    }
+
+    pub fn fail_on_fetch(mut self) -> Self {
+        self.fail_on_fetch = true;
+        self
+    }
+}
+
+#[async_trait]
+impl MarketDataSource for MockMarketDataSource {
+    async fn fetch_price(
+        &self,
+        _asset: &Asset,
+        asset_id: &AssetId,
+        date: NaiveDate,
+    ) -> Result<Option<PricePoint>> {
+        if self.fail_on_fetch {
+            anyhow::bail!("mock price fetch called unexpectedly");
+        }
+        Ok(self.prices.get(&(asset_id.clone(), date)).cloned())
+    }
+
+    async fn fetch_fx_rate(
+        &self,
+        base: &str,
+        quote: &str,
+        date: NaiveDate,
+    ) -> Result<Option<FxRatePoint>> {
+        if self.fail_on_fetch {
+            anyhow::bail!("mock fx fetch called unexpectedly");
+        }
+        Ok(self
+            .fx_rates
+            .get(&(base.to_string(), quote.to_string(), date))
+            .cloned())
+    }
+
+    fn name(&self) -> &str {
+        "mock"
+    }
+}
+
+pub fn price_point(
+    asset: &Asset,
+    date: NaiveDate,
+    price: impl Into<String>,
+    quote_currency: impl Into<String>,
+    kind: PriceKind,
+) -> PricePoint {
+    price_point_with_timestamp(
+        asset,
+        date,
+        price,
+        quote_currency,
+        kind,
+        Utc::now(),
+    )
+}
+
+pub fn price_point_with_timestamp(
+    asset: &Asset,
+    date: NaiveDate,
+    price: impl Into<String>,
+    quote_currency: impl Into<String>,
+    kind: PriceKind,
+    timestamp: DateTime<Utc>,
+) -> PricePoint {
+    PricePoint {
+        asset_id: AssetId::from_asset(asset),
+        as_of_date: date,
+        timestamp,
+        price: price.into(),
+        quote_currency: quote_currency.into(),
+        kind,
+        source: "mock".to_string(),
+    }
+}
+
+pub fn fx_rate_point(
+    base: impl Into<String>,
+    quote: impl Into<String>,
+    date: NaiveDate,
+    rate: impl Into<String>,
+) -> FxRatePoint {
+    fx_rate_point_with_timestamp(base, quote, date, rate, Utc::now())
+}
+
+pub fn fx_rate_point_with_timestamp(
+    base: impl Into<String>,
+    quote: impl Into<String>,
+    date: NaiveDate,
+    rate: impl Into<String>,
+    timestamp: DateTime<Utc>,
+) -> FxRatePoint {
+    FxRatePoint {
+        base: base.into(),
+        quote: quote.into(),
+        as_of_date: date,
+        timestamp,
+        rate: rate.into(),
+        kind: FxRateKind::Close,
+        source: "mock".to_string(),
+    }
 }

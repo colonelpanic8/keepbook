@@ -3,6 +3,7 @@ mod support;
 use anyhow::Result;
 use keepbook::git::{try_auto_commit, AutoCommitOutcome};
 use keepbook::storage::JsonFileStorage;
+use keepbook::sync::Synchronizer;
 use support::{git_available, init_repo, mock_connection, run_git, MockSynchronizer};
 use tempfile::TempDir;
 
