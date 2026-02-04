@@ -170,6 +170,9 @@ impl CryptoPriceSource for CryptoComparePriceSource {
         let Some(price) = price else {
             return Ok(None);
         };
+        if price <= 0.0 {
+            return Ok(None);
+        }
 
         Ok(Some(PricePoint {
             asset_id: asset_id.clone(),
