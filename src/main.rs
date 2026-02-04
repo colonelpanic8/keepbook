@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use chrono::{Duration, NaiveDate, Utc};
+use chrono::{Datelike, Duration, NaiveDate, Utc};
 use clap::{CommandFactory, Parser, Subcommand};
 use keepbook::config::{default_config_path, ResolvedConfig};
 use keepbook::market_data::{
@@ -197,6 +197,10 @@ enum MarketDataCommand {
         /// End date (YYYY-MM-DD, default: today)
         #[arg(long)]
         end: Option<String>,
+
+        /// Interval for backfill: daily, weekly, monthly, yearly (default: monthly)
+        #[arg(long, default_value = "monthly")]
+        interval: String,
 
         /// Base currency for FX rates (default: from config)
         #[arg(long)]
@@ -409,11 +413,13 @@ struct PriceHistoryFailure {
 struct PriceHistoryOutput {
     scope: PriceHistoryScopeOutput,
     currency: String,
+    interval: String,
     start_date: String,
     end_date: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     earliest_balance_date: Option<String>,
     days: usize,
+    points: usize,
     assets: Vec<AssetInfoOutput>,
     prices: PriceHistoryStats,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -592,6 +598,7 @@ async fn main() -> Result<()> {
                 connection,
                 start,
                 end,
+                interval,
                 currency,
                 no_fx,
             } => {
@@ -602,6 +609,7 @@ async fn main() -> Result<()> {
                     connection: connection.as_deref(),
                     start: start.as_deref(),
                     end: end.as_deref(),
+                    interval: interval.as_str(),
                     currency,
                     include_fx: !no_fx,
                 })
@@ -1486,8 +1494,38 @@ struct PriceHistoryRequest<'a> {
     connection: Option<&'a str>,
     start: Option<&'a str>,
     end: Option<&'a str>,
+    interval: &'a str,
     currency: Option<String>,
     include_fx: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum PriceHistoryInterval {
+    Daily,
+    Weekly,
+    Monthly,
+    Yearly,
+}
+
+impl PriceHistoryInterval {
+    fn parse(value: &str) -> Result<Self> {
+        match value.to_lowercase().as_str() {
+            "daily" => Ok(Self::Daily),
+            "weekly" => Ok(Self::Weekly),
+            "monthly" => Ok(Self::Monthly),
+            "yearly" => Ok(Self::Yearly),
+            _ => anyhow::bail!("Invalid interval: {value}. Use: daily, weekly, monthly, yearly"),
+        }
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Daily => "daily",
+            Self::Weekly => "weekly",
+            Self::Monthly => "monthly",
+            Self::Yearly => "yearly",
+        }
+    }
 }
 
 async fn fetch_historical_prices(request: PriceHistoryRequest<'_>) -> Result<PriceHistoryOutput> {
@@ -1500,6 +1538,7 @@ async fn fetch_historical_prices(request: PriceHistoryRequest<'_>) -> Result<Pri
         connection,
         start,
         end,
+        interval,
         currency,
         include_fx,
     } = request;
@@ -1542,6 +1581,11 @@ async fn fetch_historical_prices(request: PriceHistoryRequest<'_>) -> Result<Pri
     if start_date > end_date {
         anyhow::bail!("Start date must be on or before end date");
     }
+
+    let interval = PriceHistoryInterval::parse(interval)?;
+    let anchor_day = start_date.day();
+    let anchor_month = start_date.month();
+    let aligned_start = align_start_date(start_date, interval, anchor_month, anchor_day);
 
     let target_currency = currency.unwrap_or_else(|| config.reporting_currency.clone());
     let target_currency_upper = target_currency.to_uppercase();
@@ -1606,7 +1650,8 @@ async fn fetch_historical_prices(request: PriceHistoryRequest<'_>) -> Result<Pri
     let mut failure_count = 0usize;
     let failure_limit = 50usize;
 
-    let mut current = start_date;
+    let mut current = aligned_start;
+    let mut points = 0usize;
     {
         let mut fx_ctx = FxRateContext {
             market_data: &market_data,
@@ -1620,6 +1665,7 @@ async fn fetch_historical_prices(request: PriceHistoryRequest<'_>) -> Result<Pri
         };
 
         while current <= end_date {
+            points += 1;
             for asset_cache in asset_caches.iter_mut() {
                 match &asset_cache.asset {
                     Asset::Currency { iso_code } => {
@@ -1699,7 +1745,7 @@ async fn fetch_historical_prices(request: PriceHistoryRequest<'_>) -> Result<Pri
                 }
             }
 
-            current += Duration::days(1);
+            current = advance_interval_date(current, interval, anchor_day, anchor_month);
         }
     }
 
@@ -1716,16 +1762,81 @@ async fn fetch_historical_prices(request: PriceHistoryRequest<'_>) -> Result<Pri
     Ok(PriceHistoryOutput {
         scope,
         currency: target_currency,
+        interval: interval.as_str().to_string(),
         start_date: start_date.to_string(),
         end_date: end_date.to_string(),
         earliest_balance_date: earliest_balance_date.map(|d| d.to_string()),
         days,
+        points,
         assets: assets_output,
         prices: price_stats,
         fx: if include_fx { Some(fx_stats) } else { None },
         failure_count,
         failures,
     })
+}
+
+fn advance_interval_date(
+    date: NaiveDate,
+    interval: PriceHistoryInterval,
+    anchor_day: u32,
+    anchor_month: u32,
+) -> NaiveDate {
+    match interval {
+        PriceHistoryInterval::Daily => date + Duration::days(1),
+        PriceHistoryInterval::Weekly => date + Duration::days(7),
+        PriceHistoryInterval::Monthly => next_month_end(date),
+        PriceHistoryInterval::Yearly => add_years(date, 1, anchor_month, anchor_day),
+    }
+}
+
+fn align_start_date(
+    date: NaiveDate,
+    interval: PriceHistoryInterval,
+    anchor_month: u32,
+    anchor_day: u32,
+) -> NaiveDate {
+    match interval {
+        PriceHistoryInterval::Monthly => month_end(date),
+        PriceHistoryInterval::Yearly => {
+            let day = anchor_day.min(days_in_month(date.year(), anchor_month));
+            NaiveDate::from_ymd_opt(date.year(), anchor_month, day).expect("valid yearly date")
+        }
+        _ => date,
+    }
+}
+
+fn add_years(date: NaiveDate, years: i32, anchor_month: u32, anchor_day: u32) -> NaiveDate {
+    let year = date.year() + years;
+    let day = anchor_day.min(days_in_month(year, anchor_month));
+    NaiveDate::from_ymd_opt(year, anchor_month, day).expect("valid yearly date")
+}
+
+fn next_month_end(date: NaiveDate) -> NaiveDate {
+    let (year, month) = if date.month() == 12 {
+        (date.year() + 1, 1)
+    } else {
+        (date.year(), date.month() + 1)
+    };
+    let day = days_in_month(year, month);
+    NaiveDate::from_ymd_opt(year, month, day).expect("valid next month end")
+}
+
+fn month_end(date: NaiveDate) -> NaiveDate {
+    let day = days_in_month(date.year(), date.month());
+    NaiveDate::from_ymd_opt(date.year(), date.month(), day).expect("valid month end")
+}
+
+fn days_in_month(year: i32, month: u32) -> u32 {
+    let (next_year, next_month) = if month == 12 {
+        (year + 1, 1)
+    } else {
+        (year, month + 1)
+    };
+    let first_next =
+        NaiveDate::from_ymd_opt(next_year, next_month, 1).expect("valid next month");
+    let last = first_next - Duration::days(1);
+    last.day()
 }
 
 async fn resolve_price_history_scope(
