@@ -48,6 +48,20 @@ impl Default for RefreshConfig {
     }
 }
 
+/// Git-related configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GitConfig {
+    /// Enable automatic commits after data changes.
+    pub auto_commit: bool,
+}
+
+impl Default for GitConfig {
+    fn default() -> Self {
+        Self { auto_commit: false }
+    }
+}
+
 /// Application configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -63,6 +77,10 @@ pub struct Config {
     /// Refresh/staleness settings.
     #[serde(default)]
     pub refresh: RefreshConfig,
+
+    /// Git-related settings.
+    #[serde(default)]
+    pub git: GitConfig,
 }
 
 impl Default for Config {
@@ -71,6 +89,7 @@ impl Default for Config {
             data_dir: None,
             reporting_currency: default_reporting_currency(),
             refresh: RefreshConfig::default(),
+            git: GitConfig::default(),
         }
     }
 }
@@ -120,6 +139,9 @@ pub struct ResolvedConfig {
 
     /// Refresh/staleness settings.
     pub refresh: RefreshConfig,
+
+    /// Git-related settings.
+    pub git: GitConfig,
 }
 
 /// Returns the default config file path.
@@ -162,6 +184,7 @@ impl ResolvedConfig {
             data_dir,
             reporting_currency: config.reporting_currency,
             refresh: config.refresh,
+            git: config.git,
         })
     }
 
@@ -191,6 +214,7 @@ impl ResolvedConfig {
                 data_dir: config_dir.to_path_buf(),
                 reporting_currency: default_reporting_currency(),
                 refresh: RefreshConfig::default(),
+                git: GitConfig::default(),
             })
         }
     }
@@ -289,6 +313,21 @@ mod tests {
     }
 
     #[test]
+    fn test_load_git_config() -> Result<()> {
+        let dir = TempDir::new()?;
+        let config_path = dir.path().join("keepbook.toml");
+
+        let mut file = std::fs::File::create(&config_path)?;
+        writeln!(file, "[git]")?;
+        writeln!(file, "auto_commit = true")?;
+
+        let config = Config::load(&config_path)?;
+        assert!(config.git.auto_commit);
+
+        Ok(())
+    }
+
+    #[test]
     fn test_default_refresh_config() {
         let config = Config::default();
         assert_eq!(
@@ -299,5 +338,11 @@ mod tests {
             config.refresh.price_staleness,
             std::time::Duration::from_secs(24 * 60 * 60)
         );
+    }
+
+    #[test]
+    fn test_default_git_config() {
+        let config = Config::default();
+        assert!(!config.git.auto_commit);
     }
 }

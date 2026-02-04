@@ -7,6 +7,7 @@ use anyhow::{Context, Result};
 use chrono::{Datelike, Duration, NaiveDate, Utc};
 use clap::{CommandFactory, Parser, Subcommand};
 use keepbook::config::{default_config_path, ResolvedConfig};
+use keepbook::git::{try_auto_commit, AutoCommitOutcome};
 use keepbook::market_data::{
     FxRateKind, FxRatePoint, JsonlMarketDataStore, MarketDataService, MarketDataStore, PriceKind,
     PricePoint, PriceSourceRegistry,
@@ -466,29 +467,38 @@ async fn main() -> Result<()> {
             let output = serde_json::json!({
                 "config_file": cli.config.display().to_string(),
                 "data_directory": config.data_dir.display().to_string(),
+                "git": {
+                    "auto_commit": config.git.auto_commit
+                }
             });
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
 
         Some(Command::Add(add_cmd)) => match add_cmd {
             AddCommand::Connection { name } => {
+                let action = format!("add connection {}", name);
                 let result = add_connection(&storage, &name).await?;
                 println!("{}", serde_json::to_string_pretty(&result)?);
+                maybe_auto_commit(&config, &action);
             }
             AddCommand::Account {
                 connection,
                 name,
                 tag,
             } => {
+                let action = format!("add account {}", name);
                 let result = add_account(&storage, &connection, &name, tag).await?;
                 println!("{}", serde_json::to_string_pretty(&result)?);
+                maybe_auto_commit(&config, &action);
             }
         },
 
         Some(Command::Remove(remove_cmd)) => match remove_cmd {
             RemoveCommand::Connection { id } => {
+                let action = format!("remove connection {}", id);
                 let result = remove_connection(&storage, &id).await?;
                 println!("{}", serde_json::to_string_pretty(&result)?);
+                maybe_auto_commit(&config, &action);
             }
         },
 
@@ -498,8 +508,10 @@ async fn main() -> Result<()> {
                 asset,
                 amount,
             } => {
+                let action = format!("set balance {} {}", account, asset);
                 let result = set_balance(&storage, &account, &asset, &amount).await?;
                 println!("{}", serde_json::to_string_pretty(&result)?);
+                maybe_auto_commit(&config, &action);
             }
         },
 
@@ -532,6 +544,7 @@ async fn main() -> Result<()> {
 
                 let result = sync_connection(&storage, &id_or_name, &config).await?;
                 println!("{}", serde_json::to_string_pretty(&result)?);
+                maybe_auto_commit(&config, &format!("sync connection {}", id_or_name));
             }
             SyncCommand::All { if_stale } => {
                 if if_stale {
@@ -572,9 +585,11 @@ async fn main() -> Result<()> {
                         "total": results.len()
                     });
                     println!("{}", serde_json::to_string_pretty(&output)?);
+                    maybe_auto_commit(&config, "sync all");
                 } else {
                     let result = sync_all(&storage, &config).await?;
                     println!("{}", serde_json::to_string_pretty(&result)?);
+                    maybe_auto_commit(&config, "sync all");
                 }
             }
             SyncCommand::Symlinks => {
@@ -588,6 +603,7 @@ async fn main() -> Result<()> {
                     "warnings": warnings.len()
                 });
                 println!("{}", serde_json::to_string_pretty(&result)?);
+                maybe_auto_commit(&config, "sync symlinks");
             }
         },
 
@@ -627,6 +643,7 @@ async fn main() -> Result<()> {
                 })
                 .await?;
                 println!("{}", serde_json::to_string_pretty(&output)?);
+                maybe_auto_commit(&config, "market data fetch");
             }
         },
 
@@ -855,6 +872,7 @@ async fn main() -> Result<()> {
                 let service = PortfolioService::new(storage_arc, market_data);
                 let snapshot = service.calculate(&query).await?;
                 println!("{}", serde_json::to_string_pretty(&snapshot)?);
+                maybe_auto_commit(&config, "portfolio snapshot");
             }
 
             PortfolioCommand::History {
@@ -2218,4 +2236,25 @@ async fn schwab_login(
         },
         "message": "Session captured successfully"
     }))
+}
+
+fn maybe_auto_commit(config: &ResolvedConfig, action: &str) {
+    if !config.git.auto_commit {
+        return;
+    }
+
+    match try_auto_commit(&config.data_dir, action) {
+        Ok(AutoCommitOutcome::Committed) => {
+            tracing::info!("Auto-committed keepbook data");
+        }
+        Ok(AutoCommitOutcome::SkippedNoChanges) => {
+            tracing::debug!("Auto-commit skipped: no changes");
+        }
+        Ok(AutoCommitOutcome::SkippedNotRepo { reason }) => {
+            tracing::warn!("Auto-commit enabled but skipped: {reason}");
+        }
+        Err(err) => {
+            tracing::warn!(error = %err, "Auto-commit failed");
+        }
+    }
 }
