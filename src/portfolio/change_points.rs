@@ -96,6 +96,12 @@ impl ChangePointCollector {
     }
 }
 
+fn date_to_timestamp(date: NaiveDate) -> DateTime<Utc> {
+    date.and_hms_opt(23, 59, 59)
+        .expect("valid date")
+        .and_utc()
+}
+
 /// Granularity for filtering change points.
 #[derive(Debug, Clone, Copy)]
 pub enum Granularity {
@@ -279,7 +285,7 @@ pub async fn collect_change_points(
         for asset_id in held_assets {
             let prices = market_data.get_all_prices(&asset_id).await?;
             for price in prices {
-                collector.add_price_change(price.timestamp, asset_id.clone());
+                collector.add_price_change(date_to_timestamp(price.as_of_date), asset_id.clone());
             }
         }
     }
@@ -329,6 +335,16 @@ mod tests {
         let points = collector.into_change_points();
         assert_eq!(points.len(), 1);
         assert_eq!(points[0].triggers.len(), 2);
+    }
+
+    #[test]
+    fn date_to_timestamp_uses_end_of_day() {
+        let date = chrono::NaiveDate::from_ymd_opt(2026, 2, 1).unwrap();
+        let ts = date_to_timestamp(date);
+        assert_eq!(ts.date_naive(), date);
+        assert_eq!(ts.hour(), 23);
+        assert_eq!(ts.minute(), 59);
+        assert_eq!(ts.second(), 59);
     }
 
     #[test]
