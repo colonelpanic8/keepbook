@@ -2,12 +2,13 @@
 //! In-memory storage implementation for testing.
 
 use std::collections::HashMap;
+use std::sync::Mutex as StdMutex;
 
 use anyhow::Result;
 use tokio::sync::Mutex;
 
 use crate::credentials::CredentialStore;
-use crate::models::{Account, BalanceSnapshot, Connection, Id, Transaction};
+use crate::models::{Account, AccountConfig, BalanceSnapshot, Connection, Id, Transaction};
 
 use super::Storage;
 
@@ -15,6 +16,7 @@ use super::Storage;
 pub struct MemoryStorage {
     connections: Mutex<HashMap<Id, Connection>>,
     accounts: Mutex<HashMap<Id, Account>>,
+    account_configs: StdMutex<HashMap<Id, AccountConfig>>,
     balances: Mutex<HashMap<Id, Vec<BalanceSnapshot>>>,
     transactions: Mutex<HashMap<Id, Vec<Transaction>>>,
 }
@@ -24,9 +26,18 @@ impl MemoryStorage {
         Self {
             connections: Mutex::new(HashMap::new()),
             accounts: Mutex::new(HashMap::new()),
+            account_configs: StdMutex::new(HashMap::new()),
             balances: Mutex::new(HashMap::new()),
             transactions: Mutex::new(HashMap::new()),
         }
+    }
+
+    pub async fn set_account_config(&self, account_id: &Id, config: AccountConfig) {
+        let mut configs = self
+            .account_configs
+            .lock()
+            .expect("account config lock poisoned");
+        configs.insert(account_id.clone(), config);
     }
 }
 
@@ -43,6 +54,14 @@ impl Storage for MemoryStorage {
         _connection_id: &Id,
     ) -> Result<Option<Box<dyn CredentialStore>>> {
         Ok(None)
+    }
+
+    fn get_account_config(&self, account_id: &Id) -> Result<Option<AccountConfig>> {
+        let configs = self
+            .account_configs
+            .lock()
+            .expect("account config lock poisoned");
+        Ok(configs.get(account_id).cloned())
     }
 
     async fn list_connections(&self) -> Result<Vec<Connection>> {

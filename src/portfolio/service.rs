@@ -8,7 +8,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 
 use crate::market_data::MarketDataService;
-use crate::models::{Account, Asset, BalanceSnapshot, Connection, Id};
+use crate::models::{Account, Asset, BalanceBackfillPolicy, BalanceSnapshot, Connection, Id};
 use crate::storage::Storage;
 
 use super::{
@@ -52,6 +52,7 @@ struct CalculationContext {
     account_map: HashMap<Id, Account>,
     connection_map: HashMap<Id, Connection>,
     filtered_snapshots: Vec<(Id, BalanceSnapshot)>,
+    zero_accounts: Vec<Id>,
 }
 
 impl PortfolioService {
@@ -85,6 +86,7 @@ impl PortfolioService {
         // Build account summaries
         let mut account_summaries = Self::build_account_summaries(
             &ctx.filtered_snapshots,
+            &ctx.zero_accounts,
             &price_cache,
             &ctx.account_map,
             &ctx.connection_map,
@@ -126,18 +128,61 @@ impl PortfolioService {
             .map(|c| (c.id().clone(), c))
             .collect();
 
-        let all_snapshots = self.storage.get_latest_balances().await?;
         let as_of_datetime = as_of_date.and_hms_opt(23, 59, 59).unwrap().and_utc();
+        let mut filtered_snapshots = Vec::new();
+        let mut zero_accounts = Vec::new();
 
-        let filtered_snapshots: Vec<(Id, BalanceSnapshot)> = all_snapshots
-            .into_iter()
-            .filter(|(_, snapshot)| snapshot.timestamp <= as_of_datetime)
-            .collect();
+        for account in account_map.values() {
+            let snapshots = self.storage.get_balance_snapshots(&account.id).await?;
+            if snapshots.is_empty() {
+                let policy = self
+                    .storage
+                    .get_account_config(&account.id)?
+                    .and_then(|config| config.balance_backfill)
+                    .unwrap_or(BalanceBackfillPolicy::None);
+                if matches!(policy, BalanceBackfillPolicy::Zero) {
+                    zero_accounts.push(account.id.clone());
+                }
+                continue;
+            }
+
+            let latest_before = snapshots
+                .iter()
+                .filter(|s| s.timestamp <= as_of_datetime)
+                .max_by_key(|s| s.timestamp)
+                .cloned();
+
+            if let Some(snapshot) = latest_before {
+                filtered_snapshots.push((account.id.clone(), snapshot));
+                continue;
+            }
+
+            let policy = self
+                .storage
+                .get_account_config(&account.id)?
+                .and_then(|config| config.balance_backfill)
+                .unwrap_or(BalanceBackfillPolicy::None);
+
+            match policy {
+                BalanceBackfillPolicy::CarryEarliest => {
+                    if let Some(earliest) =
+                        snapshots.iter().min_by_key(|s| s.timestamp).cloned()
+                    {
+                        filtered_snapshots.push((account.id.clone(), earliest));
+                    }
+                }
+                BalanceBackfillPolicy::Zero => {
+                    zero_accounts.push(account.id.clone());
+                }
+                BalanceBackfillPolicy::None => {}
+            }
+        }
 
         Ok(CalculationContext {
             account_map,
             connection_map,
             filtered_snapshots,
+            zero_accounts,
         })
     }
 
@@ -267,6 +312,7 @@ impl PortfolioService {
     /// Build account summaries by aggregating values across assets.
     fn build_account_summaries(
         snapshots: &[(Id, BalanceSnapshot)],
+        zero_accounts: &[Id],
         price_cache: &HashMap<String, AssetValuation>,
         account_map: &HashMap<Id, Account>,
         connection_map: &HashMap<Id, Connection>,
@@ -291,7 +337,7 @@ impl PortfolioService {
             }
         }
 
-        let summaries = by_account
+        let mut summaries: Vec<AccountSummary> = by_account
             .into_iter()
             .filter_map(|(account_id, (value, has_missing))| {
                 let account = account_map.get(&account_id)?;
@@ -308,6 +354,26 @@ impl PortfolioService {
                 })
             })
             .collect();
+
+        for account_id in zero_accounts {
+            if summaries.iter().any(|s| s.account_id == account_id.to_string()) {
+                continue;
+            }
+            let account = match account_map.get(account_id) {
+                Some(account) => account,
+                None => continue,
+            };
+            let connection = match connection_map.get(&account.connection_id) {
+                Some(connection) => connection,
+                None => continue,
+            };
+            summaries.push(AccountSummary {
+                account_id: account_id.to_string(),
+                account_name: account.name.clone(),
+                connection_name: connection.name().to_string(),
+                value_in_base: Some("0".to_string()),
+            });
+        }
 
         Ok(summaries)
     }
@@ -439,7 +505,8 @@ mod tests {
     use super::*;
     use crate::market_data::{MarketDataStore, MemoryMarketDataStore};
     use crate::models::{
-        Account, Asset, AssetBalance, BalanceSnapshot, Connection, ConnectionConfig,
+        Account, AccountConfig, Asset, AssetBalance, BalanceBackfillPolicy, BalanceSnapshot,
+        Connection, ConnectionConfig,
     };
     use crate::storage::MemoryStorage;
     use chrono::{TimeZone, Utc};
@@ -633,6 +700,149 @@ mod tests {
         assert_eq!(checking_holding.unwrap().amount, "1000");
         assert_eq!(savings_holding.unwrap().amount, "2000");
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn calculate_uses_latest_snapshot_before_date() -> Result<()> {
+        let storage = Arc::new(MemoryStorage::new());
+        let connection = Connection::new(ConnectionConfig {
+            name: "Test Bank".to_string(),
+            synchronizer: "manual".to_string(),
+            credentials: None,
+            balance_staleness: None,
+        });
+        storage.save_connection(&connection).await?;
+
+        let account = Account::new("Checking", connection.id().clone());
+        storage.save_account(&account).await?;
+
+        let older_snapshot = BalanceSnapshot::new(
+            Utc.with_ymd_and_hms(2026, 2, 1, 12, 0, 0).unwrap(),
+            vec![AssetBalance::new(Asset::currency("USD"), "1000")],
+        );
+        let newer_snapshot = BalanceSnapshot::new(
+            Utc.with_ymd_and_hms(2026, 2, 3, 12, 0, 0).unwrap(),
+            vec![AssetBalance::new(Asset::currency("USD"), "2000")],
+        );
+        storage
+            .append_balance_snapshot(&account.id, &older_snapshot)
+            .await?;
+        storage
+            .append_balance_snapshot(&account.id, &newer_snapshot)
+            .await?;
+
+        let store = Arc::new(MemoryMarketDataStore::new());
+        let market_data = Arc::new(MarketDataService::new(store, None));
+        let service = PortfolioService::new(storage, market_data);
+
+        let query = PortfolioQuery {
+            as_of_date: chrono::NaiveDate::from_ymd_opt(2026, 2, 2).unwrap(),
+            currency: "USD".to_string(),
+            grouping: Grouping::Both,
+            include_detail: false,
+        };
+
+        let result = service.calculate(&query).await?;
+        assert_eq!(result.total_value, "1000");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn calculate_zero_backfill() -> Result<()> {
+        let storage = Arc::new(MemoryStorage::new());
+        let connection = Connection::new(ConnectionConfig {
+            name: "Test Bank".to_string(),
+            synchronizer: "manual".to_string(),
+            credentials: None,
+            balance_staleness: None,
+        });
+        storage.save_connection(&connection).await?;
+
+        let account = Account::new("Checking", connection.id().clone());
+        storage.save_account(&account).await?;
+        storage
+            .set_account_config(
+                &account.id,
+                AccountConfig {
+                    balance_backfill: Some(BalanceBackfillPolicy::Zero),
+                    ..AccountConfig::default()
+                },
+            )
+            .await;
+
+        let future_snapshot = BalanceSnapshot::new(
+            Utc.with_ymd_and_hms(2026, 2, 3, 12, 0, 0).unwrap(),
+            vec![AssetBalance::new(Asset::currency("USD"), "1000")],
+        );
+        storage
+            .append_balance_snapshot(&account.id, &future_snapshot)
+            .await?;
+
+        let store = Arc::new(MemoryMarketDataStore::new());
+        let market_data = Arc::new(MarketDataService::new(store, None));
+        let service = PortfolioService::new(storage, market_data);
+
+        let query = PortfolioQuery {
+            as_of_date: chrono::NaiveDate::from_ymd_opt(2026, 2, 1).unwrap(),
+            currency: "USD".to_string(),
+            grouping: Grouping::Account,
+            include_detail: false,
+        };
+
+        let result = service.calculate(&query).await?;
+        assert_eq!(result.total_value, "0");
+
+        let by_account = result.by_account.expect("account summaries");
+        assert_eq!(by_account.len(), 1);
+        assert_eq!(by_account[0].value_in_base.as_deref(), Some("0"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn calculate_carry_back_earliest_balance() -> Result<()> {
+        let storage = Arc::new(MemoryStorage::new());
+        let connection = Connection::new(ConnectionConfig {
+            name: "Test Bank".to_string(),
+            synchronizer: "manual".to_string(),
+            credentials: None,
+            balance_staleness: None,
+        });
+        storage.save_connection(&connection).await?;
+
+        let account = Account::new("Checking", connection.id().clone());
+        storage.save_account(&account).await?;
+        storage
+            .set_account_config(
+                &account.id,
+                AccountConfig {
+                    balance_backfill: Some(BalanceBackfillPolicy::CarryEarliest),
+                    ..AccountConfig::default()
+                },
+            )
+            .await;
+
+        let earliest_snapshot = BalanceSnapshot::new(
+            Utc.with_ymd_and_hms(2026, 2, 3, 12, 0, 0).unwrap(),
+            vec![AssetBalance::new(Asset::currency("USD"), "1000")],
+        );
+        storage
+            .append_balance_snapshot(&account.id, &earliest_snapshot)
+            .await?;
+
+        let store = Arc::new(MemoryMarketDataStore::new());
+        let market_data = Arc::new(MarketDataService::new(store, None));
+        let service = PortfolioService::new(storage, market_data);
+
+        let query = PortfolioQuery {
+            as_of_date: chrono::NaiveDate::from_ymd_opt(2026, 2, 1).unwrap(),
+            currency: "USD".to_string(),
+            grouping: Grouping::Both,
+            include_detail: false,
+        };
+
+        let result = service.calculate(&query).await?;
+        assert_eq!(result.total_value, "1000");
         Ok(())
     }
 }

@@ -5,7 +5,7 @@ mod connection;
 mod id;
 mod transaction;
 
-pub use account::{Account, AccountConfig};
+pub use account::{Account, AccountConfig, BalanceBackfillPolicy};
 pub use asset::Asset;
 pub use balance::{AssetBalance, BalanceSnapshot};
 pub use connection::{

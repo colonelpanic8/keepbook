@@ -7,7 +7,7 @@ pub use json_file::JsonFileStorage;
 pub use memory::MemoryStorage;
 
 use crate::credentials::CredentialStore;
-use crate::models::{Account, BalanceSnapshot, Connection, Id, Transaction};
+use crate::models::{Account, AccountConfig, BalanceSnapshot, Connection, Id, Transaction};
 use anyhow::Result;
 
 /// Storage trait for persisting financial data.
@@ -15,6 +15,8 @@ use anyhow::Result;
 pub trait Storage: Send + Sync {
     /// Get the credential store for a connection.
     fn get_credential_store(&self, connection_id: &Id) -> Result<Option<Box<dyn CredentialStore>>>;
+    /// Load the optional account config.
+    fn get_account_config(&self, account_id: &Id) -> Result<Option<AccountConfig>>;
     // Connections
     async fn list_connections(&self) -> Result<Vec<Connection>>;
     async fn get_connection(&self, id: &Id) -> Result<Option<Connection>>;

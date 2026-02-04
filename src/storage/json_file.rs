@@ -115,7 +115,7 @@ impl JsonFileStorage {
     }
 
     /// Load optional account config.
-    pub fn get_account_config(&self, id: &Id) -> Result<Option<AccountConfig>> {
+    fn load_account_config(&self, id: &Id) -> Result<Option<AccountConfig>> {
         let path = self.account_config_file(id);
         if !path.exists() {
             return Ok(None);
@@ -471,6 +471,10 @@ impl Storage for JsonFileStorage {
     fn get_credential_store(&self, connection_id: &Id) -> Result<Option<Box<dyn CredentialStore>>> {
         // Delegate to the inherent method
         JsonFileStorage::get_credential_store(self, connection_id)
+    }
+
+    fn get_account_config(&self, account_id: &Id) -> Result<Option<AccountConfig>> {
+        self.load_account_config(account_id)
     }
 
     async fn list_connections(&self) -> Result<Vec<Connection>> {

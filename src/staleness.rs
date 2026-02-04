@@ -183,6 +183,7 @@ mod tests {
     fn test_resolve_account_override() {
         let account_config = AccountConfig {
             balance_staleness: Some(Duration::from_secs(7 * 24 * 60 * 60)),
+            balance_backfill: None,
         };
         let connection = make_connection(None);
         let global = RefreshConfig::default();

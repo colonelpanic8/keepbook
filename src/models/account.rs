@@ -4,6 +4,18 @@ use serde::{Deserialize, Serialize};
 use super::Id;
 use crate::duration::deserialize_duration_opt;
 
+/// Policy for handling balances before the first snapshot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BalanceBackfillPolicy {
+    /// Exclude the account when no balance exists for the date.
+    None,
+    /// Show the account with a zero value when no balance exists for the date.
+    Zero,
+    /// Carry back the earliest balance snapshot to earlier dates.
+    CarryEarliest,
+}
+
 /// An individual financial account (checking, savings, credit card, brokerage, etc.)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Account {
@@ -44,4 +56,8 @@ pub struct AccountConfig {
         deserialize_with = "deserialize_duration_opt"
     )]
     pub balance_staleness: Option<std::time::Duration>,
+
+    /// How to handle portfolio queries before the first balance snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub balance_backfill: Option<BalanceBackfillPolicy>,
 }
