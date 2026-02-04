@@ -198,9 +198,17 @@ enum MarketDataCommand {
         #[arg(long)]
         end: Option<String>,
 
-        /// Interval for backfill: daily, weekly, monthly, yearly (default: monthly)
+        /// Interval for backfill: daily, weekly, monthly, yearly/annual (default: monthly)
         #[arg(long, default_value = "monthly")]
         interval: String,
+
+        /// Look back this many days when a close price is missing (default: 7)
+        #[arg(long, default_value_t = 7)]
+        lookback_days: u32,
+
+        /// Delay (ms) between price fetches to avoid rate limits (default: 0)
+        #[arg(long, default_value_t = 0)]
+        request_delay_ms: u64,
 
         /// Base currency for FX rates (default: from config)
         #[arg(long)]
@@ -599,6 +607,8 @@ async fn main() -> Result<()> {
                 start,
                 end,
                 interval,
+                lookback_days,
+                request_delay_ms,
                 currency,
                 no_fx,
             } => {
@@ -610,6 +620,8 @@ async fn main() -> Result<()> {
                     start: start.as_deref(),
                     end: end.as_deref(),
                     interval: interval.as_str(),
+                    lookback_days,
+                    request_delay_ms,
                     currency,
                     include_fx: !no_fx,
                 })
@@ -1495,6 +1507,8 @@ struct PriceHistoryRequest<'a> {
     start: Option<&'a str>,
     end: Option<&'a str>,
     interval: &'a str,
+    lookback_days: u32,
+    request_delay_ms: u64,
     currency: Option<String>,
     include_fx: bool,
 }
@@ -1513,8 +1527,10 @@ impl PriceHistoryInterval {
             "daily" => Ok(Self::Daily),
             "weekly" => Ok(Self::Weekly),
             "monthly" => Ok(Self::Monthly),
-            "yearly" => Ok(Self::Yearly),
-            _ => anyhow::bail!("Invalid interval: {value}. Use: daily, weekly, monthly, yearly"),
+            "yearly" | "annual" | "annually" => Ok(Self::Yearly),
+            _ => anyhow::bail!(
+                "Invalid interval: {value}. Use: daily, weekly, monthly, yearly, annual"
+            ),
         }
     }
 
@@ -1539,6 +1555,8 @@ async fn fetch_historical_prices(request: PriceHistoryRequest<'_>) -> Result<Pri
         start,
         end,
         interval,
+        lookback_days,
+        request_delay_ms,
         currency,
         include_fx,
     } = request;
@@ -1599,7 +1617,8 @@ async fn fetch_historical_prices(request: PriceHistoryRequest<'_>) -> Result<Pri
     let crypto_sources = registry.build_crypto_sources().await?;
     let fx_sources = registry.build_fx_sources().await?;
 
-    let mut market_data = MarketDataService::new(store.clone(), None);
+    let mut market_data =
+        MarketDataService::new(store.clone(), None).with_lookback_days(lookback_days);
     if !equity_sources.is_empty() {
         market_data =
             market_data.with_equity_router(Arc::new(EquityPriceRouter::new(equity_sources)));
@@ -1612,7 +1631,6 @@ async fn fetch_historical_prices(request: PriceHistoryRequest<'_>) -> Result<Pri
         market_data = market_data.with_fx_router(Arc::new(FxRateRouter::new(fx_sources)));
     }
 
-    let lookback_days = 7u32;
 
     let mut asset_caches = Vec::new();
     for asset in assets {
@@ -1649,6 +1667,11 @@ async fn fetch_historical_prices(request: PriceHistoryRequest<'_>) -> Result<Pri
     let mut failures = Vec::new();
     let mut failure_count = 0usize;
     let failure_limit = 50usize;
+    let request_delay = if request_delay_ms > 0 {
+        Some(std::time::Duration::from_millis(request_delay_ms))
+    } else {
+        None
+    };
 
     let mut current = aligned_start;
     let mut points = 0usize;
@@ -1667,6 +1690,7 @@ async fn fetch_historical_prices(request: PriceHistoryRequest<'_>) -> Result<Pri
         while current <= end_date {
             points += 1;
             for asset_cache in asset_caches.iter_mut() {
+                let mut should_delay = false;
                 match &asset_cache.asset {
                     Asset::Currency { iso_code } => {
                         if include_fx {
@@ -1712,6 +1736,7 @@ async fn fetch_historical_prices(request: PriceHistoryRequest<'_>) -> Result<Pri
                                 }
 
                                 upsert_price_cache(&mut asset_cache.prices, price.clone());
+                                should_delay = request_delay.is_some();
 
                                 if include_fx
                                     && price.quote_currency.to_uppercase() != target_currency_upper
@@ -1739,8 +1764,15 @@ async fn fetch_historical_prices(request: PriceHistoryRequest<'_>) -> Result<Pri
                                         quote: None,
                                     });
                                 }
+                                should_delay = request_delay.is_some();
                             }
                         }
+                    }
+                }
+
+                if should_delay {
+                    if let Some(delay) = request_delay {
+                        tokio::time::sleep(delay).await;
                     }
                 }
             }
