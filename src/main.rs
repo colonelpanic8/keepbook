@@ -1,12 +1,16 @@
+use std::collections::{HashMap, HashSet};
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use chrono::Utc;
+use chrono::{Duration, NaiveDate, Utc};
 use clap::{CommandFactory, Parser, Subcommand};
 use keepbook::config::{default_config_path, ResolvedConfig};
-use keepbook::market_data::{JsonlMarketDataStore, MarketDataStore, PriceSourceRegistry};
+use keepbook::market_data::{
+    FxRateKind, FxRatePoint, JsonlMarketDataStore, MarketDataService, MarketDataStore, PriceKind,
+    PricePoint, PriceSourceRegistry,
+};
 use keepbook::models::{
     Account, Asset, AssetBalance, BalanceSnapshot, Connection, ConnectionConfig, ConnectionState,
     Id,
@@ -57,6 +61,10 @@ enum Command {
     /// Authentication commands for synchronizers
     #[command(subcommand)]
     Auth(AuthCommand),
+
+    /// Market data commands
+    #[command(subcommand)]
+    MarketData(MarketDataCommand),
 
     /// Portfolio commands
     #[command(subcommand)]
@@ -171,6 +179,36 @@ enum ListCommand {
 }
 
 #[derive(Subcommand)]
+enum MarketDataCommand {
+    /// Fetch historical prices for assets in scope
+    Fetch {
+        /// Account ID or name (mutually exclusive with --connection)
+        #[arg(long)]
+        account: Option<String>,
+
+        /// Connection ID or name (mutually exclusive with --account)
+        #[arg(long)]
+        connection: Option<String>,
+
+        /// Start date (YYYY-MM-DD, default: earliest balance date in scope)
+        #[arg(long)]
+        start: Option<String>,
+
+        /// End date (YYYY-MM-DD, default: today)
+        #[arg(long)]
+        end: Option<String>,
+
+        /// Base currency for FX rates (default: from config)
+        #[arg(long)]
+        currency: Option<String>,
+
+        /// Disable FX rate fetching
+        #[arg(long)]
+        no_fx: bool,
+    },
+}
+
+#[derive(Subcommand)]
 enum PortfolioCommand {
     /// Calculate portfolio snapshot with valuations
     Snapshot {
@@ -205,6 +243,29 @@ enum PortfolioCommand {
         /// Force refresh all data regardless of staleness
         #[arg(long, conflicts_with_all = ["auto", "offline", "dry_run"])]
         force_refresh: bool,
+    },
+
+    /// Track net worth over time at every change point
+    History {
+        /// Base currency for valuations (default: from config)
+        #[arg(long)]
+        currency: Option<String>,
+
+        /// Start date for history (YYYY-MM-DD, default: earliest data)
+        #[arg(long)]
+        start: Option<String>,
+
+        /// End date for history (YYYY-MM-DD, default: today)
+        #[arg(long)]
+        end: Option<String>,
+
+        /// Time granularity: none/full, hourly, daily, weekly, monthly, yearly (default: none)
+        #[arg(long, default_value = "none")]
+        granularity: String,
+
+        /// Include price changes as change points (slower, more detailed)
+        #[arg(long)]
+        include_prices: bool,
     },
 }
 
@@ -268,6 +329,98 @@ struct AllOutput {
     accounts: Vec<AccountOutput>,
     price_sources: Vec<PriceSourceOutput>,
     balances: Vec<BalanceOutput>,
+}
+
+/// A single point in the net worth history
+#[derive(Serialize)]
+struct HistoryPoint {
+    timestamp: String,
+    date: String,
+    total_value: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    change_triggers: Option<Vec<String>>,
+}
+
+/// Output for portfolio history command
+#[derive(Serialize)]
+struct HistoryOutput {
+    currency: String,
+    start_date: Option<String>,
+    end_date: Option<String>,
+    granularity: String,
+    points: Vec<HistoryPoint>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    summary: Option<HistorySummary>,
+}
+
+/// Summary statistics for the history
+#[derive(Serialize)]
+struct HistorySummary {
+    initial_value: String,
+    final_value: String,
+    absolute_change: String,
+    percentage_change: String,
+}
+
+/// Scope output for market data history fetch
+#[derive(Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum PriceHistoryScopeOutput {
+    Portfolio,
+    Connection { id: String, name: String },
+    Account { id: String, name: String },
+}
+
+/// Asset info output for market data history fetch
+#[derive(Serialize)]
+struct AssetInfoOutput {
+    asset: Asset,
+    asset_id: String,
+}
+
+/// Summary stats for market data history fetch
+#[derive(Default, Serialize)]
+struct PriceHistoryStats {
+    attempted: usize,
+    existing: usize,
+    fetched: usize,
+    lookback: usize,
+    missing: usize,
+}
+
+/// Failure details for market data history fetch (sampled)
+#[derive(Serialize)]
+struct PriceHistoryFailure {
+    kind: String,
+    date: String,
+    error: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    asset_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    asset: Option<Asset>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    base: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    quote: Option<String>,
+}
+
+/// Output for market data history fetch
+#[derive(Serialize)]
+struct PriceHistoryOutput {
+    scope: PriceHistoryScopeOutput,
+    currency: String,
+    start_date: String,
+    end_date: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    earliest_balance_date: Option<String>,
+    days: usize,
+    assets: Vec<AssetInfoOutput>,
+    prices: PriceHistoryStats,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fx: Option<PriceHistoryStats>,
+    failure_count: usize,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    failures: Vec<PriceHistoryFailure>,
 }
 
 #[tokio::main]
@@ -431,6 +584,30 @@ async fn main() -> Result<()> {
                     println!("{}", serde_json::to_string_pretty(&result)?);
                 }
             },
+        },
+
+        Some(Command::MarketData(market_cmd)) => match market_cmd {
+            MarketDataCommand::Fetch {
+                account,
+                connection,
+                start,
+                end,
+                currency,
+                no_fx,
+            } => {
+                let output = fetch_historical_prices(PriceHistoryRequest {
+                    storage: &storage,
+                    config: &config,
+                    account: account.as_deref(),
+                    connection: connection.as_deref(),
+                    start: start.as_deref(),
+                    end: end.as_deref(),
+                    currency,
+                    include_fx: !no_fx,
+                })
+                .await?;
+                println!("{}", serde_json::to_string_pretty(&output)?);
+            }
         },
 
         Some(Command::List(list_cmd)) => match list_cmd {
@@ -658,6 +835,185 @@ async fn main() -> Result<()> {
                 let service = PortfolioService::new(storage_arc, market_data);
                 let snapshot = service.calculate(&query).await?;
                 println!("{}", serde_json::to_string_pretty(&snapshot)?);
+            }
+
+            PortfolioCommand::History {
+                currency,
+                start,
+                end,
+                granularity,
+                include_prices,
+            } => {
+                use keepbook::market_data::MarketDataStore;
+                use keepbook::portfolio::{
+                    collect_change_points, filter_by_date_range, filter_by_granularity,
+                    CoalesceStrategy, CollectOptions, Granularity, PortfolioQuery,
+                    PortfolioService,
+                };
+                use rust_decimal::Decimal;
+                use std::str::FromStr;
+
+                // Parse date range
+                let start_date = start
+                    .as_ref()
+                    .map(|s| {
+                        chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")
+                            .with_context(|| format!("Invalid start date: {s}"))
+                    })
+                    .transpose()?;
+                let end_date = end
+                    .as_ref()
+                    .map(|s| {
+                        chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")
+                            .with_context(|| format!("Invalid end date: {s}"))
+                    })
+                    .transpose()?;
+
+                // Parse granularity
+                let granularity_enum = match granularity.as_str() {
+                    "none" | "full" => Granularity::Full,
+                    "hourly" => Granularity::Hourly,
+                    "daily" => Granularity::Daily,
+                    "weekly" => Granularity::Weekly,
+                    "monthly" => Granularity::Monthly,
+                    "yearly" => Granularity::Yearly,
+                    _ => anyhow::bail!(
+                        "Invalid granularity: {granularity}. Use: none, full, hourly, daily, weekly, monthly, yearly"
+                    ),
+                };
+
+                // Setup storage and market data store
+                let store: Arc<dyn MarketDataStore> = Arc::new(
+                    keepbook::market_data::JsonlMarketDataStore::new(&config.data_dir),
+                );
+                let storage_arc: Arc<dyn keepbook::storage::Storage> = Arc::new(storage);
+
+                // Collect change points
+                let options = CollectOptions {
+                    account_ids: Vec::new(), // All accounts
+                    include_prices,
+                    include_fx: false,
+                    target_currency: currency.clone(),
+                };
+
+                let change_points = collect_change_points(&storage_arc, &store, &options).await?;
+
+                // Filter by date range
+                let filtered_by_date = filter_by_date_range(change_points, start_date, end_date);
+
+                // Filter by granularity
+                let filtered = filter_by_granularity(
+                    filtered_by_date,
+                    granularity_enum,
+                    CoalesceStrategy::Last,
+                );
+
+                if filtered.is_empty() {
+                    let output = HistoryOutput {
+                        currency: currency.unwrap_or_else(|| config.reporting_currency.clone()),
+                        start_date: start,
+                        end_date: end,
+                        granularity,
+                        points: Vec::new(),
+                        summary: None,
+                    };
+                    println!("{}", serde_json::to_string_pretty(&output)?);
+                    return Ok(());
+                }
+
+                // Setup market data service (offline mode - use cached data only)
+                let market_data =
+                    Arc::new(keepbook::market_data::MarketDataService::new(store, None));
+
+                // Create portfolio service
+                let service = PortfolioService::new(storage_arc, market_data);
+
+                // Calculate portfolio value at each change point
+                let target_currency = currency
+                    .clone()
+                    .unwrap_or_else(|| config.reporting_currency.clone());
+                let mut history_points = Vec::with_capacity(filtered.len());
+
+                for change_point in &filtered {
+                    let as_of_date = change_point.timestamp.date_naive();
+                    let query = PortfolioQuery {
+                        as_of_date,
+                        currency: target_currency.clone(),
+                        grouping: keepbook::portfolio::Grouping::Asset,
+                        include_detail: false,
+                    };
+
+                    let snapshot = service.calculate(&query).await?;
+
+                    // Format trigger descriptions
+                    let trigger_descriptions: Vec<String> = change_point
+                        .triggers
+                        .iter()
+                        .map(|t| match t {
+                            keepbook::portfolio::ChangeTrigger::Balance { account_id, asset } => {
+                                format!(
+                                    "balance:{}:{}",
+                                    account_id,
+                                    serde_json::to_string(asset).unwrap_or_default()
+                                )
+                            }
+                            keepbook::portfolio::ChangeTrigger::Price { asset_id } => {
+                                format!("price:{asset_id}")
+                            }
+                            keepbook::portfolio::ChangeTrigger::FxRate { base, quote } => {
+                                format!("fx:{base}/{quote}")
+                            }
+                        })
+                        .collect();
+
+                    history_points.push(HistoryPoint {
+                        timestamp: change_point.timestamp.to_rfc3339(),
+                        date: as_of_date.to_string(),
+                        total_value: snapshot.total_value,
+                        change_triggers: if trigger_descriptions.is_empty() {
+                            None
+                        } else {
+                            Some(trigger_descriptions)
+                        },
+                    });
+                }
+
+                // Calculate summary if we have points
+                let summary = if history_points.len() >= 2 {
+                    let initial =
+                        Decimal::from_str(&history_points[0].total_value).unwrap_or(Decimal::ZERO);
+                    let final_val =
+                        Decimal::from_str(&history_points[history_points.len() - 1].total_value)
+                            .unwrap_or(Decimal::ZERO);
+                    let absolute_change = final_val - initial;
+                    let percentage_change = if initial != Decimal::ZERO {
+                        ((final_val - initial) / initial * Decimal::from(100))
+                            .round_dp(2)
+                            .to_string()
+                    } else {
+                        "N/A".to_string()
+                    };
+
+                    Some(HistorySummary {
+                        initial_value: initial.normalize().to_string(),
+                        final_value: final_val.normalize().to_string(),
+                        absolute_change: absolute_change.normalize().to_string(),
+                        percentage_change,
+                    })
+                } else {
+                    None
+                };
+
+                let output = HistoryOutput {
+                    currency: target_currency,
+                    start_date: start,
+                    end_date: end,
+                    granularity,
+                    points: history_points,
+                    summary,
+                };
+
+                println!("{}", serde_json::to_string_pretty(&output)?);
             }
         },
 
@@ -1115,6 +1471,538 @@ async fn fetch_crypto_prices(
     }
 
     Ok(count)
+}
+
+struct AssetPriceCache {
+    asset: Asset,
+    asset_id: keepbook::market_data::AssetId,
+    prices: HashMap<NaiveDate, keepbook::market_data::PricePoint>,
+}
+
+struct PriceHistoryRequest<'a> {
+    storage: &'a JsonFileStorage,
+    config: &'a ResolvedConfig,
+    account: Option<&'a str>,
+    connection: Option<&'a str>,
+    start: Option<&'a str>,
+    end: Option<&'a str>,
+    currency: Option<String>,
+    include_fx: bool,
+}
+
+async fn fetch_historical_prices(request: PriceHistoryRequest<'_>) -> Result<PriceHistoryOutput> {
+    use keepbook::market_data::{CryptoPriceRouter, EquityPriceRouter, FxRateRouter};
+
+    let PriceHistoryRequest {
+        storage,
+        config,
+        account,
+        connection,
+        start,
+        end,
+        currency,
+        include_fx,
+    } = request;
+
+    let (scope, accounts) = resolve_price_history_scope(storage, account, connection).await?;
+
+    let mut assets: HashSet<Asset> = HashSet::new();
+    let mut earliest_balance_date: Option<NaiveDate> = None;
+
+    for account in &accounts {
+        let snapshots = storage.get_balance_snapshots(&account.id).await?;
+        for snapshot in snapshots {
+            let date = snapshot.timestamp.date_naive();
+            earliest_balance_date = Some(match earliest_balance_date {
+                Some(current) => current.min(date),
+                None => date,
+            });
+            for balance in snapshot.balances {
+                assets.insert(balance.asset);
+            }
+        }
+    }
+
+    if assets.is_empty() {
+        anyhow::bail!("No balances found for selected scope");
+    }
+
+    let start_date = match start {
+        Some(value) => NaiveDate::parse_from_str(value, "%Y-%m-%d")
+            .with_context(|| format!("Invalid start date: {value}"))?,
+        None => earliest_balance_date.context("No balances found to infer start date")?,
+    };
+
+    let end_date = match end {
+        Some(value) => NaiveDate::parse_from_str(value, "%Y-%m-%d")
+            .with_context(|| format!("Invalid end date: {value}"))?,
+        None => Utc::now().date_naive(),
+    };
+
+    if start_date > end_date {
+        anyhow::bail!("Start date must be on or before end date");
+    }
+
+    let target_currency = currency.unwrap_or_else(|| config.reporting_currency.clone());
+    let target_currency_upper = target_currency.to_uppercase();
+
+    let store: Arc<dyn MarketDataStore> = Arc::new(JsonlMarketDataStore::new(&config.data_dir));
+
+    // Load configured price sources
+    let mut registry = PriceSourceRegistry::new(&config.data_dir);
+    registry.load()?;
+    let equity_sources = registry.build_equity_sources().await?;
+    let crypto_sources = registry.build_crypto_sources().await?;
+    let fx_sources = registry.build_fx_sources().await?;
+
+    let mut market_data = MarketDataService::new(store.clone(), None);
+    if !equity_sources.is_empty() {
+        market_data =
+            market_data.with_equity_router(Arc::new(EquityPriceRouter::new(equity_sources)));
+    }
+    if !crypto_sources.is_empty() {
+        market_data =
+            market_data.with_crypto_router(Arc::new(CryptoPriceRouter::new(crypto_sources)));
+    }
+    if !fx_sources.is_empty() {
+        market_data = market_data.with_fx_router(Arc::new(FxRateRouter::new(fx_sources)));
+    }
+
+    let lookback_days = 7u32;
+
+    let mut asset_caches = Vec::new();
+    for asset in assets {
+        let asset_id = keepbook::market_data::AssetId::from_asset(&asset);
+        let prices = load_price_cache(&store, &asset_id).await?;
+        asset_caches.push(AssetPriceCache {
+            asset,
+            asset_id,
+            prices,
+        });
+    }
+
+    asset_caches.sort_by(|a, b| a.asset_id.to_string().cmp(&b.asset_id.to_string()));
+
+    let mut fx_cache: HashMap<(String, String), HashMap<NaiveDate, FxRatePoint>> = HashMap::new();
+
+    if include_fx {
+        for asset_cache in &asset_caches {
+            if let Asset::Currency { iso_code } = &asset_cache.asset {
+                let base = iso_code.to_uppercase();
+                if base == target_currency_upper {
+                    continue;
+                }
+                let key = (base.clone(), target_currency_upper.clone());
+                if !fx_cache.contains_key(&key) {
+                    fx_cache.insert(key.clone(), load_fx_cache(&store, &key.0, &key.1).await?);
+                }
+            }
+        }
+    }
+
+    let mut price_stats = PriceHistoryStats::default();
+    let mut fx_stats = PriceHistoryStats::default();
+    let mut failures = Vec::new();
+    let mut failure_count = 0usize;
+    let failure_limit = 50usize;
+
+    let mut current = start_date;
+    {
+        let mut fx_ctx = FxRateContext {
+            market_data: &market_data,
+            store: &store,
+            fx_cache: &mut fx_cache,
+            stats: &mut fx_stats,
+            failures: &mut failures,
+            failure_count: &mut failure_count,
+            failure_limit,
+            lookback_days,
+        };
+
+        while current <= end_date {
+            for asset_cache in asset_caches.iter_mut() {
+                match &asset_cache.asset {
+                    Asset::Currency { iso_code } => {
+                        if include_fx {
+                            let base = iso_code.to_uppercase();
+                            if base != target_currency_upper {
+                                ensure_fx_rate(&mut fx_ctx, &base, &target_currency_upper, current)
+                                    .await?;
+                            }
+                        }
+                    }
+                    Asset::Equity { .. } | Asset::Crypto { .. } => {
+                        price_stats.attempted += 1;
+                        if let Some((price, exact)) =
+                            resolve_cached_price(&asset_cache.prices, current, lookback_days)
+                        {
+                            if exact {
+                                price_stats.existing += 1;
+                            } else {
+                                price_stats.lookback += 1;
+                            }
+
+                            if include_fx
+                                && price.quote_currency.to_uppercase() != target_currency_upper
+                            {
+                                ensure_fx_rate(
+                                    &mut fx_ctx,
+                                    &price.quote_currency.to_uppercase(),
+                                    &target_currency_upper,
+                                    current,
+                                )
+                                .await?;
+                            }
+                            continue;
+                        }
+
+                        match market_data.price_close(&asset_cache.asset, current).await {
+                            Ok(price) => {
+                                let exact = price.as_of_date == current;
+                                if exact {
+                                    price_stats.fetched += 1;
+                                } else {
+                                    price_stats.lookback += 1;
+                                }
+
+                                upsert_price_cache(&mut asset_cache.prices, price.clone());
+
+                                if include_fx
+                                    && price.quote_currency.to_uppercase() != target_currency_upper
+                                {
+                                    ensure_fx_rate(
+                                        &mut fx_ctx,
+                                        &price.quote_currency.to_uppercase(),
+                                        &target_currency_upper,
+                                        current,
+                                    )
+                                    .await?;
+                                }
+                            }
+                            Err(e) => {
+                                price_stats.missing += 1;
+                                *fx_ctx.failure_count += 1;
+                                if fx_ctx.failures.len() < fx_ctx.failure_limit {
+                                    fx_ctx.failures.push(PriceHistoryFailure {
+                                        kind: "price".to_string(),
+                                        date: current.to_string(),
+                                        error: e.to_string(),
+                                        asset_id: Some(asset_cache.asset_id.to_string()),
+                                        asset: Some(asset_cache.asset.clone()),
+                                        base: None,
+                                        quote: None,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            current += Duration::days(1);
+        }
+    }
+
+    let days = (end_date - start_date).num_days() as usize + 1;
+
+    let assets_output = asset_caches
+        .iter()
+        .map(|cache| AssetInfoOutput {
+            asset: cache.asset.clone(),
+            asset_id: cache.asset_id.to_string(),
+        })
+        .collect();
+
+    Ok(PriceHistoryOutput {
+        scope,
+        currency: target_currency,
+        start_date: start_date.to_string(),
+        end_date: end_date.to_string(),
+        earliest_balance_date: earliest_balance_date.map(|d| d.to_string()),
+        days,
+        assets: assets_output,
+        prices: price_stats,
+        fx: if include_fx { Some(fx_stats) } else { None },
+        failure_count,
+        failures,
+    })
+}
+
+async fn resolve_price_history_scope(
+    storage: &JsonFileStorage,
+    account: Option<&str>,
+    connection: Option<&str>,
+) -> Result<(PriceHistoryScopeOutput, Vec<Account>)> {
+    if account.is_some() && connection.is_some() {
+        anyhow::bail!("Specify only one of --account or --connection");
+    }
+
+    if let Some(id_or_name) = account {
+        let account = find_account(storage, id_or_name)
+            .await?
+            .context(format!("Account not found: {id_or_name}"))?;
+        return Ok((
+            PriceHistoryScopeOutput::Account {
+                id: account.id.to_string(),
+                name: account.name.clone(),
+            },
+            vec![account],
+        ));
+    }
+
+    if let Some(id_or_name) = connection {
+        let connection = find_connection(storage, id_or_name)
+            .await?
+            .context(format!("Connection not found: {id_or_name}"))?;
+        let mut accounts = Vec::new();
+
+        if !connection.state.account_ids.is_empty() {
+            for account_id in &connection.state.account_ids {
+                match storage.get_account(account_id).await? {
+                    Some(account) => accounts.push(account),
+                    None => {
+                        tracing::warn!(
+                            connection_id = %connection.id(),
+                            account_id = %account_id,
+                            "account referenced by connection not found"
+                        );
+                    }
+                }
+            }
+        } else {
+            accounts = storage
+                .list_accounts()
+                .await?
+                .into_iter()
+                .filter(|a| a.connection_id == *connection.id())
+                .collect();
+        }
+
+        if accounts.is_empty() {
+            anyhow::bail!("No accounts found for connection {}", connection.name());
+        }
+
+        return Ok((
+            PriceHistoryScopeOutput::Connection {
+                id: connection.id().to_string(),
+                name: connection.name().to_string(),
+            },
+            accounts,
+        ));
+    }
+
+    let accounts = storage.list_accounts().await?;
+    if accounts.is_empty() {
+        anyhow::bail!("No accounts found");
+    }
+
+    Ok((PriceHistoryScopeOutput::Portfolio, accounts))
+}
+
+async fn find_account(storage: &JsonFileStorage, id_or_name: &str) -> Result<Option<Account>> {
+    let id = Id::from_string(id_or_name);
+    if let Some(account) = storage.get_account(&id).await? {
+        return Ok(Some(account));
+    }
+
+    let accounts = storage.list_accounts().await?;
+    let mut matches: Vec<Account> = accounts
+        .into_iter()
+        .filter(|a| a.name.eq_ignore_ascii_case(id_or_name))
+        .collect();
+
+    if matches.is_empty() {
+        return Ok(None);
+    }
+
+    if matches.len() > 1 {
+        let ids: Vec<String> = matches.iter().map(|a| a.id.to_string()).collect();
+        anyhow::bail!("Multiple accounts named '{id_or_name}'. Use an ID instead: {ids:?}");
+    }
+
+    Ok(matches.pop())
+}
+
+async fn load_price_cache(
+    store: &Arc<dyn MarketDataStore>,
+    asset_id: &keepbook::market_data::AssetId,
+) -> Result<HashMap<NaiveDate, PricePoint>> {
+    let prices = store.get_all_prices(asset_id).await?;
+    let mut map: HashMap<NaiveDate, PricePoint> = HashMap::new();
+
+    for price in prices {
+        if price.kind != PriceKind::Close {
+            continue;
+        }
+        match map.get(&price.as_of_date) {
+            Some(existing) if existing.timestamp >= price.timestamp => {}
+            _ => {
+                map.insert(price.as_of_date, price);
+            }
+        }
+    }
+
+    Ok(map)
+}
+
+async fn load_fx_cache(
+    store: &Arc<dyn MarketDataStore>,
+    base: &str,
+    quote: &str,
+) -> Result<HashMap<NaiveDate, FxRatePoint>> {
+    let rates = store.get_all_fx_rates(base, quote).await?;
+    let mut map: HashMap<NaiveDate, FxRatePoint> = HashMap::new();
+
+    for rate in rates {
+        if rate.kind != FxRateKind::Close {
+            continue;
+        }
+        match map.get(&rate.as_of_date) {
+            Some(existing) if existing.timestamp >= rate.timestamp => {}
+            _ => {
+                map.insert(rate.as_of_date, rate);
+            }
+        }
+    }
+
+    Ok(map)
+}
+
+fn resolve_cached_price(
+    cache: &HashMap<NaiveDate, PricePoint>,
+    date: NaiveDate,
+    lookback_days: u32,
+) -> Option<(PricePoint, bool)> {
+    if let Some(price) = cache.get(&date) {
+        return Some((price.clone(), true));
+    }
+
+    for offset in 1..=lookback_days {
+        let target = date - Duration::days(offset as i64);
+        if let Some(price) = cache.get(&target) {
+            return Some((price.clone(), false));
+        }
+    }
+
+    None
+}
+
+fn resolve_cached_fx(
+    cache: &HashMap<NaiveDate, FxRatePoint>,
+    date: NaiveDate,
+    lookback_days: u32,
+) -> Option<(FxRatePoint, bool)> {
+    if let Some(rate) = cache.get(&date) {
+        return Some((rate.clone(), true));
+    }
+
+    for offset in 1..=lookback_days {
+        let target = date - Duration::days(offset as i64);
+        if let Some(rate) = cache.get(&target) {
+            return Some((rate.clone(), false));
+        }
+    }
+
+    None
+}
+
+fn upsert_price_cache(cache: &mut HashMap<NaiveDate, PricePoint>, price: PricePoint) -> bool {
+    match cache.get(&price.as_of_date) {
+        Some(existing) if existing.timestamp >= price.timestamp => false,
+        _ => {
+            cache.insert(price.as_of_date, price);
+            true
+        }
+    }
+}
+
+fn upsert_fx_cache(cache: &mut HashMap<NaiveDate, FxRatePoint>, rate: FxRatePoint) -> bool {
+    match cache.get(&rate.as_of_date) {
+        Some(existing) if existing.timestamp >= rate.timestamp => false,
+        _ => {
+            cache.insert(rate.as_of_date, rate);
+            true
+        }
+    }
+}
+
+struct FxRateContext<'a> {
+    market_data: &'a MarketDataService,
+    store: &'a Arc<dyn MarketDataStore>,
+    fx_cache: &'a mut HashMap<(String, String), HashMap<NaiveDate, FxRatePoint>>,
+    stats: &'a mut PriceHistoryStats,
+    failures: &'a mut Vec<PriceHistoryFailure>,
+    failure_count: &'a mut usize,
+    failure_limit: usize,
+    lookback_days: u32,
+}
+
+async fn ensure_fx_rate(
+    ctx: &mut FxRateContext<'_>,
+    base: &str,
+    quote: &str,
+    date: NaiveDate,
+) -> Result<()> {
+    ctx.stats.attempted += 1;
+
+    let base_upper = base.to_uppercase();
+    let quote_upper = quote.to_uppercase();
+    let key = (base_upper.clone(), quote_upper.clone());
+
+    if !ctx.fx_cache.contains_key(&key) {
+        ctx.fx_cache.insert(
+            key.clone(),
+            load_fx_cache(ctx.store, &base_upper, &quote_upper).await?,
+        );
+    }
+
+    let cache = ctx
+        .fx_cache
+        .get(&key)
+        .expect("fx cache should be initialized");
+
+    if let Some((_, exact)) = resolve_cached_fx(cache, date, ctx.lookback_days) {
+        if exact {
+            ctx.stats.existing += 1;
+        } else {
+            ctx.stats.lookback += 1;
+        }
+        return Ok(());
+    }
+
+    match ctx
+        .market_data
+        .fx_close(&base_upper, &quote_upper, date)
+        .await
+    {
+        Ok(rate) => {
+            if rate.as_of_date == date {
+                ctx.stats.fetched += 1;
+            } else {
+                ctx.stats.lookback += 1;
+            }
+            if let Some(cache) = ctx.fx_cache.get_mut(&key) {
+                upsert_fx_cache(cache, rate);
+            }
+        }
+        Err(e) => {
+            ctx.stats.missing += 1;
+            *ctx.failure_count += 1;
+            if ctx.failures.len() < ctx.failure_limit {
+                ctx.failures.push(PriceHistoryFailure {
+                    kind: "fx".to_string(),
+                    date: date.to_string(),
+                    error: e.to_string(),
+                    asset_id: None,
+                    asset: None,
+                    base: Some(base_upper),
+                    quote: Some(quote_upper),
+                });
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Sync all connections

@@ -132,6 +132,31 @@ impl MarketDataStore for JsonlMarketDataStore {
         Ok(self.select_latest_price(prices, date, kind))
     }
 
+    async fn get_all_prices(&self, asset_id: &AssetId) -> Result<Vec<PricePoint>> {
+        let prices_dir = self.prices_dir(asset_id);
+
+        // List all year files in the prices directory
+        let mut entries = match fs::read_dir(&prices_dir).await {
+            Ok(e) => e,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(e).context("Failed to read prices directory"),
+        };
+
+        let mut all_prices = Vec::new();
+
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
+                let prices: Vec<PricePoint> = self.read_jsonl(&path).await?;
+                all_prices.extend(prices);
+            }
+        }
+
+        // Sort by timestamp for consistent ordering
+        all_prices.sort_by_key(|p| p.timestamp);
+        Ok(all_prices)
+    }
+
     async fn put_prices(&self, prices: &[PricePoint]) -> Result<()> {
         if prices.is_empty() {
             return Ok(());
@@ -165,6 +190,31 @@ impl MarketDataStore for JsonlMarketDataStore {
         let path = self.fx_file(base, quote, date);
         let rates = self.read_jsonl(&path).await?;
         Ok(self.select_latest_fx(rates, date, kind))
+    }
+
+    async fn get_all_fx_rates(&self, base: &str, quote: &str) -> Result<Vec<FxRatePoint>> {
+        let fx_dir = self.fx_dir(base, quote);
+
+        // List all year files in the fx directory
+        let mut entries = match fs::read_dir(&fx_dir).await {
+            Ok(e) => e,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(e).context("Failed to read FX directory"),
+        };
+
+        let mut all_rates = Vec::new();
+
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
+                let rates: Vec<FxRatePoint> = self.read_jsonl(&path).await?;
+                all_rates.extend(rates);
+            }
+        }
+
+        // Sort by timestamp for consistent ordering
+        all_rates.sort_by_key(|r| r.timestamp);
+        Ok(all_rates)
     }
 
     async fn put_fx_rates(&self, rates: &[FxRatePoint]) -> Result<()> {

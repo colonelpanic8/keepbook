@@ -14,6 +14,9 @@ pub trait MarketDataStore: Send + Sync {
         kind: PriceKind,
     ) -> Result<Option<PricePoint>>;
 
+    /// Get all prices for an asset across all time.
+    async fn get_all_prices(&self, asset_id: &AssetId) -> Result<Vec<PricePoint>>;
+
     async fn put_prices(&self, prices: &[PricePoint]) -> Result<()>;
 
     async fn get_fx_rate(
@@ -23,6 +26,9 @@ pub trait MarketDataStore: Send + Sync {
         date: NaiveDate,
         kind: FxRateKind,
     ) -> Result<Option<FxRatePoint>>;
+
+    /// Get all FX rates for a currency pair across all time.
+    async fn get_all_fx_rates(&self, base: &str, quote: &str) -> Result<Vec<FxRatePoint>>;
 
     async fn put_fx_rates(&self, rates: &[FxRatePoint]) -> Result<()>;
 
@@ -44,6 +50,10 @@ impl MarketDataStore for NullMarketDataStore {
         Ok(None)
     }
 
+    async fn get_all_prices(&self, _asset_id: &AssetId) -> Result<Vec<PricePoint>> {
+        Ok(Vec::new())
+    }
+
     async fn put_prices(&self, _prices: &[PricePoint]) -> Result<()> {
         Ok(())
     }
@@ -56,6 +66,10 @@ impl MarketDataStore for NullMarketDataStore {
         _kind: FxRateKind,
     ) -> Result<Option<FxRatePoint>> {
         Ok(None)
+    }
+
+    async fn get_all_fx_rates(&self, _base: &str, _quote: &str) -> Result<Vec<FxRatePoint>> {
+        Ok(Vec::new())
     }
 
     async fn put_fx_rates(&self, _rates: &[FxRatePoint]) -> Result<()> {
@@ -96,6 +110,15 @@ impl MarketDataStore for MemoryMarketDataStore {
         Ok(prices.get(&(asset_id.clone(), date, kind)).cloned())
     }
 
+    async fn get_all_prices(&self, asset_id: &AssetId) -> Result<Vec<PricePoint>> {
+        let prices = self.prices.lock().await;
+        Ok(prices
+            .iter()
+            .filter(|((id, _, _), _)| id == asset_id)
+            .map(|(_, p)| p.clone())
+            .collect())
+    }
+
     async fn put_prices(&self, prices: &[PricePoint]) -> Result<()> {
         if prices.is_empty() {
             return Ok(());
@@ -121,6 +144,15 @@ impl MarketDataStore for MemoryMarketDataStore {
         Ok(fx_rates
             .get(&(base.to_string(), quote.to_string(), date, kind))
             .cloned())
+    }
+
+    async fn get_all_fx_rates(&self, base: &str, quote: &str) -> Result<Vec<FxRatePoint>> {
+        let fx_rates = self.fx_rates.lock().await;
+        Ok(fx_rates
+            .iter()
+            .filter(|((b, q, _, _), _)| b == base && q == quote)
+            .map(|(_, r)| r.clone())
+            .collect())
     }
 
     async fn put_fx_rates(&self, rates: &[FxRatePoint]) -> Result<()> {

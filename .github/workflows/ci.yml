@@ -36,6 +36,9 @@ jobs:
       - name: Check formatting
         run: nix develop --command cargo fmt --check
 
+      - name: Check (No Warnings)
+        run: nix develop --command env RUSTFLAGS=-D warnings cargo check --all-targets --all-features
+
       - name: Clippy
         run: nix develop --command cargo clippy --all-targets --all-features -- -D warnings
 
@@ -43,4 +46,4 @@ jobs:
         run: nix develop --command cargo build --all-targets
 
       - name: Test
-        run: nix develop --command cargo test
+        run: nix develop --command cargo test --all-targets --all-features

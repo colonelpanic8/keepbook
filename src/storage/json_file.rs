@@ -430,10 +430,7 @@ impl JsonFileStorage {
             {
                 use std::os::unix::fs::symlink;
                 if let Err(e) = symlink(&target, &link_path) {
-                    warnings.push(format!(
-                        "Failed to create symlink for \"{}\": {}",
-                        sanitized, e
-                    ));
+                    warnings.push(format!("Failed to create symlink for \"{sanitized}\": {e}"));
                     continue;
                 }
             }
