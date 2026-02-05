@@ -40,7 +40,7 @@ async fn coinbase_sync_handles_unsafe_account_uuid() -> Result<()> {
         .await;
 
     Mock::given(method("GET"))
-        .and(path("/api/v3/brokerage/accounts/bad/id/ledger"))
+        .and(path("/api/v3/brokerage/accounts/bad%2Fid/ledger"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "ledger": []
         })))

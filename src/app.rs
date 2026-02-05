@@ -744,13 +744,10 @@ pub async fn sync_symlinks(
     config: &ResolvedConfig,
 ) -> Result<serde_json::Value> {
     let (conn_created, acct_created, warnings) = storage.rebuild_all_symlinks().await?;
-    for warning in &warnings {
-        eprintln!("Warning: {warning}");
-    }
     let result = serde_json::json!({
         "connection_symlinks_created": conn_created,
         "account_symlinks_created": acct_created,
-        "warnings": warnings.len()
+        "warnings": warnings,
     });
 
     maybe_auto_commit(config, "sync symlinks");

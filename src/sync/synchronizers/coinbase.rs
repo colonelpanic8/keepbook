@@ -121,6 +121,25 @@ impl CoinbaseSynchronizer {
         Ok(format!("{message}.{sig_b64}"))
     }
 
+    fn encode_path_segment(value: &str) -> String {
+        // RFC 3986 unreserved characters are safe in a path segment.
+        // Everything else gets percent-encoded.
+        let mut out = String::with_capacity(value.len());
+        for b in value.as_bytes() {
+            match *b {
+                b'A'..=b'Z'
+                | b'a'..=b'z'
+                | b'0'..=b'9'
+                | b'-'
+                | b'.'
+                | b'_'
+                | b'~' => out.push(*b as char),
+                other => out.push_str(&format!("%{other:02X}")),
+            }
+        }
+        out
+    }
+
     async fn request<T: for<'de> Deserialize<'de>>(&self, method: &str, path: &str) -> Result<T> {
         // Parse/validate the HTTP method up-front so invalid input doesn't panic and we don't
         // do unnecessary JWT work.
@@ -191,7 +210,10 @@ impl CoinbaseSynchronizer {
             self.request("GET", "/api/v3/brokerage/portfolios").await?;
 
         for p in portfolios.portfolios {
-            let path = format!("/api/v3/brokerage/portfolios/{}", p.uuid);
+            let path = format!(
+                "/api/v3/brokerage/portfolios/{}",
+                Self::encode_path_segment(&p.uuid)
+            );
             let breakdown: BreakdownResponse = self.request("GET", &path).await?;
 
             for pos in breakdown.breakdown.spot_positions {
@@ -228,7 +250,10 @@ impl CoinbaseSynchronizer {
             ledger: Vec<CoinbaseTransaction>,
         }
 
-        let path = format!("/api/v3/brokerage/accounts/{account_id}/ledger");
+        let path = format!(
+            "/api/v3/brokerage/accounts/{}/ledger",
+            Self::encode_path_segment(account_id)
+        );
         let resp: Response = self.request("GET", &path).await?;
         Ok(resp.ledger)
     }
@@ -277,9 +302,11 @@ impl CoinbaseSynchronizer {
                 .get_transactions(&cb_account.uuid)
                 .await
                 .unwrap_or_else(|e| {
-                    eprintln!(
-                        "Warning: Failed to get transactions for {}: {}",
-                        cb_account.name, e
+                    tracing::warn!(
+                        account_name = %cb_account.name,
+                        account_uuid = %cb_account.uuid,
+                        error = %e,
+                        "failed to fetch coinbase transactions; continuing with empty transaction set"
                     );
                     Vec::new()
                 });

@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use tracing::warn;
 
 use super::providers::{
     AlphaVantagePriceSource, CoinCapPriceSource, CoinGeckoPriceSource,
@@ -72,7 +73,11 @@ impl PriceSourceRegistry {
                     }
                 }
                 Err(e) => {
-                    eprintln!("Warning: failed to load {}: {}", source_toml.display(), e);
+                    warn!(
+                        source = %source_toml.display(),
+                        error = %e,
+                        "failed to load price source config; skipping"
+                    );
                 }
             }
         }
