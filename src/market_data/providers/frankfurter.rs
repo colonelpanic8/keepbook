@@ -38,6 +38,7 @@ struct FrankfurterResponse {
 #[derive(Debug, Clone)]
 pub struct FrankfurterRateSource {
     client: Client,
+    base_url: String,
 }
 
 impl FrankfurterRateSource {
@@ -45,12 +46,22 @@ impl FrankfurterRateSource {
     pub fn new() -> Self {
         Self {
             client: Client::new(),
+            base_url: FRANKFURTER_BASE_URL.to_string(),
         }
     }
 
     /// Creates a new Frankfurter provider with a custom HTTP client.
     pub fn with_client(client: Client) -> Self {
-        Self { client }
+        Self {
+            client,
+            base_url: FRANKFURTER_BASE_URL.to_string(),
+        }
+    }
+
+    /// Override the base URL (useful for tests).
+    pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
+        self.base_url = base_url.into();
+        self
     }
 
     /// Fetches rates from Frankfurter API with EUR as base.
@@ -60,7 +71,8 @@ impl FrankfurterRateSource {
         date: NaiveDate,
     ) -> Result<HashMap<String, f64>> {
         let symbols = currencies.join(",");
-        let url = format!("{FRANKFURTER_BASE_URL}/{date}?from=EUR&to={symbols}");
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{base}/{date}?from=EUR&to={symbols}");
 
         let response = self
             .client

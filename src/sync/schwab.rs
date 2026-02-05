@@ -47,6 +47,7 @@ use crate::credentials::SessionData;
 pub struct SchwabClient {
     client: Client,
     session: SessionData,
+    api_base: String,
 }
 
 /// Account summary from Schwab API.
@@ -112,6 +113,7 @@ pub struct Position {
 impl SchwabClient {
     const API_BASE: &'static str =
         "https://ausgateway.schwab.com/api/is.ClientSummaryExpWeb/V1/api";
+    const API_BASE_KEY: &'static str = "api_base";
 
     /// Create a new Schwab client with session data.
     pub fn new(session: SessionData) -> Result<Self> {
@@ -120,12 +122,23 @@ impl SchwabClient {
             .build()
             .context("Failed to create HTTP client")?;
 
-        Ok(Self { client, session })
+        let api_base = session
+            .data
+            .get(Self::API_BASE_KEY)
+            .cloned()
+            .unwrap_or_else(|| Self::API_BASE.to_string());
+
+        Ok(Self {
+            client,
+            session,
+            api_base,
+        })
     }
 
     /// Make an authenticated request to the Schwab API.
     async fn request<T: for<'de> Deserialize<'de>>(&self, path: &str) -> Result<T> {
-        let url = format!("{}{}", Self::API_BASE, path);
+        let base = self.api_base.trim_end_matches('/');
+        let url = format!("{base}{path}");
 
         let token = self
             .session

@@ -48,6 +48,14 @@ impl SchwabSynchronizer {
         })
     }
 
+    /// Create a synchronizer using an explicit session cache (useful for tests).
+    pub fn with_session_cache(connection: &Connection, session_cache: SessionCache) -> Self {
+        Self {
+            connection_id: connection.id().clone(),
+            session_cache,
+        }
+    }
+
     fn session_key(&self) -> String {
         self.connection_id.to_string()
     }
