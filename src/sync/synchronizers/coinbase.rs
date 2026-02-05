@@ -319,16 +319,22 @@ impl CoinbaseSynchronizer {
                         .ok()?
                         .with_timezone(&Utc);
 
+                    let entry_id = tx.entry_id;
+                    let entry_type = tx.entry_type;
+                    let tx_id = Id::from_external(&format!("coinbase:ledger:{entry_id}"));
+                    let description = tx.description.unwrap_or_else(|| entry_type.clone());
+
                     Some(
                         Transaction::new(
                             &tx.amount.value,
                             Asset::crypto(&tx.amount.currency),
-                            tx.description.unwrap_or_else(|| tx.entry_type.clone()),
+                            description,
                         )
                         .with_timestamp(timestamp)
+                        .with_id(tx_id)
                         .with_synchronizer_data(serde_json::json!({
-                            "coinbase_entry_id": tx.entry_id,
-                            "entry_type": tx.entry_type,
+                            "coinbase_entry_id": entry_id,
+                            "entry_type": entry_type,
                         })),
                     )
                 })
