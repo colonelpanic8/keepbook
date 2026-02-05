@@ -1,11 +1,15 @@
+mod support;
+
 use std::path::Path;
 
 use anyhow::Result;
 use chrono::{NaiveDate, TimeZone, Utc};
 use keepbook::app::{fetch_historical_prices, PriceHistoryRequest};
 use keepbook::config::{GitConfig, RefreshConfig, ResolvedConfig};
+use keepbook::market_data::{JsonlMarketDataStore, MarketDataStore, PriceKind};
 use keepbook::models::{Account, Asset, AssetBalance, BalanceSnapshot, Id};
 use keepbook::storage::{JsonFileStorage, Storage};
+use support::{fx_rate_point, price_point};
 use tempfile::TempDir;
 
 fn resolved_config(data_dir: &Path) -> ResolvedConfig {
@@ -190,6 +194,141 @@ async fn price_history_infers_start_date_from_balances() -> Result<()> {
     assert_eq!(output.earliest_balance_date.as_deref(), Some("2024-01-02"));
     assert_eq!(output.days, 1);
     assert_eq!(output.points, 1);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn price_history_uses_cached_price_with_lookback() -> Result<()> {
+    let dir = TempDir::new()?;
+    let storage = JsonFileStorage::new(dir.path());
+    let config = resolved_config(dir.path());
+
+    let account = create_account(&storage, "Brokerage").await?;
+    add_balance(
+        &storage,
+        &account.id,
+        NaiveDate::from_ymd_opt(2024, 1, 3).unwrap(),
+        Asset::equity("AAPL"),
+    )
+    .await?;
+
+    let store = JsonlMarketDataStore::new(dir.path());
+    let cached = price_point(
+        &Asset::equity("AAPL"),
+        NaiveDate::from_ymd_opt(2024, 1, 2).unwrap(),
+        "188.00",
+        "USD",
+        PriceKind::Close,
+    );
+    store.put_prices(std::slice::from_ref(&cached)).await?;
+
+    let account_id = account.id.to_string();
+    let output = fetch_historical_prices(PriceHistoryRequest {
+        storage: &storage,
+        config: &config,
+        account: Some(account_id.as_str()),
+        connection: None,
+        start: Some("2024-01-03"),
+        end: Some("2024-01-03"),
+        interval: "daily",
+        lookback_days: 2,
+        request_delay_ms: 0,
+        currency: None,
+        include_fx: false,
+    })
+    .await?;
+
+    assert_eq!(output.points, 1);
+    assert_eq!(output.prices.attempted, 1);
+    assert_eq!(output.prices.lookback, 1);
+    assert_eq!(output.prices.missing, 0);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn price_history_records_missing_prices() -> Result<()> {
+    let dir = TempDir::new()?;
+    let storage = JsonFileStorage::new(dir.path());
+    let config = resolved_config(dir.path());
+
+    let account = create_account(&storage, "Brokerage").await?;
+    add_balance(
+        &storage,
+        &account.id,
+        NaiveDate::from_ymd_opt(2024, 1, 2).unwrap(),
+        Asset::equity("AAPL"),
+    )
+    .await?;
+
+    let account_id = account.id.to_string();
+    let output = fetch_historical_prices(PriceHistoryRequest {
+        storage: &storage,
+        config: &config,
+        account: Some(account_id.as_str()),
+        connection: None,
+        start: Some("2024-01-02"),
+        end: Some("2024-01-02"),
+        interval: "daily",
+        lookback_days: 0,
+        request_delay_ms: 0,
+        currency: None,
+        include_fx: false,
+    })
+    .await?;
+
+    assert_eq!(output.points, 1);
+    assert_eq!(output.prices.attempted, 1);
+    assert_eq!(output.prices.missing, 1);
+    assert_eq!(output.failure_count, 1);
+    assert_eq!(output.failures.len(), 1);
+    assert_eq!(output.failures[0].kind, "price");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn price_history_uses_cached_fx_rates() -> Result<()> {
+    let dir = TempDir::new()?;
+    let storage = JsonFileStorage::new(dir.path());
+    let config = resolved_config(dir.path());
+
+    let account = create_account(&storage, "Checking").await?;
+    add_balance(
+        &storage,
+        &account.id,
+        NaiveDate::from_ymd_opt(2024, 1, 2).unwrap(),
+        Asset::currency("EUR"),
+    )
+    .await?;
+
+    let store = JsonlMarketDataStore::new(dir.path());
+    let cached = fx_rate_point("EUR", "USD", NaiveDate::from_ymd_opt(2024, 1, 2).unwrap(), "1.10");
+    store.put_fx_rates(std::slice::from_ref(&cached)).await?;
+
+    let account_id = account.id.to_string();
+    let output = fetch_historical_prices(PriceHistoryRequest {
+        storage: &storage,
+        config: &config,
+        account: Some(account_id.as_str()),
+        connection: None,
+        start: Some("2024-01-02"),
+        end: Some("2024-01-02"),
+        interval: "daily",
+        lookback_days: 0,
+        request_delay_ms: 0,
+        currency: None,
+        include_fx: true,
+    })
+    .await?;
+
+    let fx = output.fx.expect("fx stats should be present");
+    assert_eq!(fx.attempted, 1);
+    assert_eq!(fx.existing, 1);
+    assert_eq!(fx.lookback, 0);
+    assert_eq!(fx.missing, 0);
+    assert_eq!(output.failure_count, 0);
 
     Ok(())
 }

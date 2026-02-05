@@ -347,6 +347,18 @@ mod tests {
     }
 
     #[test]
+    fn test_config_load_or_default_missing_file() -> Result<()> {
+        let dir = TempDir::new()?;
+        let config_path = dir.path().join("missing.toml");
+
+        let config = Config::load_or_default(&config_path)?;
+        assert_eq!(config.data_dir, None);
+        assert_eq!(config.reporting_currency, "USD");
+
+        Ok(())
+    }
+
+    #[test]
     fn test_resolved_config_load_or_default_missing_file() -> Result<()> {
         let dir = TempDir::new()?;
         let config_path = dir.path().join("keepbook.toml");
