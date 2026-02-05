@@ -159,6 +159,17 @@ pub fn filter_by_granularity(
         return points;
     }
 
+    let custom_bucket_seconds = match granularity {
+        Granularity::Custom(duration) => {
+            let seconds = duration.num_seconds();
+            if seconds <= 0 {
+                return points;
+            }
+            Some(seconds)
+        }
+        _ => None,
+    };
+
     // Group points into buckets
     let mut buckets: BTreeMap<BucketKey, Vec<ChangePoint>> = BTreeMap::new();
 
@@ -179,8 +190,8 @@ pub fn filter_by_granularity(
                 let date = point.timestamp.date_naive();
                 BucketKey::Year(date.year())
             }
-            Granularity::Custom(duration) => {
-                let bucket_seconds = duration.num_seconds();
+            Granularity::Custom(_) => {
+                let bucket_seconds = custom_bucket_seconds.expect("custom bucket seconds");
                 BucketKey::Duration(point.timestamp.timestamp() / bucket_seconds)
             }
         };
@@ -549,5 +560,35 @@ mod tests {
         assert_eq!(filtered[0].timestamp.year(), 2025);
         assert_eq!(filtered[0].timestamp.month(), 12);
         assert_eq!(filtered[1].timestamp.year(), 2026);
+    }
+
+    #[test]
+    fn filter_custom_granularity_zero_duration_returns_input() {
+        let mut collector = ChangePointCollector::new();
+        let account_id = Id::new();
+
+        collector.add_balance_change(
+            make_ts(2026, 1, 15, 10, 0),
+            account_id.clone(),
+            Asset::currency("USD"),
+        );
+        collector.add_balance_change(
+            make_ts(2026, 1, 15, 11, 0),
+            account_id.clone(),
+            Asset::currency("USD"),
+        );
+
+        let points = collector.into_change_points();
+        let original_len = points.len();
+        let first_timestamp = points.first().map(|p| p.timestamp);
+
+        let filtered = filter_by_granularity(
+            points,
+            Granularity::Custom(Duration::zero()),
+            CoalesceStrategy::Last,
+        );
+
+        assert_eq!(filtered.len(), original_len);
+        assert_eq!(filtered.first().map(|p| p.timestamp), first_timestamp);
     }
 }
