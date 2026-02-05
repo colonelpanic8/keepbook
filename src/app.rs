@@ -199,15 +199,30 @@ pub fn config_output(config_path: &Path, config: &ResolvedConfig) -> serde_json:
 
 pub async fn list_connections(storage: &JsonFileStorage) -> Result<Vec<ConnectionOutput>> {
     let connections = storage.list_connections().await?;
+    let accounts = storage.list_accounts().await?;
+    let mut accounts_by_connection: HashMap<Id, HashSet<Id>> = HashMap::new();
+    for account in accounts {
+        accounts_by_connection
+            .entry(account.connection_id.clone())
+            .or_default()
+            .insert(account.id.clone());
+    }
     let mut output = Vec::new();
 
     for c in connections {
+        let mut account_ids: HashSet<Id> = c.state.account_ids.iter().cloned().collect();
+        if let Some(extra) = accounts_by_connection.get(c.id()) {
+            for account_id in extra {
+                account_ids.insert(account_id.clone());
+            }
+        }
+
         output.push(ConnectionOutput {
             id: c.id().to_string(),
             name: c.config.name.clone(),
             synchronizer: c.config.synchronizer.clone(),
             status: format!("{:?}", c.state.status).to_lowercase(),
-            account_count: c.state.account_ids.len(),
+            account_count: account_ids.len(),
             last_sync: c
                 .state
                 .last_sync

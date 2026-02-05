@@ -54,3 +54,34 @@ async fn list_balances_falls_back_to_accounts_by_connection_id() -> Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn latest_balances_for_connection_includes_accounts_by_connection_id() -> Result<()> {
+    let dir = TempDir::new()?;
+    let storage = JsonFileStorage::new(dir.path());
+
+    let connection = Connection::new(ConnectionConfig {
+        name: "Test Bank".to_string(),
+        synchronizer: "manual".to_string(),
+        credentials: None,
+        balance_staleness: None,
+    });
+
+    write_connection_config(&storage, &connection).await?;
+    storage.save_connection(&connection).await?;
+
+    let account = Account::new("Checking", connection.id().clone());
+    storage.save_account(&account).await?;
+
+    let snapshot = BalanceSnapshot::now(vec![AssetBalance::new(Asset::currency("USD"), "100")]);
+    storage.append_balance_snapshot(&account.id, &snapshot).await?;
+
+    let balances = storage
+        .get_latest_balances_for_connection(connection.id())
+        .await?;
+
+    assert_eq!(balances.len(), 1);
+    assert_eq!(balances[0].0, account.id);
+
+    Ok(())
+}

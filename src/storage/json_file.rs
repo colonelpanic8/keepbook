@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -592,7 +593,23 @@ impl Storage for JsonFileStorage {
             .ok_or_else(|| anyhow::anyhow!("Connection not found"))?;
 
         let mut results = Vec::new();
-        for account_id in &connection.state.account_ids {
+        let mut account_ids: Vec<Id> = connection.state.account_ids.clone();
+        let mut seen_ids: HashSet<Id> = account_ids.iter().cloned().collect();
+
+        let extra_accounts: Vec<Account> = self
+            .list_accounts()
+            .await?
+            .into_iter()
+            .filter(|account| account.connection_id == *connection.id())
+            .collect();
+
+        for account in extra_accounts {
+            if seen_ids.insert(account.id.clone()) {
+                account_ids.push(account.id);
+            }
+        }
+
+        for account_id in &account_ids {
             if let Some(snapshot) = self.get_latest_balance_snapshot(account_id).await? {
                 results.push((account_id.clone(), snapshot));
             }
