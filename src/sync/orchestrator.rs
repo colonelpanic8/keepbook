@@ -6,6 +6,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use chrono::NaiveDate;
 
+use crate::clock::{Clock, SystemClock};
 use crate::market_data::MarketDataService;
 use crate::models::{Asset, Connection, Id};
 use crate::storage::Storage;
@@ -17,6 +18,7 @@ pub struct SyncOrchestrator<S: Storage> {
     storage: Arc<S>,
     market_data: MarketDataService,
     reporting_currency: String,
+    clock: Arc<dyn Clock>,
 }
 
 /// Result of a sync operation that also stores and refreshes prices.
@@ -45,7 +47,13 @@ impl<S: Storage> SyncOrchestrator<S> {
             storage,
             market_data,
             reporting_currency,
+            clock: Arc::new(SystemClock),
         }
+    }
+
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
     }
 
     pub fn reporting_currency(&self) -> &str {
@@ -174,7 +182,9 @@ impl<S: Storage + Send + Sync> SyncOrchestrator<S> {
             .await?;
 
         // 2. Save sync results (this stores balances)
-        result.save(self.storage.as_ref()).await?;
+        result
+            .save_with_clock(self.storage.as_ref(), self.clock.as_ref())
+            .await?;
 
         // 3. Store any prices the synchronizer provided
         let mut stored_prices = 0;
@@ -195,7 +205,7 @@ impl<S: Storage + Send + Sync> SyncOrchestrator<S> {
             .collect();
 
         // 5. Fetch missing prices
-        let date = chrono::Utc::now().date_naive();
+        let date = self.clock.today();
         let refresh = self.ensure_prices(&assets, date, force_refresh).await?;
 
         Ok(SyncWithPricesResult {

@@ -1,6 +1,8 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::clock::Clock;
+
 use super::Asset;
 
 /// A single asset's balance without timestamp (belongs to a snapshot).
@@ -38,5 +40,9 @@ impl BalanceSnapshot {
 
     pub fn now(balances: Vec<AssetBalance>) -> Self {
         Self::new(Utc::now(), balances)
+    }
+
+    pub fn now_with(clock: &dyn Clock, balances: Vec<AssetBalance>) -> Self {
+        Self::new(clock.now(), balances)
     }
 }

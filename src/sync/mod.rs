@@ -17,6 +17,7 @@ use crate::market_data::PricePoint;
 use crate::models::{Account, AssetBalance, BalanceSnapshot, Connection, Id, Transaction};
 use crate::storage::Storage;
 use anyhow::Result;
+use crate::clock::{Clock, SystemClock};
 
 /// An asset balance paired with optional price data from the synchronizer.
 #[derive(Debug, Clone)]
@@ -51,6 +52,10 @@ pub struct SyncResult {
 impl SyncResult {
     /// Save this sync result to storage.
     pub async fn save(&self, storage: &impl Storage) -> Result<()> {
+        self.save_with_clock(storage, &SystemClock).await
+    }
+
+    pub async fn save_with_clock(&self, storage: &impl Storage, clock: &dyn Clock) -> Result<()> {
         for account in &self.accounts {
             storage.save_account(account).await?;
         }
@@ -63,7 +68,7 @@ impl SyncResult {
                     .iter()
                     .map(|sb| sb.asset_balance.clone())
                     .collect();
-                let snapshot = BalanceSnapshot::now(asset_balances);
+                let snapshot = BalanceSnapshot::now_with(clock, asset_balances);
                 storage
                     .append_balance_snapshot(account_id, &snapshot)
                     .await?;

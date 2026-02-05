@@ -11,7 +11,6 @@ use tracing::warn;
 
 use crate::clock::{Clock, SystemClock};
 use crate::config::ResolvedConfig;
-use crate::git::{try_auto_commit, AutoCommitOutcome};
 use crate::market_data::{
     AssetId, FxRateKind, FxRatePoint, JsonlMarketDataStore, MarketDataService,
     MarketDataServiceBuilder, MarketDataStore, PriceKind, PricePoint, PriceSourceRegistry,
@@ -30,8 +29,8 @@ use crate::staleness::{
 };
 use crate::storage::{find_account, find_connection, JsonFileStorage, Storage};
 use crate::sync::{
-    AuthPrompter, DefaultSynchronizerFactory, GitAutoCommitter, SyncContext, SyncOutcome,
-    SyncService,
+    AuthPrompter, AutoCommitter, DefaultSynchronizerFactory, GitAutoCommitter, SyncContext,
+    SyncOutcome, SyncService,
 };
 
 /// JSON output for connections
@@ -1793,24 +1792,8 @@ pub fn parse_asset(s: &str) -> Result<Asset> {
 }
 
 fn maybe_auto_commit(config: &ResolvedConfig, action: &str) {
-    if !config.git.auto_commit {
-        return;
-    }
-
-    match try_auto_commit(&config.data_dir, action) {
-        Ok(AutoCommitOutcome::Committed) => {
-            tracing::info!("Auto-committed keepbook data");
-        }
-        Ok(AutoCommitOutcome::SkippedNoChanges) => {
-            tracing::debug!("Auto-commit skipped: no changes");
-        }
-        Ok(AutoCommitOutcome::SkippedNotRepo { reason }) => {
-            tracing::warn!("Auto-commit enabled but skipped: {reason}");
-        }
-        Err(err) => {
-            tracing::warn!(error = %err, "Auto-commit failed");
-        }
-    }
+    let committer = GitAutoCommitter::new(config.data_dir.clone(), config.git.auto_commit);
+    committer.maybe_commit(action);
 }
 
 #[cfg(test)]

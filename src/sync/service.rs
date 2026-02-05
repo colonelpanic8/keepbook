@@ -155,7 +155,8 @@ impl<S: Storage> SyncService<S> {
             storage.clone(),
             context.market_data,
             context.reporting_currency,
-        );
+        )
+        .with_clock(context.clock.clone());
 
         Self {
             storage,
