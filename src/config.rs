@@ -345,4 +345,30 @@ mod tests {
         let config = Config::default();
         assert!(!config.git.auto_commit);
     }
+
+    #[test]
+    fn test_resolved_config_load_or_default_missing_file() -> Result<()> {
+        let dir = TempDir::new()?;
+        let config_path = dir.path().join("keepbook.toml");
+
+        let resolved = ResolvedConfig::load_or_default(&config_path)?;
+        assert_eq!(resolved.data_dir, dir.path());
+        assert_eq!(resolved.reporting_currency, "USD");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_resolved_config_resolves_relative_data_dir() -> Result<()> {
+        let dir = TempDir::new()?;
+        let config_path = dir.path().join("keepbook.toml");
+
+        let mut file = std::fs::File::create(&config_path)?;
+        writeln!(file, "data_dir = \"./data\"")?;
+
+        let resolved = ResolvedConfig::load(&config_path)?;
+        assert_eq!(resolved.data_dir, dir.path().join("data"));
+
+        Ok(())
+    }
 }

@@ -132,6 +132,8 @@ pub fn log_price_staleness(asset_id: &str, check: &StalenessCheck) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::market_data::{AssetId, PriceKind, PricePoint};
+    use crate::models::Asset;
     use crate::models::{ConnectionConfig, ConnectionState, LastSync, SyncStatus};
 
     fn make_connection(last_sync_age_hours: Option<i64>) -> Connection {
@@ -206,5 +208,42 @@ mod tests {
         let global = RefreshConfig::default();
         let result = resolve_balance_staleness(None, &connection, &global);
         assert_eq!(result, Duration::from_secs(14 * 24 * 60 * 60));
+    }
+
+    fn make_price_point(age_hours: i64) -> PricePoint {
+        let asset = Asset::equity("AAPL");
+        PricePoint {
+            asset_id: AssetId::from_asset(&asset),
+            as_of_date: Utc::now().date_naive(),
+            timestamp: Utc::now() - chrono::Duration::hours(age_hours),
+            price: "123.45".to_string(),
+            quote_currency: "USD".to_string(),
+            kind: PriceKind::Close,
+            source: "test".to_string(),
+        }
+    }
+
+    #[test]
+    fn test_price_stale_when_old() {
+        let price = make_price_point(48);
+        let threshold = Duration::from_secs(24 * 60 * 60);
+        let check = check_price_staleness(Some(&price), threshold);
+        assert!(check.is_stale);
+    }
+
+    #[test]
+    fn test_price_fresh_when_recent() {
+        let price = make_price_point(1);
+        let threshold = Duration::from_secs(24 * 60 * 60);
+        let check = check_price_staleness(Some(&price), threshold);
+        assert!(!check.is_stale);
+    }
+
+    #[test]
+    fn test_price_stale_when_missing() {
+        let threshold = Duration::from_secs(24 * 60 * 60);
+        let check = check_price_staleness(None, threshold);
+        assert!(check.is_stale);
+        assert!(check.age.is_none());
     }
 }
