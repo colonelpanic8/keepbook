@@ -271,7 +271,11 @@ impl JsonFileStorage {
                 if file_type.is_dir() {
                     if let Some(name) = entry.file_name().to_str() {
                         if !name.is_empty() {
-                            ids.push(Id::from(name));
+                            if Id::is_path_safe(name) {
+                                ids.push(Id::from(name));
+                            } else {
+                                warn!(dir = %path.display(), name = %name, "skipping unsafe id directory");
+                            }
                         }
                     }
                 }
