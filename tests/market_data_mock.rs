@@ -163,3 +163,20 @@ async fn test_price_latest_uses_future_cached_quote() -> Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn test_fx_close_normalizes_currency_codes() -> Result<()> {
+    let store = Arc::new(MemoryMarketDataStore::new());
+    let date = NaiveDate::from_ymd_opt(2024, 1, 2).unwrap();
+
+    let cached = fx_rate_point("USD", "EUR", date, "0.91");
+    store.put_fx_rates(std::slice::from_ref(&cached)).await?;
+
+    let provider = MockMarketDataSource::new().fail_on_fetch();
+    let service = MarketDataService::new(store.clone(), Some(Arc::new(provider)));
+
+    let fetched = service.fx_close(" usd ", "eur", date).await?;
+    assert_eq!(fetched.rate, "0.91");
+
+    Ok(())
+}

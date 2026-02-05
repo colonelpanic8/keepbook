@@ -58,7 +58,8 @@ impl<S: Storage + Send + Sync> SyncOrchestrator<S> {
         let mut needed_fx_pairs: HashSet<(String, String)> = HashSet::new();
 
         for asset in assets {
-            match asset {
+            let asset = asset.normalized();
+            match &asset {
                 Asset::Currency { iso_code } => {
                     // Currencies just need FX rate to reporting currency
                     if iso_code.to_uppercase() != self.reporting_currency.to_uppercase() {
@@ -70,7 +71,7 @@ impl<S: Storage + Send + Sync> SyncOrchestrator<S> {
                 }
                 Asset::Equity { .. } | Asset::Crypto { .. } => {
                     // Try to get/fetch price
-                    match self.market_data.price_close(asset, date).await {
+                    match self.market_data.price_close(&asset, date).await {
                         Ok(price) => {
                             result.fetched += 1;
                             // Check if we need FX conversion
