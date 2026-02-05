@@ -145,6 +145,31 @@ impl MarketDataService {
         ))
     }
 
+    /// Like [`Self::price_close`] but tries to fetch from sources first, even if the store already
+    /// has data. Falls back to the cached result if sources don't return anything.
+    ///
+    /// Returns `(price, fetched)` where `fetched` indicates whether a new point was fetched and stored.
+    pub async fn price_close_force(&self, asset: &Asset, date: NaiveDate) -> Result<(PricePoint, bool)> {
+        let asset = asset.normalized();
+        let asset_id = AssetId::from_asset(&asset);
+
+        let had_cached = self.price_from_store(&asset, date).await?.is_some();
+
+        for offset in 0..=self.lookback_days {
+            let target_date = date - Duration::days(offset as i64);
+            if let Some(price) = self
+                .fetch_price_from_sources(&asset, &asset_id, target_date)
+                .await?
+            {
+                self.store.put_prices(std::slice::from_ref(&price)).await?;
+                return Ok((price, true));
+            }
+        }
+
+        let price = self.price_close(&asset, date).await?;
+        Ok((price, !had_cached))
+    }
+
     /// Get the latest available price for an asset.
     /// Tries real-time quote first, falls back to historical close.
     /// If quote_staleness is set, returns cached quote if it's fresh enough.
@@ -253,6 +278,51 @@ impl MarketDataService {
         Err(anyhow::anyhow!(
             "No FX rate found for {base}->{quote} on or before {date}"
         ))
+    }
+
+    /// Like [`Self::fx_close`] but tries to fetch from sources first, even if the store already
+    /// has data. Falls back to the cached result if sources don't return anything.
+    ///
+    /// Returns `(rate, fetched)` where `fetched` indicates whether a new point was fetched and stored.
+    pub async fn fx_close_force(
+        &self,
+        base: &str,
+        quote: &str,
+        date: NaiveDate,
+    ) -> Result<(FxRatePoint, bool)> {
+        let base = base.trim().to_uppercase();
+        let quote = quote.trim().to_uppercase();
+
+        if base == quote {
+            return Ok((
+                FxRatePoint {
+                    base,
+                    quote,
+                    as_of_date: date,
+                    timestamp: self.clock.now(),
+                    rate: "1".to_string(),
+                    kind: FxRateKind::Close,
+                    source: "identity".to_string(),
+                },
+                false,
+            ));
+        }
+
+        let had_cached = self.fx_from_store(&base, &quote, date).await?.is_some();
+
+        for offset in 0..=self.lookback_days {
+            let target_date = date - Duration::days(offset as i64);
+            if let Some(rate) = self
+                .fetch_fx_from_sources(&base, &quote, target_date)
+                .await?
+            {
+                self.store.put_fx_rates(std::slice::from_ref(&rate)).await?;
+                return Ok((rate, true));
+            }
+        }
+
+        let rate = self.fx_close(&base, &quote, date).await?;
+        Ok((rate, !had_cached))
     }
 
     /// Get FX rate from store only, no external fetching.

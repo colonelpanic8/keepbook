@@ -68,7 +68,7 @@ impl<S: Storage + Send + Sync> SyncOrchestrator<S> {
         &self,
         assets: &HashSet<Asset>,
         date: NaiveDate,
-        _force: bool, // TODO: implement force refresh
+        force: bool,
     ) -> Result<PriceRefreshResult> {
         let mut result = PriceRefreshResult::default();
         let mut needed_fx_pairs: HashSet<(String, String)> = HashSet::new();
@@ -86,24 +86,29 @@ impl<S: Storage + Send + Sync> SyncOrchestrator<S> {
                     }
                 }
                 Asset::Equity { .. } | Asset::Crypto { .. } => {
-                    // Count cache hits as skipped.
-                    if let Some(price) = self.market_data.price_from_store(&asset, date).await? {
-                        result.skipped += 1;
-                        if price.quote_currency.to_uppercase()
-                            != self.reporting_currency.to_uppercase()
-                        {
-                            needed_fx_pairs.insert((
-                                price.quote_currency.to_uppercase(),
-                                self.reporting_currency.to_uppercase(),
-                            ));
+                    if force {
+                        match self.market_data.price_close_force(&asset, date).await {
+                            Ok((price, fetched)) => {
+                                if fetched {
+                                    result.fetched += 1;
+                                } else {
+                                    result.skipped += 1;
+                                }
+                                if price.quote_currency.to_uppercase()
+                                    != self.reporting_currency.to_uppercase()
+                                {
+                                    needed_fx_pairs.insert((
+                                        price.quote_currency.to_uppercase(),
+                                        self.reporting_currency.to_uppercase(),
+                                    ));
+                                }
+                            }
+                            Err(e) => result.failed.push((asset.clone(), e.to_string())),
                         }
-                        continue;
-                    }
-
-                    // Otherwise, fetch and store.
-                    match self.market_data.price_close(&asset, date).await {
-                        Ok(price) => {
-                            result.fetched += 1;
+                    } else {
+                        // Count cache hits as skipped.
+                        if let Some(price) = self.market_data.price_from_store(&asset, date).await? {
+                            result.skipped += 1;
                             if price.quote_currency.to_uppercase()
                                 != self.reporting_currency.to_uppercase()
                             {
@@ -112,8 +117,24 @@ impl<S: Storage + Send + Sync> SyncOrchestrator<S> {
                                     self.reporting_currency.to_uppercase(),
                                 ));
                             }
+                            continue;
                         }
-                        Err(e) => result.failed.push((asset.clone(), e.to_string())),
+
+                        // Otherwise, fetch and store.
+                        match self.market_data.price_close(&asset, date).await {
+                            Ok(price) => {
+                                result.fetched += 1;
+                                if price.quote_currency.to_uppercase()
+                                    != self.reporting_currency.to_uppercase()
+                                {
+                                    needed_fx_pairs.insert((
+                                        price.quote_currency.to_uppercase(),
+                                        self.reporting_currency.to_uppercase(),
+                                    ));
+                                }
+                            }
+                            Err(e) => result.failed.push((asset.clone(), e.to_string())),
+                        }
                     }
                 }
             }
@@ -121,20 +142,35 @@ impl<S: Storage + Send + Sync> SyncOrchestrator<S> {
 
         // Fetch needed FX rates
         for (base, quote) in needed_fx_pairs {
-            if self
-                .market_data
-                .fx_from_store(&base, &quote, date)
-                .await?
-                .is_some()
-            {
-                result.skipped += 1;
-                continue;
-            }
+            if force {
+                match self.market_data.fx_close_force(&base, &quote, date).await {
+                    Ok((_rate, fetched)) => {
+                        if fetched {
+                            result.fetched += 1;
+                        } else {
+                            result.skipped += 1;
+                        }
+                    }
+                    Err(_) => {
+                        // FX rate failures are less critical, don't add to failed.
+                    }
+                }
+            } else {
+                if self
+                    .market_data
+                    .fx_from_store(&base, &quote, date)
+                    .await?
+                    .is_some()
+                {
+                    result.skipped += 1;
+                    continue;
+                }
 
-            match self.market_data.fx_close(&base, &quote, date).await {
-                Ok(_) => result.fetched += 1,
-                Err(_) => {
-                    // FX rate failures are less critical, don't add to failed.
+                match self.market_data.fx_close(&base, &quote, date).await {
+                    Ok(_) => result.fetched += 1,
+                    Err(_) => {
+                        // FX rate failures are less critical, don't add to failed.
+                    }
                 }
             }
         }
