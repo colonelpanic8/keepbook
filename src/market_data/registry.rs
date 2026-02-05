@@ -95,42 +95,38 @@ impl PriceSourceRegistry {
         for loaded in &self.loaded {
             let source = match loaded.config.source_type {
                 PriceSourceType::Eodhd => {
-                    let store = loaded
-                        .config
-                        .credentials
-                        .as_ref()
-                        .expect("eodhd requires credentials")
-                        .build();
+                    let credentials = loaded.config.credentials.as_ref().with_context(|| {
+                        format!("Price source {} ({:?}) requires credentials",
+                            loaded.name, loaded.config.source_type)
+                    })?;
+                    let store = credentials.build();
                     let source = EodhdPriceSource::from_credentials(store.as_ref()).await?;
                     Arc::new(source) as Arc<dyn EquityPriceSource>
                 }
                 PriceSourceType::TwelveData => {
-                    let store = loaded
-                        .config
-                        .credentials
-                        .as_ref()
-                        .expect("twelve_data requires credentials")
-                        .build();
+                    let credentials = loaded.config.credentials.as_ref().with_context(|| {
+                        format!("Price source {} ({:?}) requires credentials",
+                            loaded.name, loaded.config.source_type)
+                    })?;
+                    let store = credentials.build();
                     let source = TwelveDataPriceSource::from_credentials(store.as_ref()).await?;
                     Arc::new(source) as Arc<dyn EquityPriceSource>
                 }
                 PriceSourceType::AlphaVantage => {
-                    let store = loaded
-                        .config
-                        .credentials
-                        .as_ref()
-                        .expect("alpha_vantage requires credentials")
-                        .build();
+                    let credentials = loaded.config.credentials.as_ref().with_context(|| {
+                        format!("Price source {} ({:?}) requires credentials",
+                            loaded.name, loaded.config.source_type)
+                    })?;
+                    let store = credentials.build();
                     let source = AlphaVantagePriceSource::from_credentials(store.as_ref()).await?;
                     Arc::new(source) as Arc<dyn EquityPriceSource>
                 }
                 PriceSourceType::Marketstack => {
-                    let store = loaded
-                        .config
-                        .credentials
-                        .as_ref()
-                        .expect("marketstack requires credentials")
-                        .build();
+                    let credentials = loaded.config.credentials.as_ref().with_context(|| {
+                        format!("Price source {} ({:?}) requires credentials",
+                            loaded.name, loaded.config.source_type)
+                    })?;
+                    let store = credentials.build();
                     let source = MarketstackPriceSource::from_credentials(store.as_ref()).await?;
                     Arc::new(source) as Arc<dyn EquityPriceSource>
                 }
@@ -233,9 +229,37 @@ impl PriceSourceRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::market_data::source_config::{LoadedPriceSource, PriceSourceConfig, PriceSourceType};
     use std::fs;
     use std::io::Write;
     use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn build_equity_sources_missing_credentials_returns_error_not_panic() -> Result<()> {
+        // PriceSourceConfig::load() validates this, but we still want the registry to be robust
+        // against malformed state (hand-edits, older versions, etc.).
+        let dir = TempDir::new()?;
+        let mut registry = PriceSourceRegistry::new(dir.path());
+        registry.loaded = vec![LoadedPriceSource {
+            name: "bad-eodhd".to_string(),
+            config: PriceSourceConfig {
+                source_type: PriceSourceType::Eodhd,
+                enabled: true,
+                priority: 1,
+                credentials: None,
+                config: None,
+            },
+        }];
+
+        match registry.build_equity_sources().await {
+            Ok(_) => anyhow::bail!("expected error for missing credentials"),
+            Err(err) => {
+                assert!(err.to_string().contains("requires credentials"));
+            }
+        }
+
+        Ok(())
+    }
 
     #[test]
     fn test_load_empty_directory() -> Result<()> {
