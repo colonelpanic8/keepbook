@@ -1880,3 +1880,249 @@ fn maybe_auto_commit(config: &ResolvedConfig, action: &str) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{Account, ConnectionConfig};
+    use crate::storage::JsonFileStorage;
+    use chrono::{DateTime, NaiveDate, Utc};
+    use std::collections::HashMap;
+    use tempfile::TempDir;
+
+    fn connection_config(name: &str) -> ConnectionConfig {
+        ConnectionConfig {
+            name: name.to_string(),
+            synchronizer: "mock".to_string(),
+            credentials: None,
+            balance_staleness: None,
+        }
+    }
+
+    async fn write_connection_config(
+        storage: &JsonFileStorage,
+        conn: &Connection,
+    ) -> anyhow::Result<()> {
+        let config_path = storage.connection_config_path(conn.id());
+        tokio::fs::create_dir_all(config_path.parent().unwrap()).await?;
+        let config_toml = toml::to_string_pretty(&conn.config)?;
+        tokio::fs::write(&config_path, config_toml).await?;
+        Ok(())
+    }
+
+    fn sample_price(
+        asset: &Asset,
+        date: NaiveDate,
+        timestamp: DateTime<Utc>,
+    ) -> PricePoint {
+        PricePoint {
+            asset_id: AssetId::from_asset(asset),
+            as_of_date: date,
+            timestamp,
+            price: "1.00".to_string(),
+            quote_currency: "USD".to_string(),
+            kind: PriceKind::Close,
+            source: "test".to_string(),
+        }
+    }
+
+    fn sample_fx_rate(base: &str, quote: &str, date: NaiveDate, timestamp: DateTime<Utc>) -> FxRatePoint {
+        FxRatePoint {
+            base: base.to_string(),
+            quote: quote.to_string(),
+            as_of_date: date,
+            timestamp,
+            rate: "1.25".to_string(),
+            kind: FxRateKind::Close,
+            source: "test".to_string(),
+        }
+    }
+
+    #[test]
+    fn parse_asset_handles_prefixes() -> anyhow::Result<()> {
+        let equity = parse_asset("equity:AAPL")?;
+        match equity {
+            Asset::Equity { ticker, .. } => assert_eq!(ticker, "AAPL"),
+            _ => anyhow::bail!("expected equity asset"),
+        }
+
+        let crypto = parse_asset("crypto:BTC")?;
+        match crypto {
+            Asset::Crypto { symbol, .. } => assert_eq!(symbol, "BTC"),
+            _ => anyhow::bail!("expected crypto asset"),
+        }
+
+        let currency = parse_asset("usd")?;
+        match currency {
+            Asset::Currency { iso_code } => assert_eq!(iso_code, "usd"),
+            _ => anyhow::bail!("expected currency asset"),
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn align_start_date_monthly_uses_month_end() {
+        let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        let aligned = align_start_date(date, PriceHistoryInterval::Monthly, 1, 15);
+        assert_eq!(aligned, NaiveDate::from_ymd_opt(2024, 1, 31).unwrap());
+    }
+
+    #[test]
+    fn add_years_handles_leap_day() {
+        let date = NaiveDate::from_ymd_opt(2024, 2, 29).unwrap();
+        let next = add_years(date, 1, 2, 29);
+        assert_eq!(next, NaiveDate::from_ymd_opt(2025, 2, 28).unwrap());
+    }
+
+    #[test]
+    fn resolve_cached_price_prefers_exact_then_lookback() {
+        let asset = Asset::equity("AAPL");
+        let date = NaiveDate::from_ymd_opt(2024, 1, 10).unwrap();
+        let exact = sample_price(&asset, date, Utc::now());
+        let mut cache = HashMap::new();
+        cache.insert(date, exact.clone());
+
+        let (found, exact_hit) =
+            resolve_cached_price(&cache, date, 3).expect("exact price");
+        assert!(exact_hit);
+        assert_eq!(found.as_of_date, date);
+
+        cache.remove(&date);
+        let lookback_date = date - chrono::Duration::days(1);
+        let lookback = sample_price(&asset, lookback_date, Utc::now());
+        cache.insert(lookback_date, lookback.clone());
+
+        let (found, exact_hit) =
+            resolve_cached_price(&cache, date, 3).expect("lookback price");
+        assert!(!exact_hit);
+        assert_eq!(found.as_of_date, lookback_date);
+    }
+
+    #[test]
+    fn upsert_price_cache_prefers_newer_timestamp() {
+        let asset = Asset::equity("AAPL");
+        let date = NaiveDate::from_ymd_opt(2024, 1, 5).unwrap();
+        let newer = sample_price(&asset, date, Utc::now());
+        let older = sample_price(&asset, date, Utc::now() - chrono::Duration::minutes(5));
+
+        let mut cache = HashMap::new();
+        cache.insert(date, newer.clone());
+
+        assert!(!upsert_price_cache(&mut cache, older));
+        assert_eq!(cache.get(&date).unwrap().timestamp, newer.timestamp);
+
+        let newest = sample_price(&asset, date, Utc::now() + chrono::Duration::minutes(1));
+        assert!(upsert_price_cache(&mut cache, newest.clone()));
+        assert_eq!(cache.get(&date).unwrap().timestamp, newest.timestamp);
+    }
+
+    #[test]
+    fn resolve_cached_fx_prefers_exact_then_lookback() {
+        let date = NaiveDate::from_ymd_opt(2024, 1, 10).unwrap();
+        let exact = sample_fx_rate("EUR", "USD", date, Utc::now());
+        let mut cache = HashMap::new();
+        cache.insert(date, exact.clone());
+
+        let (found, exact_hit) =
+            resolve_cached_fx(&cache, date, 3).expect("exact rate");
+        assert!(exact_hit);
+        assert_eq!(found.as_of_date, date);
+
+        cache.remove(&date);
+        let lookback_date = date - chrono::Duration::days(2);
+        let lookback = sample_fx_rate("EUR", "USD", lookback_date, Utc::now());
+        cache.insert(lookback_date, lookback.clone());
+
+        let (found, exact_hit) =
+            resolve_cached_fx(&cache, date, 3).expect("lookback rate");
+        assert!(!exact_hit);
+        assert_eq!(found.as_of_date, lookback_date);
+    }
+
+    #[tokio::test]
+    async fn find_account_errors_on_duplicate_names() -> anyhow::Result<()> {
+        let dir = TempDir::new()?;
+        let storage = JsonFileStorage::new(dir.path());
+        let conn = Connection::new(connection_config("Test"));
+
+        let account_one = Account::new("Checking", conn.id().clone());
+        let account_two = Account::new("Checking", conn.id().clone());
+        storage.save_account(&account_one).await?;
+        storage.save_account(&account_two).await?;
+
+        let err = find_account(&storage, "Checking")
+            .await
+            .expect_err("expected duplicate name error");
+        assert!(err
+            .to_string()
+            .contains("Multiple accounts named 'Checking'"));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn resolve_scope_rejects_account_and_connection() -> anyhow::Result<()> {
+        let dir = TempDir::new()?;
+        let storage = JsonFileStorage::new(dir.path());
+
+        let err = resolve_price_history_scope(&storage, Some("a"), Some("b"))
+            .await
+            .err()
+            .expect("expected invalid scope error");
+        assert!(err.to_string().contains("Specify only one"));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn resolve_scope_connection_requires_accounts() -> anyhow::Result<()> {
+        let dir = TempDir::new()?;
+        let storage = JsonFileStorage::new(dir.path());
+        let mut conn = Connection::new(connection_config("Test Connection"));
+
+        let missing_account = Account::new("Missing", conn.id().clone());
+        conn.state.account_ids = vec![missing_account.id.clone()];
+
+        write_connection_config(&storage, &conn).await?;
+        storage.save_connection(&conn).await?;
+
+        let conn_id = conn.id().to_string();
+        let err = resolve_price_history_scope(&storage, None, Some(conn_id.as_str()))
+            .await
+            .err()
+            .expect("expected missing accounts error");
+        assert!(err
+            .to_string()
+            .contains("No accounts found for connection"));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn resolve_scope_connection_uses_accounts_by_connection_id() -> anyhow::Result<()> {
+        let dir = TempDir::new()?;
+        let storage = JsonFileStorage::new(dir.path());
+        let conn = Connection::new(connection_config("Test Connection"));
+
+        write_connection_config(&storage, &conn).await?;
+        storage.save_connection(&conn).await?;
+
+        let account = Account::new("Checking", conn.id().clone());
+        storage.save_account(&account).await?;
+
+        let conn_id = conn.id().to_string();
+        let (scope, accounts) =
+            resolve_price_history_scope(&storage, None, Some(conn_id.as_str())).await?;
+        assert_eq!(accounts.len(), 1);
+        assert_eq!(accounts[0].id, account.id);
+        match scope {
+            PriceHistoryScopeOutput::Connection { id, .. } => {
+                assert_eq!(id, conn_id);
+            }
+            _ => anyhow::bail!("expected connection scope"),
+        }
+
+        Ok(())
+    }
+}
