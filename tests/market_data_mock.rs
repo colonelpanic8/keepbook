@@ -180,3 +180,20 @@ async fn test_fx_close_normalizes_currency_codes() -> Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn test_fx_close_same_currency_short_circuits() -> Result<()> {
+    let store = Arc::new(MemoryMarketDataStore::new());
+    let date = NaiveDate::from_ymd_opt(2024, 1, 2).unwrap();
+
+    let provider = MockMarketDataSource::new().fail_on_fetch();
+    let service = MarketDataService::new(store, Some(Arc::new(provider)));
+
+    let fetched = service.fx_close("USD", "USD", date).await?;
+    assert_eq!(fetched.base, "USD");
+    assert_eq!(fetched.quote, "USD");
+    assert_eq!(fetched.rate, "1");
+    assert_eq!(fetched.kind, FxRateKind::Close);
+
+    Ok(())
+}

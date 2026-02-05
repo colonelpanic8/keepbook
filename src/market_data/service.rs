@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use chrono::{Duration, NaiveDate};
+use chrono::{Duration, NaiveDate, Utc};
 use tracing::{debug, info};
 
 use super::{
@@ -194,6 +194,18 @@ impl MarketDataService {
         let base = base.trim().to_uppercase();
         let quote = quote.trim().to_uppercase();
         debug!(base = %base, quote = %quote, date = %date, "looking up FX rate");
+
+        if base == quote {
+            return Ok(FxRatePoint {
+                base,
+                quote,
+                as_of_date: date,
+                timestamp: Utc::now(),
+                rate: "1".to_string(),
+                kind: FxRateKind::Close,
+                source: "identity".to_string(),
+            });
+        }
 
         for offset in 0..=self.lookback_days {
             let target_date = date - Duration::days(offset as i64);
