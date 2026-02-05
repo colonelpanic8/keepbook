@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 use crate::clock::{Clock, SystemClock};
 
@@ -137,6 +138,23 @@ pub enum ConnectionStatus {
     Error,
     Disconnected,
     PendingReauth,
+}
+
+impl ConnectionStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ConnectionStatus::Active => "active",
+            ConnectionStatus::Error => "error",
+            ConnectionStatus::Disconnected => "disconnected",
+            ConnectionStatus::PendingReauth => "pending_reauth",
+        }
+    }
+}
+
+impl fmt::Display for ConnectionStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

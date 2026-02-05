@@ -231,7 +231,7 @@ pub async fn list_connections(storage: &JsonFileStorage) -> Result<Vec<Connectio
             id: c.id().to_string(),
             name: c.config.name.clone(),
             synchronizer: c.config.synchronizer.clone(),
-            status: format!("{:?}", c.state.status).to_lowercase(),
+            status: c.state.status.to_string(),
             account_count: account_ids.len(),
             last_sync: c
                 .state
