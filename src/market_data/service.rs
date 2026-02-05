@@ -255,6 +255,44 @@ impl MarketDataService {
         ))
     }
 
+    /// Get FX rate from store only, no external fetching.
+    /// Returns the most recent close rate by date (with lookback).
+    pub async fn fx_from_store(
+        &self,
+        base: &str,
+        quote: &str,
+        date: NaiveDate,
+    ) -> Result<Option<FxRatePoint>> {
+        let base = base.trim().to_uppercase();
+        let quote = quote.trim().to_uppercase();
+        debug!(base = %base, quote = %quote, date = %date, "looking up FX rate from store only");
+
+        if base == quote {
+            return Ok(Some(FxRatePoint {
+                base,
+                quote,
+                as_of_date: date,
+                timestamp: self.clock.now(),
+                rate: "1".to_string(),
+                kind: FxRateKind::Close,
+                source: "identity".to_string(),
+            }));
+        }
+
+        for offset in 0..=self.lookback_days {
+            let target_date = date - Duration::days(offset as i64);
+            if let Some(rate) = self
+                .store
+                .get_fx_rate(&base, &quote, target_date, FxRateKind::Close)
+                .await?
+            {
+                return Ok(Some(rate));
+            }
+        }
+
+        Ok(None)
+    }
+
     pub async fn register_asset(&self, asset: &Asset) -> Result<()> {
         let entry = super::AssetRegistryEntry::new(asset.normalized());
         if self.store.get_asset_entry(&entry.id).await?.is_none() {

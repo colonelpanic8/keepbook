@@ -86,11 +86,24 @@ impl<S: Storage + Send + Sync> SyncOrchestrator<S> {
                     }
                 }
                 Asset::Equity { .. } | Asset::Crypto { .. } => {
-                    // Try to get/fetch price
+                    // Count cache hits as skipped.
+                    if let Some(price) = self.market_data.price_from_store(&asset, date).await? {
+                        result.skipped += 1;
+                        if price.quote_currency.to_uppercase()
+                            != self.reporting_currency.to_uppercase()
+                        {
+                            needed_fx_pairs.insert((
+                                price.quote_currency.to_uppercase(),
+                                self.reporting_currency.to_uppercase(),
+                            ));
+                        }
+                        continue;
+                    }
+
+                    // Otherwise, fetch and store.
                     match self.market_data.price_close(&asset, date).await {
                         Ok(price) => {
                             result.fetched += 1;
-                            // Check if we need FX conversion
                             if price.quote_currency.to_uppercase()
                                 != self.reporting_currency.to_uppercase()
                             {
@@ -100,9 +113,7 @@ impl<S: Storage + Send + Sync> SyncOrchestrator<S> {
                                 ));
                             }
                         }
-                        Err(e) => {
-                            result.failed.push((asset.clone(), e.to_string()));
-                        }
+                        Err(e) => result.failed.push((asset.clone(), e.to_string())),
                     }
                 }
             }
@@ -110,12 +121,20 @@ impl<S: Storage + Send + Sync> SyncOrchestrator<S> {
 
         // Fetch needed FX rates
         for (base, quote) in needed_fx_pairs {
+            if self
+                .market_data
+                .fx_from_store(&base, &quote, date)
+                .await?
+                .is_some()
+            {
+                result.skipped += 1;
+                continue;
+            }
+
             match self.market_data.fx_close(&base, &quote, date).await {
-                Ok(_) => {
-                    result.fetched += 1;
-                }
+                Ok(_) => result.fetched += 1,
                 Err(_) => {
-                    // FX rate failures are less critical, don't add to failed
+                    // FX rate failures are less critical, don't add to failed.
                 }
             }
         }

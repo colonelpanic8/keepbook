@@ -54,8 +54,9 @@ async fn sync_orchestrator_uses_injected_clock_for_snapshot_and_price_date() -> 
     assert_eq!(snapshots.len(), 1);
     assert_eq!(snapshots[0].timestamp, fixed_now);
 
-    // Price refresh should use the orchestrator clock's "today" date.
-    assert_eq!(report.refresh.fetched, 1);
+    // Price refresh should use the orchestrator clock's "today" date, and count cache hits as skipped.
+    assert_eq!(report.refresh.fetched, 0);
+    assert_eq!(report.refresh.skipped, 1);
     assert!(report.refresh.failed.is_empty());
 
     Ok(())
