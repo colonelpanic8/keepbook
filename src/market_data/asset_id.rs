@@ -14,13 +14,13 @@ impl AssetId {
         let asset = asset.normalized();
         let id = match &asset {
             Asset::Currency { iso_code } => {
-                format!("currency/{}", iso_code.trim().to_uppercase())
+                format!("currency/{}", normalize_upper_segment(iso_code))
             }
             Asset::Equity {
                 ticker,
                 exchange: None,
             } => {
-                format!("equity/{}", ticker.trim().to_uppercase())
+                format!("equity/{}", normalize_upper_segment(ticker))
             }
             Asset::Equity {
                 ticker,
@@ -28,15 +28,15 @@ impl AssetId {
             } => {
                 format!(
                     "equity/{}/{}",
-                    ticker.trim().to_uppercase(),
-                    ex.trim().to_uppercase()
+                    normalize_upper_segment(ticker),
+                    normalize_upper_segment(ex)
                 )
             }
             Asset::Crypto {
                 symbol,
                 network: None,
             } => {
-                format!("crypto/{}", symbol.trim().to_uppercase())
+                format!("crypto/{}", normalize_upper_segment(symbol))
             }
             Asset::Crypto {
                 symbol,
@@ -44,8 +44,8 @@ impl AssetId {
             } => {
                 format!(
                     "crypto/{}/{}",
-                    symbol.trim().to_uppercase(),
-                    net.trim().to_lowercase()
+                    normalize_upper_segment(symbol),
+                    normalize_lower_segment(net)
                 )
             }
         };
@@ -79,6 +79,27 @@ impl AsRef<str> for AssetId {
     fn as_ref(&self) -> &str {
         self.as_str()
     }
+}
+
+fn sanitize_segment(value: &str) -> String {
+    let sanitized: String = value
+        .trim()
+        .chars()
+        .map(|c| if c == '/' || c == '\\' || c == '\0' { '-' } else { c })
+        .collect();
+    if sanitized.is_empty() || sanitized == "." || sanitized == ".." {
+        "_".to_string()
+    } else {
+        sanitized
+    }
+}
+
+fn normalize_upper_segment(value: &str) -> String {
+    sanitize_segment(value).to_uppercase()
+}
+
+fn normalize_lower_segment(value: &str) -> String {
+    sanitize_segment(value).to_lowercase()
 }
 
 #[cfg(test)]
@@ -173,5 +194,26 @@ mod tests {
         };
         let crypto_id = AssetId::from_asset(&crypto);
         assert_eq!(crypto_id.as_str(), "crypto/BTC");
+    }
+
+    #[test]
+    fn asset_id_sanitizes_path_segments() {
+        let equity = Asset::equity("BRK/B");
+        let id = AssetId::from_asset(&equity);
+        assert_eq!(id.as_str(), "equity/BRK-B");
+
+        let equity_exchange = Asset::Equity {
+            ticker: "BRK/B".to_string(),
+            exchange: Some("X/NY".to_string()),
+        };
+        let id = AssetId::from_asset(&equity_exchange);
+        assert_eq!(id.as_str(), "equity/BRK-B/X-NY");
+
+        let crypto = Asset::Crypto {
+            symbol: "ETH/ARB".to_string(),
+            network: Some("Arb/One".to_string()),
+        };
+        let id = AssetId::from_asset(&crypto);
+        assert_eq!(id.as_str(), "crypto/ETH-ARB/arb-one");
     }
 }
