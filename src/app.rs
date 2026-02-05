@@ -434,6 +434,15 @@ pub async fn add_connection(
     config: &ResolvedConfig,
     name: &str,
 ) -> Result<serde_json::Value> {
+    let existing = storage
+        .list_connections()
+        .await?
+        .into_iter()
+        .find(|conn| conn.config.name.eq_ignore_ascii_case(name));
+    if existing.is_some() {
+        anyhow::bail!("Connection name already exists: {name}");
+    }
+
     let connection = Connection {
         config: ConnectionConfig {
             name: name.to_string(),
@@ -2009,6 +2018,7 @@ fn maybe_auto_commit(config: &ResolvedConfig, action: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::{GitConfig, RefreshConfig, ResolvedConfig};
     use crate::models::{Account, ConnectionConfig};
     use crate::storage::JsonFileStorage;
     use chrono::{DateTime, NaiveDate, Utc};
@@ -2214,6 +2224,29 @@ mod tests {
         assert!(err
             .to_string()
             .contains("Multiple connections named 'Duplicate'"));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn add_connection_rejects_duplicate_names() -> anyhow::Result<()> {
+        let dir = TempDir::new()?;
+        let storage = JsonFileStorage::new(dir.path());
+        let config = ResolvedConfig {
+            data_dir: dir.path().to_path_buf(),
+            reporting_currency: "USD".to_string(),
+            refresh: RefreshConfig::default(),
+            git: GitConfig::default(),
+        };
+
+        add_connection(&storage, &config, "Duplicate").await?;
+
+        let err = add_connection(&storage, &config, "duplicate")
+            .await
+            .expect_err("expected duplicate connection name error");
+        assert!(err
+            .to_string()
+            .contains("Connection name already exists"));
 
         Ok(())
     }
