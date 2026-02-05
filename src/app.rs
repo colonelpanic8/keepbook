@@ -545,6 +545,23 @@ pub async fn sync_connection(
     let conn_id = connection.id().to_string();
     let synchronizer_type = connection.config.synchronizer.clone();
 
+    if synchronizer_type == "manual" {
+        let output = serde_json::json!({
+            "success": true,
+            "skipped": true,
+            "reason": "manual",
+            "connection": {
+                "id": conn_id,
+                "name": conn_name
+            },
+            "accounts_synced": 0,
+            "prices_stored": 0,
+            "last_sync": None::<String>
+        });
+
+        return Ok(output);
+    }
+
     // Handle auth check for Schwab
     if synchronizer_type == "schwab" {
         let mut synchronizer = SchwabSynchronizer::from_connection(&connection, storage).await?;
@@ -1898,13 +1915,21 @@ pub async fn find_connection(
 
     // Try by name
     let connections = storage.list_connections().await?;
-    for conn in connections {
-        if conn.config.name.eq_ignore_ascii_case(id_or_name) {
-            return Ok(Some(conn));
-        }
+    let mut matches: Vec<Connection> = connections
+        .into_iter()
+        .filter(|conn| conn.config.name.eq_ignore_ascii_case(id_or_name))
+        .collect();
+
+    if matches.is_empty() {
+        return Ok(None);
     }
 
-    Ok(None)
+    if matches.len() > 1 {
+        let ids: Vec<String> = matches.iter().map(|c| c.id().to_string()).collect();
+        anyhow::bail!("Multiple connections named '{id_or_name}'. Use an ID instead: {ids:?}");
+    }
+
+    Ok(matches.pop())
 }
 
 fn maybe_auto_commit(config: &ResolvedConfig, action: &str) {
@@ -2104,6 +2129,29 @@ mod tests {
         assert!(err
             .to_string()
             .contains("Multiple accounts named 'Checking'"));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn find_connection_errors_on_duplicate_names() -> anyhow::Result<()> {
+        let dir = TempDir::new()?;
+        let storage = JsonFileStorage::new(dir.path());
+
+        let conn_one = Connection::new(connection_config("Duplicate"));
+        let conn_two = Connection::new(connection_config("Duplicate"));
+
+        write_connection_config(&storage, &conn_one).await?;
+        write_connection_config(&storage, &conn_two).await?;
+        storage.save_connection(&conn_one).await?;
+        storage.save_connection(&conn_two).await?;
+
+        let err = find_connection(&storage, "Duplicate")
+            .await
+            .expect_err("expected duplicate connection name error");
+        assert!(err
+            .to_string()
+            .contains("Multiple connections named 'Duplicate'"));
 
         Ok(())
     }
