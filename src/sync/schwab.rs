@@ -210,10 +210,28 @@ pub fn parse_exported_session(json: &str) -> Result<SessionData> {
     let exported: ExportedSession =
         serde_json::from_str(json).context("Failed to parse exported session JSON")?;
 
+    let token = exported
+        .token
+        .strip_prefix("Bearer ")
+        .unwrap_or(&exported.token)
+        .to_string();
+
     Ok(SessionData {
-        token: Some(exported.token),
+        token: Some(token),
         cookies: exported.cookies,
         captured_at: Some(chrono::Utc::now().timestamp()),
         data: HashMap::new(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_exported_session_strips_bearer_prefix() {
+        let json = r#"{"token":"Bearer test-token","cookies":{}}"#;
+        let session = parse_exported_session(json).expect("parse session");
+        assert_eq!(session.token.as_deref(), Some("test-token"));
+    }
 }
