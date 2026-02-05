@@ -1893,14 +1893,19 @@ pub async fn portfolio_history(
 }
 
 pub fn parse_asset(s: &str) -> Result<Asset> {
-    if let Some(symbol) = s.strip_prefix("equity:") {
-        Ok(Asset::equity(symbol))
-    } else if let Some(symbol) = s.strip_prefix("crypto:") {
-        Ok(Asset::crypto(symbol))
-    } else {
-        // Assume it's a currency code
-        Ok(Asset::currency(s))
+    let trimmed = s.trim();
+    if let Some((prefix, value)) = trimmed.split_once(':') {
+        let value = value.trim();
+        match prefix.to_lowercase().as_str() {
+            "equity" => return Ok(Asset::equity(value)),
+            "crypto" => return Ok(Asset::crypto(value)),
+            "currency" => return Ok(Asset::currency(value)),
+            _ => {}
+        }
     }
+
+    // Assume it's a currency code
+    Ok(Asset::currency(trimmed))
 }
 
 pub async fn find_connection(
@@ -2012,19 +2017,19 @@ mod tests {
 
     #[test]
     fn parse_asset_handles_prefixes() -> anyhow::Result<()> {
-        let equity = parse_asset("equity:AAPL")?;
+        let equity = parse_asset("Equity:AAPL")?;
         match equity {
             Asset::Equity { ticker, .. } => assert_eq!(ticker, "AAPL"),
             _ => anyhow::bail!("expected equity asset"),
         }
 
-        let crypto = parse_asset("crypto:BTC")?;
+        let crypto = parse_asset("CRYPTO:BTC")?;
         match crypto {
             Asset::Crypto { symbol, .. } => assert_eq!(symbol, "BTC"),
             _ => anyhow::bail!("expected crypto asset"),
         }
 
-        let currency = parse_asset("usd")?;
+        let currency = parse_asset(" currency:usd ")?;
         match currency {
             Asset::Currency { iso_code } => assert_eq!(iso_code, "usd"),
             _ => anyhow::bail!("expected currency asset"),
