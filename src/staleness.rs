@@ -70,7 +70,7 @@ pub fn check_balance_staleness_at(
     match &connection.state.last_sync {
         Some(last_sync) => {
             let age = (now - last_sync.at).to_std().unwrap_or(Duration::ZERO);
-            if age > threshold {
+            if age >= threshold {
                 StalenessCheck::stale(age, threshold)
             } else {
                 StalenessCheck::fresh(age, threshold)
@@ -89,7 +89,7 @@ pub fn check_price_staleness_at(
     match price {
         Some(p) => {
             let age = (now - p.timestamp).to_std().unwrap_or(Duration::ZERO);
-            if age > threshold {
+            if age >= threshold {
                 StalenessCheck::stale(age, threshold)
             } else {
                 StalenessCheck::fresh(age, threshold)
@@ -151,6 +151,7 @@ mod tests {
     use crate::market_data::{AssetId, PriceKind, PricePoint};
     use crate::models::Asset;
     use crate::models::{ConnectionConfig, ConnectionState, LastSync, SyncStatus};
+    use chrono::TimeZone;
 
     fn make_connection(last_sync_age_hours: Option<i64>) -> Connection {
         let mut state = ConnectionState::new();
@@ -209,6 +210,51 @@ mod tests {
             !check.is_stale,
             "future last_sync should be treated as fresh"
         );
+    }
+
+    #[test]
+    fn test_balance_stale_when_age_equals_threshold() {
+        let last_sync_at = Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap();
+        let now = last_sync_at + chrono::Duration::hours(1);
+        let threshold = Duration::from_secs(60 * 60);
+
+        let mut state = ConnectionState::new();
+        state.last_sync = Some(LastSync {
+            at: last_sync_at,
+            status: SyncStatus::Success,
+            error: None,
+        });
+        let connection = Connection {
+            config: ConnectionConfig {
+                name: "Test".to_string(),
+                synchronizer: "manual".to_string(),
+                credentials: None,
+                balance_staleness: None,
+            },
+            state,
+        };
+
+        let check = check_balance_staleness_at(&connection, threshold, now);
+        assert!(check.is_stale, "age == threshold should be stale");
+    }
+
+    #[test]
+    fn test_price_stale_when_age_equals_threshold() {
+        let threshold = Duration::from_secs(60 * 60);
+        let timestamp = Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap();
+        let now = timestamp + chrono::Duration::hours(1);
+        let price = PricePoint {
+            asset_id: AssetId::from_asset(&Asset::equity("AAPL")),
+            as_of_date: chrono::NaiveDate::from_ymd_opt(2026, 2, 1).unwrap(),
+            timestamp,
+            price: "1".to_string(),
+            quote_currency: "USD".to_string(),
+            kind: PriceKind::Close,
+            source: "test".to_string(),
+        };
+
+        let check = check_price_staleness_at(Some(&price), threshold, now);
+        assert!(check.is_stale, "age == threshold should be stale");
     }
 
     #[test]
