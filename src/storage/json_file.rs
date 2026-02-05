@@ -413,7 +413,8 @@ impl JsonFileStorage {
                 continue;
             };
 
-            if seen_names.contains(&sanitized) {
+            let key = sanitized.to_lowercase();
+            if seen_names.contains(&key) {
                 warn!(
                     "Skipped duplicate account name \"{}\" (id: {}, connection: {})",
                     sanitized,
@@ -448,7 +449,7 @@ impl JsonFileStorage {
                 }
             }
 
-            seen_names.insert(sanitized);
+            seen_names.insert(key);
             created += 1;
         }
 
@@ -500,7 +501,8 @@ impl JsonFileStorage {
                 continue;
             };
 
-            if let Some(existing_id) = seen_names.get(&sanitized) {
+            let key = sanitized.to_lowercase();
+            if let Some(existing_id) = seen_names.get(&key) {
                 warnings.push(format!(
                     "Skipped duplicate connection name \"{}\" (id: {}, conflicts with {})",
                     sanitized,
@@ -530,7 +532,7 @@ impl JsonFileStorage {
                 }
             }
 
-            seen_names.insert(sanitized, conn.id().clone());
+            seen_names.insert(key, conn.id().clone());
             created += 1;
         }
 
