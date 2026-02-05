@@ -1894,8 +1894,14 @@ pub async fn portfolio_history(
 
 pub fn parse_asset(s: &str) -> Result<Asset> {
     let trimmed = s.trim();
+    if trimmed.is_empty() {
+        anyhow::bail!("Asset string cannot be empty");
+    }
     if let Some((prefix, value)) = trimmed.split_once(':') {
         let value = value.trim();
+        if value.is_empty() {
+            anyhow::bail!("Asset value missing for prefix '{prefix}'");
+        }
         match prefix.to_lowercase().as_str() {
             "equity" => return Ok(Asset::equity(value)),
             "crypto" => return Ok(Asset::crypto(value)),
@@ -2036,6 +2042,15 @@ mod tests {
         }
 
         Ok(())
+    }
+
+    #[test]
+    fn parse_asset_rejects_empty_values() {
+        assert!(parse_asset("").is_err());
+        assert!(parse_asset("   ").is_err());
+        assert!(parse_asset("equity:").is_err());
+        assert!(parse_asset("crypto:   ").is_err());
+        assert!(parse_asset("currency:").is_err());
     }
 
     #[test]
