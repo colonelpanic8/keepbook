@@ -6,7 +6,7 @@ use std::process::Command;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use keepbook::market_data::{AssetId, FxRateKind, FxRatePoint, MarketDataSource, PriceKind, PricePoint};
 use keepbook::models::{
     Account, Asset, AssetBalance, Connection, ConnectionConfig, Id, Transaction,
@@ -54,6 +54,7 @@ pub struct MockSynchronizer {
     pub account_external_id: String,
     pub asset: Asset,
     pub balance_amount: String,
+    pub transaction_timestamp: DateTime<Utc>,
     pub transaction_amount: String,
     pub transaction_description: String,
 }
@@ -66,6 +67,7 @@ impl Default for MockSynchronizer {
             account_external_id: "checking".to_string(),
             asset: Asset::currency("USD"),
             balance_amount: "123.45".to_string(),
+            transaction_timestamp: Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap(),
             transaction_amount: "-10.00".to_string(),
             transaction_description: "Test purchase".to_string(),
         }
@@ -105,6 +107,11 @@ impl MockSynchronizer {
     pub fn with_transaction(mut self, amount: impl Into<String>, description: impl Into<String>) -> Self {
         self.transaction_amount = amount.into();
         self.transaction_description = description.into();
+        self
+    }
+
+    pub fn with_transaction_timestamp(mut self, ts: DateTime<Utc>) -> Self {
+        self.transaction_timestamp = ts;
         self
     }
 }
@@ -153,6 +160,7 @@ impl Synchronizer for MockSynchronizer {
             self.asset.clone(),
             self.transaction_description.clone(),
         )
+        .with_timestamp(self.transaction_timestamp)
         .with_id(tx_id);
 
         Ok(SyncResult {

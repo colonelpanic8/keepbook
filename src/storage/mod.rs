@@ -1,11 +1,9 @@
 mod json_file;
 pub mod lookup;
-#[cfg(test)]
 mod memory;
 
 pub use json_file::JsonFileStorage;
 pub use lookup::{find_account, find_connection};
-#[cfg(test)]
 pub use memory::MemoryStorage;
 
 use crate::credentials::CredentialStore;

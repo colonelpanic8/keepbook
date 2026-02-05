@@ -5,8 +5,6 @@ mod service;
 pub mod schwab;
 pub mod synchronizers;
 
-use std::collections::HashSet;
-
 pub use factory::{create_synchronizer, DefaultSynchronizerFactory, SynchronizerFactory};
 pub use orchestrator::{PriceRefreshResult, SyncOrchestrator, SyncWithPricesResult};
 pub use prices::store_sync_prices;
@@ -79,18 +77,49 @@ impl SyncResult {
 
         for (account_id, txns) in &self.transactions {
             if !txns.is_empty() {
-                // Dedupe by transaction id, since repeated sync runs should be idempotent.
-                // This is intentionally simple and storage-agnostic. If this becomes slow for
-                // large histories, we can push an indexed/streaming implementation into Storage.
+                // Be (mostly) idempotent while still allowing "updates" to existing transactions
+                // (e.g. pending -> posted). We treat transaction id as the stable identity and
+                // only append a new version if something actually changed.
+                //
+                // This is intentionally storage-agnostic. If this becomes slow for large histories,
+                // we can push an indexed/streaming implementation into Storage.
                 let existing = storage.get_transactions(account_id).await?;
-                let mut seen: HashSet<Id> = existing.into_iter().map(|t| t.id).collect();
-                let new_txns: Vec<Transaction> = txns
-                    .iter()
-                    .filter(|t| seen.insert(t.id.clone()))
-                    .cloned()
+                let existing_by_id: std::collections::HashMap<Id, Transaction> = existing
+                    .into_iter()
+                    .map(|t| (t.id.clone(), t))
                     .collect();
-                if !new_txns.is_empty() {
-                    storage.append_transactions(account_id, &new_txns).await?;
+
+                // Collapse duplicates within this batch: last write wins, preserve first-seen order.
+                let mut candidate_txns: Vec<Transaction> = Vec::new();
+                let mut idx_by_id: std::collections::HashMap<Id, usize> =
+                    std::collections::HashMap::new();
+                for txn in txns {
+                    if let Some(idx) = idx_by_id.get(&txn.id).copied() {
+                        candidate_txns[idx] = txn.clone();
+                    } else {
+                        idx_by_id.insert(txn.id.clone(), candidate_txns.len());
+                        candidate_txns.push(txn.clone());
+                    }
+                }
+
+                let mut to_append: Vec<Transaction> = Vec::new();
+                for txn in candidate_txns {
+                    if let Some(existing) = existing_by_id.get(&txn.id) {
+                        let unchanged = existing.timestamp == txn.timestamp
+                            && existing.amount == txn.amount
+                            && existing.asset == txn.asset
+                            && existing.description == txn.description
+                            && existing.status == txn.status
+                            && existing.synchronizer_data == txn.synchronizer_data;
+                        if unchanged {
+                            continue;
+                        }
+                    }
+                    to_append.push(txn);
+                }
+
+                if !to_append.is_empty() {
+                    storage.append_transactions(account_id, &to_append).await?;
                 }
             }
         }

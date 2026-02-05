@@ -717,7 +717,22 @@ impl Storage for JsonFileStorage {
 
     async fn get_transactions(&self, account_id: &Id) -> Result<Vec<Transaction>> {
         let path = self.transactions_file(account_id)?;
-        self.read_jsonl(&path).await
+        let txns: Vec<Transaction> = self.read_jsonl(&path).await?;
+
+        // Be resilient to duplicate transaction ids in append-only JSONL by returning
+        // the last version (last write wins).
+        let mut by_id: std::collections::HashMap<Id, usize> = std::collections::HashMap::new();
+        let mut deduped: Vec<Transaction> = Vec::new();
+        for txn in txns {
+            if let Some(idx) = by_id.get(&txn.id).copied() {
+                deduped[idx] = txn;
+            } else {
+                by_id.insert(txn.id.clone(), deduped.len());
+                deduped.push(txn);
+            }
+        }
+
+        Ok(deduped)
     }
 
     async fn append_transactions(&self, account_id: &Id, txns: &[Transaction]) -> Result<()> {
