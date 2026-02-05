@@ -11,7 +11,8 @@ pub struct AssetId(String);
 
 impl AssetId {
     pub fn from_asset(asset: &Asset) -> Self {
-        let id = match asset {
+        let asset = asset.normalized();
+        let id = match &asset {
             Asset::Currency { iso_code } => {
                 format!("currency/{}", iso_code.trim().to_uppercase())
             }
@@ -155,5 +156,22 @@ mod tests {
         };
         let id = AssetId::from_asset(&asset);
         assert_eq!(id.as_str(), "crypto/ETH/arbitrum");
+    }
+
+    #[test]
+    fn asset_id_ignores_empty_exchange_and_network() {
+        let equity = Asset::Equity {
+            ticker: "AAPL".to_string(),
+            exchange: Some("".to_string()),
+        };
+        let equity_id = AssetId::from_asset(&equity);
+        assert_eq!(equity_id.as_str(), "equity/AAPL");
+
+        let crypto = Asset::Crypto {
+            symbol: "BTC".to_string(),
+            network: Some("   ".to_string()),
+        };
+        let crypto_id = AssetId::from_asset(&crypto);
+        assert_eq!(crypto_id.as_str(), "crypto/BTC");
     }
 }
