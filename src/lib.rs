@@ -1,6 +1,7 @@
 pub mod config;
 pub mod credentials;
 pub mod duration;
+pub mod app;
 pub mod git;
 pub mod market_data;
 pub mod models;
