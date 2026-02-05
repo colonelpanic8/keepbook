@@ -1,12 +1,13 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use crate::clock::{Clock, SystemClock};
 use crate::config::RefreshConfig;
 use crate::git::{try_auto_commit, AutoCommitOutcome};
 use crate::market_data::MarketDataService;
 use crate::models::Connection;
 use crate::storage::{find_connection, Storage};
-use crate::staleness::{check_balance_staleness, resolve_balance_staleness};
+use crate::staleness::{check_balance_staleness_at, resolve_balance_staleness};
 
 use super::{AuthStatus, InteractiveAuth, SyncOrchestrator, SyncWithPricesResult};
 use super::{DefaultSynchronizerFactory, SynchronizerFactory};
@@ -92,6 +93,7 @@ pub struct SyncContext<S: Storage> {
     pub auth_prompter: Arc<dyn AuthPrompter>,
     pub auto_committer: Arc<dyn AutoCommitter>,
     pub synchronizer_factory: Arc<dyn SynchronizerFactory>,
+    pub clock: Arc<dyn Clock>,
 }
 
 impl<S: Storage> SyncContext<S> {
@@ -103,6 +105,7 @@ impl<S: Storage> SyncContext<S> {
             auth_prompter: Arc::new(FixedAuthPrompter::deny()),
             auto_committer: Arc::new(NoopAutoCommitter),
             synchronizer_factory: Arc::new(DefaultSynchronizerFactory::new(None)),
+            clock: Arc::new(SystemClock),
         }
     }
 
@@ -118,6 +121,11 @@ impl<S: Storage> SyncContext<S> {
 
     pub fn with_factory(mut self, factory: Arc<dyn SynchronizerFactory>) -> Self {
         self.synchronizer_factory = factory;
+        self
+    }
+
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
         self
     }
 }
@@ -137,6 +145,7 @@ pub struct SyncService<S: Storage> {
     auth_prompter: Arc<dyn AuthPrompter>,
     auto_committer: Arc<dyn AutoCommitter>,
     factory: Arc<dyn SynchronizerFactory>,
+    clock: Arc<dyn Clock>,
 }
 
 impl<S: Storage> SyncService<S> {
@@ -154,6 +163,7 @@ impl<S: Storage> SyncService<S> {
             auth_prompter: context.auth_prompter,
             auto_committer: context.auto_committer,
             factory: context.synchronizer_factory,
+            clock: context.clock,
         }
     }
 
@@ -173,7 +183,7 @@ impl<S: Storage> SyncService<S> {
             .await?
             .context(format!("Connection not found: {id_or_name}"))?;
         let threshold = resolve_balance_staleness(None, &connection, refresh);
-        let check = check_balance_staleness(&connection, threshold);
+        let check = check_balance_staleness_at(&connection, threshold, self.clock.now());
 
         if !check.is_stale {
             return Ok(SyncOutcome::SkippedNotStale { connection });
@@ -211,7 +221,7 @@ impl<S: Storage> SyncService<S> {
 
         for connection in connections {
             let threshold = resolve_balance_staleness(None, &connection, refresh);
-            let check = check_balance_staleness(&connection, threshold);
+            let check = check_balance_staleness_at(&connection, threshold, self.clock.now());
 
             if !check.is_stale {
                 results.push(SyncOutcome::SkippedNotStale { connection });

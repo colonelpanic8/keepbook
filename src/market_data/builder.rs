@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use crate::clock::{Clock, SystemClock};
 use crate::market_data::{
     CryptoPriceRouter, EquityPriceRouter, FxRateRouter, JsonlMarketDataStore, MarketDataService,
     MarketDataStore, PriceSourceRegistry,
@@ -18,6 +19,7 @@ pub struct MarketDataServiceBuilder {
     quote_staleness: Option<std::time::Duration>,
     lookback_days: Option<u32>,
     offline_only: bool,
+    clock: Arc<dyn Clock>,
 }
 
 impl MarketDataServiceBuilder {
@@ -38,6 +40,7 @@ impl MarketDataServiceBuilder {
             quote_staleness: None,
             lookback_days: None,
             offline_only: false,
+            clock: Arc::new(SystemClock),
         }
     }
 
@@ -65,8 +68,13 @@ impl MarketDataServiceBuilder {
         self
     }
 
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
+    }
+
     pub async fn build(self) -> MarketDataService {
-        let mut service = MarketDataService::new(self.store, None);
+        let mut service = MarketDataService::new(self.store, None).with_clock(self.clock);
 
         if let Some(staleness) = self.quote_staleness {
             service = service.with_quote_staleness(staleness);
@@ -139,4 +147,3 @@ impl MarketDataServiceBuilder {
         service
     }
 }
-

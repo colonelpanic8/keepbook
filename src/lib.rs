@@ -1,5 +1,6 @@
 pub mod config;
 pub mod credentials;
+pub mod clock;
 pub mod duration;
 pub mod app;
 pub mod git;

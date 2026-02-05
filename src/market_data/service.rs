@@ -1,8 +1,10 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use chrono::{Duration, NaiveDate, Utc};
+use chrono::{Duration, NaiveDate};
 use tracing::{debug, info};
+
+use crate::clock::{Clock, SystemClock};
 
 use super::{
     AssetId, CryptoPriceRouter, EquityPriceRouter, FxRateKind, FxRatePoint, FxRateRouter,
@@ -19,6 +21,7 @@ pub struct MarketDataService {
     lookback_days: u32,
     /// How old a quote can be before we fetch a new one. None means always fetch.
     quote_staleness: Option<std::time::Duration>,
+    clock: Arc<dyn Clock>,
 }
 
 impl MarketDataService {
@@ -34,6 +37,7 @@ impl MarketDataService {
             fx_router: None,
             lookback_days: 7,
             quote_staleness: None,
+            clock: Arc::new(SystemClock),
         }
     }
 
@@ -59,6 +63,11 @@ impl MarketDataService {
 
     pub fn with_quote_staleness(mut self, staleness: std::time::Duration) -> Self {
         self.quote_staleness = Some(staleness);
+        self
+    }
+
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
         self
     }
 
@@ -151,7 +160,7 @@ impl MarketDataService {
                 .get_price(&asset_id, date, PriceKind::Quote)
                 .await?
             {
-                let age = (chrono::Utc::now() - cached.timestamp)
+                let age = (self.clock.now() - cached.timestamp)
                     .to_std()
                     .unwrap_or(std::time::Duration::ZERO);
                 if age < staleness {
@@ -200,7 +209,7 @@ impl MarketDataService {
                 base,
                 quote,
                 as_of_date: date,
-                timestamp: Utc::now(),
+                timestamp: self.clock.now(),
                 rate: "1".to_string(),
                 kind: FxRateKind::Close,
                 source: "identity".to_string(),

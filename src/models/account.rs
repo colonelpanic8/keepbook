@@ -1,7 +1,10 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::clock::{Clock, SystemClock};
+
 use super::Id;
+use super::{IdGenerator, UuidIdGenerator};
 use crate::duration::deserialize_duration_opt;
 
 /// Policy for handling balances before the first snapshot.
@@ -33,15 +36,47 @@ pub struct Account {
 
 impl Account {
     pub fn new(name: impl Into<String>, connection_id: Id) -> Self {
+        Self::new_with_generator(&UuidIdGenerator, &SystemClock, name, connection_id)
+    }
+
+    pub fn new_with(id: Id, created_at: DateTime<Utc>, name: impl Into<String>, connection_id: Id) -> Self {
         Self {
-            id: Id::new(),
+            id,
             name: name.into(),
             connection_id,
             tags: Vec::new(),
-            created_at: Utc::now(),
+            created_at,
             active: true,
             synchronizer_data: serde_json::Value::Null,
         }
+    }
+
+    pub fn new_with_generator(
+        ids: &dyn IdGenerator,
+        clock: &dyn Clock,
+        name: impl Into<String>,
+        connection_id: Id,
+    ) -> Self {
+        Self::new_with(ids.new_id(), clock.now(), name, connection_id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::clock::FixedClock;
+    use crate::models::{FixedIdGenerator, Id};
+    use chrono::TimeZone;
+
+    #[test]
+    fn account_new_with_generator_is_deterministic() {
+        let fixed_id = Id::from_string("acct-1");
+        let ids = FixedIdGenerator::new([fixed_id.clone()]);
+        let clock = FixedClock::new(Utc.with_ymd_and_hms(2026, 2, 5, 12, 0, 0).unwrap());
+
+        let account = Account::new_with_generator(&ids, &clock, "Checking", Id::from_string("c"));
+        assert_eq!(account.id, fixed_id);
+        assert_eq!(account.created_at, clock.now());
     }
 }
 

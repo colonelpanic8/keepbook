@@ -1,10 +1,12 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::clock::{Clock, SystemClock};
+
 use crate::credentials::CredentialConfig;
 use crate::duration::deserialize_duration_opt;
 
-use super::Id;
+use super::{Id, IdGenerator, UuidIdGenerator};
 
 /// Human-declared connection configuration.
 /// Stored in `connection.toml`.
@@ -50,20 +52,47 @@ pub struct ConnectionState {
 impl ConnectionState {
     /// Create a new connection state with default values.
     pub fn new() -> Self {
+        Self::new_with_generator(&UuidIdGenerator, &SystemClock)
+    }
+
+    pub fn new_with(id: Id, created_at: DateTime<Utc>) -> Self {
         Self {
-            id: Id::new(),
+            id,
             status: ConnectionStatus::Active,
-            created_at: Utc::now(),
+            created_at,
             last_sync: None,
             account_ids: Vec::new(),
             synchronizer_data: serde_json::Value::Null,
         }
+    }
+
+    pub fn new_with_generator(ids: &dyn IdGenerator, clock: &dyn Clock) -> Self {
+        Self::new_with(ids.new_id(), clock.now())
     }
 }
 
 impl Default for ConnectionState {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::clock::FixedClock;
+    use crate::models::{FixedIdGenerator, Id};
+    use chrono::TimeZone;
+
+    #[test]
+    fn connection_state_new_with_generator_is_deterministic() {
+        let fixed_id = Id::from_string("conn-1");
+        let ids = FixedIdGenerator::new([fixed_id.clone()]);
+        let clock = FixedClock::new(Utc.with_ymd_and_hms(2026, 2, 5, 12, 0, 0).unwrap());
+
+        let state = ConnectionState::new_with_generator(&ids, &clock);
+        assert_eq!(state.id, fixed_id);
+        assert_eq!(state.created_at, clock.now());
     }
 }
 

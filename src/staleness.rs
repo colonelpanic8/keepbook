@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use tracing::info;
 
 use crate::config::RefreshConfig;
@@ -62,8 +62,11 @@ pub fn resolve_balance_staleness(
 }
 
 /// Check if a connection's balances are stale.
-pub fn check_balance_staleness(connection: &Connection, threshold: Duration) -> StalenessCheck {
-    let now = Utc::now();
+pub fn check_balance_staleness_at(
+    connection: &Connection,
+    threshold: Duration,
+    now: DateTime<Utc>,
+) -> StalenessCheck {
     match &connection.state.last_sync {
         Some(last_sync) => {
             let age = (now - last_sync.at).to_std().unwrap_or(Duration::ZERO);
@@ -78,8 +81,11 @@ pub fn check_balance_staleness(connection: &Connection, threshold: Duration) -> 
 }
 
 /// Check if a price is stale.
-pub fn check_price_staleness(price: Option<&PricePoint>, threshold: Duration) -> StalenessCheck {
-    let now = Utc::now();
+pub fn check_price_staleness_at(
+    price: Option<&PricePoint>,
+    threshold: Duration,
+    now: DateTime<Utc>,
+) -> StalenessCheck {
     match price {
         Some(p) => {
             let age = (now - p.timestamp).to_std().unwrap_or(Duration::ZERO);
@@ -91,6 +97,16 @@ pub fn check_price_staleness(price: Option<&PricePoint>, threshold: Duration) ->
         }
         None => StalenessCheck::missing(threshold),
     }
+}
+
+/// Convenience wrapper that checks staleness relative to `Utc::now()`.
+pub fn check_balance_staleness(connection: &Connection, threshold: Duration) -> StalenessCheck {
+    check_balance_staleness_at(connection, threshold, Utc::now())
+}
+
+/// Convenience wrapper that checks staleness relative to `Utc::now()`.
+pub fn check_price_staleness(price: Option<&PricePoint>, threshold: Duration) -> StalenessCheck {
+    check_price_staleness_at(price, threshold, Utc::now())
 }
 
 /// Log staleness check results for a connection's balances.

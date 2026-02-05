@@ -9,6 +9,7 @@ use chrono::{Datelike, Duration, NaiveDate, Utc};
 use serde::Serialize;
 use tracing::warn;
 
+use crate::clock::{Clock, SystemClock};
 use crate::config::ResolvedConfig;
 use crate::git::{try_auto_commit, AutoCommitOutcome};
 use crate::market_data::{
@@ -17,7 +18,7 @@ use crate::market_data::{
 };
 use crate::models::{
     Account, Asset, AssetBalance, BalanceSnapshot, Connection, ConnectionConfig, ConnectionState,
-    Id,
+    Id, IdGenerator, UuidIdGenerator,
 };
 use crate::portfolio::{
     collect_change_points, filter_by_date_range, filter_by_granularity, CoalesceStrategy,
@@ -438,6 +439,16 @@ pub async fn add_connection(
     config: &ResolvedConfig,
     name: &str,
 ) -> Result<serde_json::Value> {
+    add_connection_with(storage, config, name, &UuidIdGenerator, &SystemClock).await
+}
+
+pub async fn add_connection_with(
+    storage: &JsonFileStorage,
+    config: &ResolvedConfig,
+    name: &str,
+    ids: &dyn IdGenerator,
+    clock: &dyn Clock,
+) -> Result<serde_json::Value> {
     let existing = storage
         .list_connections()
         .await?
@@ -454,7 +465,7 @@ pub async fn add_connection(
             credentials: None,
             balance_staleness: None,
         },
-        state: ConnectionState::new(),
+        state: ConnectionState::new_with_generator(ids, clock),
     };
 
     let id = connection.state.id.to_string();
@@ -489,6 +500,27 @@ pub async fn add_account(
     name: &str,
     tags: Vec<String>,
 ) -> Result<serde_json::Value> {
+    add_account_with(
+        storage,
+        config,
+        connection_id,
+        name,
+        tags,
+        &UuidIdGenerator,
+        &SystemClock,
+    )
+    .await
+}
+
+pub async fn add_account_with(
+    storage: &JsonFileStorage,
+    config: &ResolvedConfig,
+    connection_id: &str,
+    name: &str,
+    tags: Vec<String>,
+    ids: &dyn IdGenerator,
+    clock: &dyn Clock,
+) -> Result<serde_json::Value> {
     let conn_id = Id::from_string_checked(connection_id)
         .with_context(|| format!("Invalid connection id: {connection_id}"))?;
 
@@ -499,15 +531,8 @@ pub async fn add_account(
         .context("Connection not found")?;
 
     // Create account
-    let account = Account {
-        id: Id::new(),
-        name: name.to_string(),
-        connection_id: conn_id.clone(),
-        tags,
-        created_at: Utc::now(),
-        active: true,
-        synchronizer_data: serde_json::Value::Null,
-    };
+    let mut account = Account::new_with_generator(ids, clock, name, conn_id.clone());
+    account.tags = tags;
 
     let account_id = account.id.to_string();
 
@@ -1792,9 +1817,12 @@ fn maybe_auto_commit(config: &ResolvedConfig, action: &str) {
 mod tests {
     use super::*;
     use crate::config::{GitConfig, RefreshConfig, ResolvedConfig};
+    use crate::clock::FixedClock;
+    use crate::models::FixedIdGenerator;
     use crate::models::{Account, ConnectionConfig};
     use crate::storage::JsonFileStorage;
     use chrono::{DateTime, NaiveDate, Utc};
+    use chrono::TimeZone;
     use std::collections::HashMap;
     use std::path::PathBuf;
     use tempfile::TempDir;
@@ -1977,6 +2005,51 @@ mod tests {
         assert!(err
             .to_string()
             .contains("Connection name already exists"));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn add_connection_and_account_use_injected_ids_and_clock() -> anyhow::Result<()> {
+        let dir = TempDir::new()?;
+        let storage = JsonFileStorage::new(dir.path());
+        let config = ResolvedConfig {
+            data_dir: dir.path().to_path_buf(),
+            reporting_currency: "USD".to_string(),
+            refresh: RefreshConfig::default(),
+            git: GitConfig::default(),
+        };
+
+        let ids = FixedIdGenerator::new([Id::from_string("conn-id"), Id::from_string("acct-id")]);
+        let clock = FixedClock::new(Utc.with_ymd_and_hms(2026, 2, 5, 12, 0, 0).unwrap());
+
+        let out = add_connection_with(&storage, &config, "Test", &ids, &clock).await?;
+        assert_eq!(out["connection"]["id"].as_str(), Some("conn-id"));
+
+        let loaded = storage
+            .get_connection(&Id::from_string("conn-id"))
+            .await?
+            .expect("connection should exist");
+        assert_eq!(loaded.state.created_at, clock.now());
+
+        let out = add_account_with(
+            &storage,
+            &config,
+            "conn-id",
+            "Checking",
+            vec!["tag".to_string()],
+            &ids,
+            &clock,
+        )
+        .await?;
+        assert_eq!(out["account"]["id"].as_str(), Some("acct-id"));
+
+        let acct = storage
+            .get_account(&Id::from_string("acct-id"))
+            .await?
+            .expect("account should exist");
+        assert_eq!(acct.created_at, clock.now());
+        assert_eq!(acct.tags, vec!["tag".to_string()]);
 
         Ok(())
     }

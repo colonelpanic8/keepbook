@@ -7,6 +7,7 @@ use anyhow::Result;
 use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 
+use crate::clock::{Clock, SystemClock};
 use crate::market_data::{AssetId, MarketDataService};
 use crate::models::{Account, Asset, BalanceBackfillPolicy, BalanceSnapshot, Connection, Id};
 use crate::storage::Storage;
@@ -18,6 +19,7 @@ use super::{
 pub struct PortfolioService {
     storage: Arc<dyn Storage>,
     market_data: Arc<MarketDataService>,
+    clock: Arc<dyn Clock>,
 }
 
 /// Valuation result for an asset.
@@ -60,7 +62,13 @@ impl PortfolioService {
         Self {
             storage,
             market_data,
+            clock: Arc::new(SystemClock),
         }
+    }
+
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
     }
 
     pub async fn calculate(&self, query: &PortfolioQuery) -> Result<PortfolioSnapshot> {
@@ -433,7 +441,7 @@ impl PortfolioService {
             }
             Asset::Equity { .. } | Asset::Crypto { .. } => {
                 // Get price - try live quote first, fall back to close
-                let price_result = if as_of_date == Utc::now().date_naive() {
+                let price_result = if as_of_date == self.clock.today() {
                     self.market_data.price_latest(asset, as_of_date).await
                 } else {
                     self.market_data.price_close(asset, as_of_date).await
