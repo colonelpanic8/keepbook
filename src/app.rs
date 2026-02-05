@@ -256,10 +256,29 @@ pub fn list_price_sources(data_dir: &Path) -> Result<Vec<PriceSourceOutput>> {
 
 pub async fn list_balances(storage: &JsonFileStorage) -> Result<Vec<BalanceOutput>> {
     let connections = storage.list_connections().await?;
+    let accounts = storage.list_accounts().await?;
+    let mut accounts_by_connection: HashMap<Id, Vec<Id>> = HashMap::new();
+    for account in accounts {
+        accounts_by_connection
+            .entry(account.connection_id.clone())
+            .or_default()
+            .push(account.id);
+    }
     let mut output = Vec::new();
 
     for conn in connections {
-        for account_id in &conn.state.account_ids {
+        let mut account_ids: Vec<Id> = conn.state.account_ids.clone();
+        let mut seen_ids: HashSet<Id> = account_ids.iter().cloned().collect();
+        if let Some(extra) = accounts_by_connection.get(conn.id()) {
+            for account_id in extra {
+                if !seen_ids.contains(account_id) {
+                    seen_ids.insert(account_id.clone());
+                    account_ids.push(account_id.clone());
+                }
+            }
+        }
+
+        for account_id in &account_ids {
             if let Some(snapshot) = storage.get_latest_balance_snapshot(account_id).await? {
                 for balance in snapshot.balances {
                     output.push(BalanceOutput {
