@@ -1271,13 +1271,19 @@ async fn resolve_price_history_scope(
             }
         }
 
-        if accounts.is_empty() {
-            accounts = storage
-                .list_accounts()
-                .await?
-                .into_iter()
-                .filter(|a| a.connection_id == *connection.id())
-                .collect();
+        let mut seen_ids: HashSet<Id> =
+            accounts.iter().map(|account| account.id.clone()).collect();
+
+        let extra_accounts: Vec<Account> = storage
+            .list_accounts()
+            .await?
+            .into_iter()
+            .filter(|a| a.connection_id == *connection.id() && !seen_ids.contains(&a.id))
+            .collect();
+
+        for account in extra_accounts {
+            seen_ids.insert(account.id.clone());
+            accounts.push(account);
         }
 
         if accounts.is_empty() {
@@ -2177,6 +2183,30 @@ mod tests {
             }
             _ => anyhow::bail!("expected connection scope"),
         }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn resolve_scope_connection_includes_accounts_missing_from_state() -> anyhow::Result<()> {
+        let dir = TempDir::new()?;
+        let storage = JsonFileStorage::new(dir.path());
+        let mut conn = Connection::new(connection_config("Test Connection"));
+
+        let account_a = Account::new("Checking", conn.id().clone());
+        conn.state.account_ids = vec![account_a.id.clone()];
+
+        write_connection_config(&storage, &conn).await?;
+        storage.save_connection(&conn).await?;
+
+        let account_b = Account::new("Savings", conn.id().clone());
+        storage.save_account(&account_a).await?;
+        storage.save_account(&account_b).await?;
+
+        let conn_id = conn.id().to_string();
+        let (_, accounts) =
+            resolve_price_history_scope(&storage, None, Some(conn_id.as_str())).await?;
+        assert_eq!(accounts.len(), 2);
 
         Ok(())
     }
