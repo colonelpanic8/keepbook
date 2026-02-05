@@ -1711,7 +1711,10 @@ pub async fn portfolio_snapshot(
 
         Arc::new(service)
     } else {
-        Arc::new(MarketDataService::new(store, None))
+        Arc::new(
+            MarketDataService::new(store, None)
+                .with_quote_staleness(config.refresh.price_staleness),
+        )
     };
 
     // Calculate and output
@@ -1801,7 +1804,9 @@ pub async fn portfolio_history(
     }
 
     // Setup market data service (offline mode - use cached data only)
-    let market_data = Arc::new(MarketDataService::new(store, None));
+    let market_data = Arc::new(
+        MarketDataService::new(store, None).with_quote_staleness(config.refresh.price_staleness),
+    );
 
     // Create portfolio service
     let service = PortfolioService::new(storage_arc, market_data);
