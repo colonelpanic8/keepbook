@@ -142,7 +142,7 @@ impl JsonFileStorage {
         let sanitized: String = name
             .trim()
             .chars()
-            .map(|c| if c == '/' || c == '\0' { '-' } else { c })
+            .map(|c| if c == '/' || c == '\\' || c == '\0' { '-' } else { c })
             .collect();
         if sanitized.is_empty() {
             None
@@ -659,5 +659,23 @@ impl Storage for JsonFileStorage {
         }
 
         Ok(results)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::JsonFileStorage;
+
+    #[test]
+    fn sanitize_name_replaces_path_separators() {
+        assert_eq!(
+            JsonFileStorage::sanitize_name("foo/bar"),
+            Some("foo-bar".to_string())
+        );
+        assert_eq!(
+            JsonFileStorage::sanitize_name("foo\\bar"),
+            Some("foo-bar".to_string())
+        );
+        assert_eq!(JsonFileStorage::sanitize_name("   "), None);
     }
 }
