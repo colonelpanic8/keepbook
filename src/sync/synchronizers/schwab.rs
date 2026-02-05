@@ -105,7 +105,7 @@ impl SchwabSynchronizer {
 
             // Preserve created_at from existing account if it exists
             let created_at = existing_by_id
-                .get(&schwab_account.account_id)
+                .get(&account_id.to_string())
                 .map(|a| a.created_at)
                 .unwrap_or_else(Utc::now);
 
