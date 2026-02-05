@@ -44,6 +44,22 @@ impl Asset {
             exchange: None,
         }
     }
+
+    pub fn normalized(&self) -> Self {
+        match self {
+            Asset::Currency { iso_code } => Asset::Currency {
+                iso_code: normalize_upper(iso_code),
+            },
+            Asset::Equity { ticker, exchange } => Asset::Equity {
+                ticker: normalize_upper(ticker),
+                exchange: normalize_opt_upper(exchange),
+            },
+            Asset::Crypto { symbol, network } => Asset::Crypto {
+                symbol: normalize_upper(symbol),
+                network: normalize_opt_lower(network),
+            },
+        }
+    }
 }
 
 fn normalize_upper(value: &str) -> String {
@@ -202,5 +218,40 @@ mod tests {
             symbol: "eth".to_string(),
             network: Some("arbitrum".to_string()),
         }));
+    }
+
+    #[test]
+    fn test_asset_normalized_canonicalizes_fields() {
+        let currency = Asset::Currency {
+            iso_code: " usd ".to_string(),
+        };
+        match currency.normalized() {
+            Asset::Currency { iso_code } => assert_eq!(iso_code, "USD"),
+            _ => panic!("expected currency asset"),
+        }
+
+        let equity = Asset::Equity {
+            ticker: " aapl ".to_string(),
+            exchange: Some(" nasdaq ".to_string()),
+        };
+        match equity.normalized() {
+            Asset::Equity { ticker, exchange } => {
+                assert_eq!(ticker, "AAPL");
+                assert_eq!(exchange, Some("NASDAQ".to_string()));
+            }
+            _ => panic!("expected equity asset"),
+        }
+
+        let crypto = Asset::Crypto {
+            symbol: " eth ".to_string(),
+            network: Some(" Arbitrum ".to_string()),
+        };
+        match crypto.normalized() {
+            Asset::Crypto { symbol, network } => {
+                assert_eq!(symbol, "ETH");
+                assert_eq!(network, Some("arbitrum".to_string()));
+            }
+            _ => panic!("expected crypto asset"),
+        }
     }
 }

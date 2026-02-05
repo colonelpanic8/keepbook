@@ -7,7 +7,7 @@ use anyhow::Result;
 use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 
-use crate::market_data::MarketDataService;
+use crate::market_data::{AssetId, MarketDataService};
 use crate::models::{Account, Asset, BalanceBackfillPolicy, BalanceSnapshot, Connection, Id};
 use crate::storage::Storage;
 
@@ -95,9 +95,9 @@ impl PortfolioService {
         // Sort for consistent output
         account_summaries.sort_by(|a, b| a.account_name.cmp(&b.account_name));
         asset_summaries.sort_by(|a, b| {
-            serde_json::to_string(&a.asset)
-                .unwrap_or_default()
-                .cmp(&serde_json::to_string(&b.asset).unwrap_or_default())
+            let a_id = AssetId::from_asset(&a.asset);
+            let b_id = AssetId::from_asset(&b.asset);
+            a_id.as_str().cmp(b_id.as_str())
         });
 
         // Build snapshot based on grouping
@@ -189,16 +189,18 @@ impl PortfolioService {
     /// Aggregate balances by asset, tracking totals and holdings.
     fn aggregate_by_asset(
         snapshots: &[(Id, BalanceSnapshot)],
-    ) -> Result<HashMap<String, AssetAggregate>> {
-        let mut by_asset: HashMap<String, AssetAggregate> = HashMap::new();
+    ) -> Result<HashMap<Asset, AssetAggregate>> {
+        let mut by_asset: HashMap<Asset, AssetAggregate> = HashMap::new();
 
         for (account_id, snapshot) in snapshots {
             for asset_balance in &snapshot.balances {
-                let asset_key = serde_json::to_string(&asset_balance.asset)?;
+                let asset_key = asset_balance.asset.normalized();
                 let amount = Decimal::from_str(&asset_balance.amount)?;
                 let balance_date = snapshot.timestamp.date_naive();
 
-                let entry = by_asset.entry(asset_key).or_insert_with(|| AssetAggregate {
+                let entry = by_asset
+                    .entry(asset_key.clone())
+                    .or_insert_with(|| AssetAggregate {
                     total_amount: Decimal::ZERO,
                     latest_balance_date: balance_date,
                     holdings: Vec::new(),
@@ -210,7 +212,7 @@ impl PortfolioService {
                 }
                 entry.holdings.push(AssetHolding {
                     account_id: account_id.clone(),
-                    asset: asset_balance.asset.clone(),
+                    asset: asset_key.clone(),
                     amount: asset_balance.amount.clone(),
                     timestamp: snapshot.timestamp,
                 });
@@ -223,18 +225,17 @@ impl PortfolioService {
     /// Fetch valuations for all unique assets, caching to avoid duplicate API calls.
     async fn fetch_asset_valuations(
         &self,
-        by_asset: &HashMap<String, AssetAggregate>,
+        by_asset: &HashMap<Asset, AssetAggregate>,
         target_currency: &str,
         as_of_date: NaiveDate,
-    ) -> Result<HashMap<String, AssetValuation>> {
+    ) -> Result<HashMap<Asset, AssetValuation>> {
         let mut cache = HashMap::new();
 
-        for asset_key in by_asset.keys() {
-            let asset: Asset = serde_json::from_str(asset_key)?;
+        for asset in by_asset.keys() {
             let valuation = self
-                .value_asset(&asset, Decimal::ONE, target_currency, as_of_date)
+                .value_asset(asset, Decimal::ONE, target_currency, as_of_date)
                 .await?;
-            cache.insert(asset_key.clone(), valuation);
+            cache.insert(asset.clone(), valuation);
         }
 
         Ok(cache)
@@ -243,17 +244,16 @@ impl PortfolioService {
     /// Build asset summaries from aggregated data and cached valuations.
     fn build_asset_summaries(
         &self,
-        by_asset: &HashMap<String, AssetAggregate>,
-        price_cache: &HashMap<String, AssetValuation>,
+        by_asset: &HashMap<Asset, AssetAggregate>,
+        price_cache: &HashMap<Asset, AssetValuation>,
         account_map: &HashMap<Id, Account>,
         include_detail: bool,
     ) -> Result<(Vec<AssetSummary>, Decimal)> {
         let mut summaries = Vec::new();
         let mut total_value = Decimal::ZERO;
 
-        for (asset_key, agg) in by_asset {
-            let asset: Asset = serde_json::from_str(asset_key)?;
-            let valuation = price_cache.get(asset_key).unwrap();
+        for (asset, agg) in by_asset {
+            let valuation = price_cache.get(asset).unwrap();
 
             let asset_value = valuation
                 .value
@@ -269,7 +269,7 @@ impl PortfolioService {
             };
 
             summaries.push(AssetSummary {
-                asset,
+                asset: asset.clone(),
                 total_amount: agg.total_amount.normalize().to_string(),
                 amount_date: agg.latest_balance_date,
                 price: valuation.price.clone(),
@@ -313,7 +313,7 @@ impl PortfolioService {
     fn build_account_summaries(
         snapshots: &[(Id, BalanceSnapshot)],
         zero_accounts: &[Id],
-        price_cache: &HashMap<String, AssetValuation>,
+        price_cache: &HashMap<Asset, AssetValuation>,
         account_map: &HashMap<Id, Account>,
         connection_map: &HashMap<Id, Connection>,
     ) -> Result<Vec<AccountSummary>> {
@@ -322,7 +322,7 @@ impl PortfolioService {
 
         for (account_id, snapshot) in snapshots {
             for asset_balance in &snapshot.balances {
-                let asset_key = serde_json::to_string(&asset_balance.asset)?;
+                let asset_key = asset_balance.asset.normalized();
                 let amount = Decimal::from_str(&asset_balance.amount)?;
                 let valuation = price_cache.get(&asset_key).unwrap();
 
@@ -706,6 +706,60 @@ mod tests {
         assert!(savings_holding.is_some());
         assert_eq!(checking_holding.unwrap().amount, "1000");
         assert_eq!(savings_holding.unwrap().amount, "2000");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn calculate_merges_case_insensitive_assets() -> Result<()> {
+        let storage = Arc::new(MemoryStorage::new());
+        let connection = Connection::new(ConnectionConfig {
+            name: "Bank".to_string(),
+            synchronizer: "manual".to_string(),
+            credentials: None,
+            balance_staleness: None,
+        });
+        storage.save_connection(&connection).await?;
+
+        let account1 = Account::new("Checking", connection.id().clone());
+        let account2 = Account::new("Savings", connection.id().clone());
+        storage.save_account(&account1).await?;
+        storage.save_account(&account2).await?;
+
+        let snapshot1 = BalanceSnapshot::new(
+            Utc.with_ymd_and_hms(2026, 2, 1, 12, 0, 0).unwrap(),
+            vec![AssetBalance::new(Asset::currency("USD"), "1000")],
+        );
+        let snapshot2 = BalanceSnapshot::new(
+            Utc.with_ymd_and_hms(2026, 2, 1, 14, 0, 0).unwrap(),
+            vec![AssetBalance::new(Asset::currency(" usd "), "2000")],
+        );
+        storage
+            .append_balance_snapshot(&account1.id, &snapshot1)
+            .await?;
+        storage
+            .append_balance_snapshot(&account2.id, &snapshot2)
+            .await?;
+
+        let store = Arc::new(MemoryMarketDataStore::new());
+        let market_data = Arc::new(MarketDataService::new(store, None));
+        let service = PortfolioService::new(storage, market_data);
+
+        let query = PortfolioQuery {
+            as_of_date: chrono::NaiveDate::from_ymd_opt(2026, 2, 2).unwrap(),
+            currency: "USD".to_string(),
+            grouping: Grouping::Asset,
+            include_detail: false,
+        };
+        let result = service.calculate(&query).await?;
+
+        let by_asset = result.by_asset.unwrap();
+        assert_eq!(by_asset.len(), 1);
+        assert_eq!(by_asset[0].total_amount, "3000");
+        match &by_asset[0].asset {
+            Asset::Currency { iso_code } => assert_eq!(iso_code, "USD"),
+            _ => panic!("expected currency asset"),
+        }
 
         Ok(())
     }
