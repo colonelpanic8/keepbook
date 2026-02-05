@@ -433,7 +433,11 @@ impl PortfolioService {
             }
             Asset::Equity { .. } | Asset::Crypto { .. } => {
                 // Get price - try live quote first, fall back to close
-                let price_result = self.market_data.price_latest(asset, as_of_date).await;
+                let price_result = if as_of_date == Utc::now().date_naive() {
+                    self.market_data.price_latest(asset, as_of_date).await
+                } else {
+                    self.market_data.price_close(asset, as_of_date).await
+                };
                 let price_point = match price_result {
                     Ok(p) => p,
                     Err(_) => {
@@ -504,12 +508,15 @@ mod tests {
     use super::super::Grouping;
     use super::*;
     use crate::market_data::{MarketDataStore, MemoryMarketDataStore};
+    use crate::market_data::{AssetId, EquityPriceRouter, EquityPriceSource, PriceKind, PricePoint};
     use crate::models::{
         Account, AccountConfig, Asset, AssetBalance, BalanceBackfillPolicy, BalanceSnapshot,
         Connection, ConnectionConfig,
     };
     use crate::storage::MemoryStorage;
     use chrono::{TimeZone, Utc};
+    use rust_decimal::Decimal;
+    use std::sync::Arc;
 
     #[tokio::test]
     async fn calculate_single_currency_holding() -> Result<()> {
@@ -843,6 +850,81 @@ mod tests {
 
         let result = service.calculate(&query).await?;
         assert_eq!(result.total_value, "1000");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn historical_snapshot_uses_close_not_live_quote() -> Result<()> {
+        #[derive(Clone)]
+        struct QuoteOnlySource {
+            quote: PricePoint,
+        }
+
+        #[async_trait::async_trait]
+        impl EquityPriceSource for QuoteOnlySource {
+            async fn fetch_close(
+                &self,
+                _asset: &Asset,
+                _asset_id: &AssetId,
+                _date: chrono::NaiveDate,
+            ) -> Result<Option<PricePoint>> {
+                Ok(None)
+            }
+
+            async fn fetch_quote(
+                &self,
+                _asset: &Asset,
+                _asset_id: &AssetId,
+            ) -> Result<Option<PricePoint>> {
+                Ok(Some(self.quote.clone()))
+            }
+
+            fn name(&self) -> &str {
+                "quote-only"
+            }
+        }
+
+        let asset = Asset::equity("AAPL");
+        let asset_id = AssetId::from_asset(&asset);
+        let as_of_date = chrono::NaiveDate::from_ymd_opt(2024, 1, 2).unwrap();
+
+        let store = Arc::new(MemoryMarketDataStore::new());
+        let close_price = PricePoint {
+            asset_id: asset_id.clone(),
+            as_of_date,
+            timestamp: Utc::now(),
+            price: "100".to_string(),
+            quote_currency: "USD".to_string(),
+            kind: PriceKind::Close,
+            source: "close".to_string(),
+        };
+        store.put_prices(&[close_price]).await?;
+
+        let quote_price = PricePoint {
+            asset_id,
+            as_of_date: Utc::now().date_naive(),
+            timestamp: Utc::now(),
+            price: "200".to_string(),
+            quote_currency: "USD".to_string(),
+            kind: PriceKind::Quote,
+            source: "quote".to_string(),
+        };
+
+        let router = EquityPriceRouter::new(vec![Arc::new(QuoteOnlySource {
+            quote: quote_price,
+        })]);
+        let market_data = Arc::new(
+            MarketDataService::new(store, None).with_equity_router(Arc::new(router)),
+        );
+
+        let service = PortfolioService::new(Arc::new(MemoryStorage::new()), market_data);
+        let valuation = service
+            .value_asset(&asset, Decimal::ONE, "USD", as_of_date)
+            .await?;
+
+        assert_eq!(valuation.price.as_deref(), Some("100"));
+        assert_eq!(valuation.price_date, Some(as_of_date));
+
         Ok(())
     }
 }
