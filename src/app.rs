@@ -455,14 +455,14 @@ pub async fn add_connection(
 
     let id = connection.state.id.to_string();
 
-    // Save the connection (this creates the directory structure)
-    storage.save_connection(&connection).await?;
-
-    // Also write the config TOML since save_connection only writes state
+    // Write the config TOML since save_connection only writes state
     let config_path = storage.connection_config_path(&connection.state.id);
     let config_toml = toml::to_string_pretty(&connection.config)?;
     tokio::fs::create_dir_all(config_path.parent().unwrap()).await?;
     tokio::fs::write(&config_path, config_toml).await?;
+
+    // Save the connection (this creates the directory structure and symlinks)
+    storage.save_connection(&connection).await?;
 
     let result = serde_json::json!({
         "success": true,
@@ -2023,6 +2023,7 @@ mod tests {
     use crate::storage::JsonFileStorage;
     use chrono::{DateTime, NaiveDate, Utc};
     use std::collections::HashMap;
+    use std::path::PathBuf;
     use tempfile::TempDir;
 
     fn connection_config(name: &str) -> ConnectionConfig {
@@ -2247,6 +2248,37 @@ mod tests {
         assert!(err
             .to_string()
             .contains("Connection name already exists"));
+
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn add_connection_creates_by_name_symlink() -> anyhow::Result<()> {
+        let dir = TempDir::new()?;
+        let storage = JsonFileStorage::new(dir.path());
+        let config = ResolvedConfig {
+            data_dir: dir.path().to_path_buf(),
+            reporting_currency: "USD".to_string(),
+            refresh: RefreshConfig::default(),
+            git: GitConfig::default(),
+        };
+
+        let result = add_connection(&storage, &config, "Test Bank").await?;
+        let id = result["connection"]["id"]
+            .as_str()
+            .expect("connection id missing");
+
+        let link_path = dir
+            .path()
+            .join("connections")
+            .join("by-name")
+            .join("Test Bank");
+        let metadata = std::fs::symlink_metadata(&link_path)?;
+        assert!(metadata.file_type().is_symlink());
+
+        let target = std::fs::read_link(&link_path)?;
+        assert_eq!(target, PathBuf::from("..").join(id));
 
         Ok(())
     }
