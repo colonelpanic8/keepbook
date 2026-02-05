@@ -397,6 +397,13 @@ impl Synchronizer for CoinbaseSynchronizer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::ConnectionConfig;
+    use crate::storage::MemoryStorage;
+    use p256::elliptic_curve::rand_core::OsRng;
+    use p256::pkcs8::LineEnding;
+    use serde_json::json;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[tokio::test]
     async fn request_invalid_http_method_returns_error_not_panic() {
@@ -413,6 +420,82 @@ mod tests {
             .unwrap_err();
 
         assert!(err.to_string().contains("Invalid HTTP method"));
+    }
+
+    #[tokio::test]
+    async fn sync_works_against_wiremock() -> Result<()> {
+        // This is a "real" integration-style unit test: it exercises the actual HTTP code paths,
+        // but with a local Wiremock server instead of hitting the network.
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/v3/brokerage/portfolios"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "portfolios": [{"uuid": "p1", "name": "Default"}]
+            })))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/v3/brokerage/portfolios/p1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "breakdown": {
+                    "spot_positions": [{
+                        "asset": "BTC",
+                        "account_uuid": "11111111-1111-1111-1111-111111111111",
+                        "total_balance_crypto": 0.5,
+                        "is_cash": false
+                    }]
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path(
+                "/api/v3/brokerage/accounts/11111111-1111-1111-1111-111111111111/ledger",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "ledger": []
+            })))
+            .mount(&server)
+            .await;
+
+        // Generate a throwaway P-256 key and encode it in the SEC1 PEM format the sync code expects.
+        let secret_key = SecretKey::random(&mut OsRng);
+        let pem = secret_key
+            .to_sec1_pem(LineEnding::LF)
+            .context("Failed to encode test EC private key")?;
+
+        let synchronizer = CoinbaseSynchronizer::new(
+            "test-key".to_string(),
+            SecretString::new(pem.to_string().into()),
+        )
+        .with_base_url(server.uri());
+
+        let storage = MemoryStorage::new();
+        let mut connection = Connection::new(ConnectionConfig {
+            name: "Coinbase".to_string(),
+            synchronizer: "coinbase".to_string(),
+            credentials: None,
+            balance_staleness: None,
+        });
+
+        let result = synchronizer.sync(&mut connection, &storage).await?;
+
+        assert_eq!(result.accounts.len(), 1);
+        assert_eq!(result.accounts[0].name, "BTC Wallet");
+        assert_eq!(result.balances.len(), 1);
+        assert_eq!(result.balances[0].1.len(), 1);
+        assert!(matches!(
+            result.balances[0].1[0].asset_balance.asset,
+            Asset::Crypto { .. }
+        ));
+        assert_eq!(result.balances[0].1[0].asset_balance.amount, "0.5");
+        assert_eq!(result.transactions.len(), 1);
+        assert!(result.transactions[0].1.is_empty());
+
+        Ok(())
     }
 }
 
