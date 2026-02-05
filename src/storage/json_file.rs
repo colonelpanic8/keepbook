@@ -304,6 +304,15 @@ impl JsonFileStorage {
         for account_id in &conn.state.account_ids {
             match self.get_account(account_id).await? {
                 Some(account) => {
+                    if account.connection_id != *conn.id() {
+                        warn!(
+                            connection_id = %conn.id(),
+                            account_id = %account_id,
+                            account_connection_id = %account.connection_id,
+                            "account referenced by connection belongs to different connection"
+                        );
+                        continue;
+                    }
                     seen_ids.insert(account.id.clone());
                     accounts.push(account);
                 }

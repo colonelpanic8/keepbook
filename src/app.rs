@@ -210,11 +210,19 @@ pub async fn list_connections(storage: &JsonFileStorage) -> Result<Vec<Connectio
     let mut output = Vec::new();
 
     for c in connections {
-        let mut account_ids: HashSet<Id> = c.state.account_ids.iter().cloned().collect();
-        if let Some(extra) = accounts_by_connection.get(c.id()) {
-            for account_id in extra {
-                account_ids.insert(account_id.clone());
-            }
+        let valid_ids = accounts_by_connection
+            .get(c.id())
+            .cloned()
+            .unwrap_or_default();
+        let mut account_ids: HashSet<Id> = c
+            .state
+            .account_ids
+            .iter()
+            .filter(|id| valid_ids.contains(*id))
+            .cloned()
+            .collect();
+        for account_id in valid_ids {
+            account_ids.insert(account_id);
         }
 
         output.push(ConnectionOutput {
@@ -272,24 +280,31 @@ pub fn list_price_sources(data_dir: &Path) -> Result<Vec<PriceSourceOutput>> {
 pub async fn list_balances(storage: &JsonFileStorage) -> Result<Vec<BalanceOutput>> {
     let connections = storage.list_connections().await?;
     let accounts = storage.list_accounts().await?;
-    let mut accounts_by_connection: HashMap<Id, Vec<Id>> = HashMap::new();
+    let mut accounts_by_connection: HashMap<Id, HashSet<Id>> = HashMap::new();
     for account in accounts {
         accounts_by_connection
             .entry(account.connection_id.clone())
             .or_default()
-            .push(account.id);
+            .insert(account.id);
     }
     let mut output = Vec::new();
 
     for conn in connections {
-        let mut account_ids: Vec<Id> = conn.state.account_ids.clone();
+        let valid_ids = accounts_by_connection
+            .get(conn.id())
+            .cloned()
+            .unwrap_or_default();
+        let mut account_ids: Vec<Id> = conn
+            .state
+            .account_ids
+            .iter()
+            .filter(|id| valid_ids.contains(*id))
+            .cloned()
+            .collect();
         let mut seen_ids: HashSet<Id> = account_ids.iter().cloned().collect();
-        if let Some(extra) = accounts_by_connection.get(conn.id()) {
-            for account_id in extra {
-                if !seen_ids.contains(account_id) {
-                    seen_ids.insert(account_id.clone());
-                    account_ids.push(account_id.clone());
-                }
+        for account_id in valid_ids {
+            if seen_ids.insert(account_id.clone()) {
+                account_ids.push(account_id);
             }
         }
 
@@ -365,14 +380,25 @@ pub async fn remove_connection(
     };
 
     let name = conn.config.name.clone();
-    let mut account_ids: Vec<Id> = conn.state.account_ids.clone();
+    let accounts = storage.list_accounts().await?;
+    let valid_ids: HashSet<Id> = accounts
+        .iter()
+        .filter(|account| account.connection_id == *conn.id())
+        .map(|account| account.id.clone())
+        .collect();
+
+    let mut account_ids: Vec<Id> = conn
+        .state
+        .account_ids
+        .iter()
+        .filter(|id| valid_ids.contains(*id))
+        .cloned()
+        .collect();
     let mut seen_ids: HashSet<Id> = account_ids.iter().cloned().collect();
 
     // Also include any accounts still linked to this connection ID (handles stale state).
-    let accounts = storage.list_accounts().await?;
     for account in accounts {
-        if account.connection_id == *conn.id() && !seen_ids.contains(&account.id) {
-            seen_ids.insert(account.id.clone());
+        if account.connection_id == *conn.id() && seen_ids.insert(account.id.clone()) {
             account_ids.push(account.id);
         }
     }
@@ -1291,7 +1317,18 @@ async fn resolve_price_history_scope(
         if !connection.state.account_ids.is_empty() {
             for account_id in &connection.state.account_ids {
                 match storage.get_account(account_id).await? {
-                    Some(account) => accounts.push(account),
+                    Some(account) => {
+                        if account.connection_id != *connection.id() {
+                            warn!(
+                                connection_id = %connection.id(),
+                                account_id = %account_id,
+                                account_connection_id = %account.connection_id,
+                                "account referenced by connection belongs to different connection"
+                            );
+                        } else {
+                            accounts.push(account);
+                        }
+                    }
                     None => {
                         warn!(
                             connection_id = %connection.id(),

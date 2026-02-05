@@ -56,3 +56,42 @@ async fn remove_connection_deletes_accounts_by_connection_id() -> Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn remove_connection_does_not_delete_foreign_accounts() -> Result<()> {
+    let dir = TempDir::new()?;
+    let storage = JsonFileStorage::new(dir.path());
+    let config = resolved_config(dir.path());
+
+    let mut connection_a = Connection::new(ConnectionConfig {
+        name: "Bank A".to_string(),
+        synchronizer: "manual".to_string(),
+        credentials: None,
+        balance_staleness: None,
+    });
+    let connection_b = Connection::new(ConnectionConfig {
+        name: "Bank B".to_string(),
+        synchronizer: "manual".to_string(),
+        credentials: None,
+        balance_staleness: None,
+    });
+
+    write_connection_config(&storage, &connection_a).await?;
+    write_connection_config(&storage, &connection_b).await?;
+    storage.save_connection(&connection_a).await?;
+    storage.save_connection(&connection_b).await?;
+
+    let account_b = Account::new("Savings", connection_b.id().clone());
+    storage.save_account(&account_b).await?;
+
+    // Corrupt connection A state with a foreign account id.
+    connection_a.state.account_ids = vec![account_b.id.clone()];
+    storage.save_connection(&connection_a).await?;
+
+    remove_connection(&storage, &config, connection_a.id().as_str()).await?;
+
+    let still_exists = storage.get_account(&account_b.id).await?.is_some();
+    assert!(still_exists, "foreign account should not be deleted");
+
+    Ok(())
+}
