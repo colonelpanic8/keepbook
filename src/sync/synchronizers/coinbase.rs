@@ -242,10 +242,10 @@ impl CoinbaseSynchronizer {
 
         // Load existing accounts to check for history
         let existing_accounts = storage.list_accounts().await?;
-        let existing_ids: HashSet<String> = existing_accounts
+        let existing_ids: HashSet<Id> = existing_accounts
             .iter()
             .filter(|a| a.connection_id == *connection.id())
-            .map(|a| a.id.to_string())
+            .map(|a| a.id.clone())
             .collect();
 
         let mut accounts = Vec::new();
@@ -254,7 +254,11 @@ impl CoinbaseSynchronizer {
 
         for cb_account in coinbase_accounts {
             // Use Coinbase's UUID directly as our account ID
-            let account_id = Id::from_string(&cb_account.uuid);
+            let account_id = match Id::from_string_checked(&cb_account.uuid) {
+                Ok(id) => id,
+                // Fall back to a deterministic, filesystem-safe id for weird external values.
+                Err(_) => Id::from_external(&format!("coinbase:{}", cb_account.uuid)),
+            };
             let asset = Asset::crypto(&cb_account.currency);
             let balance_amount: f64 = cb_account.available_balance.value.parse().unwrap_or(0.0);
 
@@ -266,7 +270,7 @@ impl CoinbaseSynchronizer {
             );
 
             // Check if account already exists
-            let existing = existing_ids.contains(&cb_account.uuid);
+            let existing = existing_ids.contains(&account_id);
 
             // Get transactions for this account
             let cb_transactions = self
@@ -288,7 +292,7 @@ impl CoinbaseSynchronizer {
             // Get existing account's created_at or use now
             let created_at = existing_accounts
                 .iter()
-                .find(|a| a.id.to_string() == cb_account.uuid)
+                .find(|a| a.id == account_id)
                 .map(|a| a.created_at)
                 .unwrap_or_else(Utc::now);
 
