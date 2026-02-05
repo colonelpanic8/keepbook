@@ -306,6 +306,23 @@ impl MarketDataService {
 
     /// Store a price point directly (e.g., from a synchronizer).
     pub async fn store_price(&self, price: &PricePoint) -> Result<()> {
+        // Be idempotent: don't append duplicates (JsonlMarketDataStore is append-only).
+        if let Some(existing) = self
+            .store
+            .get_price(&price.asset_id, price.as_of_date, price.kind)
+            .await?
+        {
+            if existing.timestamp >= price.timestamp {
+                debug!(
+                    asset_id = %price.asset_id,
+                    date = %price.as_of_date,
+                    kind = ?price.kind,
+                    "skipping store_price: existing price is newer-or-equal"
+                );
+                return Ok(());
+            }
+        }
+
         self.store.put_prices(std::slice::from_ref(price)).await
     }
 
