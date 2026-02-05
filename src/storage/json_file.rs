@@ -578,8 +578,16 @@ impl Storage for JsonFileStorage {
         let mut connections = Vec::new();
 
         for id in ids {
-            if let Some(conn) = self.load_connection(&id).await? {
-                connections.push(conn);
+            match self.load_connection(&id).await {
+                Ok(Some(conn)) => connections.push(conn),
+                Ok(None) => {}
+                Err(err) => {
+                    warn!(
+                        connection_id = %id,
+                        error = %err,
+                        "skipping connection with invalid config/state"
+                    );
+                }
             }
         }
 
@@ -630,8 +638,16 @@ impl Storage for JsonFileStorage {
         let mut accounts = Vec::new();
 
         for id in ids {
-            if let Some(account) = self.get_account(&id).await? {
-                accounts.push(account);
+            match self.get_account(&id).await {
+                Ok(Some(account)) => accounts.push(account),
+                Ok(None) => {}
+                Err(err) => {
+                    warn!(
+                        account_id = %id,
+                        error = %err,
+                        "skipping account with invalid json"
+                    );
+                }
             }
         }
 
