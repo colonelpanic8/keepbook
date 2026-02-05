@@ -122,13 +122,18 @@ impl CoinbaseSynchronizer {
     }
 
     async fn request<T: for<'de> Deserialize<'de>>(&self, method: &str, path: &str) -> Result<T> {
-        let jwt = self.generate_jwt(method, path)?;
+        // Parse/validate the HTTP method up-front so invalid input doesn't panic and we don't
+        // do unnecessary JWT work.
+        let method: reqwest::Method = method
+            .parse()
+            .context("Invalid HTTP method")?;
+        let jwt = self.generate_jwt(method.as_str(), path)?;
         let base = self.api_base.trim_end_matches('/');
         let url = format!("{base}{path}");
 
         let response = self
             .client
-            .request(method.parse().unwrap(), &url)
+            .request(method, &url)
             .header("Authorization", format!("Bearer {jwt}"))
             .header("Content-Type", "application/json")
             .send()
@@ -386,6 +391,28 @@ impl Synchronizer for CoinbaseSynchronizer {
 
     async fn sync(&self, connection: &mut Connection, storage: &dyn Storage) -> Result<SyncResult> {
         self.sync_internal(connection, storage).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn request_invalid_http_method_returns_error_not_panic() {
+        // The request path validates HTTP method before trying to parse the private key.
+        let synchronizer = CoinbaseSynchronizer::new(
+            "test-key".to_string(),
+            SecretString::new("not a real pem".to_string().into()),
+        );
+
+        let err = synchronizer
+            // Spaces are not allowed in HTTP method tokens, so parsing must fail.
+            .request::<serde_json::Value>("NOT A METHOD", "/api/v3/brokerage/portfolios")
+            .await
+            .unwrap_err();
+
+        assert!(err.to_string().contains("Invalid HTTP method"));
     }
 }
 
