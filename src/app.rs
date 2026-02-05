@@ -12,9 +12,8 @@ use tracing::warn;
 use crate::config::ResolvedConfig;
 use crate::git::{try_auto_commit, AutoCommitOutcome};
 use crate::market_data::{
-    AssetId, CryptoPriceRouter, EquityPriceRouter, FxRateKind, FxRatePoint, FxRateRouter,
-    JsonlMarketDataStore, MarketDataService, MarketDataStore, PriceKind, PricePoint,
-    PriceSourceRegistry,
+    AssetId, FxRateKind, FxRatePoint, JsonlMarketDataStore, MarketDataService,
+    MarketDataServiceBuilder, MarketDataStore, PriceKind, PricePoint, PriceSourceRegistry,
 };
 use crate::models::{
     Account, Asset, AssetBalance, BalanceSnapshot, Connection, ConnectionConfig, ConnectionState,
@@ -598,7 +597,10 @@ async fn build_sync_service(
     storage: &JsonFileStorage,
     config: &ResolvedConfig,
 ) -> SyncService<JsonFileStorage> {
-    let market_data = build_market_data_service(config).await;
+    let market_data = MarketDataServiceBuilder::for_data_dir(&config.data_dir)
+        .with_quote_staleness(config.refresh.price_staleness)
+        .build()
+        .await;
     let context = SyncContext::new(
         Arc::new(storage.clone()),
         market_data,
@@ -763,113 +765,6 @@ pub async fn chase_login(
     }))
 }
 
-pub async fn store_sync_prices(
-    result: &crate::sync::SyncResult,
-    config: &ResolvedConfig,
-) -> Result<usize> {
-    let market_data_store = JsonlMarketDataStore::new(&config.data_dir);
-    let mut count = 0;
-
-    for (_, synced_balances) in &result.balances {
-        for sb in synced_balances {
-            if let Some(price) = &sb.price {
-                market_data_store
-                    .put_prices(std::slice::from_ref(price))
-                    .await?;
-                count += 1;
-            }
-        }
-    }
-
-    Ok(count)
-}
-
-pub async fn fetch_crypto_prices(
-    result: &crate::sync::SyncResult,
-    config: &ResolvedConfig,
-) -> Result<usize> {
-    // Load crypto price sources from registry
-    let mut registry = PriceSourceRegistry::new(&config.data_dir);
-    registry.load()?;
-    let crypto_sources = registry.build_crypto_sources().await?;
-
-    if crypto_sources.is_empty() {
-        tracing::debug!("No crypto price sources configured, skipping price fetch");
-        return Ok(0);
-    }
-
-    let crypto_router = Arc::new(CryptoPriceRouter::new(crypto_sources));
-    let store = Arc::new(JsonlMarketDataStore::new(&config.data_dir));
-    let market_data = MarketDataService::new(store, None).with_crypto_router(crypto_router);
-
-    // Collect unique crypto assets from sync result
-    let assets: HashSet<Asset> = result
-        .balances
-        .iter()
-        .flat_map(|(_, sbs)| sbs.iter().map(|sb| sb.asset_balance.asset.clone()))
-        .filter(|a| matches!(a, Asset::Crypto { .. }))
-        .collect();
-
-    let date = Utc::now().date_naive();
-    let mut count = 0;
-
-    for asset in assets {
-        match market_data.price_close(&asset, date).await {
-            Ok(_) => count += 1,
-            Err(e) => tracing::warn!(asset = ?asset, error = %e, "Failed to fetch price"),
-        }
-    }
-
-    Ok(count)
-}
-
-async fn build_market_data_service(config: &ResolvedConfig) -> MarketDataService {
-    let store: Arc<dyn MarketDataStore> = Arc::new(JsonlMarketDataStore::new(&config.data_dir));
-    let mut service =
-        MarketDataService::new(store, None).with_quote_staleness(config.refresh.price_staleness);
-
-    let mut registry = PriceSourceRegistry::new(&config.data_dir);
-    if let Err(e) = registry.load() {
-        warn!(error = %e, "failed to load price sources; skipping price fetch");
-        return service;
-    }
-
-    match registry.build_equity_sources().await {
-        Ok(sources) => {
-            if !sources.is_empty() {
-                service = service.with_equity_router(Arc::new(EquityPriceRouter::new(sources)));
-            }
-        }
-        Err(e) => {
-            warn!(error = %e, "failed to build equity price sources; skipping equity fetch");
-        }
-    }
-
-    match registry.build_crypto_sources().await {
-        Ok(sources) => {
-            if !sources.is_empty() {
-                service = service.with_crypto_router(Arc::new(CryptoPriceRouter::new(sources)));
-            }
-        }
-        Err(e) => {
-            warn!(error = %e, "failed to build crypto price sources; skipping crypto fetch");
-        }
-    }
-
-    match registry.build_fx_sources().await {
-        Ok(sources) => {
-            if !sources.is_empty() {
-                service = service.with_fx_router(Arc::new(FxRateRouter::new(sources)));
-            }
-        }
-        Err(e) => {
-            warn!(error = %e, "failed to build fx sources; skipping fx fetch");
-        }
-    }
-
-    service
-}
-
 pub struct PriceHistoryRequest<'a> {
     pub storage: &'a JsonFileStorage,
     pub config: &'a ResolvedConfig,
@@ -922,8 +817,6 @@ struct AssetPriceCache {
 }
 
 pub async fn fetch_historical_prices(request: PriceHistoryRequest<'_>) -> Result<PriceHistoryOutput> {
-    use crate::market_data::{CryptoPriceRouter, EquityPriceRouter, FxRateRouter};
-
     let PriceHistoryRequest {
         storage,
         config,
@@ -986,27 +879,10 @@ pub async fn fetch_historical_prices(request: PriceHistoryRequest<'_>) -> Result
     let target_currency_upper = target_currency.to_uppercase();
 
     let store: Arc<dyn MarketDataStore> = Arc::new(JsonlMarketDataStore::new(&config.data_dir));
-
-    // Load configured price sources
-    let mut registry = PriceSourceRegistry::new(&config.data_dir);
-    registry.load()?;
-    let equity_sources = registry.build_equity_sources().await?;
-    let crypto_sources = registry.build_crypto_sources().await?;
-    let fx_sources = registry.build_fx_sources().await?;
-
-    let mut market_data =
-        MarketDataService::new(store.clone(), None).with_lookback_days(lookback_days);
-    if !equity_sources.is_empty() {
-        market_data =
-            market_data.with_equity_router(Arc::new(EquityPriceRouter::new(equity_sources)));
-    }
-    if !crypto_sources.is_empty() {
-        market_data =
-            market_data.with_crypto_router(Arc::new(CryptoPriceRouter::new(crypto_sources)));
-    }
-    if !fx_sources.is_empty() {
-        market_data = market_data.with_fx_router(Arc::new(FxRateRouter::new(fx_sources)));
-    }
+    let market_data = MarketDataServiceBuilder::new(store.clone(), config.data_dir.clone())
+        .with_lookback_days(lookback_days)
+        .build()
+        .await;
 
     let mut asset_caches = Vec::new();
     for asset in assets {
@@ -1667,40 +1543,21 @@ pub async fn portfolio_snapshot(
         }
     }
 
-    // Setup market data service with or without providers
+    // Setup market data service with or without configured providers.
     let market_data = if should_refresh_prices {
-        // Load configured price sources from registry
-        let mut registry = PriceSourceRegistry::new(&config.data_dir);
-        registry.load()?;
-
-        // Build routers from configured sources
-        let equity_sources = registry.build_equity_sources().await?;
-        let crypto_sources = registry.build_crypto_sources().await?;
-        let fx_sources = registry.build_fx_sources().await?;
-
-        let mut service = MarketDataService::new(store, None)
-            .with_quote_staleness(config.refresh.price_staleness);
-
-        if !equity_sources.is_empty() {
-            let equity_router = EquityPriceRouter::new(equity_sources);
-            service = service.with_equity_router(Arc::new(equity_router));
-        }
-
-        if !crypto_sources.is_empty() {
-            let crypto_router = CryptoPriceRouter::new(crypto_sources);
-            service = service.with_crypto_router(Arc::new(crypto_router));
-        }
-
-        if !fx_sources.is_empty() {
-            let fx_router = FxRateRouter::new(fx_sources);
-            service = service.with_fx_router(Arc::new(fx_router));
-        }
-
-        Arc::new(service)
+        Arc::new(
+            MarketDataServiceBuilder::new(store.clone(), config.data_dir.clone())
+                .with_quote_staleness(config.refresh.price_staleness)
+                .build()
+                .await,
+        )
     } else {
         Arc::new(
-            MarketDataService::new(store, None)
-                .with_quote_staleness(config.refresh.price_staleness),
+            MarketDataServiceBuilder::new(store.clone(), config.data_dir.clone())
+                .with_quote_staleness(config.refresh.price_staleness)
+                .offline_only()
+                .build()
+                .await,
         )
     };
 
@@ -1792,7 +1649,11 @@ pub async fn portfolio_history(
 
     // Setup market data service (offline mode - use cached data only)
     let market_data = Arc::new(
-        MarketDataService::new(store, None).with_quote_staleness(config.refresh.price_staleness),
+        MarketDataServiceBuilder::new(store, config.data_dir.clone())
+            .with_quote_staleness(config.refresh.price_staleness)
+            .offline_only()
+            .build()
+            .await,
     );
 
     // Create portfolio service

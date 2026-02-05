@@ -1,4 +1,5 @@
 mod asset_id;
+mod builder;
 mod jsonl_store;
 mod models;
 mod provider;
@@ -9,6 +10,7 @@ mod source_config;
 mod sources;
 mod store;
 pub use asset_id::AssetId;
+pub use builder::MarketDataServiceBuilder;
 pub use jsonl_store::JsonlMarketDataStore;
 pub use models::{AssetRegistryEntry, FxRateKind, FxRatePoint, PriceKind, PricePoint};
 pub use provider::{MarketDataSource, NoopSource};

@@ -1,11 +1,13 @@
 mod factory;
 mod orchestrator;
+mod prices;
 mod service;
 pub mod schwab;
 pub mod synchronizers;
 
 pub use factory::{create_synchronizer, DefaultSynchronizerFactory, SynchronizerFactory};
 pub use orchestrator::{PriceRefreshResult, SyncOrchestrator, SyncWithPricesResult};
+pub use prices::store_sync_prices;
 pub use service::{
     AuthPrompter, AutoCommitter, FixedAuthPrompter, GitAutoCommitter, NoopAutoCommitter,
     SyncContext, SyncOutcome, SyncService,
