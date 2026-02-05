@@ -1269,7 +1269,9 @@ async fn resolve_price_history_scope(
                     }
                 }
             }
-        } else {
+        }
+
+        if accounts.is_empty() {
             accounts = storage
                 .list_accounts()
                 .await?
@@ -2128,6 +2130,35 @@ mod tests {
         let dir = TempDir::new()?;
         let storage = JsonFileStorage::new(dir.path());
         let conn = Connection::new(connection_config("Test Connection"));
+
+        write_connection_config(&storage, &conn).await?;
+        storage.save_connection(&conn).await?;
+
+        let account = Account::new("Checking", conn.id().clone());
+        storage.save_account(&account).await?;
+
+        let conn_id = conn.id().to_string();
+        let (scope, accounts) =
+            resolve_price_history_scope(&storage, None, Some(conn_id.as_str())).await?;
+        assert_eq!(accounts.len(), 1);
+        assert_eq!(accounts[0].id, account.id);
+        match scope {
+            PriceHistoryScopeOutput::Connection { id, .. } => {
+                assert_eq!(id, conn_id);
+            }
+            _ => anyhow::bail!("expected connection scope"),
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn resolve_scope_connection_falls_back_when_state_ids_missing() -> anyhow::Result<()> {
+        let dir = TempDir::new()?;
+        let storage = JsonFileStorage::new(dir.path());
+        let mut conn = Connection::new(connection_config("Test Connection"));
+
+        conn.state.account_ids = vec![Id::from_string("missing-account")];
 
         write_connection_config(&storage, &conn).await?;
         storage.save_connection(&conn).await?;
