@@ -123,6 +123,15 @@ impl Storage for MemoryStorage {
         Ok(())
     }
 
+    async fn save_account_config(&self, id: &Id, config: &AccountConfig) -> Result<()> {
+        let mut configs = self
+            .account_configs
+            .lock()
+            .expect("account config lock poisoned");
+        configs.insert(id.clone(), config.clone());
+        Ok(())
+    }
+
     async fn delete_account(&self, id: &Id) -> Result<bool> {
         let mut accounts = self.accounts.lock().await;
         Ok(accounts.remove(id).is_some())

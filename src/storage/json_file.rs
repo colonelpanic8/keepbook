@@ -656,6 +656,17 @@ impl Storage for JsonFileStorage {
         self.write_json(&path, account).await
     }
 
+    async fn save_account_config(&self, id: &Id, config: &AccountConfig) -> Result<()> {
+        let path = self.account_config_file(id)?;
+        self.ensure_dir(&path).await?;
+        let config_toml =
+            toml::to_string_pretty(config).context("Failed to serialize account config")?;
+        fs::write(&path, config_toml)
+            .await
+            .with_context(|| format!("Failed to write {}", path.display()))?;
+        Ok(())
+    }
+
     async fn delete_account(&self, id: &Id) -> Result<bool> {
         let dir = self.account_dir(id)?;
         if dir.exists() {

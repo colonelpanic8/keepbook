@@ -33,6 +33,7 @@ pub trait Storage: Send + Sync {
     async fn get_account(&self, id: &Id) -> Result<Option<Account>>;
     async fn save_account(&self, account: &Account) -> Result<()>;
     async fn delete_account(&self, id: &Id) -> Result<bool>;
+    async fn save_account_config(&self, id: &Id, config: &AccountConfig) -> Result<()>;
 
     // Balance Snapshots
     async fn get_balance_snapshots(&self, account_id: &Id) -> Result<Vec<BalanceSnapshot>>;
