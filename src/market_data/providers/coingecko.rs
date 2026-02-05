@@ -35,6 +35,7 @@ struct MarketData {
 /// No API key is required for basic usage, though rate limits apply.
 pub struct CoinGeckoPriceSource {
     client: reqwest::Client,
+    base_url: String,
     /// Quote currency for prices (e.g., "usd", "eur")
     quote_currency: String,
     /// Custom symbol to CoinGecko ID mappings (overrides defaults)
@@ -46,6 +47,7 @@ impl CoinGeckoPriceSource {
     pub fn new() -> Self {
         Self {
             client: reqwest::Client::new(),
+            base_url: COINGECKO_API_BASE.to_string(),
             quote_currency: "usd".to_string(),
             custom_mappings: HashMap::new(),
         }
@@ -55,9 +57,16 @@ impl CoinGeckoPriceSource {
     pub fn with_client(client: reqwest::Client) -> Self {
         Self {
             client,
+            base_url: COINGECKO_API_BASE.to_string(),
             quote_currency: "usd".to_string(),
             custom_mappings: HashMap::new(),
         }
+    }
+
+    /// Override the base URL (useful for tests).
+    pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
+        self.base_url = base_url.into();
+        self
     }
 
     /// Sets the quote currency for price lookups.
@@ -179,7 +188,8 @@ impl CoinGeckoPriceSource {
         let date_str = date.format("%d-%m-%Y").to_string();
 
         let url = format!(
-            "{COINGECKO_API_BASE}/coins/{coingecko_id}/history?date={date_str}&localization=false"
+            "{}/coins/{coingecko_id}/history?date={date_str}&localization=false",
+            self.base_url.trim_end_matches('/')
         );
 
         let response = self

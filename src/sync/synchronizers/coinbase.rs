@@ -29,6 +29,7 @@ pub struct CoinbaseSynchronizer {
     key_name: String,
     private_key_pem: SecretString,
     client: Client,
+    api_base: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -47,7 +48,14 @@ impl CoinbaseSynchronizer {
             key_name,
             private_key_pem,
             client: Client::new(),
+            api_base: CDP_API_BASE.to_string(),
         }
+    }
+
+    /// Override the API base URL (useful for tests).
+    pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
+        self.api_base = base_url.into();
+        self
     }
 
     /// Create a synchronizer by loading credentials from storage.
@@ -67,10 +75,15 @@ impl CoinbaseSynchronizer {
 
     fn generate_jwt(&self, method: &str, path: &str) -> Result<String> {
         let now = Utc::now().timestamp();
+        let base = self
+            .api_base
+            .trim_end_matches('/')
+            .replace("https://", "")
+            .replace("http://", "");
         let uri = format!(
             "{} {}{}",
             method,
-            CDP_API_BASE.replace("https://", "").replace("http://", ""),
+            base,
             path
         );
 
@@ -110,7 +123,8 @@ impl CoinbaseSynchronizer {
 
     async fn request<T: for<'de> Deserialize<'de>>(&self, method: &str, path: &str) -> Result<T> {
         let jwt = self.generate_jwt(method, path)?;
-        let url = format!("{CDP_API_BASE}{path}");
+        let base = self.api_base.trim_end_matches('/');
+        let url = format!("{base}{path}");
 
         let response = self
             .client
