@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::io::{self, Write};
 use std::path::Path;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -534,6 +535,13 @@ pub async fn set_balance(
     asset_str: &str,
     amount: &str,
 ) -> Result<serde_json::Value> {
+    let amount = amount.trim();
+    if amount.is_empty() {
+        anyhow::bail!("Amount cannot be empty");
+    }
+    rust_decimal::Decimal::from_str(amount)
+        .with_context(|| format!("Invalid amount: {amount}"))?;
+
     let id = Id::from_string(account_id);
 
     // Verify account exists
@@ -2279,6 +2287,37 @@ mod tests {
 
         let target = std::fs::read_link(&link_path)?;
         assert_eq!(target, PathBuf::from("..").join(id));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn set_balance_rejects_invalid_amount() -> anyhow::Result<()> {
+        let dir = TempDir::new()?;
+        let storage = JsonFileStorage::new(dir.path());
+        let config = ResolvedConfig {
+            data_dir: dir.path().to_path_buf(),
+            reporting_currency: "USD".to_string(),
+            refresh: RefreshConfig::default(),
+            git: GitConfig::default(),
+        };
+
+        let account = Account::new("Checking", Id::new());
+        storage.save_account(&account).await?;
+
+        let err = set_balance(
+            &storage,
+            &config,
+            account.id.as_str(),
+            "USD",
+            "not-a-number",
+        )
+        .await
+        .expect_err("expected invalid amount error");
+        assert!(err.to_string().contains("Invalid amount"));
+
+        let snapshots = storage.get_balance_snapshots(&account.id).await?;
+        assert!(snapshots.is_empty());
 
         Ok(())
     }
