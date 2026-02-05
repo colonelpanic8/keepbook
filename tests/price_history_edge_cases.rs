@@ -199,6 +199,46 @@ async fn price_history_infers_start_date_from_balances() -> Result<()> {
 }
 
 #[tokio::test]
+async fn price_history_normalizes_asset_output() -> Result<()> {
+    let dir = TempDir::new()?;
+    let storage = JsonFileStorage::new(dir.path());
+    let config = resolved_config(dir.path());
+
+    let account = create_account(&storage, "Checking").await?;
+    add_balance(
+        &storage,
+        &account.id,
+        NaiveDate::from_ymd_opt(2024, 1, 2).unwrap(),
+        Asset::currency(" usd "),
+    )
+    .await?;
+
+    let account_id = account.id.to_string();
+    let output = fetch_historical_prices(PriceHistoryRequest {
+        storage: &storage,
+        config: &config,
+        account: Some(account_id.as_str()),
+        connection: None,
+        start: Some("2024-01-02"),
+        end: Some("2024-01-02"),
+        interval: "daily",
+        lookback_days: 0,
+        request_delay_ms: 0,
+        currency: None,
+        include_fx: false,
+    })
+    .await?;
+
+    assert_eq!(output.assets.len(), 1);
+    match &output.assets[0].asset {
+        Asset::Currency { iso_code } => assert_eq!(iso_code, "USD"),
+        _ => anyhow::bail!("expected currency asset"),
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn price_history_uses_cached_price_with_lookback() -> Result<()> {
     let dir = TempDir::new()?;
     let storage = JsonFileStorage::new(dir.path());

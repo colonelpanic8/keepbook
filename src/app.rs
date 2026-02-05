@@ -997,7 +997,7 @@ pub async fn fetch_historical_prices(request: PriceHistoryRequest<'_>) -> Result
                 None => date,
             });
             for balance in snapshot.balances {
-                assets.insert(balance.asset);
+                assets.insert(balance.asset.normalized());
             }
         }
     }
