@@ -5,6 +5,8 @@ mod service;
 pub mod schwab;
 pub mod synchronizers;
 
+use std::collections::HashSet;
+
 pub use factory::{create_synchronizer, DefaultSynchronizerFactory, SynchronizerFactory};
 pub use orchestrator::{PriceRefreshResult, SyncOrchestrator, SyncWithPricesResult};
 pub use prices::store_sync_prices;
@@ -77,7 +79,19 @@ impl SyncResult {
 
         for (account_id, txns) in &self.transactions {
             if !txns.is_empty() {
-                storage.append_transactions(account_id, txns).await?;
+                // Dedupe by transaction id, since repeated sync runs should be idempotent.
+                // This is intentionally simple and storage-agnostic. If this becomes slow for
+                // large histories, we can push an indexed/streaming implementation into Storage.
+                let existing = storage.get_transactions(account_id).await?;
+                let mut seen: HashSet<Id> = existing.into_iter().map(|t| t.id).collect();
+                let new_txns: Vec<Transaction> = txns
+                    .iter()
+                    .filter(|t| seen.insert(t.id.clone()))
+                    .cloned()
+                    .collect();
+                if !new_txns.is_empty() {
+                    storage.append_transactions(account_id, &new_txns).await?;
+                }
             }
         }
 

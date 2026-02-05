@@ -47,6 +47,42 @@ async fn test_sync_result_persists_data() -> Result<()> {
     Ok(())
 }
 
+#[tokio::test]
+async fn test_sync_twice_does_not_duplicate_transactions() -> Result<()> {
+    let dir = TempDir::new()?;
+    let storage = JsonFileStorage::new(dir.path());
+
+    let mut connection = mock_connection("Mock Bank");
+
+    // Persist connection config so JsonFileStorage can reload it later.
+    storage
+        .save_connection_config(connection.id(), &connection.config)
+        .await?;
+
+    let synchronizer = MockSynchronizer::new();
+
+    for _ in 0..2 {
+        let result = synchronizer.sync(&mut connection, &storage).await?;
+        result.save(&storage).await?;
+    }
+
+    let loaded = storage
+        .get_connection(connection.id())
+        .await?
+        .expect("connection should exist");
+    assert_eq!(loaded.state.account_ids.len(), 1);
+
+    let account_id = loaded.state.account_ids[0].clone();
+    let transactions = storage.get_transactions(&account_id).await?;
+    assert_eq!(
+        transactions.len(),
+        1,
+        "same transaction id should not be appended twice"
+    );
+
+    Ok(())
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn test_sync_result_creates_account_symlink() -> Result<()> {

@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, Utc};
 use keepbook::market_data::{AssetId, FxRateKind, FxRatePoint, MarketDataSource, PriceKind, PricePoint};
 use keepbook::models::{
-    Account, Asset, AssetBalance, Connection, ConnectionConfig, Transaction,
+    Account, Asset, AssetBalance, Connection, ConnectionConfig, Id, Transaction,
 };
 use keepbook::storage::Storage;
 use keepbook::sync::{SyncResult, SyncedAssetBalance, Synchronizer};
@@ -51,6 +51,7 @@ pub fn init_repo(dir: &Path) -> Result<()> {
 pub struct MockSynchronizer {
     pub name: String,
     pub account_name: String,
+    pub account_external_id: String,
     pub asset: Asset,
     pub balance_amount: String,
     pub transaction_amount: String,
@@ -62,6 +63,7 @@ impl Default for MockSynchronizer {
         Self {
             name: "mock".to_string(),
             account_name: "Mock Checking".to_string(),
+            account_external_id: "checking".to_string(),
             asset: Asset::currency("USD"),
             balance_amount: "123.45".to_string(),
             transaction_amount: "-10.00".to_string(),
@@ -82,6 +84,11 @@ impl MockSynchronizer {
 
     pub fn with_account_name(mut self, name: impl Into<String>) -> Self {
         self.account_name = name.into();
+        self
+    }
+
+    pub fn with_account_external_id(mut self, id: impl Into<String>) -> Self {
+        self.account_external_id = id.into();
         self
     }
 
@@ -109,18 +116,44 @@ impl Synchronizer for MockSynchronizer {
     }
 
     async fn sync(&self, connection: &mut Connection, _storage: &dyn Storage) -> Result<SyncResult> {
-        let account = Account::new(self.account_name.clone(), connection.id().clone());
+        // Deterministic account id: stable across sync runs, unique per connection.
+        let account_id = Id::from_external(&format!(
+            "mock:{}:{}",
+            connection.id(),
+            self.account_external_id
+        ));
+
+        // Preserve created_at across runs if the account already exists.
+        let created_at = match _storage.get_account(&account_id).await? {
+            Some(existing) => existing.created_at,
+            None => Utc::now(),
+        };
+
+        let account = Account::new_with(
+            account_id.clone(),
+            created_at,
+            self.account_name.clone(),
+            connection.id().clone(),
+        );
+
         connection.state.account_ids = vec![account.id.clone()];
 
         let balance = SyncedAssetBalance::new(AssetBalance::new(
             self.asset.clone(),
             self.balance_amount.clone(),
         ));
+        let tx_id = Id::from_external(&format!(
+            "mock:{}:{}:{}",
+            connection.id(),
+            self.transaction_amount,
+            self.transaction_description
+        ));
         let transaction = Transaction::new(
             self.transaction_amount.clone(),
             self.asset.clone(),
             self.transaction_description.clone(),
-        );
+        )
+        .with_id(tx_id);
 
         Ok(SyncResult {
             connection: connection.clone(),
