@@ -9,7 +9,9 @@ pub use lookup::{find_account, find_connection};
 pub use memory::MemoryStorage;
 
 use crate::credentials::CredentialStore;
-use crate::models::{Account, AccountConfig, BalanceSnapshot, Connection, Id, Transaction};
+use crate::models::{
+    Account, AccountConfig, BalanceSnapshot, Connection, ConnectionConfig, Id, Transaction,
+};
 use anyhow::Result;
 
 /// Storage trait for persisting financial data.
@@ -24,6 +26,7 @@ pub trait Storage: Send + Sync {
     async fn get_connection(&self, id: &Id) -> Result<Option<Connection>>;
     async fn save_connection(&self, conn: &Connection) -> Result<()>;
     async fn delete_connection(&self, id: &Id) -> Result<bool>;
+    async fn save_connection_config(&self, id: &Id, config: &ConnectionConfig) -> Result<()>;
 
     // Accounts
     async fn list_accounts(&self) -> Result<Vec<Account>>;

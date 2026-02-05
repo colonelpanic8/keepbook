@@ -469,11 +469,10 @@ pub async fn add_connection_with(
 
     let id = connection.state.id.to_string();
 
-    // Write the config TOML since save_connection only writes state
-    let config_path = storage.connection_config_path(&connection.state.id)?;
-    let config_toml = toml::to_string_pretty(&connection.config)?;
-    tokio::fs::create_dir_all(config_path.parent().unwrap()).await?;
-    tokio::fs::write(&config_path, config_toml).await?;
+    // Write the config TOML since save_connection only writes state.
+    storage
+        .save_connection_config(connection.id(), &connection.config)
+        .await?;
 
     // Save the connection (this creates the directory structure and symlinks)
     storage.save_connection(&connection).await?;
@@ -1823,10 +1822,9 @@ mod tests {
         storage: &JsonFileStorage,
         conn: &Connection,
     ) -> anyhow::Result<()> {
-        let config_path = storage.connection_config_path(conn.id())?;
-        tokio::fs::create_dir_all(config_path.parent().unwrap()).await?;
-        let config_toml = toml::to_string_pretty(&conn.config)?;
-        tokio::fs::write(&config_path, config_toml).await?;
+        storage
+            .save_connection_config(conn.id(), &conn.config)
+            .await?;
         Ok(())
     }
 

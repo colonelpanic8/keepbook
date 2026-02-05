@@ -14,10 +14,9 @@ async fn test_sync_result_persists_data() -> Result<()> {
     let mut connection = mock_connection("Mock Bank");
 
     // Persist connection config so JsonFileStorage can reload it later.
-    let config_path = storage.connection_config_path(connection.id())?;
-    tokio::fs::create_dir_all(config_path.parent().unwrap()).await?;
-    let config_toml = toml::to_string_pretty(&connection.config)?;
-    tokio::fs::write(&config_path, config_toml).await?;
+    storage
+        .save_connection_config(connection.id(), &connection.config)
+        .await?;
 
     let synchronizer = MockSynchronizer::new();
     let result = synchronizer.sync(&mut connection, &storage).await?;
@@ -57,10 +56,9 @@ async fn test_sync_result_creates_account_symlink() -> Result<()> {
     let mut connection = mock_connection("Mock Bank");
 
     // Persist connection config so JsonFileStorage can reload it later.
-    let config_path = storage.connection_config_path(connection.id())?;
-    tokio::fs::create_dir_all(config_path.parent().unwrap()).await?;
-    let config_toml = toml::to_string_pretty(&connection.config)?;
-    tokio::fs::write(&config_path, config_toml).await?;
+    storage
+        .save_connection_config(connection.id(), &connection.config)
+        .await?;
 
     let synchronizer = MockSynchronizer::new();
     let result = synchronizer.sync(&mut connection, &storage).await?;

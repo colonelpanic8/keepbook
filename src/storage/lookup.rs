@@ -111,12 +111,12 @@ mod tests {
         });
         first.state.account_ids = vec![];
         second.state.account_ids = vec![];
-        let config_path = storage.connection_config_path(first.id())?;
-        tokio::fs::create_dir_all(config_path.parent().unwrap()).await?;
-        tokio::fs::write(&config_path, toml::to_string_pretty(&first.config)?).await?;
-        let config_path = storage.connection_config_path(second.id())?;
-        tokio::fs::create_dir_all(config_path.parent().unwrap()).await?;
-        tokio::fs::write(&config_path, toml::to_string_pretty(&second.config)?).await?;
+        storage
+            .save_connection_config(first.id(), &first.config)
+            .await?;
+        storage
+            .save_connection_config(second.id(), &second.config)
+            .await?;
         storage.save_connection(&first).await?;
         storage.save_connection(&second).await?;
 

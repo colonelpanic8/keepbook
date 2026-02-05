@@ -8,7 +8,10 @@ use anyhow::Result;
 use tokio::sync::Mutex;
 
 use crate::credentials::CredentialStore;
-use crate::models::{Account, AccountConfig, BalanceSnapshot, Connection, Id, Transaction};
+use crate::models::{
+    Account, AccountConfig, BalanceSnapshot, Connection, ConnectionConfig, ConnectionState, Id,
+    Transaction,
+};
 
 use super::Storage;
 
@@ -83,6 +86,25 @@ impl Storage for MemoryStorage {
     async fn delete_connection(&self, id: &Id) -> Result<bool> {
         let mut conns = self.connections.lock().await;
         Ok(conns.remove(id).is_some())
+    }
+
+    async fn save_connection_config(&self, id: &Id, config: &ConnectionConfig) -> Result<()> {
+        let mut conns = self.connections.lock().await;
+        match conns.get_mut(id) {
+            Some(existing) => {
+                existing.config = config.clone();
+            }
+            None => {
+                conns.insert(
+                    id.clone(),
+                    Connection {
+                        config: config.clone(),
+                        state: ConnectionState::new_with(id.clone(), chrono::Utc::now()),
+                    },
+                );
+            }
+        }
+        Ok(())
     }
 
     async fn list_accounts(&self) -> Result<Vec<Account>> {

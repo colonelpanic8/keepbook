@@ -608,6 +608,17 @@ impl Storage for JsonFileStorage {
         }
     }
 
+    async fn save_connection_config(&self, id: &Id, config: &ConnectionConfig) -> Result<()> {
+        let path = self.connection_config_file(id)?;
+        self.ensure_dir(&path).await?;
+        let config_toml = toml::to_string_pretty(config)
+            .context("Failed to serialize connection config")?;
+        fs::write(&path, config_toml)
+            .await
+            .with_context(|| format!("Failed to write {}", path.display()))?;
+        Ok(())
+    }
+
     async fn list_accounts(&self) -> Result<Vec<Account>> {
         let ids = self.list_dirs(&self.accounts_dir()).await?;
         let mut accounts = Vec::new();

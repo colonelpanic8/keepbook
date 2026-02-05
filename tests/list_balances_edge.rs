@@ -20,10 +20,9 @@ async fn write_connection_config(
     storage: &JsonFileStorage,
     connection: &Connection,
 ) -> Result<()> {
-    let config_path = storage.connection_config_path(connection.id())?;
-    tokio::fs::create_dir_all(config_path.parent().unwrap()).await?;
-    let config_toml = toml::to_string_pretty(&connection.config)?;
-    tokio::fs::write(&config_path, config_toml).await?;
+    storage
+        .save_connection_config(connection.id(), &connection.config)
+        .await?;
     Ok(())
 }
 
