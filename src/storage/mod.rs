@@ -56,5 +56,24 @@ pub trait Storage: Send + Sync {
 
     // Transactions
     async fn get_transactions(&self, account_id: &Id) -> Result<Vec<Transaction>>;
+    /// Get the raw append-only transaction history (may include duplicates / multiple versions).
+    ///
+    /// Most callers should prefer `get_transactions` which returns a last-write-wins view.
+    async fn get_transactions_raw(&self, account_id: &Id) -> Result<Vec<Transaction>> {
+        self.get_transactions(account_id).await
+    }
     async fn append_transactions(&self, account_id: &Id, txns: &[Transaction]) -> Result<()>;
+}
+
+/// Filesystem-y operations that only make sense for the JSON file layout.
+#[async_trait::async_trait]
+pub trait SymlinkStorage: Send + Sync {
+    async fn rebuild_all_symlinks(&self) -> Result<(usize, usize, Vec<String>)>;
+}
+
+#[async_trait::async_trait]
+impl SymlinkStorage for JsonFileStorage {
+    async fn rebuild_all_symlinks(&self) -> Result<(usize, usize, Vec<String>)> {
+        JsonFileStorage::rebuild_all_symlinks(self).await
+    }
 }

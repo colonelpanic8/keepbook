@@ -27,7 +27,7 @@ use crate::staleness::{
     check_balance_staleness, check_price_staleness, log_balance_staleness, log_price_staleness,
     resolve_balance_staleness,
 };
-use crate::storage::{find_account, find_connection, JsonFileStorage, Storage};
+use crate::storage::{find_account, find_connection, Storage, SymlinkStorage};
 use crate::sync::{
     AuthPrompter, AutoCommitter, DefaultSynchronizerFactory, GitAutoCommitter, SyncContext,
     SyncOutcome, SyncService,
@@ -199,7 +199,7 @@ pub fn config_output(config_path: &Path, config: &ResolvedConfig) -> serde_json:
     })
 }
 
-pub async fn list_connections(storage: &JsonFileStorage) -> Result<Vec<ConnectionOutput>> {
+pub async fn list_connections(storage: &dyn Storage) -> Result<Vec<ConnectionOutput>> {
     let connections = storage.list_connections().await?;
     let accounts = storage.list_accounts().await?;
     let mut accounts_by_connection: HashMap<Id, HashSet<Id>> = HashMap::new();
@@ -244,7 +244,7 @@ pub async fn list_connections(storage: &JsonFileStorage) -> Result<Vec<Connectio
     Ok(output)
 }
 
-pub async fn list_accounts(storage: &JsonFileStorage) -> Result<Vec<AccountOutput>> {
+pub async fn list_accounts(storage: &dyn Storage) -> Result<Vec<AccountOutput>> {
     let accounts = storage.list_accounts().await?;
     let mut output = Vec::new();
 
@@ -279,7 +279,7 @@ pub fn list_price_sources(data_dir: &Path) -> Result<Vec<PriceSourceOutput>> {
     Ok(output)
 }
 
-pub async fn list_balances(storage: &JsonFileStorage) -> Result<Vec<BalanceOutput>> {
+pub async fn list_balances(storage: &dyn Storage) -> Result<Vec<BalanceOutput>> {
     let connections = storage.list_connections().await?;
     let accounts = storage.list_accounts().await?;
     let mut accounts_by_connection: HashMap<Id, HashSet<Id>> = HashMap::new();
@@ -329,7 +329,7 @@ pub async fn list_balances(storage: &JsonFileStorage) -> Result<Vec<BalanceOutpu
     Ok(output)
 }
 
-pub async fn list_transactions(storage: &JsonFileStorage) -> Result<Vec<TransactionOutput>> {
+pub async fn list_transactions(storage: &dyn Storage) -> Result<Vec<TransactionOutput>> {
     let accounts = storage.list_accounts().await?;
     let mut output = Vec::new();
 
@@ -352,7 +352,7 @@ pub async fn list_transactions(storage: &JsonFileStorage) -> Result<Vec<Transact
 }
 
 pub async fn list_all(
-    storage: &JsonFileStorage,
+    storage: &dyn Storage,
     config: &ResolvedConfig,
 ) -> Result<AllOutput> {
     Ok(AllOutput {
@@ -364,7 +364,7 @@ pub async fn list_all(
 }
 
 pub async fn remove_connection(
-    storage: &JsonFileStorage,
+    storage: &dyn Storage,
     config: &ResolvedConfig,
     id_str: &str,
 ) -> Result<serde_json::Value> {
@@ -434,7 +434,7 @@ pub async fn remove_connection(
 }
 
 pub async fn add_connection(
-    storage: &JsonFileStorage,
+    storage: &dyn Storage,
     config: &ResolvedConfig,
     name: &str,
 ) -> Result<serde_json::Value> {
@@ -442,7 +442,7 @@ pub async fn add_connection(
 }
 
 pub async fn add_connection_with(
-    storage: &JsonFileStorage,
+    storage: &dyn Storage,
     config: &ResolvedConfig,
     name: &str,
     ids: &dyn IdGenerator,
@@ -492,7 +492,7 @@ pub async fn add_connection_with(
 }
 
 pub async fn add_account(
-    storage: &JsonFileStorage,
+    storage: &dyn Storage,
     config: &ResolvedConfig,
     connection_id: &str,
     name: &str,
@@ -511,7 +511,7 @@ pub async fn add_account(
 }
 
 pub async fn add_account_with(
-    storage: &JsonFileStorage,
+    storage: &dyn Storage,
     config: &ResolvedConfig,
     connection_id: &str,
     name: &str,
@@ -556,7 +556,7 @@ pub async fn add_account_with(
 }
 
 pub async fn set_balance(
-    storage: &JsonFileStorage,
+    storage: &dyn Storage,
     config: &ResolvedConfig,
     account_id: &str,
     asset_str: &str,
@@ -616,16 +616,13 @@ impl AuthPrompter for StdinPrompter {
     }
 }
 
-async fn build_sync_service(
-    storage: &JsonFileStorage,
-    config: &ResolvedConfig,
-) -> SyncService<JsonFileStorage> {
+async fn build_sync_service(storage: Arc<dyn Storage>, config: &ResolvedConfig) -> SyncService {
     let market_data = MarketDataServiceBuilder::for_data_dir(&config.data_dir)
         .with_quote_staleness(config.refresh.price_staleness)
         .build()
         .await;
     let context = SyncContext::new(
-        Arc::new(storage.clone()),
+        storage,
         market_data,
         config.reporting_currency.clone(),
     )
@@ -693,7 +690,7 @@ fn sync_outcome_to_json(outcome: SyncOutcome) -> serde_json::Value {
 }
 
 pub async fn sync_connection(
-    storage: &JsonFileStorage,
+    storage: Arc<dyn Storage>,
     config: &ResolvedConfig,
     id_or_name: &str,
 ) -> Result<serde_json::Value> {
@@ -703,7 +700,7 @@ pub async fn sync_connection(
 }
 
 pub async fn sync_connection_if_stale(
-    storage: &JsonFileStorage,
+    storage: Arc<dyn Storage>,
     config: &ResolvedConfig,
     id_or_name: &str,
 ) -> Result<serde_json::Value> {
@@ -714,7 +711,7 @@ pub async fn sync_connection_if_stale(
     Ok(sync_outcome_to_json(outcome))
 }
 
-pub async fn sync_all(storage: &JsonFileStorage, config: &ResolvedConfig) -> Result<serde_json::Value> {
+pub async fn sync_all(storage: Arc<dyn Storage>, config: &ResolvedConfig) -> Result<serde_json::Value> {
     let service = build_sync_service(storage, config).await;
     let outcomes = service.sync_all().await?;
     let results: Vec<_> = outcomes.into_iter().map(sync_outcome_to_json).collect();
@@ -726,7 +723,7 @@ pub async fn sync_all(storage: &JsonFileStorage, config: &ResolvedConfig) -> Res
 }
 
 pub async fn sync_all_if_stale(
-    storage: &JsonFileStorage,
+    storage: Arc<dyn Storage>,
     config: &ResolvedConfig,
 ) -> Result<serde_json::Value> {
     let service = build_sync_service(storage, config).await;
@@ -740,7 +737,7 @@ pub async fn sync_all_if_stale(
 }
 
 pub async fn sync_symlinks(
-    storage: &JsonFileStorage,
+    storage: &dyn SymlinkStorage,
     config: &ResolvedConfig,
 ) -> Result<serde_json::Value> {
     let (conn_created, acct_created, warnings) = storage.rebuild_all_symlinks().await?;
@@ -756,7 +753,7 @@ pub async fn sync_symlinks(
 }
 
 pub async fn schwab_login(
-    storage: &JsonFileStorage,
+    storage: Arc<dyn Storage>,
     config: &ResolvedConfig,
     id_or_name: Option<&str>,
 ) -> Result<serde_json::Value> {
@@ -771,7 +768,7 @@ pub async fn schwab_login(
 }
 
 pub async fn chase_login(
-    storage: &JsonFileStorage,
+    storage: Arc<dyn Storage>,
     config: &ResolvedConfig,
     id_or_name: Option<&str>,
 ) -> Result<serde_json::Value> {
@@ -786,7 +783,7 @@ pub async fn chase_login(
 }
 
 pub struct PriceHistoryRequest<'a> {
-    pub storage: &'a JsonFileStorage,
+    pub storage: &'a dyn Storage,
     pub config: &'a ResolvedConfig,
     pub account: Option<&'a str>,
     pub connection: Option<&'a str>,
@@ -1147,7 +1144,7 @@ fn days_in_month(year: i32, month: u32) -> u32 {
 }
 
 async fn resolve_price_history_scope(
-    storage: &JsonFileStorage,
+    storage: &dyn Storage,
     account: Option<&str>,
     connection: Option<&str>,
 ) -> Result<(PriceHistoryScopeOutput, Vec<Account>)> {
@@ -1429,7 +1426,7 @@ async fn ensure_fx_rate(
 }
 
 pub async fn portfolio_snapshot(
-    storage: &JsonFileStorage,
+    storage: Arc<dyn Storage>,
     config: &ResolvedConfig,
     currency: Option<String>,
     date: Option<String>,
@@ -1558,7 +1555,7 @@ pub async fn portfolio_snapshot(
 
     // Sync stale connections
     if !connections_to_sync.is_empty() {
-        let sync_service = build_sync_service(storage, config).await;
+        let sync_service = build_sync_service(storage.clone(), config).await;
         for connection in &connections_to_sync {
             let _ = sync_service.sync_connection(connection.id().as_ref()).await;
         }
@@ -1583,8 +1580,7 @@ pub async fn portfolio_snapshot(
     };
 
     // Calculate and output
-    let storage_arc: Arc<dyn Storage> = Arc::new(JsonFileStorage::new(&config.data_dir));
-    let service = PortfolioService::new(storage_arc, market_data);
+    let service = PortfolioService::new(storage.clone(), market_data);
     let snapshot = service.calculate(&query).await?;
 
     maybe_auto_commit(config, "portfolio snapshot");
@@ -1593,7 +1589,7 @@ pub async fn portfolio_snapshot(
 }
 
 pub async fn portfolio_history(
-    _storage: &JsonFileStorage,
+    storage: Arc<dyn Storage>,
     config: &ResolvedConfig,
     currency: Option<String>,
     start: Option<String>,
@@ -1635,7 +1631,7 @@ pub async fn portfolio_history(
 
     // Setup storage and market data store
     let store: Arc<dyn MarketDataStore> = Arc::new(JsonlMarketDataStore::new(&config.data_dir));
-    let storage_arc: Arc<dyn Storage> = Arc::new(JsonFileStorage::new(&config.data_dir));
+    let storage_arc: Arc<dyn Storage> = storage;
 
     // Collect change points
     let options = CollectOptions {

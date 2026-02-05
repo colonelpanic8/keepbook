@@ -5,6 +5,7 @@ use keepbook::config::{GitConfig, RefreshConfig, ResolvedConfig};
 use keepbook::market_data::{AssetId, JsonlMarketDataStore, MarketDataStore, PriceKind, PricePoint};
 use keepbook::models::{Account, Asset, AssetBalance, BalanceSnapshot, Connection, ConnectionConfig};
 use keepbook::storage::{JsonFileStorage, Storage};
+use std::sync::Arc;
 use tempfile::TempDir;
 
 async fn write_connection_config(
@@ -61,8 +62,9 @@ async fn portfolio_snapshot_offline_uses_cached_quote() -> Result<()> {
         .put_prices(std::slice::from_ref(&price))
         .await?;
 
+    let storage_arc: Arc<dyn Storage> = Arc::new(storage.clone());
     let snapshot = portfolio_snapshot(
-        &storage,
+        storage_arc,
         &config,
         None,
         Some(Utc::now().date_naive().to_string()),

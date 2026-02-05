@@ -51,11 +51,15 @@ pub struct SyncResult {
 
 impl SyncResult {
     /// Save this sync result to storage.
-    pub async fn save(&self, storage: &impl Storage) -> Result<()> {
+    pub async fn save(&self, storage: &dyn Storage) -> Result<()> {
         self.save_with_clock(storage, &SystemClock).await
     }
 
-    pub async fn save_with_clock(&self, storage: &impl Storage, clock: &dyn Clock) -> Result<()> {
+    pub async fn save_with_clock(
+        &self,
+        storage: &dyn Storage,
+        clock: &dyn Clock,
+    ) -> Result<()> {
         for account in &self.accounts {
             storage.save_account(account).await?;
         }

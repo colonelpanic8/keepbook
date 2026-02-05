@@ -212,8 +212,7 @@ impl Storage for MemoryStorage {
     }
 
     async fn get_transactions(&self, account_id: &Id) -> Result<Vec<Transaction>> {
-        let txns = self.transactions.lock().await;
-        let txns = txns.get(account_id).cloned().unwrap_or_default();
+        let txns = self.get_transactions_raw(account_id).await?;
 
         // Mirror JsonFileStorage behavior: last write wins for duplicate ids.
         let mut by_id: std::collections::HashMap<Id, usize> = std::collections::HashMap::new();
@@ -228,6 +227,11 @@ impl Storage for MemoryStorage {
         }
 
         Ok(deduped)
+    }
+
+    async fn get_transactions_raw(&self, account_id: &Id) -> Result<Vec<Transaction>> {
+        let txns = self.transactions.lock().await;
+        Ok(txns.get(account_id).cloned().unwrap_or_default())
     }
 
     async fn append_transactions(&self, account_id: &Id, new_txns: &[Transaction]) -> Result<()> {

@@ -86,8 +86,8 @@ impl AutoCommitter for GitAutoCommitter {
     }
 }
 
-pub struct SyncContext<S: Storage> {
-    pub storage: Arc<S>,
+pub struct SyncContext {
+    pub storage: Arc<dyn Storage>,
     pub market_data: MarketDataService,
     pub reporting_currency: String,
     pub auth_prompter: Arc<dyn AuthPrompter>,
@@ -96,8 +96,12 @@ pub struct SyncContext<S: Storage> {
     pub clock: Arc<dyn Clock>,
 }
 
-impl<S: Storage> SyncContext<S> {
-    pub fn new(storage: Arc<S>, market_data: MarketDataService, reporting_currency: String) -> Self {
+impl SyncContext {
+    pub fn new(
+        storage: Arc<dyn Storage>,
+        market_data: MarketDataService,
+        reporting_currency: String,
+    ) -> Self {
         Self {
             storage,
             market_data,
@@ -141,17 +145,17 @@ pub enum SyncOutcome {
     Failed { connection: Connection, error: String },
 }
 
-pub struct SyncService<S: Storage> {
-    storage: Arc<S>,
-    orchestrator: SyncOrchestrator<S>,
+pub struct SyncService {
+    storage: Arc<dyn Storage>,
+    orchestrator: SyncOrchestrator,
     auth_prompter: Arc<dyn AuthPrompter>,
     auto_committer: Arc<dyn AutoCommitter>,
     factory: Arc<dyn SynchronizerFactory>,
     clock: Arc<dyn Clock>,
 }
 
-impl<S: Storage> SyncService<S> {
-    pub fn new(context: SyncContext<S>) -> Self {
+impl SyncService {
+    pub fn new(context: SyncContext) -> Self {
         let storage = context.storage.clone();
         let orchestrator = SyncOrchestrator::new(
             storage.clone(),

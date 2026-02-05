@@ -14,8 +14,8 @@ use crate::storage::Storage;
 use super::{SyncResult, Synchronizer};
 
 /// Coordinates sync + price fetching operations.
-pub struct SyncOrchestrator<S: Storage> {
-    storage: Arc<S>,
+pub struct SyncOrchestrator {
+    storage: Arc<dyn Storage>,
     market_data: MarketDataService,
     reporting_currency: String,
     clock: Arc<dyn Clock>,
@@ -37,9 +37,9 @@ pub struct PriceRefreshResult {
     pub failed: Vec<(Asset, String)>,
 }
 
-impl<S: Storage> SyncOrchestrator<S> {
+impl SyncOrchestrator {
     pub fn new(
-        storage: Arc<S>,
+        storage: Arc<dyn Storage>,
         market_data: MarketDataService,
         reporting_currency: String,
     ) -> Self {
@@ -61,7 +61,7 @@ impl<S: Storage> SyncOrchestrator<S> {
     }
 }
 
-impl<S: Storage + Send + Sync> SyncOrchestrator<S> {
+impl SyncOrchestrator {
     /// Ensure prices exist for the given assets on the given date.
     /// Returns counts of fetched, skipped, and failed.
     pub async fn ensure_prices(

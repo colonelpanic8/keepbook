@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 
@@ -261,7 +261,9 @@ impl PortfolioService {
         let mut total_value = Decimal::ZERO;
 
         for (asset, agg) in by_asset {
-            let valuation = price_cache.get(asset).unwrap();
+            let valuation = price_cache
+                .get(asset)
+                .with_context(|| format!("missing valuation for asset {}", AssetId::from_asset(asset)))?;
 
             let asset_value = valuation
                 .value
@@ -332,7 +334,9 @@ impl PortfolioService {
             for asset_balance in &snapshot.balances {
                 let asset_key = asset_balance.asset.normalized();
                 let amount = Decimal::from_str(&asset_balance.amount)?;
-                let valuation = price_cache.get(&asset_key).unwrap();
+                let valuation = price_cache
+                    .get(&asset_key)
+                    .with_context(|| format!("missing valuation for asset {}", AssetId::from_asset(&asset_key)))?;
 
                 let entry = by_account
                     .entry(account_id.clone())
@@ -525,6 +529,61 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use rust_decimal::Decimal;
     use std::sync::Arc;
+
+    #[test]
+    fn build_asset_summaries_errors_on_missing_price_cache_entry() {
+        let storage = Arc::new(MemoryStorage::new());
+        let store = Arc::new(MemoryMarketDataStore::new());
+        let market_data = Arc::new(MarketDataService::new(store, None));
+        let service = PortfolioService::new(storage, market_data);
+
+        let asset = Asset::equity("AAPL");
+        let mut by_asset: std::collections::HashMap<Asset, super::AssetAggregate> =
+            std::collections::HashMap::new();
+        by_asset.insert(
+            asset.clone(),
+            super::AssetAggregate {
+                total_amount: Decimal::ONE,
+                latest_balance_date: chrono::NaiveDate::from_ymd_opt(2026, 2, 1).unwrap(),
+                holdings: Vec::new(),
+            },
+        );
+
+        let price_cache: std::collections::HashMap<Asset, super::AssetValuation> =
+            std::collections::HashMap::new();
+        let account_map: std::collections::HashMap<Id, Account> = std::collections::HashMap::new();
+
+        let err = service
+            .build_asset_summaries(&by_asset, &price_cache, &account_map, false)
+            .unwrap_err();
+        assert!(err.to_string().contains("missing valuation"));
+    }
+
+    #[test]
+    fn build_account_summaries_errors_on_missing_price_cache_entry() {
+        let asset = Asset::equity("AAPL");
+        let snapshot = BalanceSnapshot::new(
+            Utc.with_ymd_and_hms(2026, 2, 1, 12, 0, 0).unwrap(),
+            vec![AssetBalance::new(asset.clone(), "1")],
+        );
+
+        let snapshots = vec![(Id::from_string("acct-1"), snapshot)];
+        let price_cache: std::collections::HashMap<Asset, super::AssetValuation> =
+            std::collections::HashMap::new();
+        let account_map: std::collections::HashMap<Id, Account> = std::collections::HashMap::new();
+        let connection_map: std::collections::HashMap<Id, Connection> =
+            std::collections::HashMap::new();
+
+        let err = PortfolioService::build_account_summaries(
+            &snapshots,
+            &[],
+            &price_cache,
+            &account_map,
+            &connection_map,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("missing valuation"));
+    }
 
     #[tokio::test]
     async fn calculate_single_currency_holding() -> Result<()> {

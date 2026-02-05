@@ -1,10 +1,11 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
 use keepbook::app;
 use keepbook::config::{default_config_path, ResolvedConfig};
-use keepbook::storage::JsonFileStorage;
+use keepbook::storage::{JsonFileStorage, Storage};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 #[derive(Parser)]
@@ -302,6 +303,7 @@ async fn main() -> Result<()> {
 
     let config = ResolvedConfig::load_or_default(&cli.config)?;
     let storage = JsonFileStorage::new(&config.data_dir);
+    let storage_arc: Arc<dyn Storage> = Arc::new(storage.clone());
 
     match cli.command {
         Some(Command::Config) => {
@@ -311,7 +313,7 @@ async fn main() -> Result<()> {
 
         Some(Command::Add(add_cmd)) => match add_cmd {
             AddCommand::Connection { name } => {
-                let result = app::add_connection(&storage, &config, &name).await?;
+                let result = app::add_connection(storage_arc.as_ref(), &config, &name).await?;
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
             AddCommand::Account {
@@ -319,14 +321,15 @@ async fn main() -> Result<()> {
                 name,
                 tag,
             } => {
-                let result = app::add_account(&storage, &config, &connection, &name, tag).await?;
+                let result =
+                    app::add_account(storage_arc.as_ref(), &config, &connection, &name, tag).await?;
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
         },
 
         Some(Command::Remove(remove_cmd)) => match remove_cmd {
             RemoveCommand::Connection { id } => {
-                let result = app::remove_connection(&storage, &config, &id).await?;
+                let result = app::remove_connection(storage_arc.as_ref(), &config, &id).await?;
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
         },
@@ -337,7 +340,9 @@ async fn main() -> Result<()> {
                 asset,
                 amount,
             } => {
-                let result = app::set_balance(&storage, &config, &account, &asset, &amount).await?;
+                let result =
+                    app::set_balance(storage_arc.as_ref(), &config, &account, &asset, &amount)
+                        .await?;
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
         },
@@ -348,17 +353,17 @@ async fn main() -> Result<()> {
                 if_stale,
             } => {
                 let result = if if_stale {
-                    app::sync_connection_if_stale(&storage, &config, &id_or_name).await?
+                    app::sync_connection_if_stale(storage_arc.clone(), &config, &id_or_name).await?
                 } else {
-                    app::sync_connection(&storage, &config, &id_or_name).await?
+                    app::sync_connection(storage_arc.clone(), &config, &id_or_name).await?
                 };
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
             SyncCommand::All { if_stale } => {
                 let result = if if_stale {
-                    app::sync_all_if_stale(&storage, &config).await?
+                    app::sync_all_if_stale(storage_arc.clone(), &config).await?
                 } else {
-                    app::sync_all(&storage, &config).await?
+                    app::sync_all(storage_arc.clone(), &config).await?
                 };
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
@@ -371,13 +376,23 @@ async fn main() -> Result<()> {
         Some(Command::Auth(auth_cmd)) => match auth_cmd {
             AuthCommand::Schwab(schwab_cmd) => match schwab_cmd {
                 SchwabAuthCommand::Login { id_or_name } => {
-                    let result = app::schwab_login(&storage, &config, id_or_name.as_deref()).await?;
+                    let result = app::schwab_login(
+                        storage_arc.clone(),
+                        &config,
+                        id_or_name.as_deref(),
+                    )
+                    .await?;
                     println!("{}", serde_json::to_string_pretty(&result)?);
                 }
             },
             AuthCommand::Chase(chase_cmd) => match chase_cmd {
                 ChaseAuthCommand::Login { id_or_name } => {
-                    let result = app::chase_login(&storage, &config, id_or_name.as_deref()).await?;
+                    let result = app::chase_login(
+                        storage_arc.clone(),
+                        &config,
+                        id_or_name.as_deref(),
+                    )
+                    .await?;
                     println!("{}", serde_json::to_string_pretty(&result)?);
                 }
             },
@@ -396,7 +411,7 @@ async fn main() -> Result<()> {
                 no_fx,
             } => {
                 let output = app::fetch_historical_prices(app::PriceHistoryRequest {
-                    storage: &storage,
+                    storage: storage_arc.as_ref(),
                     config: &config,
                     account: account.as_deref(),
                     connection: connection.as_deref(),
@@ -415,12 +430,12 @@ async fn main() -> Result<()> {
 
         Some(Command::List(list_cmd)) => match list_cmd {
             ListCommand::Connections => {
-                let connections = app::list_connections(&storage).await?;
+                let connections = app::list_connections(storage_arc.as_ref()).await?;
                 println!("{}", serde_json::to_string_pretty(&connections)?);
             }
 
             ListCommand::Accounts => {
-                let accounts = app::list_accounts(&storage).await?;
+                let accounts = app::list_accounts(storage_arc.as_ref()).await?;
                 println!("{}", serde_json::to_string_pretty(&accounts)?);
             }
 
@@ -430,17 +445,17 @@ async fn main() -> Result<()> {
             }
 
             ListCommand::Balances => {
-                let balances = app::list_balances(&storage).await?;
+                let balances = app::list_balances(storage_arc.as_ref()).await?;
                 println!("{}", serde_json::to_string_pretty(&balances)?);
             }
 
             ListCommand::Transactions => {
-                let transactions = app::list_transactions(&storage).await?;
+                let transactions = app::list_transactions(storage_arc.as_ref()).await?;
                 println!("{}", serde_json::to_string_pretty(&transactions)?);
             }
 
             ListCommand::All => {
-                let output = app::list_all(&storage, &config).await?;
+                let output = app::list_all(storage_arc.as_ref(), &config).await?;
                 println!("{}", serde_json::to_string_pretty(&output)?);
             }
         },
@@ -457,7 +472,7 @@ async fn main() -> Result<()> {
                 force_refresh,
             } => {
                 let snapshot = app::portfolio_snapshot(
-                    &storage,
+                    storage_arc.clone(),
                     &config,
                     currency,
                     date,
@@ -480,7 +495,7 @@ async fn main() -> Result<()> {
                 include_prices,
             } => {
                 let output = app::portfolio_history(
-                    &storage,
+                    storage_arc.clone(),
                     &config,
                     currency,
                     start,

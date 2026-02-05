@@ -716,8 +716,7 @@ impl Storage for JsonFileStorage {
     }
 
     async fn get_transactions(&self, account_id: &Id) -> Result<Vec<Transaction>> {
-        let path = self.transactions_file(account_id)?;
-        let txns: Vec<Transaction> = self.read_jsonl(&path).await?;
+        let txns = self.get_transactions_raw(account_id).await?;
 
         // Be resilient to duplicate transaction ids in append-only JSONL by returning
         // the last version (last write wins).
@@ -733,6 +732,11 @@ impl Storage for JsonFileStorage {
         }
 
         Ok(deduped)
+    }
+
+    async fn get_transactions_raw(&self, account_id: &Id) -> Result<Vec<Transaction>> {
+        let path = self.transactions_file(account_id)?;
+        self.read_jsonl(&path).await
     }
 
     async fn append_transactions(&self, account_id: &Id, txns: &[Transaction]) -> Result<()> {

@@ -78,10 +78,10 @@ async fn setup_service(
     storage: &JsonFileStorage,
     prompter: FixedAuthPrompter,
     state: Arc<MockState>,
-) -> SyncService<JsonFileStorage> {
+) -> SyncService {
     let market_data = MarketDataService::new(Arc::new(NullMarketDataStore), None);
     let context = SyncContext::new(
-        Arc::new(storage.clone()),
+        Arc::new(storage.clone()) as Arc<dyn Storage>,
         market_data,
         "USD".to_string(),
     )
