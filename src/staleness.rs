@@ -66,7 +66,7 @@ pub fn check_balance_staleness(connection: &Connection, threshold: Duration) -> 
     let now = Utc::now();
     match &connection.state.last_sync {
         Some(last_sync) => {
-            let age = (now - last_sync.at).to_std().unwrap_or(Duration::MAX);
+            let age = (now - last_sync.at).to_std().unwrap_or(Duration::ZERO);
             if age > threshold {
                 StalenessCheck::stale(age, threshold)
             } else {
@@ -82,7 +82,7 @@ pub fn check_price_staleness(price: Option<&PricePoint>, threshold: Duration) ->
     let now = Utc::now();
     match price {
         Some(p) => {
-            let age = (now - p.timestamp).to_std().unwrap_or(Duration::MAX);
+            let age = (now - p.timestamp).to_std().unwrap_or(Duration::ZERO);
             if age > threshold {
                 StalenessCheck::stale(age, threshold)
             } else {
@@ -182,6 +182,20 @@ mod tests {
     }
 
     #[test]
+    fn test_balance_future_timestamp_is_not_stale() {
+        let mut connection = make_connection(Some(0));
+        if let Some(last_sync) = &mut connection.state.last_sync {
+            last_sync.at = Utc::now() + chrono::Duration::hours(1);
+        }
+        let threshold = Duration::from_secs(24 * 60 * 60);
+        let check = check_balance_staleness(&connection, threshold);
+        assert!(
+            !check.is_stale,
+            "future last_sync should be treated as fresh"
+        );
+    }
+
+    #[test]
     fn test_resolve_account_override() {
         let account_config = AccountConfig {
             balance_staleness: Some(Duration::from_secs(7 * 24 * 60 * 60)),
@@ -245,5 +259,17 @@ mod tests {
         let check = check_price_staleness(None, threshold);
         assert!(check.is_stale);
         assert!(check.age.is_none());
+    }
+
+    #[test]
+    fn test_price_future_timestamp_is_not_stale() {
+        let mut price = make_price_point(0);
+        price.timestamp = Utc::now() + chrono::Duration::hours(1);
+        let threshold = Duration::from_secs(24 * 60 * 60);
+        let check = check_price_staleness(Some(&price), threshold);
+        assert!(
+            !check.is_stale,
+            "future price timestamps should be treated as fresh"
+        );
     }
 }
