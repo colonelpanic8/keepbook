@@ -331,16 +331,21 @@ pub async fn remove_connection(
     };
 
     let name = conn.config.name.clone();
-    let account_ids: Vec<String> = conn
-        .state
-        .account_ids
-        .iter()
-        .map(|a| a.to_string())
-        .collect();
+    let mut account_ids: Vec<Id> = conn.state.account_ids.clone();
+    let mut seen_ids: HashSet<Id> = account_ids.iter().cloned().collect();
+
+    // Also include any accounts still linked to this connection ID (handles stale state).
+    let accounts = storage.list_accounts().await?;
+    for account in accounts {
+        if account.connection_id == *conn.id() && !seen_ids.contains(&account.id) {
+            seen_ids.insert(account.id.clone());
+            account_ids.push(account.id);
+        }
+    }
 
     // Delete all accounts belonging to this connection
     let mut deleted_accounts = 0;
-    for account_id in &conn.state.account_ids {
+    for account_id in &account_ids {
         if storage.delete_account(account_id).await? {
             deleted_accounts += 1;
         }
@@ -356,7 +361,7 @@ pub async fn remove_connection(
             "name": name
         },
         "deleted_accounts": deleted_accounts,
-        "account_ids": account_ids
+        "account_ids": account_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>()
     });
 
     maybe_auto_commit(config, &format!("remove connection {id_str}"));
