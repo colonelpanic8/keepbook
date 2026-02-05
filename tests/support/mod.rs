@@ -11,6 +11,7 @@ use keepbook::market_data::{AssetId, FxRateKind, FxRatePoint, MarketDataSource, 
 use keepbook::models::{
     Account, Asset, AssetBalance, Connection, ConnectionConfig, Transaction,
 };
+use keepbook::storage::Storage;
 use keepbook::sync::{SyncResult, SyncedAssetBalance, Synchronizer};
 
 pub fn git_available() -> bool {
@@ -107,7 +108,7 @@ impl Synchronizer for MockSynchronizer {
         &self.name
     }
 
-    async fn sync(&self, connection: &mut Connection) -> Result<SyncResult> {
+    async fn sync(&self, connection: &mut Connection, _storage: &dyn Storage) -> Result<SyncResult> {
         let account = Account::new(self.account_name.clone(), connection.id().clone());
         connection.state.account_ids = vec![account.id.clone()];
 

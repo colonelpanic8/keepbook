@@ -228,7 +228,7 @@ impl CoinbaseSynchronizer {
         Ok(resp.ledger)
     }
 
-    async fn sync_internal<S: Storage>(
+    async fn sync_internal<S: Storage + ?Sized>(
         &self,
         connection: &mut Connection,
         storage: &S,
@@ -384,18 +384,17 @@ impl Synchronizer for CoinbaseSynchronizer {
         "coinbase"
     }
 
-    async fn sync(&self, _connection: &mut Connection) -> Result<SyncResult> {
-        // We need storage but can't access it through the trait
-        // This is a limitation - we'll need to refactor
-        anyhow::bail!(
-            "CoinbaseSynchronizer::sync requires storage access. Use sync_with_storage instead."
-        )
+    async fn sync(&self, connection: &mut Connection, storage: &dyn Storage) -> Result<SyncResult> {
+        self.sync_internal(connection, storage).await
     }
 }
 
 impl CoinbaseSynchronizer {
     /// Create a new synchronizer from connection credentials.
-    pub async fn from_connection<S: Storage>(connection: &Connection, storage: &S) -> Result<Self> {
+    pub async fn from_connection<S: Storage + ?Sized>(
+        connection: &Connection,
+        storage: &S,
+    ) -> Result<Self> {
         let credential_store = storage
             .get_credential_store(connection.id())?
             .context("No credentials configured for this connection")?;
@@ -404,7 +403,7 @@ impl CoinbaseSynchronizer {
     }
 
     /// Sync with storage access for looking up existing accounts.
-    pub async fn sync_with_storage<S: Storage>(
+    pub async fn sync_with_storage<S: Storage + ?Sized>(
         &self,
         connection: &mut Connection,
         storage: &S,

@@ -28,9 +28,11 @@ use crate::staleness::{
     check_balance_staleness, check_price_staleness, log_balance_staleness, log_price_staleness,
     resolve_balance_staleness,
 };
-use crate::storage::{JsonFileStorage, Storage};
-use crate::sync::synchronizers::{CoinbaseSynchronizer, SchwabSynchronizer};
-use crate::sync::{AuthStatus, InteractiveAuth};
+use crate::storage::{find_account, find_connection, JsonFileStorage, Storage};
+use crate::sync::{
+    AuthPrompter, DefaultSynchronizerFactory, GitAutoCommitter, SyncContext, SyncOutcome,
+    SyncService,
+};
 
 /// JSON output for connections
 #[derive(Serialize)]
@@ -295,14 +297,16 @@ pub async fn list_balances(storage: &JsonFileStorage) -> Result<Vec<BalanceOutpu
             .get(conn.id())
             .cloned()
             .unwrap_or_default();
-        let mut account_ids: Vec<Id> = conn
-            .state
-            .account_ids
-            .iter()
-            .filter(|id| valid_ids.contains(*id))
-            .cloned()
-            .collect();
-        let mut seen_ids: HashSet<Id> = account_ids.iter().cloned().collect();
+        let mut account_ids = Vec::new();
+        let mut seen_ids: HashSet<Id> = HashSet::new();
+        for account_id in &conn.state.account_ids {
+            if !valid_ids.contains(account_id) {
+                continue;
+            }
+            if seen_ids.insert(account_id.clone()) {
+                account_ids.push(account_id.clone());
+            }
+        }
         for account_id in valid_ids {
             if seen_ids.insert(account_id.clone()) {
                 account_ids.push(account_id);
@@ -365,7 +369,8 @@ pub async fn remove_connection(
     config: &ResolvedConfig,
     id_str: &str,
 ) -> Result<serde_json::Value> {
-    let id = Id::from_string(id_str);
+    let id = Id::from_string_checked(id_str)
+        .with_context(|| format!("Invalid connection id: {id_str}"))?;
 
     // Get connection info first
     let connection = storage.get_connection(&id).await?;
@@ -388,14 +393,13 @@ pub async fn remove_connection(
         .map(|account| account.id.clone())
         .collect();
 
-    let mut account_ids: Vec<Id> = conn
-        .state
-        .account_ids
-        .iter()
-        .filter(|id| valid_ids.contains(*id))
-        .cloned()
-        .collect();
-    let mut seen_ids: HashSet<Id> = account_ids.iter().cloned().collect();
+    let mut account_ids: Vec<Id> = Vec::new();
+    let mut seen_ids: HashSet<Id> = HashSet::new();
+    for id in &conn.state.account_ids {
+        if valid_ids.contains(id) && seen_ids.insert(id.clone()) {
+            account_ids.push(id.clone());
+        }
+    }
 
     // Also include any accounts still linked to this connection ID (handles stale state).
     for account in accounts {
@@ -457,7 +461,7 @@ pub async fn add_connection(
     let id = connection.state.id.to_string();
 
     // Write the config TOML since save_connection only writes state
-    let config_path = storage.connection_config_path(&connection.state.id);
+    let config_path = storage.connection_config_path(&connection.state.id)?;
     let config_toml = toml::to_string_pretty(&connection.config)?;
     tokio::fs::create_dir_all(config_path.parent().unwrap()).await?;
     tokio::fs::write(&config_path, config_toml).await?;
@@ -486,7 +490,8 @@ pub async fn add_account(
     name: &str,
     tags: Vec<String>,
 ) -> Result<serde_json::Value> {
-    let conn_id = Id::from_string(connection_id);
+    let conn_id = Id::from_string_checked(connection_id)
+        .with_context(|| format!("Invalid connection id: {connection_id}"))?;
 
     // Verify connection exists
     let mut connection = storage
@@ -542,7 +547,8 @@ pub async fn set_balance(
     rust_decimal::Decimal::from_str(amount)
         .with_context(|| format!("Invalid amount: {amount}"))?;
 
-    let id = Id::from_string(account_id);
+    let id = Id::from_string_checked(account_id)
+        .with_context(|| format!("Invalid account id: {account_id}"))?;
 
     // Verify account exists
     storage
@@ -575,134 +581,100 @@ pub async fn set_balance(
     Ok(result)
 }
 
+struct StdinPrompter;
+
+impl AuthPrompter for StdinPrompter {
+    fn confirm_login(&self, prompt: &str) -> Result<bool> {
+        print!("{prompt} [Y/n] ");
+        io::stdout().flush()?;
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        let input = input.trim().to_lowercase();
+        Ok(input.is_empty() || input == "y" || input == "yes")
+    }
+}
+
+async fn build_sync_service(
+    storage: &JsonFileStorage,
+    config: &ResolvedConfig,
+) -> SyncService<JsonFileStorage> {
+    let market_data = build_market_data_service(config).await;
+    let context = SyncContext::new(
+        Arc::new(storage.clone()),
+        market_data,
+        config.reporting_currency.clone(),
+    )
+    .with_auth_prompter(Arc::new(StdinPrompter))
+    .with_auto_committer(Arc::new(GitAutoCommitter::new(
+        config.data_dir.clone(),
+        config.git.auto_commit,
+    )))
+    .with_factory(Arc::new(DefaultSynchronizerFactory::new(Some(
+        config.data_dir.clone(),
+    ))));
+
+    SyncService::new(context)
+}
+
+fn connection_object(connection: &Connection) -> serde_json::Value {
+    serde_json::json!({
+        "id": connection.id().to_string(),
+        "name": connection.config.name
+    })
+}
+
+fn sync_outcome_to_json(outcome: SyncOutcome) -> serde_json::Value {
+    match outcome {
+        SyncOutcome::Synced { report } => {
+            let connection = &report.result.connection;
+            let mut output = serde_json::json!({
+                "success": true,
+                "connection": connection_object(connection),
+                "accounts_synced": report.result.accounts.len(),
+                "prices_stored": report.stored_prices + report.refresh.fetched,
+                "last_sync": report.result.connection.state.last_sync.as_ref().map(|ls| ls.at.to_rfc3339())
+            });
+            if connection.config.synchronizer == "chase" {
+                output["downloaded"] = connection.state.synchronizer_data.clone();
+            }
+            output
+        }
+        SyncOutcome::SkippedManual { connection } => serde_json::json!({
+            "success": true,
+            "skipped": true,
+            "reason": "manual",
+            "connection": connection_object(&connection),
+            "accounts_synced": 0,
+            "prices_stored": 0,
+            "last_sync": None::<String>
+        }),
+        SyncOutcome::SkippedNotStale { connection } => serde_json::json!({
+            "success": true,
+            "skipped": true,
+            "reason": "not stale",
+            "connection": connection.config.name
+        }),
+        SyncOutcome::AuthRequired { connection, error } => serde_json::json!({
+            "success": false,
+            "error": error,
+            "connection": connection.config.name
+        }),
+        SyncOutcome::Failed { connection, error } => serde_json::json!({
+            "success": false,
+            "connection": connection.config.name,
+            "error": error
+        }),
+    }
+}
+
 pub async fn sync_connection(
     storage: &JsonFileStorage,
     config: &ResolvedConfig,
     id_or_name: &str,
 ) -> Result<serde_json::Value> {
-    let mut connection = find_connection(storage, id_or_name)
-        .await?
-        .context(format!("Connection not found: {id_or_name}"))?;
-
-    let conn_name = connection.config.name.clone();
-    let conn_id = connection.id().to_string();
-    let synchronizer_type = connection.config.synchronizer.clone();
-
-    if synchronizer_type == "manual" {
-        let output = serde_json::json!({
-            "success": true,
-            "skipped": true,
-            "reason": "manual",
-            "connection": {
-                "id": conn_id,
-                "name": conn_name
-            },
-            "accounts_synced": 0,
-            "prices_stored": 0,
-            "last_sync": None::<String>
-        });
-
-        return Ok(output);
-    }
-
-    // Handle auth check for Schwab
-    if synchronizer_type == "schwab" {
-        let mut synchronizer = SchwabSynchronizer::from_connection(&connection, storage).await?;
-
-        match synchronizer.check_auth().await? {
-            AuthStatus::Valid => {}
-            AuthStatus::Missing => {
-                // Prompt user
-                print!("No session found. Run login now? [Y/n] ");
-                io::stdout().flush()?;
-                let mut input = String::new();
-                io::stdin().read_line(&mut input)?;
-                let input = input.trim().to_lowercase();
-
-                if input.is_empty() || input == "y" || input == "yes" {
-                    synchronizer.login().await?;
-                } else {
-                    return Ok(serde_json::json!({
-                        "success": false,
-                        "error": "No session available",
-                        "connection": conn_name
-                    }));
-                }
-            }
-            AuthStatus::Expired { reason } => {
-                print!("Session expired ({reason}). Run login now? [Y/n] ");
-                io::stdout().flush()?;
-                let mut input = String::new();
-                io::stdin().read_line(&mut input)?;
-                let input = input.trim().to_lowercase();
-
-                if input.is_empty() || input == "y" || input == "yes" {
-                    synchronizer.login().await?;
-                } else {
-                    return Ok(serde_json::json!({
-                        "success": false,
-                        "error": format!("Session expired: {}", reason),
-                        "connection": conn_name
-                    }));
-                }
-            }
-        }
-
-        // Now sync
-        let result = synchronizer
-            .sync_with_storage(&mut connection, storage)
-            .await?;
-        result.save(storage).await?;
-
-        // Store prices from sync result
-        let prices_stored = store_sync_prices(&result, config).await?;
-
-        let output = serde_json::json!({
-            "success": true,
-            "connection": {
-                "id": conn_id,
-                "name": conn_name
-            },
-            "accounts_synced": result.accounts.len(),
-            "prices_stored": prices_stored,
-            "last_sync": result.connection.state.last_sync.as_ref().map(|ls| ls.at.to_rfc3339())
-        });
-
-        maybe_auto_commit(config, &format!("sync connection {id_or_name}"));
-
-        return Ok(output);
-    }
-
-    // Handle Coinbase
-    if synchronizer_type == "coinbase" {
-        let synchronizer = CoinbaseSynchronizer::from_connection(&connection, storage).await?;
-        let result = synchronizer
-            .sync_with_storage(&mut connection, storage)
-            .await?;
-        result.save(storage).await?;
-
-        // Coinbase doesn't provide prices, so fetch them from configured sources
-        let prices_fetched = fetch_crypto_prices(&result, config).await.unwrap_or(0);
-
-        let output = serde_json::json!({
-            "success": true,
-            "connection": {
-                "id": conn_id,
-                "name": conn_name
-            },
-            "accounts_synced": result.accounts.len(),
-            "prices_stored": prices_fetched,
-            "last_sync": result.connection.state.last_sync.as_ref().map(|ls| ls.at.to_rfc3339())
-        });
-
-        maybe_auto_commit(config, &format!("sync connection {id_or_name}"));
-
-        return Ok(output);
-    }
-
-    Err(anyhow::anyhow!(
-        "Unknown synchronizer type: {synchronizer_type}"
-    ))
+    let service = build_sync_service(storage, config).await;
+    let outcome = service.sync_connection(id_or_name).await?;
+    Ok(sync_outcome_to_json(outcome))
 }
 
 pub async fn sync_connection_if_stale(
@@ -710,90 +682,36 @@ pub async fn sync_connection_if_stale(
     config: &ResolvedConfig,
     id_or_name: &str,
 ) -> Result<serde_json::Value> {
-    let connection = find_connection(storage, id_or_name)
-        .await?
-        .context(format!("Connection not found: {id_or_name}"))?;
-
-    let threshold = resolve_balance_staleness(None, &connection, &config.refresh);
-    let check = check_balance_staleness(&connection, threshold);
-
-    if !check.is_stale {
-        return Ok(serde_json::json!({
-            "success": true,
-            "skipped": true,
-            "reason": "not stale",
-            "connection": connection.config.name
-        }));
-    }
-
-    sync_connection(storage, config, id_or_name).await
+    let service = build_sync_service(storage, config).await;
+    let outcome = service
+        .sync_connection_if_stale(id_or_name, &config.refresh)
+        .await?;
+    Ok(sync_outcome_to_json(outcome))
 }
 
 pub async fn sync_all(storage: &JsonFileStorage, config: &ResolvedConfig) -> Result<serde_json::Value> {
-    let connections = storage.list_connections().await?;
+    let service = build_sync_service(storage, config).await;
+    let outcomes = service.sync_all().await?;
+    let results: Vec<_> = outcomes.into_iter().map(sync_outcome_to_json).collect();
 
-    let mut results = Vec::new();
-    for conn in connections {
-        let id_or_name = conn.id().to_string();
-        match sync_connection(storage, config, &id_or_name).await {
-            Ok(result) => results.push(result),
-            Err(e) => results.push(serde_json::json!({
-                "success": false,
-                "connection": conn.config.name,
-                "error": e.to_string()
-            })),
-        }
-    }
-
-    let output = serde_json::json!({
+    Ok(serde_json::json!({
         "results": results,
         "total": results.len()
-    });
-
-    maybe_auto_commit(config, "sync all");
-
-    Ok(output)
+    }))
 }
 
 pub async fn sync_all_if_stale(
     storage: &JsonFileStorage,
     config: &ResolvedConfig,
 ) -> Result<serde_json::Value> {
-    let connections = storage.list_connections().await?;
-    let mut results = Vec::new();
+    let service = build_sync_service(storage, config).await;
+    let outcomes = service.sync_all_if_stale(&config.refresh).await?;
+    let results: Vec<_> = outcomes.into_iter().map(sync_outcome_to_json).collect();
 
-    for connection in connections {
-        let threshold = resolve_balance_staleness(None, &connection, &config.refresh);
-        let check = check_balance_staleness(&connection, threshold);
-
-        if !check.is_stale {
-            results.push(serde_json::json!({
-                "success": true,
-                "skipped": true,
-                "reason": "not stale",
-                "connection": connection.config.name
-            }));
-            continue;
-        }
-
-        match sync_connection(storage, config, connection.id().as_ref()).await {
-            Ok(result) => results.push(result),
-            Err(e) => results.push(serde_json::json!({
-                "success": false,
-                "connection": connection.config.name,
-                "error": e.to_string()
-            })),
-        }
-    }
-
-    let output = serde_json::json!({
+    Ok(serde_json::json!({
         "results": results,
         "total": results.len()
-    });
-
-    maybe_auto_commit(config, "sync all");
-
-    Ok(output)
+    }))
 }
 
 pub async fn sync_symlinks(
@@ -817,48 +735,30 @@ pub async fn sync_symlinks(
 
 pub async fn schwab_login(
     storage: &JsonFileStorage,
+    config: &ResolvedConfig,
     id_or_name: Option<&str>,
 ) -> Result<serde_json::Value> {
-    // Find Schwab connection(s)
-    let connections = storage.list_connections().await?;
-    let schwab_connections: Vec<_> = connections
-        .into_iter()
-        .filter(|c| c.config.synchronizer == "schwab")
-        .collect();
-
-    let connection = match (id_or_name, schwab_connections.len()) {
-        // Explicit ID/name provided
-        (Some(id_or_name), _) => find_connection(storage, id_or_name)
-            .await?
-            .filter(|c| c.config.synchronizer == "schwab")
-            .context(format!("Schwab connection not found: {id_or_name}"))?,
-        // No ID, exactly one Schwab connection
-        (None, 1) => schwab_connections.into_iter().next().unwrap(),
-        // No ID, no Schwab connections
-        (None, 0) => {
-            return Err(anyhow::anyhow!("No Schwab connections found"));
-        }
-        // No ID, multiple Schwab connections
-        (None, n) => {
-            let names: Vec<_> = schwab_connections.iter().map(|c| &c.config.name).collect();
-            return Err(anyhow::anyhow!(
-                "Multiple Schwab connections found ({n}). Specify one: {names:?}"
-            ));
-        }
-    };
-
-    let conn_name = connection.config.name.clone();
-    let conn_id = connection.id().to_string();
-
-    let mut synchronizer = SchwabSynchronizer::from_connection(&connection, storage).await?;
-    synchronizer.login().await?;
+    let service = build_sync_service(storage, config).await;
+    let connection = service.login("schwab", id_or_name).await?;
 
     Ok(serde_json::json!({
         "success": true,
-        "connection": {
-            "id": conn_id,
-            "name": conn_name
-        },
+        "connection": connection_object(&connection),
+        "message": "Session captured successfully"
+    }))
+}
+
+pub async fn chase_login(
+    storage: &JsonFileStorage,
+    config: &ResolvedConfig,
+    id_or_name: Option<&str>,
+) -> Result<serde_json::Value> {
+    let service = build_sync_service(storage, config).await;
+    let connection = service.login("chase", id_or_name).await?;
+
+    Ok(serde_json::json!({
+        "success": true,
+        "connection": connection_object(&connection),
         "message": "Session captured successfully"
     }))
 }
@@ -921,6 +821,53 @@ pub async fn fetch_crypto_prices(
     }
 
     Ok(count)
+}
+
+async fn build_market_data_service(config: &ResolvedConfig) -> MarketDataService {
+    let store: Arc<dyn MarketDataStore> = Arc::new(JsonlMarketDataStore::new(&config.data_dir));
+    let mut service =
+        MarketDataService::new(store, None).with_quote_staleness(config.refresh.price_staleness);
+
+    let mut registry = PriceSourceRegistry::new(&config.data_dir);
+    if let Err(e) = registry.load() {
+        warn!(error = %e, "failed to load price sources; skipping price fetch");
+        return service;
+    }
+
+    match registry.build_equity_sources().await {
+        Ok(sources) => {
+            if !sources.is_empty() {
+                service = service.with_equity_router(Arc::new(EquityPriceRouter::new(sources)));
+            }
+        }
+        Err(e) => {
+            warn!(error = %e, "failed to build equity price sources; skipping equity fetch");
+        }
+    }
+
+    match registry.build_crypto_sources().await {
+        Ok(sources) => {
+            if !sources.is_empty() {
+                service = service.with_crypto_router(Arc::new(CryptoPriceRouter::new(sources)));
+            }
+        }
+        Err(e) => {
+            warn!(error = %e, "failed to build crypto price sources; skipping crypto fetch");
+        }
+    }
+
+    match registry.build_fx_sources().await {
+        Ok(sources) => {
+            if !sources.is_empty() {
+                service = service.with_fx_router(Arc::new(FxRateRouter::new(sources)));
+            }
+        }
+        Err(e) => {
+            warn!(error = %e, "failed to build fx sources; skipping fx fetch");
+        }
+    }
+
+    service
 }
 
 pub struct PriceHistoryRequest<'a> {
@@ -1330,9 +1277,21 @@ async fn resolve_price_history_scope(
             .await?
             .context(format!("Connection not found: {id_or_name}"))?;
         let mut accounts = Vec::new();
+        let mut seen_ids: HashSet<Id> = HashSet::new();
 
         if !connection.state.account_ids.is_empty() {
             for account_id in &connection.state.account_ids {
+                if !seen_ids.insert(account_id.clone()) {
+                    continue;
+                }
+                if !Id::is_path_safe(account_id.as_str()) {
+                    warn!(
+                        connection_id = %connection.id(),
+                        account_id = %account_id,
+                        "skipping account with unsafe id referenced by connection"
+                    );
+                    continue;
+                }
                 match storage.get_account(account_id).await? {
                     Some(account) => {
                         if account.connection_id != *connection.id() {
@@ -1356,9 +1315,6 @@ async fn resolve_price_history_scope(
                 }
             }
         }
-
-        let mut seen_ids: HashSet<Id> =
-            accounts.iter().map(|account| account.id.clone()).collect();
 
         let extra_accounts: Vec<Account> = storage
             .list_accounts()
@@ -1393,29 +1349,6 @@ async fn resolve_price_history_scope(
     Ok((PriceHistoryScopeOutput::Portfolio, accounts))
 }
 
-async fn find_account(storage: &JsonFileStorage, id_or_name: &str) -> Result<Option<Account>> {
-    let id = Id::from_string(id_or_name);
-    if let Some(account) = storage.get_account(&id).await? {
-        return Ok(Some(account));
-    }
-
-    let accounts = storage.list_accounts().await?;
-    let mut matches: Vec<Account> = accounts
-        .into_iter()
-        .filter(|a| a.name.eq_ignore_ascii_case(id_or_name))
-        .collect();
-
-    if matches.is_empty() {
-        return Ok(None);
-    }
-
-    if matches.len() > 1 {
-        let ids: Vec<String> = matches.iter().map(|a| a.id.to_string()).collect();
-        anyhow::bail!("Multiple accounts named '{id_or_name}'. Use an ID instead: {ids:?}");
-    }
-
-    Ok(matches.pop())
-}
 
 async fn load_price_cache(
     store: &Arc<dyn MarketDataStore>,
@@ -1973,35 +1906,6 @@ pub fn parse_asset(s: &str) -> Result<Asset> {
     Ok(Asset::currency(trimmed))
 }
 
-pub async fn find_connection(
-    storage: &JsonFileStorage,
-    id_or_name: &str,
-) -> Result<Option<Connection>> {
-    // Try by ID first
-    let id = Id::from_string(id_or_name);
-    if let Some(conn) = storage.get_connection(&id).await? {
-        return Ok(Some(conn));
-    }
-
-    // Try by name
-    let connections = storage.list_connections().await?;
-    let mut matches: Vec<Connection> = connections
-        .into_iter()
-        .filter(|conn| conn.config.name.eq_ignore_ascii_case(id_or_name))
-        .collect();
-
-    if matches.is_empty() {
-        return Ok(None);
-    }
-
-    if matches.len() > 1 {
-        let ids: Vec<String> = matches.iter().map(|c| c.id().to_string()).collect();
-        anyhow::bail!("Multiple connections named '{id_or_name}'. Use an ID instead: {ids:?}");
-    }
-
-    Ok(matches.pop())
-}
-
 fn maybe_auto_commit(config: &ResolvedConfig, action: &str) {
     if !config.git.auto_commit {
         return;
@@ -2047,7 +1951,7 @@ mod tests {
         storage: &JsonFileStorage,
         conn: &Connection,
     ) -> anyhow::Result<()> {
-        let config_path = storage.connection_config_path(conn.id());
+        let config_path = storage.connection_config_path(conn.id())?;
         tokio::fs::create_dir_all(config_path.parent().unwrap()).await?;
         let config_toml = toml::to_string_pretty(&conn.config)?;
         tokio::fs::write(&config_path, config_toml).await?;
@@ -2191,50 +2095,6 @@ mod tests {
             resolve_cached_fx(&cache, date, 3).expect("lookback rate");
         assert!(!exact_hit);
         assert_eq!(found.as_of_date, lookback_date);
-    }
-
-    #[tokio::test]
-    async fn find_account_errors_on_duplicate_names() -> anyhow::Result<()> {
-        let dir = TempDir::new()?;
-        let storage = JsonFileStorage::new(dir.path());
-        let conn = Connection::new(connection_config("Test"));
-
-        let account_one = Account::new("Checking", conn.id().clone());
-        let account_two = Account::new("Checking", conn.id().clone());
-        storage.save_account(&account_one).await?;
-        storage.save_account(&account_two).await?;
-
-        let err = find_account(&storage, "Checking")
-            .await
-            .expect_err("expected duplicate name error");
-        assert!(err
-            .to_string()
-            .contains("Multiple accounts named 'Checking'"));
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn find_connection_errors_on_duplicate_names() -> anyhow::Result<()> {
-        let dir = TempDir::new()?;
-        let storage = JsonFileStorage::new(dir.path());
-
-        let conn_one = Connection::new(connection_config("Duplicate"));
-        let conn_two = Connection::new(connection_config("Duplicate"));
-
-        write_connection_config(&storage, &conn_one).await?;
-        write_connection_config(&storage, &conn_two).await?;
-        storage.save_connection(&conn_one).await?;
-        storage.save_connection(&conn_two).await?;
-
-        let err = find_connection(&storage, "Duplicate")
-            .await
-            .expect_err("expected duplicate connection name error");
-        assert!(err
-            .to_string()
-            .contains("Multiple connections named 'Duplicate'"));
-
-        Ok(())
     }
 
     #[tokio::test]

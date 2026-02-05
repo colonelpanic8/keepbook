@@ -42,13 +42,19 @@ pub fn parse_duration(s: &str) -> Result<Duration> {
 
     let num: u64 = num.parse().with_context(|| "Invalid number in duration")?;
 
-    Ok(match unit {
-        "d" => Duration::from_secs(num * 24 * 60 * 60),
-        "h" => Duration::from_secs(num * 60 * 60),
-        "m" => Duration::from_secs(num * 60),
-        "s" => Duration::from_secs(num),
+    let secs = match unit {
+        "d" => num
+            .checked_mul(24 * 60 * 60)
+            .context("Duration is too large")?,
+        "h" => num
+            .checked_mul(60 * 60)
+            .context("Duration is too large")?,
+        "m" => num.checked_mul(60).context("Duration is too large")?,
+        "s" => num,
         _ => unreachable!(),
-    })
+    };
+
+    Ok(Duration::from_secs(secs))
 }
 
 /// Format a duration to a human-readable string.
@@ -220,6 +226,15 @@ mod tests {
         assert!(parse_duration("abcd").is_err());
         assert!(parse_duration("-1d").is_err());
         assert!(parse_duration("1.5h").is_err());
+    }
+
+    #[test]
+    fn test_overflow_rejected() {
+        let max = u64::MAX.to_string();
+        assert!(parse_duration(&format!("{max}d")).is_err());
+        assert!(parse_duration(&format!("{max}h")).is_err());
+        assert!(parse_duration(&format!("{max}m")).is_err());
+        assert!(parse_duration(&format!("{max}s")).is_ok());
     }
 
     #[test]

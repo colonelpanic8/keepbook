@@ -19,6 +19,14 @@ pub struct SyncOrchestrator<S: Storage> {
     reporting_currency: String,
 }
 
+/// Result of a sync operation that also stores and refreshes prices.
+#[derive(Debug)]
+pub struct SyncWithPricesResult {
+    pub result: SyncResult,
+    pub stored_prices: usize,
+    pub refresh: PriceRefreshResult,
+}
+
 /// Result of a price refresh operation.
 #[derive(Debug, Default)]
 pub struct PriceRefreshResult {
@@ -159,18 +167,22 @@ impl<S: Storage + Send + Sync> SyncOrchestrator<S> {
         synchronizer: &dyn Synchronizer,
         connection: &mut Connection,
         force_refresh: bool,
-    ) -> Result<SyncResult> {
+    ) -> Result<SyncWithPricesResult> {
         // 1. Run the sync
-        let result = synchronizer.sync(connection).await?;
+        let result = synchronizer
+            .sync(connection, self.storage.as_ref())
+            .await?;
 
         // 2. Save sync results (this stores balances)
         result.save(self.storage.as_ref()).await?;
 
         // 3. Store any prices the synchronizer provided
+        let mut stored_prices = 0;
         for (_, synced_balances) in &result.balances {
             for sb in synced_balances {
                 if let Some(price) = &sb.price {
                     self.market_data.store_price(price).await?;
+                    stored_prices += 1;
                 }
             }
         }
@@ -184,8 +196,12 @@ impl<S: Storage + Send + Sync> SyncOrchestrator<S> {
 
         // 5. Fetch missing prices
         let date = chrono::Utc::now().date_naive();
-        self.ensure_prices(&assets, date, force_refresh).await?;
+        let refresh = self.ensure_prices(&assets, date, force_refresh).await?;
 
-        Ok(result)
+        Ok(SyncWithPricesResult {
+            result,
+            stored_prices,
+            refresh,
+        })
     }
 }

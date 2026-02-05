@@ -1,9 +1,15 @@
+mod factory;
 mod orchestrator;
+mod service;
 pub mod schwab;
 pub mod synchronizers;
 
-pub use orchestrator::{PriceRefreshResult, SyncOrchestrator};
-pub use synchronizers::create_synchronizer;
+pub use factory::{create_synchronizer, DefaultSynchronizerFactory, SynchronizerFactory};
+pub use orchestrator::{PriceRefreshResult, SyncOrchestrator, SyncWithPricesResult};
+pub use service::{
+    AuthPrompter, AutoCommitter, FixedAuthPrompter, GitAutoCommitter, NoopAutoCommitter,
+    SyncContext, SyncOutcome, SyncService,
+};
 
 use crate::market_data::PricePoint;
 use crate::models::{Account, AssetBalance, BalanceSnapshot, Connection, Id, Transaction};
@@ -32,6 +38,7 @@ impl SyncedAssetBalance {
 }
 
 /// Result of a sync operation.
+#[derive(Debug)]
 pub struct SyncResult {
     pub connection: Connection,
     pub accounts: Vec<Account>,
@@ -80,8 +87,14 @@ pub trait Synchronizer: Send + Sync {
     /// Human-readable name for this synchronizer
     fn name(&self) -> &str;
 
-    /// Perform a full sync, returning all accounts, balances, and transactions
-    async fn sync(&self, connection: &mut Connection) -> Result<SyncResult>;
+    /// Perform a full sync, returning all accounts, balances, and transactions.
+    async fn sync(&self, connection: &mut Connection, storage: &dyn Storage)
+        -> Result<SyncResult>;
+
+    /// Return interactive auth support if this synchronizer needs it.
+    fn interactive(&mut self) -> Option<&mut dyn InteractiveAuth> {
+        None
+    }
 }
 
 /// Authentication status for synchronizers requiring interactive auth.

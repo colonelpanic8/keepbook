@@ -19,7 +19,7 @@ async fn test_mock_sync_auto_commit() -> Result<()> {
     let storage = JsonFileStorage::new(dir.path());
     let mut connection = mock_connection("Mock Bank");
     let synchronizer = MockSynchronizer::new();
-    let result = synchronizer.sync(&mut connection).await?;
+    let result = synchronizer.sync(&mut connection, &storage).await?;
     result.save(&storage).await?;
 
     let outcome = try_auto_commit(dir.path(), "sync mock")?;

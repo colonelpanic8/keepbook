@@ -29,6 +29,7 @@ use crate::models::{
 ///       balances.jsonl
 ///       transactions.jsonl
 /// ```
+#[derive(Clone)]
 pub struct JsonFileStorage {
     base_path: PathBuf,
 }
@@ -52,24 +53,34 @@ impl JsonFileStorage {
         self.base_path.join("accounts")
     }
 
-    fn connection_dir(&self, id: &Id) -> PathBuf {
-        self.connections_dir().join(id.to_string())
+    fn ensure_id_path_safe(&self, id: &Id) -> Result<()> {
+        let value = id.as_str();
+        if Id::is_path_safe(value) {
+            Ok(())
+        } else {
+            anyhow::bail!("Invalid id path segment: {value}");
+        }
     }
 
-    fn connection_accounts_dir(&self, id: &Id) -> PathBuf {
-        self.connection_dir(id).join("accounts")
+    fn connection_dir(&self, id: &Id) -> Result<PathBuf> {
+        self.ensure_id_path_safe(id)?;
+        Ok(self.connections_dir().join(id.to_string()))
     }
 
-    fn connection_config_file(&self, id: &Id) -> PathBuf {
-        self.connection_dir(id).join("connection.toml")
+    fn connection_accounts_dir(&self, id: &Id) -> Result<PathBuf> {
+        Ok(self.connection_dir(id)?.join("accounts"))
     }
 
-    fn connection_state_file(&self, id: &Id) -> PathBuf {
-        self.connection_dir(id).join("connection.json")
+    fn connection_config_file(&self, id: &Id) -> Result<PathBuf> {
+        Ok(self.connection_dir(id)?.join("connection.toml"))
+    }
+
+    fn connection_state_file(&self, id: &Id) -> Result<PathBuf> {
+        Ok(self.connection_dir(id)?.join("connection.json"))
     }
 
     /// Get the path to a connection's config file.
-    pub fn connection_config_path(&self, id: &Id) -> PathBuf {
+    pub fn connection_config_path(&self, id: &Id) -> Result<PathBuf> {
         self.connection_config_file(id)
     }
 
@@ -82,7 +93,7 @@ impl JsonFileStorage {
         connection_id: &Id,
     ) -> Result<Option<Box<dyn CredentialStore>>> {
         // First try to load from connection config
-        let config_path = self.connection_config_file(connection_id);
+        let config_path = self.connection_config_file(connection_id)?;
         if config_path.exists() {
             let content = std::fs::read_to_string(&config_path)
                 .with_context(|| format!("Failed to read {}", config_path.display()))?;
@@ -94,7 +105,7 @@ impl JsonFileStorage {
         }
 
         // Fallback to separate credentials.toml (backwards compatibility)
-        let creds_path = self.connection_dir(connection_id).join("credentials.toml");
+        let creds_path = self.connection_dir(connection_id)?.join("credentials.toml");
         if creds_path.exists() {
             let config = crate::credentials::CredentialConfig::load(&creds_path)?;
             return Ok(Some(config.build()));
@@ -103,21 +114,22 @@ impl JsonFileStorage {
         Ok(None)
     }
 
-    fn account_dir(&self, id: &Id) -> PathBuf {
-        self.accounts_dir().join(id.to_string())
+    fn account_dir(&self, id: &Id) -> Result<PathBuf> {
+        self.ensure_id_path_safe(id)?;
+        Ok(self.accounts_dir().join(id.to_string()))
     }
 
-    fn account_file(&self, id: &Id) -> PathBuf {
-        self.account_dir(id).join("account.json")
+    fn account_file(&self, id: &Id) -> Result<PathBuf> {
+        Ok(self.account_dir(id)?.join("account.json"))
     }
 
-    fn account_config_file(&self, id: &Id) -> PathBuf {
-        self.account_dir(id).join("account_config.toml")
+    fn account_config_file(&self, id: &Id) -> Result<PathBuf> {
+        Ok(self.account_dir(id)?.join("account_config.toml"))
     }
 
     /// Load optional account config.
     fn load_account_config(&self, id: &Id) -> Result<Option<AccountConfig>> {
-        let path = self.account_config_file(id);
+        let path = self.account_config_file(id)?;
         if !path.exists() {
             return Ok(None);
         }
@@ -128,12 +140,12 @@ impl JsonFileStorage {
         Ok(Some(config))
     }
 
-    fn balances_file(&self, account_id: &Id) -> PathBuf {
-        self.account_dir(account_id).join("balances.jsonl")
+    fn balances_file(&self, account_id: &Id) -> Result<PathBuf> {
+        Ok(self.account_dir(account_id)?.join("balances.jsonl"))
     }
 
-    fn transactions_file(&self, account_id: &Id) -> PathBuf {
-        self.account_dir(account_id).join("transactions.jsonl")
+    fn transactions_file(&self, account_id: &Id) -> Result<PathBuf> {
+        Ok(self.account_dir(account_id)?.join("transactions.jsonl"))
     }
 
     /// Sanitize a name for use as a symlink filename.
@@ -144,7 +156,7 @@ impl JsonFileStorage {
             .chars()
             .map(|c| if c == '/' || c == '\\' || c == '\0' { '-' } else { c })
             .collect();
-        if sanitized.is_empty() {
+        if sanitized.is_empty() || sanitized == "." || sanitized == ".." {
             None
         } else {
             Some(sanitized)
@@ -271,8 +283,8 @@ impl JsonFileStorage {
 
     /// Load a connection by reading both config (TOML) and state (JSON).
     async fn load_connection(&self, id: &Id) -> Result<Option<Connection>> {
-        let config_path = self.connection_config_file(id);
-        let state_path = self.connection_state_file(id);
+        let config_path = self.connection_config_file(id)?;
+        let state_path = self.connection_state_file(id)?;
 
         // Config is required
         let config: ConnectionConfig = match self.read_toml_sync(&config_path)? {
@@ -281,7 +293,7 @@ impl JsonFileStorage {
         };
 
         // State may not exist yet (new connection)
-        let state: ConnectionState = match self.read_json(&state_path).await? {
+        let mut state: ConnectionState = match self.read_json(&state_path).await? {
             Some(s) => s,
             None => {
                 // Create default state with the directory name as ID
@@ -291,6 +303,15 @@ impl JsonFileStorage {
                 }
             }
         };
+
+        if state.id != *id || !Id::is_path_safe(state.id.as_str()) {
+            warn!(
+                connection_id = %id,
+                state_id = %state.id,
+                "connection state id does not match directory id; using directory id"
+            );
+            state.id = id.clone();
+        }
 
         Ok(Some(Connection { config, state }))
     }
@@ -302,6 +323,14 @@ impl JsonFileStorage {
         let mut seen_ids: HashSet<Id> = HashSet::new();
 
         for account_id in &conn.state.account_ids {
+            if !Id::is_path_safe(account_id.as_str()) {
+                warn!(
+                    connection_id = %conn.id(),
+                    account_id = %account_id,
+                    "skipping account with unsafe id referenced by connection"
+                );
+                continue;
+            }
             match self.get_account(account_id).await? {
                 Some(account) => {
                     if account.connection_id != *conn.id() {
@@ -313,8 +342,9 @@ impl JsonFileStorage {
                         );
                         continue;
                     }
-                    seen_ids.insert(account.id.clone());
-                    accounts.push(account);
+                    if seen_ids.insert(account.id.clone()) {
+                        accounts.push(account);
+                    }
                 }
                 None => {
                     warn!(
@@ -346,7 +376,7 @@ impl JsonFileStorage {
     /// Creates symlinks like:
     ///   connections/{conn-id}/accounts/{account-name} -> ../../../accounts/{account-id}
     async fn update_account_symlinks(&self, conn: &Connection) -> Result<usize> {
-        let accounts_dir = self.connection_accounts_dir(conn.id());
+        let accounts_dir = self.connection_accounts_dir(conn.id())?;
 
         // Create or ensure the accounts directory exists
         fs::create_dir_all(&accounts_dir)
@@ -391,6 +421,14 @@ impl JsonFileStorage {
 
             let link_path = accounts_dir.join(&sanitized);
             // Relative path: ../../../accounts/{account-id}
+            if !Id::is_path_safe(account.id.as_str()) {
+                warn!(
+                    "Skipped account with unsafe id \"{}\" (connection: {})",
+                    account.id,
+                    conn.id()
+                );
+                continue;
+            }
             let target = PathBuf::from("../../../accounts").join(account.id.to_string());
 
             #[cfg(unix)]
@@ -468,6 +506,14 @@ impl JsonFileStorage {
                 continue;
             }
 
+            if !Id::is_path_safe(conn.id().as_str()) {
+                warnings.push(format!(
+                    "Skipped connection with unsafe id \"{}\"",
+                    conn.id()
+                ));
+                continue;
+            }
+
             let link_path = by_name_dir.join(&sanitized);
             let target = PathBuf::from("..").join(conn.id().to_string());
 
@@ -540,8 +586,8 @@ impl Storage for JsonFileStorage {
 
     async fn save_connection(&self, conn: &Connection) -> Result<()> {
         // Only save state - config is human-managed
-        self.write_json(&self.connection_state_file(conn.id()), &conn.state)
-            .await?;
+        let state_path = self.connection_state_file(conn.id())?;
+        self.write_json(&state_path, &conn.state).await?;
         let _ = self.update_account_symlinks(conn).await?;
         // Rebuild connection by-name symlinks (handles creates and name changes)
         let _ = self.rebuild_connection_symlinks().await;
@@ -549,7 +595,7 @@ impl Storage for JsonFileStorage {
     }
 
     async fn delete_connection(&self, id: &Id) -> Result<bool> {
-        let dir = self.connection_dir(id);
+        let dir = self.connection_dir(id)?;
         if dir.exists() {
             fs::remove_dir_all(&dir).await.with_context(|| {
                 format!("Failed to delete connection directory: {}", dir.display())
@@ -576,16 +622,31 @@ impl Storage for JsonFileStorage {
     }
 
     async fn get_account(&self, id: &Id) -> Result<Option<Account>> {
-        self.read_json(&self.account_file(id)).await
+        let path = self.account_file(id)?;
+        let mut account: Account = match self.read_json(&path).await? {
+            Some(account) => account,
+            None => return Ok(None),
+        };
+
+        if account.id != *id || !Id::is_path_safe(account.id.as_str()) {
+            warn!(
+                account_id = %id,
+                stored_id = %account.id,
+                "account id does not match directory id; using directory id"
+            );
+            account.id = id.clone();
+        }
+
+        Ok(Some(account))
     }
 
     async fn save_account(&self, account: &Account) -> Result<()> {
-        self.write_json(&self.account_file(&account.id), account)
-            .await
+        let path = self.account_file(&account.id)?;
+        self.write_json(&path, account).await
     }
 
     async fn delete_account(&self, id: &Id) -> Result<bool> {
-        let dir = self.account_dir(id);
+        let dir = self.account_dir(id)?;
         if dir.exists() {
             fs::remove_dir_all(&dir).await.with_context(|| {
                 format!("Failed to delete account directory: {}", dir.display())
@@ -597,7 +658,8 @@ impl Storage for JsonFileStorage {
     }
 
     async fn get_balance_snapshots(&self, account_id: &Id) -> Result<Vec<BalanceSnapshot>> {
-        self.read_jsonl(&self.balances_file(account_id)).await
+        let path = self.balances_file(account_id)?;
+        self.read_jsonl(&path).await
     }
 
     async fn append_balance_snapshot(
@@ -605,17 +667,18 @@ impl Storage for JsonFileStorage {
         account_id: &Id,
         snapshot: &BalanceSnapshot,
     ) -> Result<()> {
-        self.append_jsonl(&self.balances_file(account_id), &[snapshot])
-            .await
+        let path = self.balances_file(account_id)?;
+        self.append_jsonl(&path, &[snapshot]).await
     }
 
     async fn get_transactions(&self, account_id: &Id) -> Result<Vec<Transaction>> {
-        self.read_jsonl(&self.transactions_file(account_id)).await
+        let path = self.transactions_file(account_id)?;
+        self.read_jsonl(&path).await
     }
 
     async fn append_transactions(&self, account_id: &Id, txns: &[Transaction]) -> Result<()> {
-        self.append_jsonl(&self.transactions_file(account_id), txns)
-            .await
+        let path = self.transactions_file(account_id)?;
+        self.append_jsonl(&path, txns).await
     }
 
     async fn get_latest_balance_snapshot(
@@ -677,5 +740,7 @@ mod tests {
             Some("foo-bar".to_string())
         );
         assert_eq!(JsonFileStorage::sanitize_name("   "), None);
+        assert_eq!(JsonFileStorage::sanitize_name("."), None);
+        assert_eq!(JsonFileStorage::sanitize_name(".."), None);
     }
 }

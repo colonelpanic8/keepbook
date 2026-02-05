@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
-use keepbook::credentials::{SessionCache, SessionData};
 use chrono::Duration;
+use keepbook::credentials::{SessionCache, SessionData};
+use keepbook::market_data::PriceKind;
 use keepbook::models::{Account, Asset, Connection, ConnectionConfig, Id};
 use keepbook::storage::{JsonFileStorage, Storage};
 use keepbook::sync::synchronizers::SchwabSynchronizer;
@@ -113,7 +114,7 @@ async fn schwab_sync_uses_cached_session_and_base_url_override() -> Result<()> {
     assert_eq!(account.name, "Schwab Brokerage");
 
     let (_, balances) = &result.balances[0];
-    let has_equity = balances.iter().any(|b| {
+    let aapl_balance = balances.iter().find(|b| {
         matches!(
             b.asset_balance.asset,
             Asset::Equity { ref ticker, .. } if ticker == "AAPL"
@@ -132,7 +133,16 @@ async fn schwab_sync_uses_cached_session_and_base_url_override() -> Result<()> {
         )
     });
 
-    assert!(has_equity, "expected equity position balance");
+    let aapl_balance = aapl_balance.expect("expected equity position balance");
+    let price = aapl_balance
+        .price
+        .as_ref()
+        .expect("expected price for equity position");
+    assert_eq!(price.quote_currency, "USD");
+    assert_eq!(price.source, "schwab");
+    assert_eq!(price.kind, PriceKind::Close);
+    let price_value: f64 = price.price.parse().expect("price should parse");
+    assert_eq!(price_value, 150.0);
     assert!(has_cash, "expected cash balance from account balances");
     assert!(!has_cash_position, "cash position should be skipped");
 

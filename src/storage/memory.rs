@@ -149,7 +149,7 @@ impl Storage for MemoryStorage {
         let balances = self.balances.lock().await;
 
         if connections.get(connection_id).is_none() {
-            return Ok(Vec::new());
+            anyhow::bail!("Connection not found");
         }
 
         let account_ids: Vec<Id> = accounts
@@ -190,6 +190,25 @@ impl Storage for MemoryStorage {
         txns.entry(account_id.clone())
             .or_default()
             .extend(new_txns.iter().cloned());
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn memory_storage_errors_on_missing_connection_balances() -> Result<()> {
+        let storage = MemoryStorage::new();
+        let missing = Id::new();
+
+        let err = storage
+            .get_latest_balances_for_connection(&missing)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("Connection not found"));
+
         Ok(())
     }
 }

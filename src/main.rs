@@ -123,6 +123,9 @@ enum AuthCommand {
     /// Schwab authentication commands
     #[command(subcommand)]
     Schwab(SchwabAuthCommand),
+    /// Chase authentication commands
+    #[command(subcommand)]
+    Chase(ChaseAuthCommand),
 }
 
 #[derive(Subcommand)]
@@ -130,6 +133,15 @@ enum SchwabAuthCommand {
     /// Login via browser to capture session
     Login {
         /// Connection ID or name (optional if only one Schwab connection)
+        id_or_name: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ChaseAuthCommand {
+    /// Login via browser to capture session
+    Login {
+        /// Connection ID or name (optional if only one Chase connection)
         id_or_name: Option<String>,
     },
 }
@@ -359,7 +371,13 @@ async fn main() -> Result<()> {
         Some(Command::Auth(auth_cmd)) => match auth_cmd {
             AuthCommand::Schwab(schwab_cmd) => match schwab_cmd {
                 SchwabAuthCommand::Login { id_or_name } => {
-                    let result = app::schwab_login(&storage, id_or_name.as_deref()).await?;
+                    let result = app::schwab_login(&storage, &config, id_or_name.as_deref()).await?;
+                    println!("{}", serde_json::to_string_pretty(&result)?);
+                }
+            },
+            AuthCommand::Chase(chase_cmd) => match chase_cmd {
+                ChaseAuthCommand::Login { id_or_name } => {
+                    let result = app::chase_login(&storage, &config, id_or_name.as_deref()).await?;
                     println!("{}", serde_json::to_string_pretty(&result)?);
                 }
             },

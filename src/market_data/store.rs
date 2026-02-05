@@ -141,16 +141,20 @@ impl MarketDataStore for MemoryMarketDataStore {
         kind: FxRateKind,
     ) -> Result<Option<FxRatePoint>> {
         let fx_rates = self.fx_rates.lock().await;
+        let base = base.trim().to_uppercase();
+        let quote = quote.trim().to_uppercase();
         Ok(fx_rates
-            .get(&(base.to_string(), quote.to_string(), date, kind))
+            .get(&(base, quote, date, kind))
             .cloned())
     }
 
     async fn get_all_fx_rates(&self, base: &str, quote: &str) -> Result<Vec<FxRatePoint>> {
         let fx_rates = self.fx_rates.lock().await;
+        let base = base.trim().to_uppercase();
+        let quote = quote.trim().to_uppercase();
         Ok(fx_rates
             .iter()
-            .filter(|((b, q, _, _), _)| b == base && q == quote)
+            .filter(|((b, q, _, _), _)| b == &base && q == &quote)
             .map(|(_, r)| r.clone())
             .collect())
     }
@@ -161,14 +165,19 @@ impl MarketDataStore for MemoryMarketDataStore {
         }
         let mut store = self.fx_rates.lock().await;
         for rate in rates {
+            let normalized = FxRatePoint {
+                base: rate.base.trim().to_uppercase(),
+                quote: rate.quote.trim().to_uppercase(),
+                ..rate.clone()
+            };
             store.insert(
                 (
-                    rate.base.clone(),
-                    rate.quote.clone(),
-                    rate.as_of_date,
-                    rate.kind,
+                    normalized.base.clone(),
+                    normalized.quote.clone(),
+                    normalized.as_of_date,
+                    normalized.kind,
                 ),
-                rate.clone(),
+                normalized,
             );
         }
         Ok(())

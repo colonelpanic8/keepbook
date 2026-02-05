@@ -2,6 +2,14 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use uuid::Uuid;
 
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[error(
+    "Invalid id {value:?}: ids must be a single path segment (no '/', '\\\\', NUL, '.' or '..')"
+)]
+pub struct IdError {
+    value: String,
+}
+
 /// Opaque identifier for stored entities.
 ///
 /// For file-backed storage, ids should be safe path segments (no slashes).
@@ -29,6 +37,16 @@ impl Id {
         Self(value.into())
     }
 
+    /// Create an ID from an arbitrary string, validating that it is a safe path segment.
+    pub fn from_string_checked(value: impl Into<String>) -> Result<Self, IdError> {
+        let value = value.into();
+        if Self::is_path_safe(&value) {
+            Ok(Self(value))
+        } else {
+            Err(IdError { value })
+        }
+    }
+
     /// Create a deterministic, filesystem-safe ID from an external identifier.
     /// Uses UUID5 to hash the input, ensuring the same input always produces the same ID.
     /// This is useful for external IDs that may contain special characters (like base64).
@@ -38,6 +56,14 @@ impl Id {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    /// Returns true if the string is safe to use as a single path segment.
+    pub fn is_path_safe(value: &str) -> bool {
+        if value.is_empty() || value == "." || value == ".." {
+            return false;
+        }
+        !value.chars().any(|c| c == '/' || c == '\\' || c == '\0')
     }
 }
 
@@ -93,5 +119,15 @@ mod tests {
     fn test_from_string_keeps_value() {
         let id = Id::from_string("account-id-123");
         assert_eq!(id.as_str(), "account-id-123");
+    }
+
+    #[test]
+    fn test_from_string_checked_rejects_unsafe_values() {
+        assert!(Id::from_string_checked("../escape").is_err());
+        assert!(Id::from_string_checked("..").is_err());
+        assert!(Id::from_string_checked(".").is_err());
+        assert!(Id::from_string_checked("foo/bar").is_err());
+        assert!(Id::from_string_checked("foo\\bar").is_err());
+        assert!(Id::from_string_checked("bad\0id").is_err());
     }
 }

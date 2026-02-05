@@ -36,7 +36,7 @@ pub struct SchwabSynchronizer {
 
 impl SchwabSynchronizer {
     /// Create a new Schwab synchronizer for a connection.
-    pub async fn from_connection<S: Storage>(
+    pub async fn from_connection<S: Storage + ?Sized>(
         connection: &Connection,
         _storage: &S,
     ) -> Result<Self> {
@@ -64,7 +64,7 @@ impl SchwabSynchronizer {
         self.session_cache.get(&self.session_key())
     }
 
-    async fn sync_internal<S: Storage>(
+    async fn sync_internal<S: Storage + ?Sized>(
         &self,
         connection: &mut Connection,
         storage: &S,
@@ -202,16 +202,18 @@ impl Synchronizer for SchwabSynchronizer {
         "schwab"
     }
 
-    async fn sync(&self, _connection: &mut Connection) -> Result<SyncResult> {
-        anyhow::bail!(
-            "SchwabSynchronizer::sync requires storage access. Use sync_with_storage instead."
-        )
+    async fn sync(&self, connection: &mut Connection, storage: &dyn Storage) -> Result<SyncResult> {
+        self.sync_internal(connection, storage).await
+    }
+
+    fn interactive(&mut self) -> Option<&mut dyn InteractiveAuth> {
+        Some(self)
     }
 }
 
 impl SchwabSynchronizer {
     /// Sync with storage access for looking up existing accounts.
-    pub async fn sync_with_storage<S: Storage>(
+    pub async fn sync_with_storage<S: Storage + ?Sized>(
         &self,
         connection: &mut Connection,
         storage: &S,
