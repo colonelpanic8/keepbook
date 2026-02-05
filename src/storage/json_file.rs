@@ -295,11 +295,48 @@ impl JsonFileStorage {
         Ok(Some(Connection { config, state }))
     }
 
+    /// Collect accounts for a connection, including any that are linked by connection_id
+    /// even if the connection state is missing them.
+    async fn collect_accounts_for_connection(&self, conn: &Connection) -> Result<Vec<Account>> {
+        let mut accounts = Vec::new();
+        let mut seen_ids: HashSet<Id> = HashSet::new();
+
+        for account_id in &conn.state.account_ids {
+            match self.get_account(account_id).await? {
+                Some(account) => {
+                    seen_ids.insert(account.id.clone());
+                    accounts.push(account);
+                }
+                None => {
+                    warn!(
+                        connection_id = %conn.id(),
+                        account_id = %account_id,
+                        "account referenced by connection not found"
+                    );
+                }
+            }
+        }
+
+        let extra_accounts: Vec<Account> = self
+            .list_accounts()
+            .await?
+            .into_iter()
+            .filter(|account| account.connection_id == *conn.id() && !seen_ids.contains(&account.id))
+            .collect();
+
+        for account in extra_accounts {
+            seen_ids.insert(account.id.clone());
+            accounts.push(account);
+        }
+
+        Ok(accounts)
+    }
+
     /// Update symlinks from connection's accounts/ dir to the actual account directories.
     ///
     /// Creates symlinks like:
     ///   connections/{conn-id}/accounts/{account-name} -> ../../../accounts/{account-id}
-    async fn update_account_symlinks(&self, conn: &Connection) -> Result<()> {
+    async fn update_account_symlinks(&self, conn: &Connection) -> Result<usize> {
         let accounts_dir = self.connection_accounts_dir(conn.id());
 
         // Create or ensure the accounts directory exists
@@ -319,18 +356,15 @@ impl JsonFileStorage {
         }
 
         // Load accounts and create symlinks by name
+        let accounts = self.collect_accounts_for_connection(conn).await?;
         let mut seen_names: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut created = 0usize;
 
-        for account_id in &conn.state.account_ids {
-            let account = match self.get_account(account_id).await? {
-                Some(a) => a,
-                None => continue,
-            };
-
+        for account in accounts {
             let Some(sanitized) = Self::sanitize_name(&account.name) else {
                 warn!(
                     "Skipped account with empty name (id: {}, connection: {})",
-                    account_id,
+                    account.id,
                     conn.id()
                 );
                 continue;
@@ -340,7 +374,7 @@ impl JsonFileStorage {
                 warn!(
                     "Skipped duplicate account name \"{}\" (id: {}, connection: {})",
                     sanitized,
-                    account_id,
+                    account.id,
                     conn.id()
                 );
                 continue;
@@ -348,7 +382,7 @@ impl JsonFileStorage {
 
             let link_path = accounts_dir.join(&sanitized);
             // Relative path: ../../../accounts/{account-id}
-            let target = PathBuf::from("../../../accounts").join(account_id.to_string());
+            let target = PathBuf::from("../../../accounts").join(account.id.to_string());
 
             #[cfg(unix)]
             {
@@ -364,9 +398,10 @@ impl JsonFileStorage {
             }
 
             seen_names.insert(sanitized);
+            created += 1;
         }
 
-        Ok(())
+        Ok(created)
     }
 
     /// Rebuild all symlinks in connections/by-name/ directory.
@@ -452,15 +487,14 @@ impl JsonFileStorage {
         let mut account_created = 0;
 
         for conn in connections {
-            if let Err(e) = self.update_account_symlinks(&conn).await {
-                warnings.push(format!(
+            match self.update_account_symlinks(&conn).await {
+                Ok(created) => account_created += created,
+                Err(e) => warnings.push(format!(
                     "Failed to update account symlinks for connection {}: {}",
                     conn.id(),
                     e
-                ));
-                continue;
+                )),
             }
-            account_created += conn.state.account_ids.len();
         }
 
         Ok((conn_created, account_created, warnings))
@@ -499,7 +533,7 @@ impl Storage for JsonFileStorage {
         // Only save state - config is human-managed
         self.write_json(&self.connection_state_file(conn.id()), &conn.state)
             .await?;
-        self.update_account_symlinks(conn).await?;
+        let _ = self.update_account_symlinks(conn).await?;
         // Rebuild connection by-name symlinks (handles creates and name changes)
         let _ = self.rebuild_connection_symlinks().await;
         Ok(())
@@ -592,26 +626,12 @@ impl Storage for JsonFileStorage {
             .await?
             .ok_or_else(|| anyhow::anyhow!("Connection not found"))?;
 
+        let accounts = self.collect_accounts_for_connection(&connection).await?;
         let mut results = Vec::new();
-        let mut account_ids: Vec<Id> = connection.state.account_ids.clone();
-        let mut seen_ids: HashSet<Id> = account_ids.iter().cloned().collect();
 
-        let extra_accounts: Vec<Account> = self
-            .list_accounts()
-            .await?
-            .into_iter()
-            .filter(|account| account.connection_id == *connection.id())
-            .collect();
-
-        for account in extra_accounts {
-            if seen_ids.insert(account.id.clone()) {
-                account_ids.push(account.id);
-            }
-        }
-
-        for account_id in &account_ids {
-            if let Some(snapshot) = self.get_latest_balance_snapshot(account_id).await? {
-                results.push((account_id.clone(), snapshot));
+        for account in accounts {
+            if let Some(snapshot) = self.get_latest_balance_snapshot(&account.id).await? {
+                results.push((account.id.clone(), snapshot));
             }
         }
 
