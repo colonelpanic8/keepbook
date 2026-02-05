@@ -1561,8 +1561,9 @@ pub async fn portfolio_snapshot(
 
     // Sync stale connections
     if !connections_to_sync.is_empty() {
+        let sync_service = build_sync_service(storage, config).await;
         for connection in &connections_to_sync {
-            let _ = sync_connection(storage, config, connection.id().as_ref()).await;
+            let _ = sync_service.sync_connection(connection.id().as_ref()).await;
         }
     }
 
