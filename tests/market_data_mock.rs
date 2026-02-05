@@ -136,3 +136,30 @@ async fn test_fx_close_uses_lookback_from_store() -> Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn test_price_latest_uses_future_cached_quote() -> Result<()> {
+    let store = Arc::new(MemoryMarketDataStore::new());
+    let asset = Asset::crypto("BTC");
+    let date = NaiveDate::from_ymd_opt(2024, 1, 2).unwrap();
+
+    let cached_quote = price_point_with_timestamp(
+        &asset,
+        date,
+        "45000.00",
+        "USD",
+        PriceKind::Quote,
+        Utc::now() + Duration::minutes(5),
+    );
+    store.put_prices(std::slice::from_ref(&cached_quote)).await?;
+
+    let provider = MockMarketDataSource::new().fail_on_fetch();
+    let service = MarketDataService::new(store.clone(), Some(Arc::new(provider)))
+        .with_quote_staleness(std::time::Duration::from_secs(60 * 60));
+
+    let latest = service.price_latest(&asset, date).await?;
+    assert_eq!(latest.kind, PriceKind::Quote);
+    assert_eq!(latest.price, "45000.00");
+
+    Ok(())
+}

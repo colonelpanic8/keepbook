@@ -150,7 +150,7 @@ impl MarketDataService {
             {
                 let age = (chrono::Utc::now() - cached.timestamp)
                     .to_std()
-                    .unwrap_or(std::time::Duration::MAX);
+                    .unwrap_or(std::time::Duration::ZERO);
                 if age < staleness {
                     debug!(
                         asset_id = %asset_id,
