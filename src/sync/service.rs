@@ -125,6 +125,8 @@ impl<S: Storage> SyncContext<S> {
     }
 
     pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        // Keep time-sensitive behavior consistent across orchestrator and market data.
+        self.market_data = self.market_data.with_clock(clock.clone());
         self.clock = clock;
         self
     }
