@@ -42,11 +42,11 @@ pub struct SyncResult {
 impl SyncResult {
     /// Save this sync result to storage.
     pub async fn save(&self, storage: &impl Storage) -> Result<()> {
-        storage.save_connection(&self.connection).await?;
-
         for account in &self.accounts {
             storage.save_account(account).await?;
         }
+
+        storage.save_connection(&self.connection).await?;
 
         for (account_id, synced_balances) in &self.balances {
             if !synced_balances.is_empty() {

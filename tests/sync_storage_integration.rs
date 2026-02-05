@@ -47,3 +47,33 @@ async fn test_sync_result_persists_data() -> Result<()> {
 
     Ok(())
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn test_sync_result_creates_account_symlink() -> Result<()> {
+    let dir = TempDir::new()?;
+    let storage = JsonFileStorage::new(dir.path());
+
+    let mut connection = mock_connection("Mock Bank");
+
+    // Persist connection config so JsonFileStorage can reload it later.
+    let config_path = storage.connection_config_path(connection.id());
+    tokio::fs::create_dir_all(config_path.parent().unwrap()).await?;
+    let config_toml = toml::to_string_pretty(&connection.config)?;
+    tokio::fs::write(&config_path, config_toml).await?;
+
+    let synchronizer = MockSynchronizer::new();
+    let result = synchronizer.sync(&mut connection).await?;
+    result.save(&storage).await?;
+
+    let link_path = dir
+        .path()
+        .join("connections")
+        .join(connection.id().to_string())
+        .join("accounts")
+        .join("Mock Checking");
+    let metadata = std::fs::symlink_metadata(&link_path)?;
+    assert!(metadata.file_type().is_symlink());
+
+    Ok(())
+}
