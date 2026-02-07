@@ -1,8 +1,8 @@
 use anyhow::Result;
 use chrono::NaiveDate;
+use keepbook::market_data::JsonlMarketDataStore;
 use keepbook::market_data::{AssetId, MarketDataStore, PriceKind, PricePoint};
 use keepbook::models::{Account, Asset, Connection, ConnectionConfig};
-use keepbook::market_data::JsonlMarketDataStore;
 use keepbook::sync::store_sync_prices;
 use keepbook::sync::{SyncResult, SyncedAssetBalance};
 use tempfile::TempDir;
@@ -33,11 +33,8 @@ async fn store_sync_prices_persists_price_points() -> Result<()> {
         source: "mock".to_string(),
     };
 
-    let balance = SyncedAssetBalance::new(keepbook::models::AssetBalance::new(
-        asset,
-        "1",
-    ))
-    .with_price(price.clone());
+    let balance = SyncedAssetBalance::new(keepbook::models::AssetBalance::new(asset, "1"))
+        .with_price(price.clone());
 
     let result = SyncResult {
         connection: connection.clone(),

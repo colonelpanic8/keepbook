@@ -85,10 +85,9 @@ fn normalize_opt_lower(value: &Option<String>) -> Option<String> {
 impl PartialEq for Asset {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (
-                Asset::Currency { iso_code: a },
-                Asset::Currency { iso_code: b },
-            ) => normalize_upper(a) == normalize_upper(b),
+            (Asset::Currency { iso_code: a }, Asset::Currency { iso_code: b }) => {
+                normalize_upper(a) == normalize_upper(b)
+            }
             (
                 Asset::Equity {
                     ticker: a,

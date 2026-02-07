@@ -46,9 +46,7 @@ pub fn parse_duration(s: &str) -> Result<Duration> {
         "d" => num
             .checked_mul(24 * 60 * 60)
             .context("Duration is too large")?,
-        "h" => num
-            .checked_mul(60 * 60)
-            .context("Duration is too large")?,
+        "h" => num.checked_mul(60 * 60).context("Duration is too large")?,
         "m" => num.checked_mul(60).context("Duration is too large")?,
         "s" => num,
         _ => unreachable!(),

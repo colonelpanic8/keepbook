@@ -35,11 +35,10 @@ async fn add_balance(
     asset: Asset,
 ) -> Result<()> {
     let timestamp = Utc.from_utc_datetime(&date.and_hms_opt(0, 0, 0).unwrap());
-    let snapshot = BalanceSnapshot::new(
-        timestamp,
-        vec![AssetBalance::new(asset, "100.00")],
-    );
-    storage.append_balance_snapshot(account_id, &snapshot).await?;
+    let snapshot = BalanceSnapshot::new(timestamp, vec![AssetBalance::new(asset, "100.00")]);
+    storage
+        .append_balance_snapshot(account_id, &snapshot)
+        .await?;
     Ok(())
 }
 
@@ -344,7 +343,12 @@ async fn price_history_uses_cached_fx_rates() -> Result<()> {
     .await?;
 
     let store = JsonlMarketDataStore::new(dir.path());
-    let cached = fx_rate_point("EUR", "USD", NaiveDate::from_ymd_opt(2024, 1, 2).unwrap(), "1.10");
+    let cached = fx_rate_point(
+        "EUR",
+        "USD",
+        NaiveDate::from_ymd_opt(2024, 1, 2).unwrap(),
+        "1.10",
+    );
     store.put_fx_rates(std::slice::from_ref(&cached)).await?;
 
     let account_id = account.id.to_string();

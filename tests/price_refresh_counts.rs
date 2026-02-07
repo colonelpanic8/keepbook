@@ -9,8 +9,8 @@ use keepbook::market_data::{
     PriceKind, PricePoint,
 };
 use keepbook::models::Asset;
-use keepbook::storage::MemoryStorage;
 use keepbook::storage::JsonFileStorage;
+use keepbook::storage::MemoryStorage;
 use keepbook::sync::SyncOrchestrator;
 
 use crate::support::MockMarketDataSource;

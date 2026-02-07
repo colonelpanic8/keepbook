@@ -8,13 +8,12 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use tracing::warn;
 
-use super::providers::{
-    AlphaVantagePriceSource, CoinCapPriceSource, CoinGeckoPriceSource,
-    CryptoComparePriceSource, EodhdPriceSource, FrankfurterRateSource, MarketstackPriceSource,
-    TwelveDataPriceSource,
-};
 use super::providers::coincap::CoinCapConfig;
 use super::providers::cryptocompare::CryptoCompareConfig;
+use super::providers::{
+    AlphaVantagePriceSource, CoinCapPriceSource, CoinGeckoPriceSource, CryptoComparePriceSource,
+    EodhdPriceSource, FrankfurterRateSource, MarketstackPriceSource, TwelveDataPriceSource,
+};
 use super::source_config::{LoadedPriceSource, PriceSourceConfig, PriceSourceType};
 use super::sources::{CryptoPriceSource, EquityPriceSource, FxRateSource};
 
@@ -101,8 +100,10 @@ impl PriceSourceRegistry {
             let source = match loaded.config.source_type {
                 PriceSourceType::Eodhd => {
                     let credentials = loaded.config.credentials.as_ref().with_context(|| {
-                        format!("Price source {} ({:?}) requires credentials",
-                            loaded.name, loaded.config.source_type)
+                        format!(
+                            "Price source {} ({:?}) requires credentials",
+                            loaded.name, loaded.config.source_type
+                        )
                     })?;
                     let store = credentials.build();
                     let source = EodhdPriceSource::from_credentials(store.as_ref()).await?;
@@ -110,8 +111,10 @@ impl PriceSourceRegistry {
                 }
                 PriceSourceType::TwelveData => {
                     let credentials = loaded.config.credentials.as_ref().with_context(|| {
-                        format!("Price source {} ({:?}) requires credentials",
-                            loaded.name, loaded.config.source_type)
+                        format!(
+                            "Price source {} ({:?}) requires credentials",
+                            loaded.name, loaded.config.source_type
+                        )
                     })?;
                     let store = credentials.build();
                     let source = TwelveDataPriceSource::from_credentials(store.as_ref()).await?;
@@ -119,8 +122,10 @@ impl PriceSourceRegistry {
                 }
                 PriceSourceType::AlphaVantage => {
                     let credentials = loaded.config.credentials.as_ref().with_context(|| {
-                        format!("Price source {} ({:?}) requires credentials",
-                            loaded.name, loaded.config.source_type)
+                        format!(
+                            "Price source {} ({:?}) requires credentials",
+                            loaded.name, loaded.config.source_type
+                        )
                     })?;
                     let store = credentials.build();
                     let source = AlphaVantagePriceSource::from_credentials(store.as_ref()).await?;
@@ -128,8 +133,10 @@ impl PriceSourceRegistry {
                 }
                 PriceSourceType::Marketstack => {
                     let credentials = loaded.config.credentials.as_ref().with_context(|| {
-                        format!("Price source {} ({:?}) requires credentials",
-                            loaded.name, loaded.config.source_type)
+                        format!(
+                            "Price source {} ({:?}) requires credentials",
+                            loaded.name, loaded.config.source_type
+                        )
                     })?;
                     let store = credentials.build();
                     let source = MarketstackPriceSource::from_credentials(store.as_ref()).await?;
@@ -165,14 +172,13 @@ impl PriceSourceRegistry {
                     };
 
                     if let Some(config) = &loaded.config.config {
-                        let parsed: CryptoCompareConfig = config.clone().try_into().with_context(
-                            || {
+                        let parsed: CryptoCompareConfig =
+                            config.clone().try_into().with_context(|| {
                                 format!(
                                     "Failed to parse config for CryptoCompare source {}",
                                     loaded.name
                                 )
-                            },
-                        )?;
+                            })?;
                         provider = provider.with_config(parsed);
                     }
 
@@ -187,12 +193,10 @@ impl PriceSourceRegistry {
                     };
 
                     if let Some(config) = &loaded.config.config {
-                        let parsed: CoinCapConfig = config.clone().try_into().with_context(|| {
-                            format!(
-                                "Failed to parse config for CoinCap source {}",
-                                loaded.name
-                            )
-                        })?;
+                        let parsed: CoinCapConfig =
+                            config.clone().try_into().with_context(|| {
+                                format!("Failed to parse config for CoinCap source {}", loaded.name)
+                            })?;
                         provider = provider.with_config(parsed);
                     }
 
@@ -234,7 +238,9 @@ impl PriceSourceRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::market_data::source_config::{LoadedPriceSource, PriceSourceConfig, PriceSourceType};
+    use crate::market_data::source_config::{
+        LoadedPriceSource, PriceSourceConfig, PriceSourceType,
+    };
     use std::fs;
     use std::io::Write;
     use tempfile::TempDir;

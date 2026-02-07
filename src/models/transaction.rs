@@ -87,13 +87,8 @@ mod tests {
         let ids = FixedIdGenerator::new([Id::from_string("tx-1")]);
         let clock = FixedClock::new(Utc.with_ymd_and_hms(2026, 2, 5, 12, 0, 0).unwrap());
 
-        let tx = Transaction::new_with_generator(
-            &ids,
-            &clock,
-            "-1",
-            Asset::currency("USD"),
-            "Test",
-        );
+        let tx =
+            Transaction::new_with_generator(&ids, &clock, "-1", Asset::currency("USD"), "Test");
 
         assert_eq!(tx.id.as_str(), "tx-1");
         assert_eq!(tx.timestamp, clock.now());

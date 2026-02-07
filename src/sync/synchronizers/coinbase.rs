@@ -80,12 +80,7 @@ impl CoinbaseSynchronizer {
             .trim_end_matches('/')
             .replace("https://", "")
             .replace("http://", "");
-        let uri = format!(
-            "{} {}{}",
-            method,
-            base,
-            path
-        );
+        let uri = format!("{} {}{}", method, base, path);
 
         let claims = JwtClaims {
             sub: self.key_name.clone(),
@@ -127,13 +122,9 @@ impl CoinbaseSynchronizer {
         let mut out = String::with_capacity(value.len());
         for b in value.as_bytes() {
             match *b {
-                b'A'..=b'Z'
-                | b'a'..=b'z'
-                | b'0'..=b'9'
-                | b'-'
-                | b'.'
-                | b'_'
-                | b'~' => out.push(*b as char),
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                    out.push(*b as char)
+                }
                 other => out.push_str(&format!("%{other:02X}")),
             }
         }
@@ -143,9 +134,7 @@ impl CoinbaseSynchronizer {
     async fn request<T: for<'de> Deserialize<'de>>(&self, method: &str, path: &str) -> Result<T> {
         // Parse/validate the HTTP method up-front so invalid input doesn't panic and we don't
         // do unnecessary JWT work.
-        let method: reqwest::Method = method
-            .parse()
-            .context("Invalid HTTP method")?;
+        let method: reqwest::Method = method.parse().context("Invalid HTTP method")?;
         let jwt = self.generate_jwt(method.as_str(), path)?;
         let base = self.api_base.trim_end_matches('/');
         let url = format!("{base}{path}");

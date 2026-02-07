@@ -1,8 +1,8 @@
 mod factory;
 mod orchestrator;
 mod prices;
-mod service;
 pub mod schwab;
+mod service;
 pub mod synchronizers;
 
 pub use factory::{create_synchronizer, DefaultSynchronizerFactory, SynchronizerFactory};
@@ -13,11 +13,11 @@ pub use service::{
     SyncContext, SyncOutcome, SyncService,
 };
 
+use crate::clock::{Clock, SystemClock};
 use crate::market_data::PricePoint;
 use crate::models::{Account, AssetBalance, BalanceSnapshot, Connection, Id, Transaction};
 use crate::storage::Storage;
 use anyhow::Result;
-use crate::clock::{Clock, SystemClock};
 
 /// An asset balance paired with optional price data from the synchronizer.
 #[derive(Debug, Clone)]
@@ -55,11 +55,7 @@ impl SyncResult {
         self.save_with_clock(storage, &SystemClock).await
     }
 
-    pub async fn save_with_clock(
-        &self,
-        storage: &dyn Storage,
-        clock: &dyn Clock,
-    ) -> Result<()> {
+    pub async fn save_with_clock(&self, storage: &dyn Storage, clock: &dyn Clock) -> Result<()> {
         for account in &self.accounts {
             storage.save_account(account).await?;
         }
@@ -88,10 +84,8 @@ impl SyncResult {
                 // This is intentionally storage-agnostic. If this becomes slow for large histories,
                 // we can push an indexed/streaming implementation into Storage.
                 let existing = storage.get_transactions(account_id).await?;
-                let existing_by_id: std::collections::HashMap<Id, Transaction> = existing
-                    .into_iter()
-                    .map(|t| (t.id.clone(), t))
-                    .collect();
+                let existing_by_id: std::collections::HashMap<Id, Transaction> =
+                    existing.into_iter().map(|t| (t.id.clone(), t)).collect();
 
                 // Collapse duplicates within this batch: last write wins, preserve first-seen order.
                 let mut candidate_txns: Vec<Transaction> = Vec::new();
@@ -142,8 +136,7 @@ pub trait Synchronizer: Send + Sync {
     fn name(&self) -> &str;
 
     /// Perform a full sync, returning all accounts, balances, and transactions.
-    async fn sync(&self, connection: &mut Connection, storage: &dyn Storage)
-        -> Result<SyncResult>;
+    async fn sync(&self, connection: &mut Connection, storage: &dyn Storage) -> Result<SyncResult>;
 
     /// Return interactive auth support if this synchronizer needs it.
     fn interactive(&mut self) -> Option<&mut dyn InteractiveAuth> {

@@ -322,7 +322,8 @@ async fn main() -> Result<()> {
                 tag,
             } => {
                 let result =
-                    app::add_account(storage_arc.as_ref(), &config, &connection, &name, tag).await?;
+                    app::add_account(storage_arc.as_ref(), &config, &connection, &name, tag)
+                        .await?;
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
         },
@@ -376,23 +377,17 @@ async fn main() -> Result<()> {
         Some(Command::Auth(auth_cmd)) => match auth_cmd {
             AuthCommand::Schwab(schwab_cmd) => match schwab_cmd {
                 SchwabAuthCommand::Login { id_or_name } => {
-                    let result = app::schwab_login(
-                        storage_arc.clone(),
-                        &config,
-                        id_or_name.as_deref(),
-                    )
-                    .await?;
+                    let result =
+                        app::schwab_login(storage_arc.clone(), &config, id_or_name.as_deref())
+                            .await?;
                     println!("{}", serde_json::to_string_pretty(&result)?);
                 }
             },
             AuthCommand::Chase(chase_cmd) => match chase_cmd {
                 ChaseAuthCommand::Login { id_or_name } => {
-                    let result = app::chase_login(
-                        storage_arc.clone(),
-                        &config,
-                        id_or_name.as_deref(),
-                    )
-                    .await?;
+                    let result =
+                        app::chase_login(storage_arc.clone(), &config, id_or_name.as_deref())
+                            .await?;
                     println!("{}", serde_json::to_string_pretty(&result)?);
                 }
             },

@@ -85,7 +85,13 @@ fn sanitize_segment(value: &str) -> String {
     let sanitized: String = value
         .trim()
         .chars()
-        .map(|c| if c == '/' || c == '\\' || c == '\0' { '-' } else { c })
+        .map(|c| {
+            if c == '/' || c == '\\' || c == '\0' {
+                '-'
+            } else {
+                c
+            }
+        })
         .collect();
     if sanitized.is_empty() || sanitized == "." || sanitized == ".." {
         "_".to_string()

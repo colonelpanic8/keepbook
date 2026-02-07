@@ -112,11 +112,7 @@ mod tests {
     }
 
     fn run_git(dir: &Path, args: &[&str]) -> Result<std::process::Output> {
-        let output = Command::new("git")
-            .arg("-C")
-            .arg(dir)
-            .args(args)
-            .output()?;
+        let output = Command::new("git").arg("-C").arg(dir).args(args).output()?;
         Ok(output)
     }
 

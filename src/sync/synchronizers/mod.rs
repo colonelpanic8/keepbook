@@ -1,7 +1,7 @@
 //! Synchronizer implementations for various financial services.
 
-mod coinbase;
 mod chase;
+mod coinbase;
 mod schwab;
 
 pub use chase::ChaseSynchronizer;

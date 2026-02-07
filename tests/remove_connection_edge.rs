@@ -16,10 +16,7 @@ fn resolved_config(data_dir: &Path) -> ResolvedConfig {
     }
 }
 
-async fn write_connection_config(
-    storage: &JsonFileStorage,
-    connection: &Connection,
-) -> Result<()> {
+async fn write_connection_config(storage: &JsonFileStorage, connection: &Connection) -> Result<()> {
     storage
         .save_connection_config(connection.id(), &connection.config)
         .await?;

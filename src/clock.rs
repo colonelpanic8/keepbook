@@ -34,4 +34,3 @@ impl Clock for FixedClock {
         self.now
     }
 }
-

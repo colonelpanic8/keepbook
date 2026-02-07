@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
 use crate::clock::{Clock, SystemClock};
 use crate::config::RefreshConfig;
 use crate::git::{try_auto_commit, AutoCommitOutcome};
 use crate::market_data::MarketDataService;
 use crate::models::Connection;
-use crate::storage::{find_connection, Storage};
 use crate::staleness::{check_balance_staleness_at, resolve_balance_staleness};
+use crate::storage::{find_connection, Storage};
+use anyhow::{Context, Result};
 
 use super::{AuthStatus, InteractiveAuth, SyncOrchestrator, SyncWithPricesResult};
 use super::{DefaultSynchronizerFactory, SynchronizerFactory};
@@ -138,11 +138,23 @@ impl SyncContext {
 
 #[derive(Debug)]
 pub enum SyncOutcome {
-    Synced { report: SyncWithPricesResult },
-    SkippedManual { connection: Connection },
-    SkippedNotStale { connection: Connection },
-    AuthRequired { connection: Connection, error: String },
-    Failed { connection: Connection, error: String },
+    Synced {
+        report: SyncWithPricesResult,
+    },
+    SkippedManual {
+        connection: Connection,
+    },
+    SkippedNotStale {
+        connection: Connection,
+    },
+    AuthRequired {
+        connection: Connection,
+        error: String,
+    },
+    Failed {
+        connection: Connection,
+        error: String,
+    },
 }
 
 pub struct SyncService {
@@ -270,8 +282,7 @@ impl SyncService {
                 .filter(|c| c.config.synchronizer == synchronizer_name)
                 .context(format!(
                     "{} connection not found: {}",
-                    synchronizer_name,
-                    id_or_name
+                    synchronizer_name, id_or_name
                 ))?,
             (None, 1) => matching.into_iter().next().unwrap(),
             (None, 0) => {
@@ -313,8 +324,9 @@ impl SyncService {
             .await?;
 
         if let Some(interactive) = synchronizer.interactive() {
-            if let Some(outcome) =
-                self.ensure_interactive_auth(&connection, interactive).await?
+            if let Some(outcome) = self
+                .ensure_interactive_auth(&connection, interactive)
+                .await?
             {
                 return Ok(outcome);
             }
@@ -339,10 +351,7 @@ impl SyncService {
         match synchronizer.check_auth().await? {
             AuthStatus::Valid => Ok(None),
             AuthStatus::Missing => {
-                let prompt = format!(
-                    "No {} session found. Run login now?",
-                    synchronizer.name()
-                );
+                let prompt = format!("No {} session found. Run login now?", synchronizer.name());
                 if self.auth_prompter.confirm_login(&prompt)? {
                     synchronizer.login().await?;
                     Ok(None)

@@ -97,9 +97,7 @@ impl ChangePointCollector {
 }
 
 fn date_to_timestamp(date: NaiveDate) -> DateTime<Utc> {
-    date.and_hms_opt(23, 59, 59)
-        .expect("valid date")
-        .and_utc()
+    date.and_hms_opt(23, 59, 59).expect("valid date").and_utc()
 }
 
 /// Granularity for filtering change points.

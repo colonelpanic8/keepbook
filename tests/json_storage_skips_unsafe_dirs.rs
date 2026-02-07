@@ -60,4 +60,3 @@ async fn json_storage_skips_unsafe_account_dirs_in_listing() -> Result<()> {
 
     Ok(())
 }
-

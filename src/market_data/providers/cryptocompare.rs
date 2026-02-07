@@ -103,11 +103,7 @@ impl CryptoComparePriceSource {
 
     async fn fetch_histoday(&self, symbol: &str, date: NaiveDate) -> Result<Option<f64>> {
         let to_ts = Utc
-            .from_utc_datetime(
-                &(date + Duration::days(1))
-                    .and_hms_opt(0, 0, 0)
-                    .unwrap(),
-            )
+            .from_utc_datetime(&(date + Duration::days(1)).and_hms_opt(0, 0, 0).unwrap())
             .timestamp();
 
         let url = format!(

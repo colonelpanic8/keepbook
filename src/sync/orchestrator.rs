@@ -107,7 +107,8 @@ impl SyncOrchestrator {
                         }
                     } else {
                         // Count cache hits as skipped.
-                        if let Some(price) = self.market_data.price_from_store(&asset, date).await? {
+                        if let Some(price) = self.market_data.price_from_store(&asset, date).await?
+                        {
                             result.skipped += 1;
                             if price.quote_currency.to_uppercase()
                                 != self.reporting_currency.to_uppercase()
@@ -232,9 +233,7 @@ impl SyncOrchestrator {
         force_refresh: bool,
     ) -> Result<SyncWithPricesResult> {
         // 1. Run the sync
-        let result = synchronizer
-            .sync(connection, self.storage.as_ref())
-            .await?;
+        let result = synchronizer.sync(connection, self.storage.as_ref()).await?;
 
         // 2. Save sync results (this stores balances)
         result

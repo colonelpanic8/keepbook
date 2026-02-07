@@ -3,10 +3,7 @@ use keepbook::models::{Account, Connection, ConnectionConfig};
 use keepbook::storage::{JsonFileStorage, Storage};
 use tempfile::TempDir;
 
-async fn write_connection_config(
-    storage: &JsonFileStorage,
-    connection: &Connection,
-) -> Result<()> {
+async fn write_connection_config(storage: &JsonFileStorage, connection: &Connection) -> Result<()> {
     storage
         .save_connection_config(connection.id(), &connection.config)
         .await?;

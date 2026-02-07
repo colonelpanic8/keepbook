@@ -11,14 +11,10 @@ async fn storage_rejects_path_traversal_ids() -> Result<()> {
     let bad_id = Id::from_string("../escape");
 
     let err = storage.get_account(&bad_id).await.unwrap_err();
-    assert!(err
-        .to_string()
-        .contains("Invalid id path segment"));
+    assert!(err.to_string().contains("Invalid id path segment"));
 
     let err = storage.get_connection(&bad_id).await.unwrap_err();
-    assert!(err
-        .to_string()
-        .contains("Invalid id path segment"));
+    assert!(err.to_string().contains("Invalid id path segment"));
 
     Ok(())
 }

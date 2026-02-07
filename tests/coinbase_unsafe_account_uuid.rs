@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 use keepbook::models::{Connection, ConnectionConfig, Id};
 use keepbook::storage::{JsonFileStorage, Storage};
-use keepbook::sync::Synchronizer;
 use keepbook::sync::synchronizers::CoinbaseSynchronizer;
+use keepbook::sync::Synchronizer;
 use p256::elliptic_curve::rand_core::OsRng;
 use p256::pkcs8::LineEnding;
 use p256::SecretKey;

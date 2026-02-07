@@ -149,7 +149,11 @@ impl MarketDataService {
     /// has data. Falls back to the cached result if sources don't return anything.
     ///
     /// Returns `(price, fetched)` where `fetched` indicates whether a new point was fetched and stored.
-    pub async fn price_close_force(&self, asset: &Asset, date: NaiveDate) -> Result<(PricePoint, bool)> {
+    pub async fn price_close_force(
+        &self,
+        asset: &Asset,
+        date: NaiveDate,
+    ) -> Result<(PricePoint, bool)> {
         let asset = asset.normalized();
         let asset_id = AssetId::from_asset(&asset);
 

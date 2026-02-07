@@ -93,8 +93,11 @@ async fn coinbase_sync_dedupes_transactions_by_id() -> Result<()> {
 
     let account_id = loaded.state.account_ids[0].clone();
     let transactions = storage.get_transactions(&account_id).await?;
-    assert_eq!(transactions.len(), 1, "same entry should not be stored twice");
+    assert_eq!(
+        transactions.len(),
+        1,
+        "same entry should not be stored twice"
+    );
 
     Ok(())
 }
-

@@ -143,9 +143,7 @@ impl MarketDataStore for MemoryMarketDataStore {
         let fx_rates = self.fx_rates.lock().await;
         let base = base.trim().to_uppercase();
         let quote = quote.trim().to_uppercase();
-        Ok(fx_rates
-            .get(&(base, quote, date, kind))
-            .cloned())
+        Ok(fx_rates.get(&(base, quote, date, kind)).cloned())
     }
 
     async fn get_all_fx_rates(&self, base: &str, quote: &str) -> Result<Vec<FxRatePoint>> {

@@ -68,8 +68,12 @@ async fn json_storage_get_transactions_raw_includes_duplicates_in_append_order()
     let older = Transaction::new("-1", Asset::currency("USD"), "Old").with_id(tx_id.clone());
     let newer = Transaction::new("-1", Asset::currency("USD"), "New").with_id(tx_id.clone());
 
-    storage.append_transactions(&account.id, &[older.clone()]).await?;
-    storage.append_transactions(&account.id, &[newer.clone()]).await?;
+    storage
+        .append_transactions(&account.id, &[older.clone()])
+        .await?;
+    storage
+        .append_transactions(&account.id, &[newer.clone()])
+        .await?;
 
     let raw = storage.get_transactions_raw(&account.id).await?;
     assert_eq!(raw.len(), 2);

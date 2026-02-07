@@ -7,7 +7,9 @@ use std::process::Command;
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, TimeZone, Utc};
-use keepbook::market_data::{AssetId, FxRateKind, FxRatePoint, MarketDataSource, PriceKind, PricePoint};
+use keepbook::market_data::{
+    AssetId, FxRateKind, FxRatePoint, MarketDataSource, PriceKind, PricePoint,
+};
 use keepbook::models::{
     Account, Asset, AssetBalance, Connection, ConnectionConfig, Id, Transaction,
 };
@@ -23,11 +25,7 @@ pub fn git_available() -> bool {
 }
 
 pub fn run_git(dir: &Path, args: &[&str]) -> Result<std::process::Output> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(args)
-        .output()?;
+    let output = Command::new("git").arg("-C").arg(dir).args(args).output()?;
     Ok(output)
 }
 
@@ -104,7 +102,11 @@ impl MockSynchronizer {
         self
     }
 
-    pub fn with_transaction(mut self, amount: impl Into<String>, description: impl Into<String>) -> Self {
+    pub fn with_transaction(
+        mut self,
+        amount: impl Into<String>,
+        description: impl Into<String>,
+    ) -> Self {
         self.transaction_amount = amount.into();
         self.transaction_description = description.into();
         self
@@ -122,7 +124,11 @@ impl Synchronizer for MockSynchronizer {
         &self.name
     }
 
-    async fn sync(&self, connection: &mut Connection, _storage: &dyn Storage) -> Result<SyncResult> {
+    async fn sync(
+        &self,
+        connection: &mut Connection,
+        _storage: &dyn Storage,
+    ) -> Result<SyncResult> {
         // Deterministic account id: stable across sync runs, unique per connection.
         let account_id = Id::from_external(&format!(
             "mock:{}:{}",
@@ -200,8 +206,10 @@ impl MockMarketDataSource {
     }
 
     pub fn with_fx_rate(mut self, rate: FxRatePoint) -> Self {
-        self.fx_rates
-            .insert((rate.base.clone(), rate.quote.clone(), rate.as_of_date), rate);
+        self.fx_rates.insert(
+            (rate.base.clone(), rate.quote.clone(), rate.as_of_date),
+            rate,
+        );
         self
     }
 
@@ -252,14 +260,7 @@ pub fn price_point(
     quote_currency: impl Into<String>,
     kind: PriceKind,
 ) -> PricePoint {
-    price_point_with_timestamp(
-        asset,
-        date,
-        price,
-        quote_currency,
-        kind,
-        Utc::now(),
-    )
+    price_point_with_timestamp(asset, date, price, quote_currency, kind, Utc::now())
 }
 
 pub fn price_point_with_timestamp(

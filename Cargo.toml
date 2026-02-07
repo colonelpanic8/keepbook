@@ -3,6 +3,11 @@ name = "keepbook"
 version = "0.1.0"
 edition = "2021"
 
+[workspace]
+members = [
+  "crates/keepbook-ffi",
+]
+
 [lib]
 name = "keepbook"
 path = "src/lib.rs"
@@ -10,25 +15,65 @@ path = "src/lib.rs"
 [[bin]]
 name = "keepbook"
 path = "src/main.rs"
+required-features = ["cli"]
 
 [[example]]
 name = "plaid"
 path = "examples/plaid.rs"
+required-features = ["cli"]
 
 [[example]]
 name = "eodhd_test"
 path = "examples/eodhd_test.rs"
+required-features = ["cli"]
 
 [[example]]
 name = "chase_browser_poc"
 path = "examples/chase_browser_poc.rs"
+required-features = ["cli"]
+
+[features]
+# Default keeps existing CLI behavior. Consumers (mobile/web) can disable default
+# features to build only the library parts they need.
+default = ["cli"]
+
+# Enables all modules used by the CLI app.
+cli = [
+  "app",
+  "config",
+  "credentials",
+  "git",
+  "market_data",
+  "portfolio",
+  "staleness",
+  "sync",
+  "dep:clap",
+  "dep:tracing-subscriber",
+]
+
+# Fine-grained feature gates for consumers that want a subset.
+app = []
+config = []
+credentials = []
+git = []
+market_data = ["dep:reqwest"]
+portfolio = []
+staleness = []
+sync = [
+  "dep:reqwest",
+  "dep:base64",
+  "dep:chromiumoxide",
+  "dep:futures",
+  "dep:p256",
+  "dep:rand",
+]
 
 [dependencies]
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 
 # HTTP client (using rustls to avoid OpenSSL dependency)
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -41,16 +86,12 @@ chrono = { version = "0.4", features = ["serde"] }
 # UUIDs
 uuid = { version = "1", features = ["v4", "v5", "serde"] }
 
-# JWT for Coinbase CDP API auth
-jsonwebtoken = "9"
-
 # Crypto for EC key handling
-p256 = { version = "0.13", features = ["ecdsa", "pem"] }
-rand = "0.8"
+p256 = { version = "0.13", features = ["ecdsa", "pem"], optional = true }
+rand = { version = "0.8", optional = true }
 
 # Base64 encoding
-base64 = "0.22"
-sha2 = "0.10"
+base64 = { version = "0.22", optional = true }
 rust_decimal = "1"
 
 # Error handling
@@ -58,7 +99,7 @@ thiserror = "2"
 anyhow = "1"
 
 # CLI
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive"], optional = true }
 
 # For reading pass credentials
 secrecy = "0.10"
@@ -70,12 +111,12 @@ dirs = "6"
 async-trait = "0.1"
 
 # Chrome DevTools Protocol for browser automation
-chromiumoxide = { version = "0.7", default-features = false, features = ["tokio-runtime"] }
-futures = "0.3"
+chromiumoxide = { version = "0.7", default-features = false, features = ["tokio-runtime"], optional = true }
+futures = { version = "0.3", optional = true }
 
 # Structured logging
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"], optional = true }
 
 [dev-dependencies]
 tempfile = "3"

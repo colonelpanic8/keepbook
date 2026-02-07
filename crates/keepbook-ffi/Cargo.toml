@@ -1,0 +1,15 @@
+[package]
+name = "keepbook-ffi"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "keepbook_ffi"
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+# Consume the keepbook library without its default (CLI) feature set.
+keepbook = { path = "../..", default-features = false, features = ["credentials"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"

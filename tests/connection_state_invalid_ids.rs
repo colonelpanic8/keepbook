@@ -1,12 +1,11 @@
 use anyhow::Result;
-use keepbook::models::{Account, Asset, AssetBalance, BalanceSnapshot, Connection, ConnectionConfig, Id};
+use keepbook::models::{
+    Account, Asset, AssetBalance, BalanceSnapshot, Connection, ConnectionConfig, Id,
+};
 use keepbook::storage::{JsonFileStorage, Storage};
 use tempfile::TempDir;
 
-async fn write_connection_config(
-    storage: &JsonFileStorage,
-    connection: &Connection,
-) -> Result<()> {
+async fn write_connection_config(storage: &JsonFileStorage, connection: &Connection) -> Result<()> {
     storage
         .save_connection_config(connection.id(), &connection.config)
         .await?;
@@ -41,7 +40,9 @@ async fn invalid_account_ids_in_state_do_not_break_balance_lookup() -> Result<()
     let account = Account::new("Checking", connection.id().clone());
     storage.save_account(&account).await?;
     let snapshot = BalanceSnapshot::now(vec![AssetBalance::new(Asset::currency("USD"), "100")]);
-    storage.append_balance_snapshot(&account.id, &snapshot).await?;
+    storage
+        .append_balance_snapshot(&account.id, &snapshot)
+        .await?;
 
     let balances = storage
         .get_latest_balances_for_connection(connection.id())

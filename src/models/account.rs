@@ -39,7 +39,12 @@ impl Account {
         Self::new_with_generator(&UuidIdGenerator, &SystemClock, name, connection_id)
     }
 
-    pub fn new_with(id: Id, created_at: DateTime<Utc>, name: impl Into<String>, connection_id: Id) -> Self {
+    pub fn new_with(
+        id: Id,
+        created_at: DateTime<Utc>,
+        name: impl Into<String>,
+        connection_id: Id,
+    ) -> Self {
         Self {
             id,
             name: name.into(),

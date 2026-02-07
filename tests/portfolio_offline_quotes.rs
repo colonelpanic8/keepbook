@@ -2,16 +2,17 @@ use anyhow::Result;
 use chrono::Utc;
 use keepbook::app::portfolio_snapshot;
 use keepbook::config::{GitConfig, RefreshConfig, ResolvedConfig};
-use keepbook::market_data::{AssetId, JsonlMarketDataStore, MarketDataStore, PriceKind, PricePoint};
-use keepbook::models::{Account, Asset, AssetBalance, BalanceSnapshot, Connection, ConnectionConfig};
+use keepbook::market_data::{
+    AssetId, JsonlMarketDataStore, MarketDataStore, PriceKind, PricePoint,
+};
+use keepbook::models::{
+    Account, Asset, AssetBalance, BalanceSnapshot, Connection, ConnectionConfig,
+};
 use keepbook::storage::{JsonFileStorage, Storage};
 use std::sync::Arc;
 use tempfile::TempDir;
 
-async fn write_connection_config(
-    storage: &JsonFileStorage,
-    connection: &Connection,
-) -> Result<()> {
+async fn write_connection_config(storage: &JsonFileStorage, connection: &Connection) -> Result<()> {
     storage
         .save_connection_config(connection.id(), &connection.config)
         .await?;
@@ -45,7 +46,9 @@ async fn portfolio_snapshot_offline_uses_cached_quote() -> Result<()> {
 
     let asset = Asset::equity("AAPL");
     let snapshot = BalanceSnapshot::now(vec![AssetBalance::new(asset.clone(), "2")]);
-    storage.append_balance_snapshot(&account.id, &snapshot).await?;
+    storage
+        .append_balance_snapshot(&account.id, &snapshot)
+        .await?;
 
     let price = PricePoint {
         asset_id: AssetId::from_asset(&asset),

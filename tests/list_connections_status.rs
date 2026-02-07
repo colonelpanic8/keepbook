@@ -27,4 +27,3 @@ async fn list_connections_renders_status_as_snake_case() -> Result<()> {
 
     Ok(())
 }
-

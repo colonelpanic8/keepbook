@@ -1,12 +1,28 @@
-pub mod config;
-pub mod credentials;
 pub mod clock;
 pub mod duration;
-pub mod app;
-pub mod git;
-pub mod market_data;
 pub mod models;
-pub mod portfolio;
-pub mod staleness;
 pub mod storage;
+
+#[cfg(feature = "config")]
+pub mod config;
+
+#[cfg(feature = "credentials")]
+pub mod credentials;
+
+#[cfg(feature = "app")]
+pub mod app;
+
+#[cfg(feature = "git")]
+pub mod git;
+
+#[cfg(feature = "market_data")]
+pub mod market_data;
+
+#[cfg(feature = "portfolio")]
+pub mod portfolio;
+
+#[cfg(feature = "staleness")]
+pub mod staleness;
+
+#[cfg(feature = "sync")]
 pub mod sync;

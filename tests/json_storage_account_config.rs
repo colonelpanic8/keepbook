@@ -3,7 +3,9 @@ use std::sync::Arc;
 use anyhow::Result;
 use chrono::NaiveDate;
 use keepbook::market_data::{MarketDataService, NullMarketDataStore};
-use keepbook::models::{Account, AccountConfig, BalanceBackfillPolicy, Connection, ConnectionConfig};
+use keepbook::models::{
+    Account, AccountConfig, BalanceBackfillPolicy, Connection, ConnectionConfig,
+};
 use keepbook::portfolio::{Grouping, PortfolioQuery, PortfolioService};
 use keepbook::storage::{JsonFileStorage, Storage};
 
@@ -55,4 +57,3 @@ async fn json_storage_reads_account_config_for_zero_backfill() -> Result<()> {
 
     Ok(())
 }
-

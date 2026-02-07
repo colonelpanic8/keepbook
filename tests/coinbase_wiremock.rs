@@ -116,7 +116,10 @@ async fn coinbase_sync_filters_zero_balances_and_cash_positions() -> Result<()> 
     let account = &result.accounts[0];
     assert_eq!(account.name, "ETH Wallet");
     assert_eq!(
-        account.synchronizer_data.get("currency").and_then(|v| v.as_str()),
+        account
+            .synchronizer_data
+            .get("currency")
+            .and_then(|v| v.as_str()),
         Some("ETH")
     );
 

@@ -40,9 +40,7 @@ impl SynchronizerFactory for DefaultSynchronizerFactory {
                 if let Some(data_dir) = &self.data_dir {
                     Ok(Box::new(
                         ChaseSynchronizer::from_connection_with_download_dir(
-                            connection,
-                            storage,
-                            data_dir,
+                            connection, storage, data_dir,
                         )
                         .await?,
                     ))

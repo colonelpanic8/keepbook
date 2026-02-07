@@ -1,12 +1,15 @@
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 
 use anyhow::Result;
 use keepbook::market_data::{MarketDataService, NullMarketDataStore};
 use keepbook::models::{Connection, ConnectionConfig};
 use keepbook::storage::{JsonFileStorage, Storage};
 use keepbook::sync::{
-    AuthStatus, FixedAuthPrompter, NoopAutoCommitter, SyncContext, SyncOutcome, SyncService,
-    Synchronizer, SynchronizerFactory, SyncResult,
+    AuthStatus, FixedAuthPrompter, NoopAutoCommitter, SyncContext, SyncOutcome, SyncResult,
+    SyncService, Synchronizer, SynchronizerFactory,
 };
 use tempfile::TempDir;
 

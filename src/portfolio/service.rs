@@ -173,9 +173,7 @@ impl PortfolioService {
 
             match policy {
                 BalanceBackfillPolicy::CarryEarliest => {
-                    if let Some(earliest) =
-                        snapshots.iter().min_by_key(|s| s.timestamp).cloned()
-                    {
+                    if let Some(earliest) = snapshots.iter().min_by_key(|s| s.timestamp).cloned() {
                         filtered_snapshots.push((account.id.clone(), earliest));
                     }
                 }
@@ -209,10 +207,10 @@ impl PortfolioService {
                 let entry = by_asset
                     .entry(asset_key.clone())
                     .or_insert_with(|| AssetAggregate {
-                    total_amount: Decimal::ZERO,
-                    latest_balance_date: balance_date,
-                    holdings: Vec::new(),
-                });
+                        total_amount: Decimal::ZERO,
+                        latest_balance_date: balance_date,
+                        holdings: Vec::new(),
+                    });
 
                 entry.total_amount += amount;
                 if balance_date > entry.latest_balance_date {
@@ -261,9 +259,9 @@ impl PortfolioService {
         let mut total_value = Decimal::ZERO;
 
         for (asset, agg) in by_asset {
-            let valuation = price_cache
-                .get(asset)
-                .with_context(|| format!("missing valuation for asset {}", AssetId::from_asset(asset)))?;
+            let valuation = price_cache.get(asset).with_context(|| {
+                format!("missing valuation for asset {}", AssetId::from_asset(asset))
+            })?;
 
             let asset_value = valuation
                 .value
@@ -334,9 +332,12 @@ impl PortfolioService {
             for asset_balance in &snapshot.balances {
                 let asset_key = asset_balance.asset.normalized();
                 let amount = Decimal::from_str(&asset_balance.amount)?;
-                let valuation = price_cache
-                    .get(&asset_key)
-                    .with_context(|| format!("missing valuation for asset {}", AssetId::from_asset(&asset_key)))?;
+                let valuation = price_cache.get(&asset_key).with_context(|| {
+                    format!(
+                        "missing valuation for asset {}",
+                        AssetId::from_asset(&asset_key)
+                    )
+                })?;
 
                 let entry = by_account
                     .entry(account_id.clone())
@@ -368,7 +369,10 @@ impl PortfolioService {
             .collect();
 
         for account_id in zero_accounts {
-            if summaries.iter().any(|s| s.account_id == account_id.to_string()) {
+            if summaries
+                .iter()
+                .any(|s| s.account_id == account_id.to_string())
+            {
                 continue;
             }
             let account = match account_map.get(account_id) {
@@ -519,8 +523,10 @@ impl PortfolioService {
 mod tests {
     use super::super::Grouping;
     use super::*;
+    use crate::market_data::{
+        AssetId, EquityPriceRouter, EquityPriceSource, PriceKind, PricePoint,
+    };
     use crate::market_data::{MarketDataStore, MemoryMarketDataStore};
-    use crate::market_data::{AssetId, EquityPriceRouter, EquityPriceSource, PriceKind, PricePoint};
     use crate::models::{
         Account, AccountConfig, Asset, AssetBalance, BalanceBackfillPolicy, BalanceSnapshot,
         Connection, ConnectionConfig,
@@ -1031,12 +1037,9 @@ mod tests {
             source: "quote".to_string(),
         };
 
-        let router = EquityPriceRouter::new(vec![Arc::new(QuoteOnlySource {
-            quote: quote_price,
-        })]);
-        let market_data = Arc::new(
-            MarketDataService::new(store, None).with_equity_router(Arc::new(router)),
-        );
+        let router = EquityPriceRouter::new(vec![Arc::new(QuoteOnlySource { quote: quote_price })]);
+        let market_data =
+            Arc::new(MarketDataService::new(store, None).with_equity_router(Arc::new(router)));
 
         let service = PortfolioService::new(Arc::new(MemoryStorage::new()), market_data);
         let valuation = service

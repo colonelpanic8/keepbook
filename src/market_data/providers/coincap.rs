@@ -97,10 +97,7 @@ impl CoinCapPriceSource {
     }
 
     async fn send_request(&self, url: &str) -> Result<reqwest::Response> {
-        let mut request = self
-            .client
-            .get(url)
-            .header("Accept", "application/json");
+        let mut request = self.client.get(url).header("Accept", "application/json");
 
         if let Some(key) = &self.api_key {
             request = request.bearer_auth(key);
@@ -161,20 +158,12 @@ impl CoinCapPriceSource {
         Ok(Some(asset_id))
     }
 
-    async fn fetch_history(
-        &self,
-        asset_id: &str,
-        date: NaiveDate,
-    ) -> Result<Option<HistoryPoint>> {
+    async fn fetch_history(&self, asset_id: &str, date: NaiveDate) -> Result<Option<HistoryPoint>> {
         let start = Utc
             .from_utc_datetime(&date.and_hms_opt(0, 0, 0).unwrap())
             .timestamp_millis();
         let end = Utc
-            .from_utc_datetime(
-                &(date + Duration::days(1))
-                    .and_hms_opt(0, 0, 0)
-                    .unwrap(),
-            )
+            .from_utc_datetime(&(date + Duration::days(1)).and_hms_opt(0, 0, 0).unwrap())
             .timestamp_millis();
 
         let url = format!(
@@ -263,10 +252,7 @@ mod tests {
 
         let response: HistoryResponse = serde_json::from_str(json).expect("parse history");
         assert_eq!(response.data.len(), 1);
-        assert_eq!(
-            response.data[0].price_usd.as_str().unwrap(),
-            "42685.1234"
-        );
+        assert_eq!(response.data[0].price_usd.as_str().unwrap(), "42685.1234");
     }
 
     #[test]

@@ -61,7 +61,10 @@ impl ChaseSynchronizer {
     }
 
     /// Create a synchronizer using an explicit session cache (useful for tests).
-    pub fn with_session_cache(connection: &Connection, session_cache: SessionCache) -> Result<Self> {
+    pub fn with_session_cache(
+        connection: &Connection,
+        session_cache: SessionCache,
+    ) -> Result<Self> {
         let download_root = default_download_root()?;
         Ok(Self {
             connection_id: connection.id().clone(),
@@ -127,7 +130,10 @@ impl ChaseSynchronizer {
         println!("5. Click Download");
         println!("========================================\n");
         println!("Waiting for downloads in: {}", download_dir.display());
-        println!("Will stop after {} seconds of inactivity.", DOWNLOAD_IDLE_SECS);
+        println!(
+            "Will stop after {} seconds of inactivity.",
+            DOWNLOAD_IDLE_SECS
+        );
 
         let downloads = watch_for_downloads(
             &download_dir,
@@ -137,7 +143,9 @@ impl ChaseSynchronizer {
         .await?;
 
         if downloads.is_empty() {
-            anyhow::bail!("No downloads detected. Try again and make sure the QFX download completes.");
+            anyhow::bail!(
+                "No downloads detected. Try again and make sure the QFX download completes."
+            );
         }
 
         // Refresh session cookies for reuse.
@@ -164,10 +172,8 @@ impl ChaseSynchronizer {
         connection.state.status = ConnectionStatus::Active;
 
         // Record downloads for later parsing.
-        let download_list: Vec<String> = downloads
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect();
+        let download_list: Vec<String> =
+            downloads.iter().map(|p| p.display().to_string()).collect();
         let mut data = connection
             .state
             .synchronizer_data
@@ -178,10 +184,7 @@ impl ChaseSynchronizer {
             "download_dir".to_string(),
             serde_json::Value::String(download_dir.display().to_string()),
         );
-        data.insert(
-            "downloads".to_string(),
-            serde_json::json!(download_list),
-        );
+        data.insert("downloads".to_string(), serde_json::json!(download_list));
         data.insert(
             "downloaded_at".to_string(),
             serde_json::Value::String(Utc::now().to_rfc3339()),
@@ -206,7 +209,11 @@ impl Synchronizer for ChaseSynchronizer {
         "chase"
     }
 
-    async fn sync(&self, connection: &mut Connection, _storage: &dyn Storage) -> Result<SyncResult> {
+    async fn sync(
+        &self,
+        connection: &mut Connection,
+        _storage: &dyn Storage,
+    ) -> Result<SyncResult> {
         self.sync_internal(connection).await
     }
 
@@ -284,7 +291,10 @@ impl InteractiveAuth for ChaseSynchronizer {
 
         self.session_cache.set(&self.session_key(), &session)?;
 
-        println!("Session saved successfully ({} cookies).", session.cookies.len());
+        println!(
+            "Session saved successfully ({} cookies).",
+            session.cookies.len()
+        );
 
         drop(browser);
         handler_task.abort();

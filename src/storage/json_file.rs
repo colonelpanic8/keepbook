@@ -154,7 +154,13 @@ impl JsonFileStorage {
         let sanitized: String = name
             .trim()
             .chars()
-            .map(|c| if c == '/' || c == '\\' || c == '\0' { '-' } else { c })
+            .map(|c| {
+                if c == '/' || c == '\\' || c == '\0' {
+                    '-'
+                } else {
+                    c
+                }
+            })
             .collect();
         if sanitized.is_empty() || sanitized == "." || sanitized == ".." {
             None
@@ -364,7 +370,9 @@ impl JsonFileStorage {
             .list_accounts()
             .await?
             .into_iter()
-            .filter(|account| account.connection_id == *conn.id() && !seen_ids.contains(&account.id))
+            .filter(|account| {
+                account.connection_id == *conn.id() && !seen_ids.contains(&account.id)
+            })
             .collect();
 
         for account in extra_accounts {
@@ -625,8 +633,8 @@ impl Storage for JsonFileStorage {
     async fn save_connection_config(&self, id: &Id, config: &ConnectionConfig) -> Result<()> {
         let path = self.connection_config_file(id)?;
         self.ensure_dir(&path).await?;
-        let config_toml = toml::to_string_pretty(config)
-            .context("Failed to serialize connection config")?;
+        let config_toml =
+            toml::to_string_pretty(config).context("Failed to serialize connection config")?;
         fs::write(&path, config_toml)
             .await
             .with_context(|| format!("Failed to write {}", path.display()))?;

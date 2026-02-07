@@ -100,14 +100,14 @@ async fn schwab_sync_uses_cached_session_and_base_url_override() -> Result<()> {
     let session_cache = SessionCache::with_path(cache_dir.path())?;
 
     let mut session = SessionData::new().with_token("test-token");
-    session
-        .data
-        .insert("api_base".to_string(), server.uri());
+    session.data.insert("api_base".to_string(), server.uri());
     session.cookies = HashMap::new();
     session_cache.set(&connection.id().to_string(), &session)?;
 
     let synchronizer = SchwabSynchronizer::with_session_cache(&connection, session_cache);
-    let result = synchronizer.sync_with_storage(&mut connection, &storage).await?;
+    let result = synchronizer
+        .sync_with_storage(&mut connection, &storage)
+        .await?;
 
     assert_eq!(result.accounts.len(), 1);
     let account = &result.accounts[0];
@@ -216,13 +216,13 @@ async fn schwab_preserves_created_at_for_existing_account() -> Result<()> {
     let cache_dir = TempDir::new()?;
     let session_cache = SessionCache::with_path(cache_dir.path())?;
     let mut session = SessionData::new().with_token("test-token");
-    session
-        .data
-        .insert("api_base".to_string(), server.uri());
+    session.data.insert("api_base".to_string(), server.uri());
     session_cache.set(&connection.id().to_string(), &session)?;
 
     let synchronizer = SchwabSynchronizer::with_session_cache(&connection, session_cache);
-    let result = synchronizer.sync_with_storage(&mut connection, &storage).await?;
+    let result = synchronizer
+        .sync_with_storage(&mut connection, &storage)
+        .await?;
 
     assert_eq!(result.accounts.len(), 1);
     assert_eq!(result.accounts[0].id, existing.id);
@@ -292,13 +292,13 @@ async fn schwab_account_ids_are_deterministic() -> Result<()> {
     let cache_dir = TempDir::new()?;
     let session_cache = SessionCache::with_path(cache_dir.path())?;
     let mut session = SessionData::new().with_token("test-token");
-    session
-        .data
-        .insert("api_base".to_string(), server.uri());
+    session.data.insert("api_base".to_string(), server.uri());
     session_cache.set(&connection.id().to_string(), &session)?;
 
     let synchronizer = SchwabSynchronizer::with_session_cache(&connection, session_cache);
-    let result = synchronizer.sync_with_storage(&mut connection, &storage).await?;
+    let result = synchronizer
+        .sync_with_storage(&mut connection, &storage)
+        .await?;
 
     assert_eq!(result.accounts.len(), 1);
     assert_eq!(result.accounts[0].id, Id::from_external("ABC123"));

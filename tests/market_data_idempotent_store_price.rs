@@ -1,6 +1,8 @@
 use anyhow::Result;
 use chrono::NaiveDate;
-use keepbook::market_data::{AssetId, JsonlMarketDataStore, MarketDataService, MarketDataStore, PriceKind, PricePoint};
+use keepbook::market_data::{
+    AssetId, JsonlMarketDataStore, MarketDataService, MarketDataStore, PriceKind, PricePoint,
+};
 use keepbook::models::Asset;
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -30,4 +32,3 @@ async fn store_price_is_idempotent_for_jsonl_store() -> Result<()> {
     assert_eq!(all.len(), 1, "store_price should not append duplicates");
     Ok(())
 }
-

@@ -233,11 +233,7 @@ pub async fn list_connections(storage: &dyn Storage) -> Result<Vec<ConnectionOut
             synchronizer: c.config.synchronizer.clone(),
             status: c.state.status.to_string(),
             account_count: account_ids.len(),
-            last_sync: c
-                .state
-                .last_sync
-                .as_ref()
-                .map(|ls| ls.at.to_rfc3339()),
+            last_sync: c.state.last_sync.as_ref().map(|ls| ls.at.to_rfc3339()),
         });
     }
 
@@ -351,10 +347,7 @@ pub async fn list_transactions(storage: &dyn Storage) -> Result<Vec<TransactionO
     Ok(output)
 }
 
-pub async fn list_all(
-    storage: &dyn Storage,
-    config: &ResolvedConfig,
-) -> Result<AllOutput> {
+pub async fn list_all(storage: &dyn Storage, config: &ResolvedConfig) -> Result<AllOutput> {
     Ok(AllOutput {
         connections: list_connections(storage).await?,
         accounts: list_accounts(storage).await?,
@@ -566,8 +559,7 @@ pub async fn set_balance(
     if amount.is_empty() {
         anyhow::bail!("Amount cannot be empty");
     }
-    rust_decimal::Decimal::from_str(amount)
-        .with_context(|| format!("Invalid amount: {amount}"))?;
+    rust_decimal::Decimal::from_str(amount).with_context(|| format!("Invalid amount: {amount}"))?;
 
     let id = Id::from_string_checked(account_id)
         .with_context(|| format!("Invalid account id: {account_id}"))?;
@@ -621,19 +613,15 @@ async fn build_sync_service(storage: Arc<dyn Storage>, config: &ResolvedConfig) 
         .with_quote_staleness(config.refresh.price_staleness)
         .build()
         .await;
-    let context = SyncContext::new(
-        storage,
-        market_data,
-        config.reporting_currency.clone(),
-    )
-    .with_auth_prompter(Arc::new(StdinPrompter))
-    .with_auto_committer(Arc::new(GitAutoCommitter::new(
-        config.data_dir.clone(),
-        config.git.auto_commit,
-    )))
-    .with_factory(Arc::new(DefaultSynchronizerFactory::new(Some(
-        config.data_dir.clone(),
-    ))));
+    let context = SyncContext::new(storage, market_data, config.reporting_currency.clone())
+        .with_auth_prompter(Arc::new(StdinPrompter))
+        .with_auto_committer(Arc::new(GitAutoCommitter::new(
+            config.data_dir.clone(),
+            config.git.auto_commit,
+        )))
+        .with_factory(Arc::new(DefaultSynchronizerFactory::new(Some(
+            config.data_dir.clone(),
+        ))));
 
     SyncService::new(context)
 }
@@ -711,7 +699,10 @@ pub async fn sync_connection_if_stale(
     Ok(sync_outcome_to_json(outcome))
 }
 
-pub async fn sync_all(storage: Arc<dyn Storage>, config: &ResolvedConfig) -> Result<serde_json::Value> {
+pub async fn sync_all(
+    storage: Arc<dyn Storage>,
+    config: &ResolvedConfig,
+) -> Result<serde_json::Value> {
     let service = build_sync_service(storage, config).await;
     let outcomes = service.sync_all().await?;
     let results: Vec<_> = outcomes.into_iter().map(sync_outcome_to_json).collect();
@@ -833,7 +824,9 @@ struct AssetPriceCache {
     prices: HashMap<NaiveDate, PricePoint>,
 }
 
-pub async fn fetch_historical_prices(request: PriceHistoryRequest<'_>) -> Result<PriceHistoryOutput> {
+pub async fn fetch_historical_prices(
+    request: PriceHistoryRequest<'_>,
+) -> Result<PriceHistoryOutput> {
     let PriceHistoryRequest {
         storage,
         config,
@@ -1242,7 +1235,6 @@ async fn resolve_price_history_scope(
     Ok((PriceHistoryScopeOutput::Portfolio, accounts))
 }
 
-
 async fn load_price_cache(
     store: &Arc<dyn MarketDataStore>,
     asset_id: &AssetId,
@@ -1647,11 +1639,8 @@ pub async fn portfolio_history(
     let filtered_by_date = filter_by_date_range(change_points, start_date, end_date);
 
     // Filter by granularity
-    let filtered = filter_by_granularity(
-        filtered_by_date,
-        granularity_enum,
-        CoalesceStrategy::Last,
-    );
+    let filtered =
+        filter_by_granularity(filtered_by_date, granularity_enum, CoalesceStrategy::Last);
 
     if filtered.is_empty() {
         return Ok(HistoryOutput {
@@ -1728,11 +1717,9 @@ pub async fn portfolio_history(
 
     // Calculate summary if we have points
     let summary = if history_points.len() >= 2 {
-        let initial =
-            Decimal::from_str(&history_points[0].total_value).unwrap_or(Decimal::ZERO);
-        let final_val =
-            Decimal::from_str(&history_points[history_points.len() - 1].total_value)
-                .unwrap_or(Decimal::ZERO);
+        let initial = Decimal::from_str(&history_points[0].total_value).unwrap_or(Decimal::ZERO);
+        let final_val = Decimal::from_str(&history_points[history_points.len() - 1].total_value)
+            .unwrap_or(Decimal::ZERO);
         let absolute_change = final_val - initial;
         let percentage_change = if initial != Decimal::ZERO {
             ((final_val - initial) / initial * Decimal::from(100))
@@ -1792,13 +1779,13 @@ fn maybe_auto_commit(config: &ResolvedConfig, action: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{GitConfig, RefreshConfig, ResolvedConfig};
     use crate::clock::FixedClock;
+    use crate::config::{GitConfig, RefreshConfig, ResolvedConfig};
     use crate::models::FixedIdGenerator;
     use crate::models::{Account, ConnectionConfig};
     use crate::storage::JsonFileStorage;
-    use chrono::{DateTime, NaiveDate, Utc};
     use chrono::TimeZone;
+    use chrono::{DateTime, NaiveDate, Utc};
     use std::collections::HashMap;
     use std::path::PathBuf;
     use tempfile::TempDir;
@@ -1822,11 +1809,7 @@ mod tests {
         Ok(())
     }
 
-    fn sample_price(
-        asset: &Asset,
-        date: NaiveDate,
-        timestamp: DateTime<Utc>,
-    ) -> PricePoint {
+    fn sample_price(asset: &Asset, date: NaiveDate, timestamp: DateTime<Utc>) -> PricePoint {
         PricePoint {
             asset_id: AssetId::from_asset(asset),
             as_of_date: date,
@@ -1838,7 +1821,12 @@ mod tests {
         }
     }
 
-    fn sample_fx_rate(base: &str, quote: &str, date: NaiveDate, timestamp: DateTime<Utc>) -> FxRatePoint {
+    fn sample_fx_rate(
+        base: &str,
+        quote: &str,
+        date: NaiveDate,
+        timestamp: DateTime<Utc>,
+    ) -> FxRatePoint {
         FxRatePoint {
             base: base.to_string(),
             quote: quote.to_string(),
@@ -1904,8 +1892,7 @@ mod tests {
         let mut cache = HashMap::new();
         cache.insert(date, exact.clone());
 
-        let (found, exact_hit) =
-            resolve_cached_price(&cache, date, 3).expect("exact price");
+        let (found, exact_hit) = resolve_cached_price(&cache, date, 3).expect("exact price");
         assert!(exact_hit);
         assert_eq!(found.as_of_date, date);
 
@@ -1914,8 +1901,7 @@ mod tests {
         let lookback = sample_price(&asset, lookback_date, Utc::now());
         cache.insert(lookback_date, lookback.clone());
 
-        let (found, exact_hit) =
-            resolve_cached_price(&cache, date, 3).expect("lookback price");
+        let (found, exact_hit) = resolve_cached_price(&cache, date, 3).expect("lookback price");
         assert!(!exact_hit);
         assert_eq!(found.as_of_date, lookback_date);
     }
@@ -1945,8 +1931,7 @@ mod tests {
         let mut cache = HashMap::new();
         cache.insert(date, exact.clone());
 
-        let (found, exact_hit) =
-            resolve_cached_fx(&cache, date, 3).expect("exact rate");
+        let (found, exact_hit) = resolve_cached_fx(&cache, date, 3).expect("exact rate");
         assert!(exact_hit);
         assert_eq!(found.as_of_date, date);
 
@@ -1955,8 +1940,7 @@ mod tests {
         let lookback = sample_fx_rate("EUR", "USD", lookback_date, Utc::now());
         cache.insert(lookback_date, lookback.clone());
 
-        let (found, exact_hit) =
-            resolve_cached_fx(&cache, date, 3).expect("lookback rate");
+        let (found, exact_hit) = resolve_cached_fx(&cache, date, 3).expect("lookback rate");
         assert!(!exact_hit);
         assert_eq!(found.as_of_date, lookback_date);
     }
@@ -1977,9 +1961,7 @@ mod tests {
         let err = add_connection(&storage, &config, "duplicate")
             .await
             .expect_err("expected duplicate connection name error");
-        assert!(err
-            .to_string()
-            .contains("Connection name already exists"));
+        assert!(err.to_string().contains("Connection name already exists"));
 
         Ok(())
     }
@@ -2122,9 +2104,7 @@ mod tests {
             .await
             .err()
             .expect("expected missing accounts error");
-        assert!(err
-            .to_string()
-            .contains("No accounts found for connection"));
+        assert!(err.to_string().contains("No accounts found for connection"));
 
         Ok(())
     }

@@ -3,7 +3,9 @@ use std::path::Path;
 use anyhow::Result;
 use keepbook::app::list_balances;
 use keepbook::config::{GitConfig, RefreshConfig, ResolvedConfig};
-use keepbook::models::{Account, Asset, AssetBalance, BalanceSnapshot, Connection, ConnectionConfig};
+use keepbook::models::{
+    Account, Asset, AssetBalance, BalanceSnapshot, Connection, ConnectionConfig,
+};
 use keepbook::storage::{JsonFileStorage, Storage};
 use tempfile::TempDir;
 
@@ -16,10 +18,7 @@ fn resolved_config(data_dir: &Path) -> ResolvedConfig {
     }
 }
 
-async fn write_connection_config(
-    storage: &JsonFileStorage,
-    connection: &Connection,
-) -> Result<()> {
+async fn write_connection_config(storage: &JsonFileStorage, connection: &Connection) -> Result<()> {
     storage
         .save_connection_config(connection.id(), &connection.config)
         .await?;
@@ -46,7 +45,9 @@ async fn list_balances_falls_back_to_accounts_by_connection_id() -> Result<()> {
     storage.save_account(&account).await?;
 
     let snapshot = BalanceSnapshot::now(vec![AssetBalance::new(Asset::currency("USD"), "100")]);
-    storage.append_balance_snapshot(&account.id, &snapshot).await?;
+    storage
+        .append_balance_snapshot(&account.id, &snapshot)
+        .await?;
 
     let balances = list_balances(&storage).await?;
     assert_eq!(balances.len(), 1, "expected balance even if state is empty");
@@ -73,7 +74,9 @@ async fn latest_balances_for_connection_includes_accounts_by_connection_id() -> 
     storage.save_account(&account).await?;
 
     let snapshot = BalanceSnapshot::now(vec![AssetBalance::new(Asset::currency("USD"), "100")]);
-    storage.append_balance_snapshot(&account.id, &snapshot).await?;
+    storage
+        .append_balance_snapshot(&account.id, &snapshot)
+        .await?;
 
     let balances = storage
         .get_latest_balances_for_connection(connection.id())

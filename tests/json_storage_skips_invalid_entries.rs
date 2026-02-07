@@ -59,4 +59,3 @@ async fn list_accounts_skips_invalid_json() -> Result<()> {
 
     Ok(())
 }
-

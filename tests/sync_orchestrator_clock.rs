@@ -19,7 +19,9 @@ async fn sync_orchestrator_uses_injected_clock_for_snapshot_and_price_date() -> 
     let storage = JsonFileStorage::new(dir.path());
     let storage_arc = Arc::new(storage.clone());
 
-    let fixed_now = chrono::Utc.with_ymd_and_hms(2026, 2, 5, 12, 34, 56).unwrap();
+    let fixed_now = chrono::Utc
+        .with_ymd_and_hms(2026, 2, 5, 12, 34, 56)
+        .unwrap();
     let clock = Arc::new(FixedClock::new(fixed_now));
 
     let store = Arc::new(MemoryMarketDataStore::new());

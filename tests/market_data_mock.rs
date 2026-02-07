@@ -4,7 +4,9 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use chrono::{Duration, NaiveDate, Utc};
-use keepbook::market_data::{AssetId, FxRateKind, MarketDataService, MarketDataStore, MemoryMarketDataStore, PriceKind};
+use keepbook::market_data::{
+    AssetId, FxRateKind, MarketDataService, MarketDataStore, MemoryMarketDataStore, PriceKind,
+};
 use keepbook::models::Asset;
 use support::{fx_rate_point, price_point, price_point_with_timestamp, MockMarketDataSource};
 
@@ -48,7 +50,9 @@ async fn test_price_latest_uses_fresh_cached_quote() -> Result<()> {
         PriceKind::Quote,
         Utc::now() - Duration::minutes(5),
     );
-    store.put_prices(std::slice::from_ref(&cached_quote)).await?;
+    store
+        .put_prices(std::slice::from_ref(&cached_quote))
+        .await?;
 
     let provider = MockMarketDataSource::new().fail_on_fetch();
     let service = MarketDataService::new(store.clone(), Some(Arc::new(provider)))
@@ -151,7 +155,9 @@ async fn test_price_latest_uses_future_cached_quote() -> Result<()> {
         PriceKind::Quote,
         Utc::now() + Duration::minutes(5),
     );
-    store.put_prices(std::slice::from_ref(&cached_quote)).await?;
+    store
+        .put_prices(std::slice::from_ref(&cached_quote))
+        .await?;
 
     let provider = MockMarketDataSource::new().fail_on_fetch();
     let service = MarketDataService::new(store.clone(), Some(Arc::new(provider)))
