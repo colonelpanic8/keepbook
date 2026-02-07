@@ -178,35 +178,61 @@ impl MarketDataService {
     /// Tries real-time quote first, falls back to historical close.
     /// If quote_staleness is set, returns cached quote if it's fresh enough.
     pub async fn price_latest(&self, asset: &Asset, date: NaiveDate) -> Result<PricePoint> {
+        Ok(self.price_latest_with_status(asset, date).await?.0)
+    }
+
+    /// Like [`Self::price_latest`] but returns whether a new point was fetched and stored.
+    pub async fn price_latest_with_status(
+        &self,
+        asset: &Asset,
+        date: NaiveDate,
+    ) -> Result<(PricePoint, bool)> {
+        self.price_latest_inner(asset, date, false).await
+    }
+
+    /// Like [`Self::price_latest`] but always tries to fetch a new quote first (ignores cached quote
+    /// freshness), then falls back to close prices. Returns whether a new point was fetched/stored.
+    pub async fn price_latest_force(&self, asset: &Asset, date: NaiveDate) -> Result<(PricePoint, bool)> {
+        self.price_latest_inner(asset, date, true).await
+    }
+
+    async fn price_latest_inner(
+        &self,
+        asset: &Asset,
+        date: NaiveDate,
+        force: bool,
+    ) -> Result<(PricePoint, bool)> {
         let asset = asset.normalized();
         let asset_id = AssetId::from_asset(&asset);
         debug!(asset_id = %asset_id, "looking up latest price (quote or close)");
 
-        // Check for a cached quote first if staleness is configured
-        if let Some(staleness) = self.quote_staleness {
-            if let Some(cached) = self
-                .store
-                .get_price(&asset_id, date, PriceKind::Quote)
-                .await?
-            {
-                let age = (self.clock.now() - cached.timestamp)
-                    .to_std()
-                    .unwrap_or(std::time::Duration::ZERO);
-                if age < staleness {
+        // Check for a cached quote first if staleness is configured (unless forced).
+        if !force {
+            if let Some(staleness) = self.quote_staleness {
+                if let Some(cached) = self
+                    .store
+                    .get_price(&asset_id, date, PriceKind::Quote)
+                    .await?
+                {
+                    let age = (self.clock.now() - cached.timestamp)
+                        .to_std()
+                        .unwrap_or(std::time::Duration::ZERO);
+                    if age < staleness {
+                        debug!(
+                            asset_id = %asset_id,
+                            price = %cached.price,
+                            age_secs = age.as_secs(),
+                            "returning cached quote (still fresh)"
+                        );
+                        return Ok((cached, false));
+                    }
                     debug!(
                         asset_id = %asset_id,
-                        price = %cached.price,
                         age_secs = age.as_secs(),
-                        "returning cached quote (still fresh)"
+                        staleness_secs = staleness.as_secs(),
+                        "cached quote is stale, fetching new one"
                     );
-                    return Ok(cached);
                 }
-                debug!(
-                    asset_id = %asset_id,
-                    age_secs = age.as_secs(),
-                    staleness_secs = staleness.as_secs(),
-                    "cached quote is stale, fetching new one"
-                );
             }
         }
 
@@ -220,12 +246,22 @@ impl MarketDataService {
                 "live quote fetched and stored"
             );
             self.store.put_prices(std::slice::from_ref(&price)).await?;
-            return Ok(price);
+            return Ok((price, true));
         }
 
         debug!(asset_id = %asset_id, "no live quote available, falling back to close price");
-        // Fall back to close price
-        self.price_close(&asset, date).await
+        // Fall back to close price, but track whether we had to fetch.
+        if force {
+            let (price, fetched) = self.price_close_force(&asset, date).await?;
+            return Ok((price, fetched));
+        }
+
+        if let Some(price) = self.price_from_store(&asset, date).await? {
+            return Ok((price, false));
+        }
+
+        let price = self.price_close(&asset, date).await?;
+        Ok((price, true))
     }
 
     pub async fn fx_close(&self, base: &str, quote: &str, date: NaiveDate) -> Result<FxRatePoint> {
@@ -474,5 +510,148 @@ impl MarketDataService {
         }
 
         Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::clock::FixedClock;
+    use crate::market_data::{MemoryMarketDataStore, PriceKind, PricePoint};
+    use crate::market_data::{AssetId, EquityPriceRouter, EquityPriceSource};
+    use chrono::{TimeZone, Utc};
+    use std::sync::Arc;
+
+    struct FixedEquityQuoteSource {
+        point: PricePoint,
+    }
+
+    #[async_trait::async_trait]
+    impl EquityPriceSource for FixedEquityQuoteSource {
+        async fn fetch_close(
+            &self,
+            _asset: &Asset,
+            _asset_id: &AssetId,
+            _date: NaiveDate,
+        ) -> Result<Option<PricePoint>> {
+            Ok(None)
+        }
+
+        async fn fetch_quote(&self, _asset: &Asset, _asset_id: &AssetId) -> Result<Option<PricePoint>> {
+            Ok(Some(self.point.clone()))
+        }
+
+        fn name(&self) -> &str {
+            "fixed"
+        }
+    }
+
+    fn make_quote(asset_id: &AssetId, as_of_date: NaiveDate, ts: chrono::DateTime<Utc>, px: &str) -> PricePoint {
+        PricePoint {
+            asset_id: asset_id.clone(),
+            as_of_date,
+            timestamp: ts,
+            kind: PriceKind::Quote,
+            price: px.to_string(),
+            quote_currency: "USD".to_string(),
+            source: "fixed".to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn price_latest_with_status_uses_fresh_cached_quote() -> Result<()> {
+        let now = Utc.with_ymd_and_hms(2026, 2, 6, 12, 0, 0).unwrap();
+        let clock = Arc::new(FixedClock::new(now));
+
+        let store = Arc::new(MemoryMarketDataStore::default());
+        let mut svc = MarketDataService::new(store.clone(), None)
+            .with_quote_staleness(std::time::Duration::from_secs(3600))
+            .with_clock(clock);
+
+        let asset = Asset::Equity {
+            ticker: "AAPL".to_string(),
+            exchange: Some("NASDAQ".to_string()),
+        };
+        let asset_id = AssetId::from_asset(&asset.normalized());
+        let today = now.date_naive();
+
+        let cached = make_quote(&asset_id, today, now - chrono::Duration::minutes(30), "100");
+        store.put_prices(std::slice::from_ref(&cached)).await?;
+
+        // Router exists but should not be used due to fresh cache.
+        let src_quote = make_quote(&asset_id, today, now, "200");
+        let router = Arc::new(EquityPriceRouter::new(vec![Arc::new(FixedEquityQuoteSource {
+            point: src_quote,
+        })]));
+        svc = svc.with_equity_router(router);
+
+        let (p, fetched) = svc.price_latest_with_status(&asset, today).await?;
+        assert!(!fetched);
+        assert_eq!(p.price, "100");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn price_latest_with_status_fetches_when_cached_quote_is_stale() -> Result<()> {
+        let now = Utc.with_ymd_and_hms(2026, 2, 6, 12, 0, 0).unwrap();
+        let clock = Arc::new(FixedClock::new(now));
+
+        let store = Arc::new(MemoryMarketDataStore::default());
+        let mut svc = MarketDataService::new(store.clone(), None)
+            .with_quote_staleness(std::time::Duration::from_secs(3600))
+            .with_clock(clock);
+
+        let asset = Asset::Equity {
+            ticker: "AAPL".to_string(),
+            exchange: Some("NASDAQ".to_string()),
+        };
+        let asset_id = AssetId::from_asset(&asset.normalized());
+        let today = now.date_naive();
+
+        let cached = make_quote(&asset_id, today, now - chrono::Duration::hours(2), "100");
+        store.put_prices(std::slice::from_ref(&cached)).await?;
+
+        let src_quote = make_quote(&asset_id, today, now, "200");
+        let router = Arc::new(EquityPriceRouter::new(vec![Arc::new(FixedEquityQuoteSource {
+            point: src_quote.clone(),
+        })]));
+        svc = svc.with_equity_router(router);
+
+        let (p, fetched) = svc.price_latest_with_status(&asset, today).await?;
+        assert!(fetched);
+        assert_eq!(p.price, "200");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn price_latest_force_ignores_fresh_cached_quote() -> Result<()> {
+        let now = Utc.with_ymd_and_hms(2026, 2, 6, 12, 0, 0).unwrap();
+        let clock = Arc::new(FixedClock::new(now));
+
+        let store = Arc::new(MemoryMarketDataStore::default());
+        let mut svc = MarketDataService::new(store.clone(), None)
+            .with_quote_staleness(std::time::Duration::from_secs(3600))
+            .with_clock(clock);
+
+        let asset = Asset::Equity {
+            ticker: "AAPL".to_string(),
+            exchange: Some("NASDAQ".to_string()),
+        };
+        let asset_id = AssetId::from_asset(&asset.normalized());
+        let today = now.date_naive();
+
+        let cached = make_quote(&asset_id, today, now - chrono::Duration::minutes(5), "100");
+        store.put_prices(std::slice::from_ref(&cached)).await?;
+
+        let src_quote = make_quote(&asset_id, today, now, "200");
+        let router = Arc::new(EquityPriceRouter::new(vec![Arc::new(FixedEquityQuoteSource {
+            point: src_quote.clone(),
+        })]));
+        svc = svc.with_equity_router(router);
+
+        let (p, fetched) = svc.price_latest_force(&asset, today).await?;
+        assert!(fetched);
+        assert_eq!(p.price, "200");
+        Ok(())
     }
 }

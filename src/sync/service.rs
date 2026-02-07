@@ -6,10 +6,10 @@ use crate::git::{try_auto_commit, AutoCommitOutcome};
 use crate::market_data::MarketDataService;
 use crate::models::Connection;
 use crate::staleness::{check_balance_staleness_at, resolve_balance_staleness};
-use crate::storage::{find_connection, Storage};
+use crate::storage::{find_account, find_connection, Storage};
 use anyhow::{Context, Result};
 
-use super::{AuthStatus, InteractiveAuth, SyncOrchestrator, SyncWithPricesResult};
+use super::{AuthStatus, InteractiveAuth, PriceRefreshResult, SyncOrchestrator, SyncWithPricesResult};
 use super::{DefaultSynchronizerFactory, SynchronizerFactory};
 
 pub trait AuthPrompter: Send + Sync {
@@ -263,6 +263,67 @@ impl SyncService {
         self.auto_committer.maybe_commit("sync all");
 
         Ok(results)
+    }
+
+    /// Refresh prices only (no balance sync), for all accounts in storage.
+    pub async fn sync_prices_all(&self, force: bool) -> Result<PriceRefreshResult> {
+        let date = self.clock.today();
+        let result = self
+            .orchestrator
+            .refresh_all_valuation_prices(date, force)
+            .await?;
+
+        let label = if force { "sync prices all (force)" } else { "sync prices all" };
+        self.auto_committer.maybe_commit(label);
+        Ok(result)
+    }
+
+    /// Refresh prices only (no balance sync), for all accounts in a connection.
+    pub async fn sync_prices_connection(
+        &self,
+        id_or_name: &str,
+        force: bool,
+    ) -> Result<PriceRefreshResult> {
+        let connection = find_connection(self.storage.as_ref(), id_or_name)
+            .await?
+            .context(format!("Connection not found: {id_or_name}"))?;
+        let date = self.clock.today();
+        let result = self
+            .orchestrator
+            .refresh_connection_valuation_prices(connection.id(), date, force)
+            .await?;
+
+        let label = if force {
+            format!("sync prices connection {id_or_name} (force)")
+        } else {
+            format!("sync prices connection {id_or_name}")
+        };
+        self.auto_committer.maybe_commit(&label);
+        Ok(result)
+    }
+
+    /// Refresh prices only (no balance sync), for a single account.
+    pub async fn sync_prices_account(
+        &self,
+        id_or_name: &str,
+        force: bool,
+    ) -> Result<PriceRefreshResult> {
+        let account = find_account(self.storage.as_ref(), id_or_name)
+            .await?
+            .context(format!("Account not found: {id_or_name}"))?;
+        let date = self.clock.today();
+        let result = self
+            .orchestrator
+            .refresh_account_valuation_prices(&account.id, date, force)
+            .await?;
+
+        let label = if force {
+            format!("sync prices account {id_or_name} (force)")
+        } else {
+            format!("sync prices account {id_or_name}")
+        };
+        self.auto_committer.maybe_commit(&label);
+        Ok(result)
     }
 
     pub async fn login(

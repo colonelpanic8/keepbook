@@ -2,11 +2,50 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
-use clap::{CommandFactory, Parser, Subcommand};
+use clap::{Args, CommandFactory, Parser, Subcommand};
 use keepbook::app;
 use keepbook::config::{default_config_path, ResolvedConfig};
 use keepbook::storage::{JsonFileStorage, Storage};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+
+fn parse_duration_arg(s: &str) -> Result<std::time::Duration, String> {
+    keepbook::duration::parse_duration(s).map_err(|e| e.to_string())
+}
+
+#[derive(Args, Debug, Clone)]
+struct PriceSyncOptions {
+    /// Force fetching even if cached data looks fresh (best-effort for quotes).
+    #[arg(long, global = true)]
+    force: bool,
+
+    /// Override quote freshness threshold (e.g. "0s", "30m", "6h", "1d").
+    /// Default is `refresh.price_staleness` from config.
+    #[arg(
+        long,
+        global = true,
+        value_name = "DURATION",
+        value_parser = parse_duration_arg
+    )]
+    quote_staleness: Option<std::time::Duration>,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum PriceSyncScopeCommand {
+    /// Refresh prices for all accounts (uses latest stored balances).
+    All,
+    /// Refresh prices for accounts in a connection.
+    /// If ID/NAME is omitted, you will be prompted to select one.
+    Connection {
+        /// Connection ID or name
+        id_or_name: Option<String>,
+    },
+    /// Refresh prices for a single account.
+    /// If ID/NAME is omitted, you will be prompted to select one.
+    Account {
+        /// Account ID or name
+        id_or_name: Option<String>,
+    },
+}
 
 #[derive(Parser)]
 #[command(name = "keepbook")]
@@ -114,6 +153,16 @@ enum SyncCommand {
         /// Only sync connections with stale data
         #[arg(long)]
         if_stale: bool,
+    },
+    /// Refresh prices only (no balance sync).
+    ///
+    /// If no scope subcommand is specified, a minimal interactive selector is shown.
+    Prices {
+        #[command(flatten)]
+        opts: PriceSyncOptions,
+
+        #[command(subcommand)]
+        scope: Option<PriceSyncScopeCommand>,
     },
     /// Rebuild all symlinks (connections/by-name and account directories)
     Symlinks,
@@ -274,9 +323,36 @@ enum PortfolioCommand {
         #[arg(long, default_value = "none")]
         granularity: String,
 
-        /// Include price changes as change points (slower, more detailed)
-        #[arg(long)]
+        /// Include price changes as change points (default: enabled)
+        #[arg(long, default_value_t = true)]
         include_prices: bool,
+
+        /// Disable price changes as change points (faster, less detailed)
+        #[arg(long, conflicts_with = "include_prices")]
+        no_include_prices: bool,
+    },
+
+    /// List all change points (timestamps where portfolio value could have changed)
+    ChangePoints {
+        /// Start date (YYYY-MM-DD, default: earliest data)
+        #[arg(long)]
+        start: Option<String>,
+
+        /// End date (YYYY-MM-DD, default: today)
+        #[arg(long)]
+        end: Option<String>,
+
+        /// Time granularity: none/full, hourly, daily, weekly, monthly, yearly (default: none)
+        #[arg(long, default_value = "none")]
+        granularity: String,
+
+        /// Include price changes as change points (default: enabled)
+        #[arg(long, default_value_t = true)]
+        include_prices: bool,
+
+        /// Disable price changes as change points (faster, less detailed)
+        #[arg(long, conflicts_with = "include_prices")]
+        no_include_prices: bool,
     },
 }
 
@@ -366,6 +442,26 @@ async fn main() -> Result<()> {
                 } else {
                     app::sync_all(storage_arc.clone(), &config).await?
                 };
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
+            SyncCommand::Prices { opts, scope } => {
+                let result = app::sync_prices(
+                    storage_arc.clone(),
+                    &config,
+                    match &scope {
+                        None => app::SyncPricesScopeArg::Interactive,
+                        Some(PriceSyncScopeCommand::All) => app::SyncPricesScopeArg::All,
+                        Some(PriceSyncScopeCommand::Connection { id_or_name }) => {
+                            app::SyncPricesScopeArg::Connection(id_or_name.as_deref())
+                        }
+                        Some(PriceSyncScopeCommand::Account { id_or_name }) => {
+                            app::SyncPricesScopeArg::Account(id_or_name.as_deref())
+                        }
+                    },
+                    opts.force,
+                    opts.quote_staleness,
+                )
+                .await?;
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
             SyncCommand::Symlinks => {
@@ -488,6 +584,7 @@ async fn main() -> Result<()> {
                 end,
                 granularity,
                 include_prices,
+                no_include_prices,
             } => {
                 let output = app::portfolio_history(
                     storage_arc.clone(),
@@ -496,7 +593,26 @@ async fn main() -> Result<()> {
                     start,
                     end,
                     granularity,
-                    include_prices,
+                    include_prices && !no_include_prices,
+                )
+                .await?;
+                println!("{}", serde_json::to_string_pretty(&output)?);
+            }
+
+            PortfolioCommand::ChangePoints {
+                start,
+                end,
+                granularity,
+                include_prices,
+                no_include_prices,
+            } => {
+                let output = app::portfolio_change_points(
+                    storage_arc.clone(),
+                    &config,
+                    start,
+                    end,
+                    granularity,
+                    include_prices && !no_include_prices,
                 )
                 .await?;
                 println!("{}", serde_json::to_string_pretty(&output)?);

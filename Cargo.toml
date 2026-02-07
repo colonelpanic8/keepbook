@@ -47,12 +47,14 @@ cli = [
   "portfolio",
   "staleness",
   "sync",
+  "tui",
   "dep:clap",
   "dep:tracing-subscriber",
 ]
 
 # Fine-grained feature gates for consumers that want a subset.
 app = []
+tui = ["dep:dialoguer"]
 config = []
 credentials = []
 git = []
@@ -100,6 +102,7 @@ anyhow = "1"
 
 # CLI
 clap = { version = "4", features = ["derive"], optional = true }
+dialoguer = { version = "0.11", optional = true }
 
 # For reading pass credentials
 secrecy = "0.10"
