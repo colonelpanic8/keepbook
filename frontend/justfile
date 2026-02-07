@@ -1,0 +1,37 @@
+# keepbook/frontend development commands
+
+# Android Virtual Device name (without '@'). Override with `just emulator avd=...`
+avd := env_var_or_default("AVD", "keepbook_test")
+
+# Start the Android emulator with nixGL (Linux-only)
+emulator:
+    nixGLIntel emulator @{{avd}} -no-snapshot -no-boot-anim
+
+# Start emulator in background
+emulator-bg:
+    nixGLIntel emulator @{{avd}} -no-snapshot -no-boot-anim &
+
+# Run Expo prebuild to generate native projects (android/ ios/)
+prebuild:
+    npx expo prebuild
+
+# Clean prebuild output (useful when native deps change)
+prebuild-clean:
+    npx expo prebuild --clean
+
+# Build Android app for emulator (x86_64). Requires android/ from prebuild.
+build-android:
+    cd android && ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest -DtestBuildType=debug -PreactNativeArchitectures=x86_64
+
+# Build Android app for device (arm64). Requires android/ from prebuild.
+build-android-device:
+    cd android && ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest -DtestBuildType=debug -PreactNativeArchitectures=arm64-v8a
+
+# Clean Android build
+clean-android:
+    cd android && ./gradlew clean
+
+# List connected devices
+devices:
+    adb devices
+
