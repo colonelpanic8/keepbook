@@ -339,12 +339,12 @@ portfolio
   .action(
     async (opts: { currency?: string; date?: string; groupBy?: string; detail?: boolean }) => {
       await run(async () => {
-      const cfg = await loadConfig(program.opts().config);
-      const storage = new JsonFileStorage(cfg.config.data_dir);
-      const marketDataStore = new JsonlMarketDataStore(cfg.config.data_dir);
-      return portfolioSnapshot(storage, marketDataStore, cfg.config, {
-        currency: opts.currency,
-        date: opts.date,
+        const cfg = await loadConfig(program.opts().config);
+        const storage = new JsonFileStorage(cfg.config.data_dir);
+        const marketDataStore = new JsonlMarketDataStore(cfg.config.data_dir);
+        return portfolioSnapshot(storage, marketDataStore, cfg.config, {
+          currency: opts.currency,
+          date: opts.date,
           groupBy: opts.groupBy,
           detail: opts.detail,
         });
@@ -370,12 +370,12 @@ portfolio
       includePrices?: boolean;
     }) => {
       await run(async () => {
-      const cfg = await loadConfig(program.opts().config);
-      const storage = new JsonFileStorage(cfg.config.data_dir);
-      const marketDataStore = new JsonlMarketDataStore(cfg.config.data_dir);
-      return portfolioHistory(storage, marketDataStore, cfg.config, {
-        currency: opts.currency,
-        start: opts.start,
+        const cfg = await loadConfig(program.opts().config);
+        const storage = new JsonFileStorage(cfg.config.data_dir);
+        const marketDataStore = new JsonlMarketDataStore(cfg.config.data_dir);
+        return portfolioHistory(storage, marketDataStore, cfg.config, {
+          currency: opts.currency,
+          start: opts.start,
           end: opts.end,
           granularity: opts.granularity,
           includePrices: opts.includePrices,
@@ -400,12 +400,12 @@ portfolio
       includePrices?: boolean;
     }) => {
       await run(async () => {
-      const cfg = await loadConfig(program.opts().config);
-      const storage = new JsonFileStorage(cfg.config.data_dir);
-      const marketDataStore = new JsonlMarketDataStore(cfg.config.data_dir);
-      return portfolioChangePoints(storage, marketDataStore, cfg.config, {
-        start: opts.start,
-        end: opts.end,
+        const cfg = await loadConfig(program.opts().config);
+        const storage = new JsonFileStorage(cfg.config.data_dir);
+        const marketDataStore = new JsonlMarketDataStore(cfg.config.data_dir);
+        return portfolioChangePoints(storage, marketDataStore, cfg.config, {
+          start: opts.start,
+          end: opts.end,
           granularity: opts.granularity,
           includePrices: opts.includePrices,
         });

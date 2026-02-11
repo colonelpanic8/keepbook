@@ -344,16 +344,16 @@ export async function collectChangePoints(
   // Step 2: collect balance changes
   for (const account of accounts) {
     const snapshots = await storage.getBalanceSnapshots(account.id);
-      for (const snapshot of snapshots) {
-        for (const balance of snapshot.balances) {
-          collector.addBalanceChange(
-            snapshot.timestamp,
-            account.id,
-            balance.asset,
-            snapshot.timestamp_raw,
-          );
-        }
+    for (const snapshot of snapshots) {
+      for (const balance of snapshot.balances) {
+        collector.addBalanceChange(
+          snapshot.timestamp,
+          account.id,
+          balance.asset,
+          snapshot.timestamp_raw,
+        );
       }
+    }
   }
 
   // Step 3: if includePrices, add price changes for held assets
