@@ -209,7 +209,9 @@ impl SyncOrchestrator {
                         let resp = if force {
                             self.market_data.price_latest_force(&asset, date).await
                         } else {
-                            self.market_data.price_latest_with_status(&asset, date).await
+                            self.market_data
+                                .price_latest_with_status(&asset, date)
+                                .await
                         };
                         match resp {
                             Ok((price, fetched)) => {
@@ -251,7 +253,8 @@ impl SyncOrchestrator {
                                 Err(e) => result.failed.push((asset.clone(), e.to_string())),
                             }
                         } else {
-                            if let Some(price) = self.market_data.price_from_store(&asset, date).await?
+                            if let Some(price) =
+                                self.market_data.price_from_store(&asset, date).await?
                             {
                                 result.skipped += 1;
                                 if price.quote_currency.to_uppercase()

@@ -17,6 +17,7 @@ struct MockState {
     login_called: AtomicBool,
     sync_called: AtomicBool,
     auth_status: AuthStatus,
+    login_should_fail: bool,
 }
 
 struct InteractiveMock {
@@ -56,6 +57,9 @@ impl keepbook::sync::InteractiveAuth for InteractiveMock {
 
     async fn login(&mut self) -> Result<()> {
         self.state.login_called.store(true, Ordering::SeqCst);
+        if self.state.login_should_fail {
+            anyhow::bail!("mock login failed");
+        }
         Ok(())
     }
 }
@@ -120,6 +124,7 @@ async fn sync_service_auth_decline_skips_sync() -> Result<()> {
         login_called: AtomicBool::new(false),
         sync_called: AtomicBool::new(false),
         auth_status: AuthStatus::Missing,
+        login_should_fail: false,
     });
 
     let service = setup_service(&storage, FixedAuthPrompter::deny(), state.clone()).await;
@@ -153,6 +158,7 @@ async fn sync_service_auth_accepts_and_syncs() -> Result<()> {
         login_called: AtomicBool::new(false),
         sync_called: AtomicBool::new(false),
         auth_status: AuthStatus::Missing,
+        login_should_fail: false,
     });
 
     let service = setup_service(&storage, FixedAuthPrompter::allow(), state.clone()).await;
@@ -165,6 +171,45 @@ async fn sync_service_auth_accepts_and_syncs() -> Result<()> {
 
     assert!(state.login_called.load(Ordering::SeqCst));
     assert!(state.sync_called.load(Ordering::SeqCst));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn sync_service_auth_login_failure_returns_auth_required() -> Result<()> {
+    let dir = TempDir::new()?;
+    let storage = JsonFileStorage::new(dir.path());
+
+    let connection = Connection::new(ConnectionConfig {
+        name: "Mock".to_string(),
+        synchronizer: "mock".to_string(),
+        credentials: None,
+        balance_staleness: None,
+    });
+    persist_connection(&storage, &connection).await?;
+
+    let state = Arc::new(MockState {
+        login_called: AtomicBool::new(false),
+        sync_called: AtomicBool::new(false),
+        auth_status: AuthStatus::Expired {
+            reason: "Session expired".to_string(),
+        },
+        login_should_fail: true,
+    });
+
+    let service = setup_service(&storage, FixedAuthPrompter::allow(), state.clone()).await;
+    let outcome = service.sync_connection(connection.id().as_ref()).await?;
+
+    match outcome {
+        SyncOutcome::AuthRequired { error, .. } => {
+            assert!(error.contains("Interactive login failed"));
+            assert!(error.contains("mock login failed"));
+        }
+        other => anyhow::bail!("unexpected outcome: {:?}", other),
+    }
+
+    assert!(state.login_called.load(Ordering::SeqCst));
+    assert!(!state.sync_called.load(Ordering::SeqCst));
 
     Ok(())
 }

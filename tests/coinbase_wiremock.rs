@@ -64,34 +64,21 @@ async fn coinbase_sync_filters_zero_balances_and_cash_positions() -> Result<()> 
         .mount(&server)
         .await;
 
-    let ledger_empty = r#"{"ledger": []}"#;
-    Mock::given(method("GET"))
-        .and(path("/api/v3/brokerage/accounts/acct-zero/ledger"))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(ledger_empty, "application/json"))
-        .mount(&server)
-        .await;
-
-    let ledger_body = r#"{
-        "ledger": [
+    let fills_body = r#"{
+        "fills": [
             {
                 "entry_id": "entry-1",
-                "entry_type": "trade",
-                "amount": { "value": "0.5", "currency": "ETH" },
-                "created_at": "2024-01-02T00:00:00Z",
-                "description": "buy"
+                "product_id": "ETH-USD",
+                "size": "0.5",
+                "trade_time": "2024-01-02T00:00:00Z",
+                "side": "BUY"
             }
-        ]
+        ],
+        "has_next": false
     }"#;
     Mock::given(method("GET"))
-        .and(path("/api/v3/brokerage/accounts/acct-eth/ledger"))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(ledger_body, "application/json"))
-        .mount(&server)
-        .await;
-
-    let ledger_usd = r#"{"ledger": []}"#;
-    Mock::given(method("GET"))
-        .and(path("/api/v3/brokerage/accounts/acct-usd/ledger"))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(ledger_usd, "application/json"))
+        .and(path("/api/v3/brokerage/orders/historical/fills"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(fills_body, "application/json"))
         .mount(&server)
         .await;
 
@@ -130,7 +117,7 @@ async fn coinbase_sync_filters_zero_balances_and_cash_positions() -> Result<()> 
 
     let (_, txns) = &result.transactions[0];
     assert_eq!(txns.len(), 1);
-    assert_eq!(txns[0].description, "buy");
+    assert_eq!(txns[0].description, "BUY ETH-USD");
     assert!(txns[0].timestamp <= Utc::now());
 
     Ok(())
@@ -169,20 +156,21 @@ async fn coinbase_keeps_zero_balance_with_transactions() -> Result<()> {
         .mount(&server)
         .await;
 
-    let ledger_body = r#"{
-        "ledger": [
+    let fills_body = r#"{
+        "fills": [
             {
                 "entry_id": "entry-1",
-                "entry_type": "transfer",
-                "amount": { "value": "0.01", "currency": "BTC" },
-                "created_at": "2024-01-02T00:00:00Z",
-                "description": "deposit"
+                "product_id": "BTC-USD",
+                "size": "0.01",
+                "trade_time": "2024-01-02T00:00:00Z",
+                "side": "BUY"
             }
-        ]
+        ],
+        "has_next": false
     }"#;
     Mock::given(method("GET"))
-        .and(path("/api/v3/brokerage/accounts/acct-zero/ledger"))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(ledger_body, "application/json"))
+        .and(path("/api/v3/brokerage/orders/historical/fills"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(fills_body, "application/json"))
         .mount(&server)
         .await;
 
@@ -206,7 +194,7 @@ async fn coinbase_keeps_zero_balance_with_transactions() -> Result<()> {
     assert_eq!(result.accounts.len(), 1);
     assert_eq!(result.transactions.len(), 1);
     assert_eq!(result.transactions[0].1.len(), 1);
-    assert_eq!(result.transactions[0].1[0].description, "deposit");
+    assert_eq!(result.transactions[0].1[0].description, "BUY BTC-USD");
 
     Ok(())
 }
@@ -244,10 +232,10 @@ async fn coinbase_keeps_existing_zero_balance_without_transactions() -> Result<(
         .mount(&server)
         .await;
 
-    let ledger_body = r#"{"ledger": []}"#;
+    let fills_body = r#"{"fills": [], "has_next": false}"#;
     Mock::given(method("GET"))
-        .and(path("/api/v3/brokerage/accounts/acct-zero/ledger"))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(ledger_body, "application/json"))
+        .and(path("/api/v3/brokerage/orders/historical/fills"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(fills_body, "application/json"))
         .mount(&server)
         .await;
 
@@ -311,10 +299,10 @@ async fn coinbase_account_ids_are_stable() -> Result<()> {
         .mount(&server)
         .await;
 
-    let ledger_body = r#"{"ledger": []}"#;
+    let fills_body = r#"{"fills": [], "has_next": false}"#;
     Mock::given(method("GET"))
-        .and(path("/api/v3/brokerage/accounts/acct-eth/ledger"))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(ledger_body, "application/json"))
+        .and(path("/api/v3/brokerage/orders/historical/fills"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(fills_body, "application/json"))
         .mount(&server)
         .await;
 

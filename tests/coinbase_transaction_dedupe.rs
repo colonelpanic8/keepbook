@@ -40,17 +40,16 @@ async fn coinbase_sync_dedupes_transactions_by_id() -> Result<()> {
         .await;
 
     Mock::given(method("GET"))
-        .and(path(
-            "/api/v3/brokerage/accounts/11111111-1111-1111-1111-111111111111/ledger",
-        ))
+        .and(path("/api/v3/brokerage/orders/historical/fills"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "ledger": [{
+            "fills": [{
                 "entry_id": "entry-1",
-                "entry_type": "TRADE",
-                "amount": {"value": "-0.01", "currency": "BTC"},
-                "created_at": "2024-01-02T03:04:05Z",
-                "description": "Test trade"
-            }]
+                "product_id": "BTC-USD",
+                "size": "0.01",
+                "trade_time": "2024-01-02T03:04:05Z",
+                "side": "SELL"
+            }],
+            "has_next": false
         })))
         .mount(&server)
         .await;

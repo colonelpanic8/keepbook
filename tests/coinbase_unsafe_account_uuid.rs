@@ -40,9 +40,10 @@ async fn coinbase_sync_handles_unsafe_account_uuid() -> Result<()> {
         .await;
 
     Mock::given(method("GET"))
-        .and(path("/api/v3/brokerage/accounts/bad%2Fid/ledger"))
+        .and(path("/api/v3/brokerage/orders/historical/fills"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "ledger": []
+            "fills": [],
+            "has_next": false
         })))
         .mount(&server)
         .await;

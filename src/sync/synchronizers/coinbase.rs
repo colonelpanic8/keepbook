@@ -3,7 +3,7 @@
 //! This synchronizer uses Coinbase's CDP API with JWT authentication.
 //! Credentials are loaded via the CredentialStore abstraction.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::{Context, Result};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
@@ -131,6 +131,20 @@ impl CoinbaseSynchronizer {
         out
     }
 
+    fn encode_query_component(value: &str) -> String {
+        // RFC 3986 unreserved characters are safe in a query component.
+        let mut out = String::with_capacity(value.len());
+        for b in value.as_bytes() {
+            match *b {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                    out.push(*b as char)
+                }
+                other => out.push_str(&format!("%{other:02X}")),
+            }
+        }
+        out
+    }
+
     async fn request<T: for<'de> Deserialize<'de>>(&self, method: &str, path: &str) -> Result<T> {
         // Parse/validate the HTTP method up-front so invalid input doesn't panic and we don't
         // do unnecessary JWT work.
@@ -232,19 +246,50 @@ impl CoinbaseSynchronizer {
         Ok(accounts)
     }
 
-    async fn get_transactions(&self, account_id: &str) -> Result<Vec<CoinbaseTransaction>> {
+    async fn get_fills(&self) -> Result<Vec<CoinbaseFill>> {
         #[derive(Deserialize)]
         struct Response {
             #[serde(default)]
-            ledger: Vec<CoinbaseTransaction>,
+            fills: Vec<CoinbaseFill>,
+            #[serde(default)]
+            has_next: bool,
+            #[serde(default)]
+            cursor: Option<String>,
         }
 
-        let path = format!(
-            "/api/v3/brokerage/accounts/{}/ledger",
-            Self::encode_path_segment(account_id)
-        );
-        let resp: Response = self.request("GET", &path).await?;
-        Ok(resp.ledger)
+        let mut fills = Vec::new();
+        let mut cursor: Option<String> = None;
+
+        loop {
+            let path = match &cursor {
+                Some(c) => format!(
+                    "/api/v3/brokerage/orders/historical/fills?cursor={}",
+                    Self::encode_query_component(c)
+                ),
+                None => "/api/v3/brokerage/orders/historical/fills".to_string(),
+            };
+
+            let resp: Response = self.request("GET", &path).await?;
+            fills.extend(resp.fills);
+
+            if !resp.has_next {
+                break;
+            }
+
+            cursor = resp.cursor;
+            if cursor.is_none() {
+                tracing::warn!(
+                    "coinbase fills response reported has_next=true without cursor; stopping pagination"
+                );
+                break;
+            }
+        }
+
+        Ok(fills)
+    }
+
+    fn base_asset_from_product_id(product_id: &str) -> Option<&str> {
+        product_id.split('-').next().filter(|s| !s.is_empty())
     }
 
     async fn sync_internal<S: Storage + ?Sized>(
@@ -253,6 +298,13 @@ impl CoinbaseSynchronizer {
         storage: &S,
     ) -> Result<SyncResult> {
         let coinbase_accounts = self.get_accounts().await?;
+        let fills = self.get_fills().await.unwrap_or_else(|e| {
+            tracing::warn!(
+                error = %e,
+                "failed to fetch coinbase fills; continuing with empty transaction set"
+            );
+            Vec::new()
+        });
 
         // Load existing accounts to check for history
         let existing_accounts = storage.list_accounts().await?;
@@ -261,6 +313,31 @@ impl CoinbaseSynchronizer {
             .filter(|a| a.connection_id == *connection.id())
             .map(|a| a.id.clone())
             .collect();
+
+        let mut account_uuid_by_currency: HashMap<String, String> = HashMap::new();
+        for account in &coinbase_accounts {
+            let currency = account.currency.to_uppercase();
+            account_uuid_by_currency
+                .entry(currency)
+                .or_insert_with(|| account.uuid.clone());
+        }
+
+        let mut fills_by_account_uuid: HashMap<String, Vec<CoinbaseFill>> = HashMap::new();
+        for fill in fills {
+            let Some(base_asset) = Self::base_asset_from_product_id(&fill.product_id) else {
+                continue;
+            };
+
+            let Some(account_uuid) = account_uuid_by_currency.get(&base_asset.to_uppercase())
+            else {
+                continue;
+            };
+
+            fills_by_account_uuid
+                .entry(account_uuid.clone())
+                .or_default()
+                .push(fill);
+        }
 
         let mut accounts = Vec::new();
         let mut balances: Vec<(Id, Vec<SyncedAssetBalance>)> = Vec::new();
@@ -286,19 +363,9 @@ impl CoinbaseSynchronizer {
             // Check if account already exists
             let existing = existing_ids.contains(&account_id);
 
-            // Get transactions for this account
-            let cb_transactions = self
-                .get_transactions(&cb_account.uuid)
-                .await
-                .unwrap_or_else(|e| {
-                    tracing::warn!(
-                        account_name = %cb_account.name,
-                        account_uuid = %cb_account.uuid,
-                        error = %e,
-                        "failed to fetch coinbase transactions; continuing with empty transaction set"
-                    );
-                    Vec::new()
-                });
+            let cb_transactions = fills_by_account_uuid
+                .remove(&cb_account.uuid)
+                .unwrap_or_default();
 
             // Skip zero-balance accounts unless they already exist or have transactions
             if balance_amount == 0.0 && !existing && cb_transactions.is_empty() {
@@ -331,27 +398,46 @@ impl CoinbaseSynchronizer {
             let account_transactions: Vec<Transaction> = cb_transactions
                 .into_iter()
                 .filter_map(|tx| {
-                    let timestamp = DateTime::parse_from_rfc3339(&tx.created_at)
+                    let timestamp = DateTime::parse_from_rfc3339(&tx.trade_time)
                         .ok()?
                         .with_timezone(&Utc);
 
-                    let entry_id = tx.entry_id;
-                    let entry_type = tx.entry_type;
-                    let tx_id = Id::from_external(&format!("coinbase:ledger:{entry_id}"));
-                    let description = tx.description.unwrap_or_else(|| entry_type.clone());
+                    let side = tx.side.trim().to_uppercase();
+                    let side_label = if side.is_empty() {
+                        "FILL".to_string()
+                    } else {
+                        side
+                    };
+
+                    let mut amount = tx.size.clone();
+                    if side_label == "SELL" && !amount.starts_with('-') {
+                        amount = format!("-{amount}");
+                    }
+
+                    let trade_id = tx.trade_id.clone();
+                    let order_id = tx.order_id.clone();
+                    let entry_id = tx
+                        .entry_id
+                        .or(trade_id.clone())
+                        .or(order_id.clone())
+                        .unwrap_or_else(|| {
+                            format!("{}:{}:{}", tx.product_id, tx.trade_time, tx.side)
+                        });
+
+                    let tx_id = Id::from_external(&format!("coinbase:fill:{entry_id}"));
+                    let description = format!("{} {}", side_label, tx.product_id);
 
                     Some(
-                        Transaction::new(
-                            &tx.amount.value,
-                            Asset::crypto(&tx.amount.currency),
-                            description,
-                        )
-                        .with_timestamp(timestamp)
-                        .with_id(tx_id)
-                        .with_synchronizer_data(serde_json::json!({
-                            "coinbase_entry_id": entry_id,
-                            "entry_type": entry_type,
-                        })),
+                        Transaction::new(amount, Asset::crypto(&cb_account.currency), description)
+                            .with_timestamp(timestamp)
+                            .with_id(tx_id)
+                            .with_synchronizer_data(serde_json::json!({
+                                "coinbase_entry_id": entry_id,
+                                "trade_id": trade_id,
+                                "order_id": order_id,
+                                "product_id": tx.product_id,
+                                "side": side_label,
+                            })),
                     )
                 })
                 .collect();
@@ -400,13 +486,18 @@ struct CoinbaseBalance {
 }
 
 #[derive(Debug, Deserialize)]
-struct CoinbaseTransaction {
-    entry_id: String,
-    entry_type: String,
-    amount: CoinbaseBalance,
-    created_at: String,
+struct CoinbaseFill {
     #[serde(default)]
-    description: Option<String>,
+    entry_id: Option<String>,
+    #[serde(default)]
+    trade_id: Option<String>,
+    #[serde(default)]
+    order_id: Option<String>,
+    product_id: String,
+    size: String,
+    trade_time: String,
+    #[serde(default)]
+    side: String,
 }
 
 #[async_trait::async_trait]
@@ -428,7 +519,7 @@ mod tests {
     use p256::elliptic_curve::rand_core::OsRng;
     use p256::pkcs8::LineEnding;
     use serde_json::json;
-    use wiremock::matchers::{method, path};
+    use wiremock::matchers::{method, path, query_param, query_param_is_missing};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[tokio::test]
@@ -478,11 +569,10 @@ mod tests {
             .await;
 
         Mock::given(method("GET"))
-            .and(path(
-                "/api/v3/brokerage/accounts/11111111-1111-1111-1111-111111111111/ledger",
-            ))
+            .and(path("/api/v3/brokerage/orders/historical/fills"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "ledger": []
+                "fills": [],
+                "has_next": false
             })))
             .mount(&server)
             .await;
@@ -520,6 +610,144 @@ mod tests {
         assert_eq!(result.balances[0].1[0].asset_balance.amount, "0.5");
         assert_eq!(result.transactions.len(), 1);
         assert!(result.transactions[0].1.is_empty());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sync_maps_coinbase_fills_to_wallet_transactions() -> Result<()> {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/v3/brokerage/portfolios"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "portfolios": [{"uuid": "p1", "name": "Default"}]
+            })))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/v3/brokerage/portfolios/p1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "breakdown": {
+                    "spot_positions": [{
+                        "asset": "BTC",
+                        "account_uuid": "11111111-1111-1111-1111-111111111111",
+                        "total_balance_crypto": 1.25,
+                        "is_cash": false
+                    }]
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/v3/brokerage/orders/historical/fills"))
+            .and(query_param_is_missing("cursor"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "fills": [{
+                    "entry_id": "entry-1",
+                    "trade_id": "trade-1",
+                    "order_id": "order-1",
+                    "product_id": "BTC-USD",
+                    "size": "0.10",
+                    "trade_time": "2026-02-10T12:34:56Z",
+                    "side": "SELL"
+                }],
+                "has_next": false
+            })))
+            .mount(&server)
+            .await;
+
+        let secret_key = SecretKey::random(&mut OsRng);
+        let pem = secret_key
+            .to_sec1_pem(LineEnding::LF)
+            .context("Failed to encode test EC private key")?;
+
+        let synchronizer = CoinbaseSynchronizer::new(
+            "test-key".to_string(),
+            SecretString::new(pem.to_string().into()),
+        )
+        .with_base_url(server.uri());
+
+        let storage = MemoryStorage::new();
+        let mut connection = Connection::new(ConnectionConfig {
+            name: "Coinbase".to_string(),
+            synchronizer: "coinbase".to_string(),
+            credentials: None,
+            balance_staleness: None,
+        });
+
+        let result = synchronizer.sync(&mut connection, &storage).await?;
+        let txs = &result.transactions[0].1;
+        assert_eq!(txs.len(), 1);
+        assert_eq!(txs[0].amount, "-0.10");
+        assert_eq!(txs[0].description, "SELL BTC-USD");
+        assert_eq!(
+            txs[0]
+                .synchronizer_data
+                .get("coinbase_entry_id")
+                .and_then(|v| v.as_str()),
+            Some("entry-1")
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn get_fills_paginates_on_cursor() -> Result<()> {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/v3/brokerage/orders/historical/fills"))
+            .and(query_param_is_missing("cursor"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "fills": [{
+                    "entry_id": "entry-1",
+                    "product_id": "BTC-USD",
+                    "size": "0.01",
+                    "trade_time": "2026-02-10T00:00:00Z",
+                    "side": "BUY"
+                }],
+                "has_next": true,
+                "cursor": "abc123"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/v3/brokerage/orders/historical/fills"))
+            .and(query_param("cursor", "abc123"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "fills": [{
+                    "entry_id": "entry-2",
+                    "product_id": "BTC-USD",
+                    "size": "0.02",
+                    "trade_time": "2026-02-10T01:00:00Z",
+                    "side": "BUY"
+                }],
+                "has_next": false
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let secret_key = SecretKey::random(&mut OsRng);
+        let pem = secret_key
+            .to_sec1_pem(LineEnding::LF)
+            .context("Failed to encode test EC private key")?;
+
+        let synchronizer = CoinbaseSynchronizer::new(
+            "test-key".to_string(),
+            SecretString::new(pem.to_string().into()),
+        )
+        .with_base_url(server.uri());
+
+        let fills = synchronizer.get_fills().await?;
+        assert_eq!(fills.len(), 2);
+        assert_eq!(fills[0].entry_id.as_deref(), Some("entry-1"));
+        assert_eq!(fills[1].entry_id.as_deref(), Some("entry-2"));
 
         Ok(())
     }

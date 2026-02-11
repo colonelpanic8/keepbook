@@ -6,7 +6,9 @@ use crate::models::Connection;
 use crate::storage::Storage;
 
 use super::Synchronizer;
-use crate::sync::synchronizers::{ChaseSynchronizer, CoinbaseSynchronizer, SchwabSynchronizer};
+use crate::sync::synchronizers::{
+    ChaseSynchronizer, CoinbaseSynchronizer, PlaidSynchronizer, SchwabSynchronizer,
+};
 
 #[async_trait::async_trait]
 pub trait SynchronizerFactory: Send + Sync {
@@ -55,6 +57,9 @@ impl SynchronizerFactory for DefaultSynchronizerFactory {
             )),
             "coinbase" => Ok(Box::new(
                 CoinbaseSynchronizer::from_connection(connection, storage).await?,
+            )),
+            "plaid" => Ok(Box::new(
+                PlaidSynchronizer::from_connection(connection, storage).await?,
             )),
             other => Err(anyhow!("Unknown synchronizer: {other}")),
         }

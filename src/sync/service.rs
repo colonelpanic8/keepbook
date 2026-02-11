@@ -9,7 +9,9 @@ use crate::staleness::{check_balance_staleness_at, resolve_balance_staleness};
 use crate::storage::{find_account, find_connection, Storage};
 use anyhow::{Context, Result};
 
-use super::{AuthStatus, InteractiveAuth, PriceRefreshResult, SyncOrchestrator, SyncWithPricesResult};
+use super::{
+    AuthStatus, InteractiveAuth, PriceRefreshResult, SyncOrchestrator, SyncWithPricesResult,
+};
 use super::{DefaultSynchronizerFactory, SynchronizerFactory};
 
 pub trait AuthPrompter: Send + Sync {
@@ -224,7 +226,7 @@ impl SyncService {
                 Ok(outcome) => results.push(outcome),
                 Err(err) => results.push(SyncOutcome::Failed {
                     connection,
-                    error: err.to_string(),
+                    error: format!("{err:#}"),
                 }),
             }
         }
@@ -255,7 +257,7 @@ impl SyncService {
                 Ok(outcome) => results.push(outcome),
                 Err(err) => results.push(SyncOutcome::Failed {
                     connection,
-                    error: err.to_string(),
+                    error: format!("{err:#}"),
                 }),
             }
         }
@@ -273,7 +275,11 @@ impl SyncService {
             .refresh_all_valuation_prices(date, force)
             .await?;
 
-        let label = if force { "sync prices all (force)" } else { "sync prices all" };
+        let label = if force {
+            "sync prices all (force)"
+        } else {
+            "sync prices all"
+        };
         self.auto_committer.maybe_commit(label);
         Ok(result)
     }
@@ -414,8 +420,13 @@ impl SyncService {
             AuthStatus::Missing => {
                 let prompt = format!("No {} session found. Run login now?", synchronizer.name());
                 if self.auth_prompter.confirm_login(&prompt)? {
-                    synchronizer.login().await?;
-                    Ok(None)
+                    match synchronizer.login().await {
+                        Ok(()) => Ok(None),
+                        Err(err) => Ok(Some(SyncOutcome::AuthRequired {
+                            connection: connection.clone(),
+                            error: format!("Interactive login failed: {err:#}"),
+                        })),
+                    }
                 } else {
                     Ok(Some(SyncOutcome::AuthRequired {
                         connection: connection.clone(),
@@ -429,8 +440,13 @@ impl SyncService {
                     synchronizer.name()
                 );
                 if self.auth_prompter.confirm_login(&prompt)? {
-                    synchronizer.login().await?;
-                    Ok(None)
+                    match synchronizer.login().await {
+                        Ok(()) => Ok(None),
+                        Err(err) => Ok(Some(SyncOutcome::AuthRequired {
+                            connection: connection.clone(),
+                            error: format!("Interactive login failed: {err:#}"),
+                        })),
+                    }
                 } else {
                     Ok(Some(SyncOutcome::AuthRequired {
                         connection: connection.clone(),

@@ -22,6 +22,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "lowercase")]
 enum PlaidEnvironment {
     Sandbox,
+    Development,
     Production,
 }
 
@@ -29,6 +30,7 @@ impl PlaidEnvironment {
     fn base_url(&self) -> &'static str {
         match self {
             PlaidEnvironment::Sandbox => "https://sandbox.plaid.com",
+            PlaidEnvironment::Development => "https://development.plaid.com",
             PlaidEnvironment::Production => "https://production.plaid.com",
         }
     }
@@ -78,6 +80,7 @@ impl PlaidSynchronizer {
             } else if let Some(env) = line.strip_prefix("environment: ") {
                 environment = match env {
                     "production" => PlaidEnvironment::Production,
+                    "development" => PlaidEnvironment::Development,
                     _ => PlaidEnvironment::Sandbox,
                 };
             }
@@ -116,6 +119,53 @@ impl PlaidSynchronizer {
         }
 
         serde_json::from_str(&body_text).context("Failed to parse JSON response")
+    }
+
+    /// Create a Plaid Link token for interactive account linking.
+    async fn create_link_token(
+        &self,
+        client_user_id: &str,
+        products: &[&str],
+        country_codes: &[&str],
+        language: &str,
+    ) -> Result<String> {
+        #[derive(Serialize)]
+        struct Request<'a> {
+            client_id: &'a str,
+            secret: &'a str,
+            client_name: &'a str,
+            products: &'a [&'a str],
+            country_codes: &'a [&'a str],
+            language: &'a str,
+            user: User<'a>,
+        }
+
+        #[derive(Serialize)]
+        struct User<'a> {
+            client_user_id: &'a str,
+        }
+
+        #[derive(Deserialize)]
+        struct Response {
+            link_token: String,
+        }
+
+        let resp: Response = self
+            .request(
+                "/link/token/create",
+                &Request {
+                    client_id: &self.client_id,
+                    secret: &self.secret,
+                    client_name: "Keepbook",
+                    products,
+                    country_codes,
+                    language,
+                    user: User { client_user_id },
+                },
+            )
+            .await?;
+
+        Ok(resp.link_token)
     }
 
     /// Create a sandbox public token for testing
@@ -285,7 +335,8 @@ impl PlaidSynchronizer {
         }
 
         for plaid_account in plaid_accounts {
-            let account_id = Id::new();
+            // Use Plaid's account_id as stable identity.
+            let account_id = Id::from_external(&plaid_account.account_id);
 
             // Determine asset type based on account type
             let asset = match plaid_account.account_type.as_str() {
@@ -469,6 +520,113 @@ async fn setup(storage: &JsonFileStorage, synchronizer: &PlaidSynchronizer) -> R
     Ok(())
 }
 
+fn write_link_html(path: &std::path::Path, link_token: &str) -> Result<()> {
+    let html = format!(
+        r#"<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Keepbook Plaid Link</title>
+    <style>
+      body {{ font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px; }}
+      button {{ font-size: 16px; padding: 10px 14px; }}
+      pre {{ background: #0b1020; color: #e6e6e6; padding: 12px; border-radius: 8px; overflow: auto; }}
+      .muted {{ color: #666; }}
+    </style>
+    <script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
+  </head>
+  <body>
+    <h1>Plaid Link (Keepbook)</h1>
+    <p class="muted">Click connect, complete institution login, then copy the public token or leave the page open for automation.</p>
+    <button id="link-button">Connect</button>
+    <h2>Result</h2>
+    <pre id="out">(not connected yet)</pre>
+    <script>
+      const linkToken = {link_token_json};
+      const out = document.getElementById('out');
+      const handler = Plaid.create({{
+        token: linkToken,
+        onSuccess: (public_token, metadata) => {{
+          window.__keepbook_plaid = {{ public_token, metadata }};
+          out.textContent = JSON.stringify({{ public_token, metadata }}, null, 2);
+        }},
+        onExit: (err, metadata) => {{
+          window.__keepbook_plaid_exit = {{ err, metadata }};
+          if (err) {{
+            out.textContent = JSON.stringify({{ error: err, metadata }}, null, 2);
+          }}
+        }}
+      }});
+      document.getElementById('link-button').addEventListener('click', () => handler.open());
+    </script>
+  </body>
+</html>
+"#,
+        link_token_json = serde_json::to_string(link_token)?,
+    );
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, html)?;
+    Ok(())
+}
+
+async fn link(synchronizer: &PlaidSynchronizer) -> Result<()> {
+    // Any stable value works here for Link token creation; the user authorizes later.
+    let client_user_id = format!("keepbook-{}", Utc::now().timestamp());
+    // Investments is commonly required for retirement accounts; transactions are useful when present.
+    let products = &["investments", "transactions"];
+    let country_codes = &["US"];
+
+    println!("Creating Plaid Link token...");
+    let link_token = synchronizer
+        .create_link_token(&client_user_id, products, country_codes, "en")
+        .await?;
+
+    let out_path = std::path::PathBuf::from("target").join("keepbook_plaid_link.html");
+    write_link_html(&out_path, &link_token)?;
+
+    println!("\nLink HTML written to: {}", out_path.display());
+    println!("Serve `target/` over http://127.0.0.1:<port>/ and open /keepbook_plaid_link.html");
+    println!("After linking, capture the `public_token` and run:");
+    println!("  cargo run --example plaid -- exchange-and-sync <PUBLIC_TOKEN>");
+    Ok(())
+}
+
+async fn exchange_and_sync(
+    storage: &JsonFileStorage,
+    synchronizer: &PlaidSynchronizer,
+    public_token: &str,
+) -> Result<()> {
+    println!("Exchanging public token for access token...");
+    let access_token = synchronizer.exchange_public_token(public_token).await?;
+
+    // Create a new connection with the access token
+    let mut connection = Connection::new(ConnectionConfig {
+        name: "Plaid (Linked)".to_string(),
+        synchronizer: "plaid".to_string(),
+        credentials: None,
+        balance_staleness: None,
+    });
+    connection.state.synchronizer_data = serde_json::json!({
+        "access_token": access_token,
+    });
+
+    println!("Connection: {} ({})", connection.name(), connection.id());
+
+    println!("\nSyncing from Plaid...\n");
+    let result = synchronizer.sync(&mut connection).await?;
+
+    for account in &result.accounts {
+        println!("  - {} ({})", account.name, account.id);
+    }
+
+    result.save(storage).await?;
+    println!("\nSync complete!");
+    Ok(())
+}
+
 async fn sync(storage: &JsonFileStorage, synchronizer: &PlaidSynchronizer) -> Result<()> {
     let connections = storage.list_connections().await?;
     let connection = connections
@@ -513,10 +671,17 @@ async fn main() -> Result<()> {
 
     match command {
         "setup" => setup(&storage, &synchronizer).await,
+        "link" => link(&synchronizer).await,
+        "exchange-and-sync" => {
+            let public_token = args
+                .get(2)
+                .context("Missing public token. Usage: exchange-and-sync <PUBLIC_TOKEN>")?;
+            exchange_and_sync(&storage, &synchronizer, public_token).await
+        }
         "sync" => sync(&storage, &synchronizer).await,
         other => {
             println!("Unknown command: {other}");
-            println!("Usage: cargo run --example plaid -- [setup|sync]");
+            println!("Usage: cargo run --example plaid -- [setup|link|exchange-and-sync|sync]");
             Ok(())
         }
     }
