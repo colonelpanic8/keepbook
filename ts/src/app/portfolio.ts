@@ -1,8 +1,9 @@
 /**
- * Portfolio snapshot command.
+ * Portfolio snapshot and history commands.
  *
  * Provides `serializeSnapshot` (convert library types to plain JSON-serializable
- * objects) and `portfolioSnapshot` (the top-level command handler).
+ * objects), `portfolioSnapshot` (the top-level snapshot command handler), and
+ * `portfolioHistory` (the top-level history command handler).
  */
 
 import type { Storage } from '../storage/storage.js';
@@ -17,8 +18,11 @@ import type {
   Grouping,
 } from '../portfolio/models.js';
 import { type Clock, SystemClock } from '../clock.js';
-import { formatChronoSerde } from './format.js';
+import { formatChronoSerde, parseGranularity, formatDateYMD, formatRfc3339, decStr } from './format.js';
 import type { ResolvedConfig } from '../config.js';
+import { collectChangePoints, filterByDateRange, filterByGranularity, type ChangePoint, type ChangeTrigger } from '../portfolio/change-points.js';
+import type { HistoryOutput, HistoryPoint, HistorySummary } from './types.js';
+import Decimal from 'decimal.js';
 
 // ---------------------------------------------------------------------------
 // Serialization
@@ -168,4 +172,128 @@ export async function portfolioSnapshot(
   });
 
   return serializeSnapshot(snapshot);
+}
+
+// ---------------------------------------------------------------------------
+// Portfolio History
+// ---------------------------------------------------------------------------
+
+export interface PortfolioHistoryOptions {
+  currency?: string;
+  start?: string;
+  end?: string;
+  granularity?: string;
+  includePrices?: boolean;
+}
+
+/**
+ * Format a ChangeTrigger into its string representation.
+ *
+ * - Balance trigger: `"balance:<account_id>:<json_asset>"` (compact JSON, no spaces)
+ * - Price trigger: `"price:<asset_id_string>"`
+ * - FxRate trigger: `"fx:<base>/<quote>"`
+ */
+function formatTrigger(trigger: ChangeTrigger): string {
+  switch (trigger.type) {
+    case 'balance':
+      return `balance:${trigger.account_id}:${JSON.stringify(trigger.asset)}`;
+    case 'price':
+      return `price:${trigger.asset_id.asStr()}`;
+    case 'fx_rate':
+      return `fx:${trigger.base}/${trigger.quote}`;
+  }
+}
+
+/**
+ * Execute the portfolio history command.
+ *
+ * Collects change points from storage and market data, calculates portfolio
+ * value at each point, and returns the history with optional summary statistics.
+ */
+export async function portfolioHistory(
+  storage: Storage,
+  marketDataStore: MarketDataStore,
+  config: ResolvedConfig,
+  options: PortfolioHistoryOptions,
+  clock?: Clock,
+): Promise<HistoryOutput> {
+  const effectiveClock = clock ?? new SystemClock();
+  const currency = options.currency ?? config.reporting_currency;
+  const granularity = parseGranularity(options.granularity ?? 'none');
+
+  const marketDataService = new MarketDataService(marketDataStore);
+
+  // Collect change points
+  const allPoints = await collectChangePoints(storage, marketDataStore, {
+    includePrices: options.includePrices ?? true,
+  });
+
+  // Filter by date range
+  const dateFiltered = filterByDateRange(allPoints, options.start, options.end);
+
+  // Filter by granularity
+  const points = filterByGranularity(dateFiltered, granularity, 'last');
+
+  // Calculate portfolio value at each change point
+  const historyPoints: HistoryPoint[] = [];
+  for (const point of points) {
+    const portfolioService = new PortfolioService(
+      storage,
+      marketDataService,
+      effectiveClock,
+    );
+
+    const snapshot = await portfolioService.calculate({
+      as_of_date: formatDateYMD(point.timestamp),
+      currency,
+      grouping: 'both',
+      include_detail: false,
+    });
+
+    const totalValue = snapshot.total_value;
+
+    // Format triggers
+    const triggers = point.triggers.map(formatTrigger);
+
+    const historyPoint: HistoryPoint = {
+      timestamp: formatRfc3339(point.timestamp),
+      date: formatDateYMD(point.timestamp),
+      total_value: totalValue,
+      change_triggers: triggers.length > 0 ? triggers : undefined,
+    };
+
+    historyPoints.push(historyPoint);
+  }
+
+  // Calculate summary if 2+ points
+  let summary: HistorySummary | undefined;
+  if (historyPoints.length >= 2) {
+    const initialValue = new Decimal(historyPoints[0].total_value);
+    const finalValue = new Decimal(historyPoints[historyPoints.length - 1].total_value);
+    const absoluteChange = finalValue.minus(initialValue);
+
+    let percentageChange: string;
+    if (initialValue.isZero()) {
+      percentageChange = 'N/A';
+    } else {
+      const pct = finalValue.minus(initialValue).div(initialValue).times(100);
+      percentageChange = decStr(new Decimal(pct.toFixed(2)));
+    }
+
+    summary = {
+      initial_value: decStr(initialValue),
+      final_value: decStr(finalValue),
+      absolute_change: decStr(absoluteChange),
+      percentage_change: percentageChange,
+    };
+  }
+
+  return {
+    currency,
+    start_date: options.start ?? null,
+    end_date: options.end ?? null,
+    granularity: options.granularity ?? 'none',
+    points: historyPoints,
+    summary,
+  };
 }
