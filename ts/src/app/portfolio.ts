@@ -21,7 +21,7 @@ import { type Clock, SystemClock } from '../clock.js';
 import { formatChronoSerde, parseGranularity, formatDateYMD, formatRfc3339, decStr } from './format.js';
 import type { ResolvedConfig } from '../config.js';
 import { collectChangePoints, filterByDateRange, filterByGranularity, type ChangePoint, type ChangeTrigger } from '../portfolio/change-points.js';
-import type { HistoryOutput, HistoryPoint, HistorySummary } from './types.js';
+import type { HistoryOutput, HistoryPoint, HistorySummary, SerializedChangePoint, SerializedChangeTrigger, ChangePointsOutput } from './types.js';
 import Decimal from 'decimal.js';
 
 // ---------------------------------------------------------------------------
@@ -295,5 +295,85 @@ export async function portfolioHistory(
     granularity: options.granularity ?? 'none',
     points: historyPoints,
     summary,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Portfolio Change Points
+// ---------------------------------------------------------------------------
+
+/**
+ * Serialize a `ChangeTrigger` to its JSON-serializable form.
+ *
+ * - Balance: `{type: 'balance', account_id: "<id>", asset: <asset>}`
+ * - Price: `{type: 'price', asset_id: "<asset_id_string>"}`
+ * - FxRate: `{type: 'fx_rate', base: "<base>", quote: "<quote>"}`
+ */
+export function serializeChangeTrigger(trigger: ChangeTrigger): SerializedChangeTrigger {
+  switch (trigger.type) {
+    case 'balance':
+      return { type: 'balance', account_id: trigger.account_id.asStr(), asset: trigger.asset };
+    case 'price':
+      return { type: 'price', asset_id: trigger.asset_id.asStr() };
+    case 'fx_rate':
+      return { type: 'fx_rate', base: trigger.base, quote: trigger.quote };
+  }
+}
+
+/**
+ * Serialize a `ChangePoint` to its JSON-serializable form.
+ *
+ * Uses `formatChronoSerde` (Z suffix) because Rust's `ChangePoint.timestamp`
+ * is serialized via chrono serde derive, not manual `to_rfc3339`.
+ */
+export function serializeChangePoint(point: ChangePoint): SerializedChangePoint {
+  return {
+    timestamp: formatChronoSerde(point.timestamp),
+    triggers: point.triggers.map(serializeChangeTrigger),
+  };
+}
+
+export interface PortfolioChangePointsOptions {
+  start?: string;
+  end?: string;
+  granularity?: string;
+  includePrices?: boolean;
+}
+
+/**
+ * Execute the portfolio change-points command.
+ *
+ * Collects change points from storage and market data, filters by date range
+ * and granularity, serializes each point, and returns the output.
+ */
+export async function portfolioChangePoints(
+  storage: Storage,
+  marketDataStore: MarketDataStore,
+  config: ResolvedConfig,
+  options: PortfolioChangePointsOptions,
+  clock?: Clock,
+): Promise<ChangePointsOutput> {
+  const granularity = parseGranularity(options.granularity ?? 'none');
+
+  // Collect change points
+  const allPoints = await collectChangePoints(storage, marketDataStore, {
+    includePrices: options.includePrices ?? true,
+  });
+
+  // Filter by date range
+  const dateFiltered = filterByDateRange(allPoints, options.start, options.end);
+
+  // Filter by granularity
+  const points = filterByGranularity(dateFiltered, granularity, 'last');
+
+  // Serialize each change point
+  const serialized = points.map(serializeChangePoint);
+
+  return {
+    start_date: options.start ?? null,
+    end_date: options.end ?? null,
+    granularity: options.granularity ?? 'none',
+    include_prices: options.includePrices ?? true,
+    points: serialized,
   };
 }

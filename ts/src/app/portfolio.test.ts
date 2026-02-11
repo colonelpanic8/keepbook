@@ -11,9 +11,10 @@ import { Asset } from '../models/asset.js';
 import { AssetId } from '../market-data/asset-id.js';
 import type { ResolvedConfig } from '../config.js';
 import type { PortfolioSnapshot, AssetSummary } from '../portfolio/models.js';
-import { serializeSnapshot, portfolioSnapshot, portfolioHistory } from './portfolio.js';
+import { serializeSnapshot, portfolioSnapshot, portfolioHistory, serializeChangeTrigger, serializeChangePoint, portfolioChangePoints } from './portfolio.js';
 import { formatChronoSerde } from './format.js';
-import type { HistoryOutput } from './types.js';
+import type { HistoryOutput, ChangePointsOutput } from './types.js';
+import type { ChangeTrigger, ChangePoint } from '../portfolio/change-points.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1334,5 +1335,339 @@ describe('portfolioHistory', () => {
 
     // Should have at least 2 points: one for balance, one for price change
     expect(result.points.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// serializeChangeTrigger
+// ---------------------------------------------------------------------------
+
+describe('serializeChangeTrigger', () => {
+  it('serializes balance trigger', () => {
+    const trigger: ChangeTrigger = {
+      type: 'balance',
+      account_id: Id.fromString('acct-1'),
+      asset: Asset.currency('USD'),
+    };
+    const result = serializeChangeTrigger(trigger);
+    expect(result).toEqual({
+      type: 'balance',
+      account_id: 'acct-1',
+      asset: { type: 'currency', iso_code: 'USD' },
+    });
+  });
+
+  it('serializes price trigger', () => {
+    const trigger: ChangeTrigger = {
+      type: 'price',
+      asset_id: AssetId.fromString('equity/AAPL'),
+    };
+    const result = serializeChangeTrigger(trigger);
+    expect(result).toEqual({
+      type: 'price',
+      asset_id: 'equity/AAPL',
+    });
+  });
+
+  it('serializes fx_rate trigger', () => {
+    const trigger: ChangeTrigger = {
+      type: 'fx_rate',
+      base: 'EUR',
+      quote: 'USD',
+    };
+    const result = serializeChangeTrigger(trigger);
+    expect(result).toEqual({
+      type: 'fx_rate',
+      base: 'EUR',
+      quote: 'USD',
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// serializeChangePoint
+// ---------------------------------------------------------------------------
+
+describe('serializeChangePoint', () => {
+  it('uses formatChronoSerde (Z suffix) for timestamp', () => {
+    const point: ChangePoint = {
+      timestamp: new Date('2024-06-15T10:30:00Z'),
+      triggers: [],
+    };
+    const result = serializeChangePoint(point);
+    expect(result.timestamp).toBe('2024-06-15T10:30:00Z');
+    // Verify it uses Z suffix, NOT +00:00
+    expect(result.timestamp).not.toContain('+00:00');
+  });
+
+  it('formats subsecond timestamps with Z suffix', () => {
+    const point: ChangePoint = {
+      timestamp: new Date('2024-06-15T10:30:00.456Z'),
+      triggers: [],
+    };
+    const result = serializeChangePoint(point);
+    expect(result.timestamp).toBe('2024-06-15T10:30:00.456000000Z');
+    expect(result.timestamp).not.toContain('+00:00');
+  });
+
+  it('serializes all trigger types in a point', () => {
+    const point: ChangePoint = {
+      timestamp: new Date('2024-06-15T10:00:00Z'),
+      triggers: [
+        { type: 'balance', account_id: Id.fromString('acct-1'), asset: Asset.currency('USD') },
+        { type: 'price', asset_id: AssetId.fromString('equity/AAPL') },
+      ],
+    };
+    const result = serializeChangePoint(point);
+    expect(result.triggers).toHaveLength(2);
+    expect(result.triggers[0]).toEqual({
+      type: 'balance',
+      account_id: 'acct-1',
+      asset: { type: 'currency', iso_code: 'USD' },
+    });
+    expect(result.triggers[1]).toEqual({
+      type: 'price',
+      asset_id: 'equity/AAPL',
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// portfolioChangePoints
+// ---------------------------------------------------------------------------
+
+describe('portfolioChangePoints', () => {
+  // -------------------------------------------------------------------------
+  // Empty storage
+  // -------------------------------------------------------------------------
+
+  it('returns empty output for empty storage', async () => {
+    const storage = new MemoryStorage();
+    const store = new NullMarketDataStore();
+    const config = makeConfig();
+    const clock = makeClock('2024-06-15T12:00:00Z');
+
+    const result = await portfolioChangePoints(
+      storage,
+      store,
+      config,
+      {},
+      clock,
+    );
+
+    expect(result).toEqual({
+      start_date: null,
+      end_date: null,
+      granularity: 'none',
+      include_prices: true,
+      points: [],
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // start_date and end_date are null (not omitted) when not provided
+  // -------------------------------------------------------------------------
+
+  it('start_date and end_date are null not omitted when not provided', async () => {
+    const storage = new MemoryStorage();
+    const store = new NullMarketDataStore();
+    const config = makeConfig();
+    const clock = makeClock('2024-06-15T12:00:00Z');
+
+    const result = await portfolioChangePoints(storage, store, config, {}, clock);
+
+    const json = JSON.stringify(result);
+    const parsed = JSON.parse(json);
+    expect(parsed.start_date).toBeNull();
+    expect(parsed.end_date).toBeNull();
+    expect('start_date' in parsed).toBe(true);
+    expect('end_date' in parsed).toBe(true);
+  });
+
+  // -------------------------------------------------------------------------
+  // With balance changes: points appear with correct triggers
+  // -------------------------------------------------------------------------
+
+  it('includes balance change points with correct triggers', async () => {
+    const clock = makeClock('2024-06-15T12:00:00Z');
+    const { storage } = await setupStorageWithBalances(clock, [
+      {
+        timestamp: '2024-06-14T10:00:00Z',
+        balances: [{ asset: Asset.currency('USD'), amount: '100' }],
+      },
+    ]);
+    const store = new NullMarketDataStore();
+    const config = makeConfig();
+
+    const result = await portfolioChangePoints(storage, store, config, {}, clock);
+
+    expect(result.points).toHaveLength(1);
+    expect(result.points[0].timestamp).toBe('2024-06-14T10:00:00Z');
+    expect(result.points[0].triggers).toHaveLength(1);
+    expect(result.points[0].triggers[0]).toEqual({
+      type: 'balance',
+      account_id: 'acct-1',
+      asset: { type: 'currency', iso_code: 'USD' },
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Date range filtering works
+  // -------------------------------------------------------------------------
+
+  it('filters points by date range', async () => {
+    const clock = makeClock('2024-06-20T12:00:00Z');
+    const { storage } = await setupStorageWithBalances(clock, [
+      {
+        timestamp: '2024-06-10T10:00:00Z',
+        balances: [{ asset: Asset.currency('USD'), amount: '100' }],
+      },
+      {
+        timestamp: '2024-06-12T10:00:00Z',
+        balances: [{ asset: Asset.currency('USD'), amount: '200' }],
+      },
+      {
+        timestamp: '2024-06-15T10:00:00Z',
+        balances: [{ asset: Asset.currency('USD'), amount: '300' }],
+      },
+    ]);
+    const store = new NullMarketDataStore();
+    const config = makeConfig();
+
+    const result = await portfolioChangePoints(
+      storage,
+      store,
+      config,
+      { start: '2024-06-11', end: '2024-06-14' },
+      clock,
+    );
+
+    // Only the 2024-06-12 point should be included
+    expect(result.points).toHaveLength(1);
+    expect(result.points[0].timestamp).toBe('2024-06-12T10:00:00Z');
+    expect(result.start_date).toBe('2024-06-11');
+    expect(result.end_date).toBe('2024-06-14');
+  });
+
+  // -------------------------------------------------------------------------
+  // Granularity passed through as original string
+  // -------------------------------------------------------------------------
+
+  it('granularity in output is the original string', async () => {
+    const storage = new MemoryStorage();
+    const store = new NullMarketDataStore();
+    const config = makeConfig();
+    const clock = makeClock('2024-06-15T12:00:00Z');
+
+    const result = await portfolioChangePoints(
+      storage,
+      store,
+      config,
+      { granularity: 'daily' },
+      clock,
+    );
+    expect(result.granularity).toBe('daily');
+  });
+
+  it('default granularity is "none"', async () => {
+    const storage = new MemoryStorage();
+    const store = new NullMarketDataStore();
+    const config = makeConfig();
+    const clock = makeClock('2024-06-15T12:00:00Z');
+
+    const result = await portfolioChangePoints(storage, store, config, {}, clock);
+    expect(result.granularity).toBe('none');
+  });
+
+  // -------------------------------------------------------------------------
+  // include_prices defaults to true
+  // -------------------------------------------------------------------------
+
+  it('include_prices defaults to true', async () => {
+    const storage = new MemoryStorage();
+    const store = new NullMarketDataStore();
+    const config = makeConfig();
+    const clock = makeClock('2024-06-15T12:00:00Z');
+
+    const result = await portfolioChangePoints(storage, store, config, {}, clock);
+    expect(result.include_prices).toBe(true);
+  });
+
+  it('include_prices reflects options.includePrices when set to false', async () => {
+    const storage = new MemoryStorage();
+    const store = new NullMarketDataStore();
+    const config = makeConfig();
+    const clock = makeClock('2024-06-15T12:00:00Z');
+
+    const result = await portfolioChangePoints(
+      storage,
+      store,
+      config,
+      { includePrices: false },
+      clock,
+    );
+    expect(result.include_prices).toBe(false);
+  });
+
+  // -------------------------------------------------------------------------
+  // Multiple balance changes appear with separate triggers
+  // -------------------------------------------------------------------------
+
+  it('multiple balance changes at different times produce multiple points', async () => {
+    const clock = makeClock('2024-06-20T12:00:00Z');
+    const { storage } = await setupStorageWithBalances(clock, [
+      {
+        timestamp: '2024-06-13T10:00:00Z',
+        balances: [{ asset: Asset.currency('USD'), amount: '100' }],
+      },
+      {
+        timestamp: '2024-06-14T10:00:00Z',
+        balances: [{ asset: Asset.currency('USD'), amount: '200' }],
+      },
+    ]);
+    const store = new NullMarketDataStore();
+    const config = makeConfig();
+
+    const result = await portfolioChangePoints(storage, store, config, {}, clock);
+
+    expect(result.points).toHaveLength(2);
+    expect(result.points[0].timestamp).toBe('2024-06-13T10:00:00Z');
+    expect(result.points[1].timestamp).toBe('2024-06-14T10:00:00Z');
+    // Each point should have a balance trigger
+    expect(result.points[0].triggers[0].type).toBe('balance');
+    expect(result.points[1].triggers[0].type).toBe('balance');
+  });
+
+  // -------------------------------------------------------------------------
+  // JSON round-trip preserves structure including null fields
+  // -------------------------------------------------------------------------
+
+  it('JSON round-trip preserves structure including null fields', async () => {
+    const clock = makeClock('2024-06-15T12:00:00Z');
+    const { storage } = await setupStorageWithBalances(clock, [
+      {
+        timestamp: '2024-06-14T10:00:00Z',
+        balances: [{ asset: Asset.currency('USD'), amount: '100' }],
+      },
+    ]);
+    const store = new NullMarketDataStore();
+    const config = makeConfig();
+
+    const result = await portfolioChangePoints(storage, store, config, {}, clock);
+
+    const json = JSON.stringify(result);
+    const parsed = JSON.parse(json);
+
+    expect(parsed.start_date).toBeNull();
+    expect(parsed.end_date).toBeNull();
+    expect(parsed.granularity).toBe('none');
+    expect(parsed.include_prices).toBe(true);
+    expect(parsed.points).toHaveLength(1);
+    expect(parsed.points[0].timestamp).toBe('2024-06-14T10:00:00Z');
+    expect(parsed.points[0].triggers[0]).toEqual({
+      type: 'balance',
+      account_id: 'acct-1',
+      asset: { type: 'currency', iso_code: 'USD' },
+    });
   });
 });
