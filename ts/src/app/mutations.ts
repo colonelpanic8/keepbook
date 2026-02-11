@@ -15,7 +15,7 @@ import { Id } from '../models/id.js';
 import { type IdGenerator, UuidIdGenerator } from '../models/id-generator.js';
 import { type Clock, SystemClock } from '../clock.js';
 import { parseAsset, formatRfc3339, decStr } from './format.js';
-import { Decimal } from 'decimal.js';
+import { Decimal } from '../decimal.js';
 
 // ---------------------------------------------------------------------------
 // addConnection

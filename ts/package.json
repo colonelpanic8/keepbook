@@ -1,6 +1,7 @@
 {
   "name": "keepbook",
   "version": "0.1.0",
+  "license": "UNLICENSED",
   "type": "module",
   "bin": {
     "keepbook": "./dist/cli/main.js"
@@ -9,7 +10,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "build": "tsc",
-    "kb": "yarn build && node dist/cli/main.js",
+    "kb": "tsc --pretty false >/dev/null && node dist/cli/main.js",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",

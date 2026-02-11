@@ -29,8 +29,9 @@ import {
  *
  * Resolution order:
  * 1. `./keepbook.toml` if it exists in the current working directory.
- * 2. `$XDG_CONFIG_HOME/keepbook/config.toml` (or `~/.config/keepbook/config.toml`
- *    when `XDG_CONFIG_HOME` is not set) if it exists.
+ * 2. `$XDG_DATA_HOME/keepbook/keepbook.toml` (or
+ *    `~/.local/share/keepbook/keepbook.toml` when `XDG_DATA_HOME` is not set)
+ *    if it exists.
  * 3. The XDG path from step 2 (even if it does not yet exist) as the default.
  */
 export function defaultConfigPath(): string {
@@ -39,8 +40,8 @@ export function defaultConfigPath(): string {
     return localConfig;
   }
 
-  const xdgConfigHome = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
-  const xdgConfig = path.join(xdgConfigHome, 'keepbook', 'config.toml');
+  const xdgDataHome = process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share');
+  const xdgConfig = path.join(xdgDataHome, 'keepbook', 'keepbook.toml');
   if (fs.existsSync(xdgConfig)) {
     return xdgConfig;
   }

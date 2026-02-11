@@ -5,7 +5,7 @@
  * CLI's serde-serialized format, especially for timestamps and decimals.
  */
 
-import { Decimal } from 'decimal.js';
+import { Decimal } from '../decimal.js';
 import { type AssetType, Asset } from '../models/asset.js';
 import { type Granularity } from '../portfolio/change-points.js';
 
@@ -47,6 +47,25 @@ function formatCore(date: Date): string {
   return `${y}-${mo}-${d}T${h}:${mi}:${s}${formatSubseconds(date)}`;
 }
 
+function formatFromEpochNanos(epochNanos: string, suffix: '+00:00' | 'Z'): string {
+  const nanos = BigInt(epochNanos);
+  const wholeSeconds = nanos / 1000000000n;
+  const fractionNanos = nanos % 1000000000n;
+  const date = new Date(Number(wholeSeconds * 1000n));
+  const core = formatCore(date);
+  if (fractionNanos === 0n) {
+    return `${core}${suffix}`;
+  }
+  const y = pad(date.getUTCFullYear(), 4);
+  const mo = pad(date.getUTCMonth() + 1, 2);
+  const d = pad(date.getUTCDate(), 2);
+  const h = pad(date.getUTCHours(), 2);
+  const mi = pad(date.getUTCMinutes(), 2);
+  const s = pad(date.getUTCSeconds(), 2);
+  const frac = fractionNanos.toString().padStart(9, '0');
+  return `${y}-${mo}-${d}T${h}:${mi}:${s}.${frac}${suffix}`;
+}
+
 /**
  * Format a Date as RFC 3339 matching Rust's `DateTime::to_rfc3339()`.
  *
@@ -63,6 +82,13 @@ export function formatRfc3339(date: Date): string {
 }
 
 /**
+ * Format an epoch-nanoseconds timestamp as RFC 3339 with `+00:00`.
+ */
+export function formatRfc3339FromEpochNanos(epochNanos: string): string {
+  return formatFromEpochNanos(epochNanos, '+00:00');
+}
+
+/**
  * Format a Date matching Rust's chrono serde serialization.
  *
  * - Uses `Z` suffix.
@@ -75,6 +101,13 @@ export function formatRfc3339(date: Date): string {
  */
 export function formatChronoSerde(date: Date): string {
   return formatCore(date) + 'Z';
+}
+
+/**
+ * Format an epoch-nanoseconds timestamp with `Z` suffix.
+ */
+export function formatChronoSerdeFromEpochNanos(epochNanos: string): string {
+  return formatFromEpochNanos(epochNanos, 'Z');
 }
 
 /**

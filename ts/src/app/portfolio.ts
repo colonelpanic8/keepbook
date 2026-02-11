@@ -20,9 +20,11 @@ import type {
 import { type Clock, SystemClock } from '../clock.js';
 import {
   formatChronoSerde,
+  formatChronoSerdeFromEpochNanos,
   parseGranularity,
   formatDateYMD,
   formatRfc3339,
+  formatRfc3339FromEpochNanos,
   decStr,
 } from './format.js';
 import type { ResolvedConfig } from '../config.js';
@@ -41,7 +43,7 @@ import type {
   SerializedChangeTrigger,
   ChangePointsOutput,
 } from './types.js';
-import { Decimal } from 'decimal.js';
+import { Decimal } from '../decimal.js';
 
 // ---------------------------------------------------------------------------
 // Serialization
@@ -267,7 +269,10 @@ export async function portfolioHistory(
     const triggers = point.triggers.map(formatTrigger);
 
     const historyPoint: HistoryPoint = {
-      timestamp: formatRfc3339(point.timestamp),
+      timestamp:
+        point.timestamp_nanos !== undefined
+          ? formatRfc3339FromEpochNanos(point.timestamp_nanos)
+          : formatRfc3339(point.timestamp),
       date: formatDateYMD(point.timestamp),
       total_value: totalValue,
       change_triggers: triggers.length > 0 ? triggers : undefined,
@@ -288,7 +293,7 @@ export async function portfolioHistory(
       percentageChange = 'N/A';
     } else {
       const pct = finalValue.minus(initialValue).div(initialValue).times(100);
-      percentageChange = decStr(new Decimal(pct.toFixed(2)));
+      percentageChange = pct.toDecimalPlaces(2).toFixed(2);
     }
 
     summary = {
@@ -339,7 +344,10 @@ export function serializeChangeTrigger(trigger: ChangeTrigger): SerializedChange
  */
 export function serializeChangePoint(point: ChangePoint): SerializedChangePoint {
   return {
-    timestamp: formatChronoSerde(point.timestamp),
+    timestamp:
+      point.timestamp_nanos !== undefined
+        ? formatChronoSerdeFromEpochNanos(point.timestamp_nanos)
+        : formatChronoSerde(point.timestamp),
     triggers: point.triggers.map(serializeChangeTrigger),
   };
 }

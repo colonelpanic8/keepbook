@@ -777,7 +777,7 @@ describe('portfolioHistory', () => {
     expect(result.summary!.initial_value).toBe('100');
     expect(result.summary!.final_value).toBe('150');
     expect(result.summary!.absolute_change).toBe('50');
-    expect(result.summary!.percentage_change).toBe('50');
+    expect(result.summary!.percentage_change).toBe('50.00');
   });
 
   // -------------------------------------------------------------------------
@@ -1080,7 +1080,7 @@ describe('portfolioHistory', () => {
     expect(result.summary!.initial_value).toBe('200');
     expect(result.summary!.final_value).toBe('300');
     expect(result.summary!.absolute_change).toBe('100');
-    expect(result.summary!.percentage_change).toBe('50');
+    expect(result.summary!.percentage_change).toBe('50.00');
   });
 
   // -------------------------------------------------------------------------

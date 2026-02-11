@@ -23,6 +23,22 @@ function makeTmpDir(): string {
 // ---------------------------------------------------------------------------
 
 describe('defaultConfigPath', () => {
+  const originalCwd = process.cwd();
+  const originalHome = process.env.HOME;
+  const originalXdgDataHome = process.env.XDG_DATA_HOME;
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+  });
+
+  afterEach(() => {
+    process.chdir(originalCwd);
+    process.env.HOME = originalHome;
+    process.env.XDG_DATA_HOME = originalXdgDataHome;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
   it('returns a string', () => {
     const result = defaultConfigPath();
     expect(typeof result).toBe('string');
@@ -32,6 +48,44 @@ describe('defaultConfigPath', () => {
   it('returns an absolute path', () => {
     const result = defaultConfigPath();
     expect(path.isAbsolute(result)).toBe(true);
+  });
+
+  it('prefers local keepbook.toml when present', () => {
+    const cwd = path.join(tmpDir, 'cwd');
+    const xdgDataHome = path.join(tmpDir, 'xdg-data');
+    fs.mkdirSync(cwd, { recursive: true });
+    fs.mkdirSync(path.join(xdgDataHome, 'keepbook'), { recursive: true });
+    fs.writeFileSync(path.join(cwd, 'keepbook.toml'), '');
+    fs.writeFileSync(path.join(xdgDataHome, 'keepbook', 'keepbook.toml'), '');
+
+    process.chdir(cwd);
+    process.env.XDG_DATA_HOME = xdgDataHome;
+
+    expect(defaultConfigPath()).toBe(path.join(cwd, 'keepbook.toml'));
+  });
+
+  it('uses XDG data keepbook.toml when local file is absent', () => {
+    const cwd = path.join(tmpDir, 'cwd');
+    const xdgDataHome = path.join(tmpDir, 'xdg-data');
+    fs.mkdirSync(cwd, { recursive: true });
+    fs.mkdirSync(path.join(xdgDataHome, 'keepbook'), { recursive: true });
+    fs.writeFileSync(path.join(xdgDataHome, 'keepbook', 'keepbook.toml'), '');
+
+    process.chdir(cwd);
+    process.env.XDG_DATA_HOME = xdgDataHome;
+
+    expect(defaultConfigPath()).toBe(path.join(xdgDataHome, 'keepbook', 'keepbook.toml'));
+  });
+
+  it('falls back to XDG data keepbook.toml path when no files exist', () => {
+    const cwd = path.join(tmpDir, 'cwd');
+    const xdgDataHome = path.join(tmpDir, 'xdg-data');
+    fs.mkdirSync(cwd, { recursive: true });
+
+    process.chdir(cwd);
+    process.env.XDG_DATA_HOME = xdgDataHome;
+
+    expect(defaultConfigPath()).toBe(path.join(xdgDataHome, 'keepbook', 'keepbook.toml'));
   });
 });
 
