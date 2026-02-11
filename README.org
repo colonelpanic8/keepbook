@@ -4,257 +4,158 @@
 
 * Overview
 
-Keepbook is an open-source personal finance manager designed for data ownership and transparency. Unlike Mint or Quicken Simplifi, your financial data lives in a human-readable format that you control completely.
+Keepbook is a local-first personal finance toolkit.
 
-* Core Principles
+- Data is stored in plain JSON/TOML/JSONL files you own.
+- The core is a Rust library and CLI.
+- Sync adapters, market data sources, and portfolio valuation are pluggable.
 
-** Data Ownership
-Your financial data is yours. It lives in plain text files (JSON/JSONL) that you can read, edit, backup, and move without any proprietary tooling. No vendor lock-in, no data hostage situations.
+* Current Status
 
-** Easy Self-Hosting
-The storage format is designed for easy self-hosting:
-- Works with any git host (GitHub, GitLab, Codeberg, self-hosted Gitea)
-- No database server required
-- Works offline, sync when convenient
+This repository is no longer at the initial MVP design stage. Current implementation includes:
 
-** Free Audit Trail
-Using git for storage provides a complete history of every change to your financial data at no additional cost or complexity.
+- Connection/account management via CLI.
+- JSON file storage with append-only balance snapshots and transactions.
+- Synchronizers for Chase, Schwab, Coinbase, and Plaid.
+- Price/FX source routing with configurable providers.
+- Portfolio snapshot/history/change-point valuation commands.
+- Optional git auto-commit after data-changing operations.
 
-** Extensible Sync
-Bank integrations are first-class but pluggable. Add new synchronizers (Plaid, direct bank APIs, file imports) through a clean abstraction. The goal is that adding a new data source should be straightforward.
+Not implemented yet:
 
-** Balances as Truth
-Account balances are tracked independently, not just derived from transactions. Real-world banking is messy—fees aren't always reported, interest accrues silently, transfers get weird. Balance snapshots are the ground truth.
+- Annotation layer (categories/notes as first class stored overlays).
+- Budgeting/reporting UI workflows.
+- Stable public API for frontend integration (frontend work is experimental).
 
-** Raw Data + Annotation Layer
-Synchronized data is never modified directly. User edits (categorization, merchant normalization, notes) are stored as a separate annotation layer on top of raw data. This preserves the original data, allows re-syncing without losing edits, and maintains clear provenance.
+* CLI
+
+The main binary is =keepbook=. Commands emit JSON.
+
+Key command groups:
+
+- =config=
+- =add connection|account=
+- =set balance=
+- =list connections|accounts|balances|transactions|price-sources|all=
+- =sync connection|all|prices|symlinks=
+- =auth schwab login= / =auth chase login=
+- =market-data fetch=
+- =portfolio snapshot|history|change-points=
+
+Examples:
+
+#+BEGIN_SRC bash
+# Show resolved config and data directory
+keepbook config
+
+# Create a manual connection and account
+keepbook add connection "Manual"
+keepbook add account --connection <connection-id> "Checking"
+
+# Set a balance snapshot entry
+keepbook set balance --account <account-id> --asset USD --amount 1234.56
+
+# Sync transactions/balances from one source
+keepbook sync connection <connection-id-or-name>
+
+# Refresh latest prices only
+keepbook sync prices all
+
+# Portfolio valuation in EUR at a specific date
+keepbook portfolio snapshot --currency EUR --date 2026-02-01
+#+END_SRC
+
+* Configuration
+
+Default config path resolution:
+
+1. =./keepbook.toml= if present.
+2. =~/.local/share/keepbook/keepbook.toml= (XDG data dir fallback).
+
+Config fields (currently used):
+
+#+BEGIN_SRC toml
+# Optional; if relative, resolved against config directory
+# data_dir = "./data"
+
+reporting_currency = "USD"
+
+[refresh]
+balance_staleness = "14d"
+price_staleness = "24h"
+
+[git]
+auto_commit = false
+#+END_SRC
+
+* Storage Layout
+
+Primary storage root is the resolved =data_dir=.
+
+#+BEGIN_SRC text
+data/
+  connections/
+    by-name/                      # symlinks to connection dirs
+    {connection-id}/
+      connection.toml             # human config
+      connection.json             # machine state
+      accounts/                   # symlinks to account dirs
+
+  accounts/
+    {account-id}/
+      account.json
+      account_config.toml         # optional
+      balances.jsonl              # append-only BalanceSnapshot rows
+      transactions.jsonl          # append-only Transaction rows
+
+  # market data store (also under data_dir)
+  assets/
+    index.jsonl                   # AssetId -> Asset registry entries
+  prices/
+    {asset-id}/
+      {year}.jsonl
+  fx/
+    {BASE}-{QUOTE}/
+      {year}.jsonl
+
+  # configured network sources
+  price_sources/
+    {source-name}/
+      source.toml
+#+END_SRC
+
+Notes:
+
+- Balances are stored as full snapshots (all holdings for an account at one timestamp).
+- Transaction files are append-only; read-path logic provides a last-write-wins view by transaction id.
+- Symlinks are rebuilt with =keepbook sync symlinks=.
+
+* Price Sources
+
+Configured in =price_sources/*/source.toml=. Source type controls required credentials and supported asset classes.
+
+Implemented source types:
+
+- Equities: =eodhd=, =twelve_data=, =alpha_vantage=, =marketstack=
+- Crypto: =coingecko=, =cryptocompare=, =coincap=
+- FX: =frankfurter=
 
 * Architecture
 
-** Headless Core
-The core is a Rust library/CLI that handles:
-- Synchronizer abstraction for fetching data
-- Sync orchestration and scheduling
-- Deduplication and conflict resolution
-- Reading/writing the storage format
+Main modules:
 
-Frontends (web, mobile, CLI) are built separately and consume the core however makes sense—direct library usage, CLI invocation, HTTP API, or WASM. This decision is deferred intentionally.
+- =src/storage= - storage trait + JSON file implementation.
+- =src/sync= - synchronizer traits, orchestration, auth flows.
+- =src/market_data= - store, source adapters, routers, service builder.
+- =src/portfolio= - valuation, history, and change-point logic.
+- =src/app.rs= - CLI command handlers.
 
-** Storage Abstraction
-
-The core operates on typed data structures and programs against a storage trait:
-
-#+BEGIN_SRC rust
-trait Storage {
-    // Connections
-    fn list_connections(&self) -> Result<Vec<Connection>>;
-    fn get_connection(&self, id: &Id) -> Result<Connection>;
-
-    // Accounts
-    fn list_accounts(&self) -> Result<Vec<Account>>;
-    fn get_account(&self, id: &Id) -> Result<Account>;
-
-    // Balances
-    fn get_balances(&self, account_id: &Id, range: TimeRange) -> Result<Vec<Balance>>;
-
-    // Transactions
-    fn get_transactions(&self, account_id: &Id, range: TimeRange) -> Result<Vec<Transaction>>;
-
-    // Writes (batch-only)
-    fn write_batch(&self, metadata: &BatchMetadata, updates: &[AccountUpdate]) -> Result<()>;
-}
-#+END_SRC
-
-The default implementation uses JSON files with the structure described below. Alternative backends (SQLite, etc.) could implement the same trait.
-
-** Default Storage Format
-
-Account-separated, monthly time-sharded, with connections as a distinct concept:
-
-#+BEGIN_SRC
-data/
-  connections/
-    {uuid}/
-      connection.json
-
-  accounts/
-    {uuid}/
-      account.json
-      2024/
-        01-balances.jsonl
-        01-transactions.jsonl
-        01-annotations.jsonl
-        02-balances.jsonl
-        02-transactions.jsonl
-        02-annotations.jsonl
-#+END_SRC
-
-- *Connections* represent a sync source (Plaid item, bank login, file import). One sync can produce multiple accounts.
-- *Accounts* are the actual financial accounts. Each references its parent connection.
-- *Annotations* store user edits layered on top of raw transaction data.
-- Monthly sharding keeps files small and changes isolated.
-
-* Data Model
-
-** Connection
-
-A sync source — one Plaid link, one bank login, one file import source.
-
-#+BEGIN_SRC json
-{
-  "id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
-  "name": "Chase Banking",
-  "synchronizer": "plaid",
-  "status": "active",
-  "created_at": "2024-01-15T10:30:00Z",
-  "last_sync": {
-    "at": "2024-06-01T08:00:00Z",
-    "status": "success"
-  },
-  "account_ids": ["d290f1ee-6c54-4b01-90e6-d701748f0851", "..."],
-  "synchronizer_data": {}
-}
-#+END_SRC
-
-| Field | Description |
-|-------+-------------|
-| id | Opaque string id (often UUID), immutable |
-| name | Human-friendly, user-editable |
-| synchronizer | Which sync plugin handles this connection |
-| status | active, error, disconnected, pending_reauth |
-| last_sync | Timestamp and status of most recent sync |
-| account_ids | Accounts produced by this connection |
-| synchronizer_data | Opaque data owned by the synchronizer plugin |
-
-** Account
-
-An individual financial account (checking, savings, credit card, brokerage, etc.).
-
-#+BEGIN_SRC json
-{
-  "id": "d290f1ee-6c54-4b01-90e6-d701748f0851",
-  "name": "Primary Checking",
-  "connection_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
-  "tags": [],
-  "created_at": "2024-01-15T10:30:00Z",
-  "active": true,
-  "synchronizer_data": {}
-}
-#+END_SRC
-
-| Field | Description |
-|-------+-------------|
-| id | Opaque string id (often UUID), immutable |
-| name | Human-friendly, user-editable |
-| connection_id | Parent connection that syncs this account |
-| tags | User-defined labels for organization |
-| active | Whether account is active (false for closed accounts) |
-| synchronizer_data | Opaque data owned by the synchronizer plugin |
-
-** Balance
-
-A point-in-time snapshot of an account's holdings. Stored in monthly JSONL files.
-
-#+BEGIN_SRC json
-{"timestamp": "2024-06-01T08:00:00Z", "asset": {"type": "currency", "iso_code": "USD"}, "amount": "1523.47"}
-{"timestamp": "2024-06-01T08:00:00Z", "asset": {"type": "equity", "ticker": "AAPL", "exchange": "NASDAQ"}, "amount": "15"}
-#+END_SRC
-
-| Field | Description |
-|-------+-------------|
-| timestamp | When this balance was recorded |
-| asset | What is being measured (see Asset below) |
-| amount | Quantity as string (avoids floating point issues) |
-
-** Asset
-
-Assets are represented inline with type-specific fields:
-
-#+BEGIN_SRC json
-{"type": "currency", "iso_code": "USD"}
-{"type": "equity", "ticker": "AAPL", "exchange": "NASDAQ"}
-{"type": "crypto", "symbol": "BTC"}
-#+END_SRC
-
-The =type= field determines what other fields are present. This allows matching across synchronizers — two records with ={"type": "currency", "iso_code": "USD"}= refer to the same asset.
-
-** Transaction
-
-A financial transaction. Stored in monthly JSONL files.
-
-#+BEGIN_SRC json
-{
-  "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "timestamp": "2024-06-01T12:34:56Z",
-  "amount": "-45.67",
-  "asset": {"type": "currency", "iso_code": "USD"},
-  "description": "WHOLEFDS MKT #10456",
-  "status": "posted",
-  "synchronizer_data": {}
-}
-#+END_SRC
-
-| Field | Description |
-|-------+-------------|
-| id | Opaque string id (often UUID), immutable |
-| timestamp | Transaction date (synchronizer decides which date to use) |
-| amount | Signed string — negative for debits, positive for credits |
-| asset | What was transacted |
-| description | Raw description from the bank |
-| status | pending, posted, or reversed |
-| synchronizer_data | Opaque data for deduplication, original IDs, etc. |
-
-** Annotation
-
-User edits layered on top of raw transaction data. Stored separately to preserve original synced data.
-
-#+BEGIN_SRC json
-{"transaction_id": "a1b2c3d4-...", "merchant": "Whole Foods", "category": "groceries", "notes": "weekly shopping"}
-#+END_SRC
-
-| Field | Description |
-|-------+-------------|
-| transaction_id | Which transaction this annotates |
-| merchant | Normalized merchant name |
-| category | User-assigned category |
-| notes | Freeform notes |
-
-Additional annotation fields can be added as needed.
-
-* MVP Scope
-
-The initial focus is narrow:
-
-1. *Account + Balance Storage* — Track accounts and their balance history over time
-2. *Transaction Storage* — Store transactions in the defined format
-3. *Synchronizer Abstraction* — Clean trait/interface for data sources
-4. *Sync Engine* — Orchestrate fetching, deduplicating, and persisting
-5. *Storage Abstraction* — Trait-based storage layer with JSON file implementation
-
-What's explicitly *not* in MVP:
-- Categories and auto-categorization rules
-- Budgets
-- Reports and visualizations
-- Web/mobile UI
-- Split transactions
-- Recurring transaction detection
-
-These come later, built on top of solid storage and sync foundations.
-
-* Future Directions
-
-- Category system with hierarchies and rules
-- Payee/merchant normalization
-- Tags and split transactions
-- Budgeting with targets and alerts
-- Investment account support (holdings, cost basis)
-- Multi-currency support
-- Web and mobile interfaces
+A lightweight FFI crate exists at =crates/keepbook-ffi= for embedding use cases.
 
 * Why "Keepbook"?
 
-Bookkeeping, but you keep the books. Yourself. Forever.
+Bookkeeping, but you keep the books.
 
 * License
 
-TBD — likely MIT or Apache 2.0 for maximum openness.
+TBD (likely MIT or Apache-2.0).
