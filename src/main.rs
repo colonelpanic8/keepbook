@@ -536,7 +536,7 @@ async fn main() -> Result<()> {
             }
 
             ListCommand::Balances => {
-                let balances = app::list_balances(storage_arc.as_ref()).await?;
+                let balances = app::list_balances(storage_arc.as_ref(), &config).await?;
                 println!("{}", serde_json::to_string_pretty(&balances)?);
             }
 

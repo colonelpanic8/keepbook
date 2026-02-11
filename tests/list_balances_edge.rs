@@ -49,8 +49,13 @@ async fn list_balances_falls_back_to_accounts_by_connection_id() -> Result<()> {
         .append_balance_snapshot(&account.id, &snapshot)
         .await?;
 
-    let balances = list_balances(&storage).await?;
+    let balances = list_balances(&storage, &_config).await?;
     assert_eq!(balances.len(), 1, "expected balance even if state is empty");
+    assert_eq!(
+        balances[0].value_in_reporting_currency.as_deref(),
+        Some("100")
+    );
+    assert_eq!(balances[0].reporting_currency, "USD");
 
     Ok(())
 }

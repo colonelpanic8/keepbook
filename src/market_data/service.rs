@@ -192,7 +192,11 @@ impl MarketDataService {
 
     /// Like [`Self::price_latest`] but always tries to fetch a new quote first (ignores cached quote
     /// freshness), then falls back to close prices. Returns whether a new point was fetched/stored.
-    pub async fn price_latest_force(&self, asset: &Asset, date: NaiveDate) -> Result<(PricePoint, bool)> {
+    pub async fn price_latest_force(
+        &self,
+        asset: &Asset,
+        date: NaiveDate,
+    ) -> Result<(PricePoint, bool)> {
         self.price_latest_inner(asset, date, true).await
     }
 
@@ -517,8 +521,8 @@ impl MarketDataService {
 mod tests {
     use super::*;
     use crate::clock::FixedClock;
-    use crate::market_data::{MemoryMarketDataStore, PriceKind, PricePoint};
     use crate::market_data::{AssetId, EquityPriceRouter, EquityPriceSource};
+    use crate::market_data::{MemoryMarketDataStore, PriceKind, PricePoint};
     use chrono::{TimeZone, Utc};
     use std::sync::Arc;
 
@@ -537,7 +541,11 @@ mod tests {
             Ok(None)
         }
 
-        async fn fetch_quote(&self, _asset: &Asset, _asset_id: &AssetId) -> Result<Option<PricePoint>> {
+        async fn fetch_quote(
+            &self,
+            _asset: &Asset,
+            _asset_id: &AssetId,
+        ) -> Result<Option<PricePoint>> {
             Ok(Some(self.point.clone()))
         }
 
@@ -546,7 +554,12 @@ mod tests {
         }
     }
 
-    fn make_quote(asset_id: &AssetId, as_of_date: NaiveDate, ts: chrono::DateTime<Utc>, px: &str) -> PricePoint {
+    fn make_quote(
+        asset_id: &AssetId,
+        as_of_date: NaiveDate,
+        ts: chrono::DateTime<Utc>,
+        px: &str,
+    ) -> PricePoint {
         PricePoint {
             asset_id: asset_id.clone(),
             as_of_date,
@@ -580,9 +593,9 @@ mod tests {
 
         // Router exists but should not be used due to fresh cache.
         let src_quote = make_quote(&asset_id, today, now, "200");
-        let router = Arc::new(EquityPriceRouter::new(vec![Arc::new(FixedEquityQuoteSource {
-            point: src_quote,
-        })]));
+        let router = Arc::new(EquityPriceRouter::new(vec![Arc::new(
+            FixedEquityQuoteSource { point: src_quote },
+        )]));
         svc = svc.with_equity_router(router);
 
         let (p, fetched) = svc.price_latest_with_status(&asset, today).await?;
@@ -612,9 +625,11 @@ mod tests {
         store.put_prices(std::slice::from_ref(&cached)).await?;
 
         let src_quote = make_quote(&asset_id, today, now, "200");
-        let router = Arc::new(EquityPriceRouter::new(vec![Arc::new(FixedEquityQuoteSource {
-            point: src_quote.clone(),
-        })]));
+        let router = Arc::new(EquityPriceRouter::new(vec![Arc::new(
+            FixedEquityQuoteSource {
+                point: src_quote.clone(),
+            },
+        )]));
         svc = svc.with_equity_router(router);
 
         let (p, fetched) = svc.price_latest_with_status(&asset, today).await?;
@@ -644,9 +659,11 @@ mod tests {
         store.put_prices(std::slice::from_ref(&cached)).await?;
 
         let src_quote = make_quote(&asset_id, today, now, "200");
-        let router = Arc::new(EquityPriceRouter::new(vec![Arc::new(FixedEquityQuoteSource {
-            point: src_quote.clone(),
-        })]));
+        let router = Arc::new(EquityPriceRouter::new(vec![Arc::new(
+            FixedEquityQuoteSource {
+                point: src_quote.clone(),
+            },
+        )]));
         svc = svc.with_equity_router(router);
 
         let (p, fetched) = svc.price_latest_force(&asset, today).await?;

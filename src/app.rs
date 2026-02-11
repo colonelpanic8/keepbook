@@ -71,6 +71,8 @@ pub struct BalanceOutput {
     pub account_id: String,
     pub asset: serde_json::Value,
     pub amount: String,
+    pub value_in_reporting_currency: Option<String>,
+    pub reporting_currency: String,
     pub timestamp: String,
 }
 
@@ -285,7 +287,75 @@ pub fn list_price_sources(data_dir: &Path) -> Result<Vec<PriceSourceOutput>> {
     Ok(output)
 }
 
-pub async fn list_balances(storage: &dyn Storage) -> Result<Vec<BalanceOutput>> {
+async fn value_in_reporting_currency(
+    market_data: &MarketDataService,
+    asset: &Asset,
+    amount: &str,
+    reporting_currency: &str,
+    as_of_date: NaiveDate,
+) -> Result<Option<String>> {
+    use rust_decimal::Decimal;
+
+    let amount = Decimal::from_str(amount)
+        .with_context(|| format!("Invalid balance amount for valuation: {amount}"))?;
+    let reporting_currency = reporting_currency.trim().to_uppercase();
+
+    match asset {
+        Asset::Currency { iso_code } => {
+            if iso_code.eq_ignore_ascii_case(&reporting_currency) {
+                return Ok(Some(amount.normalize().to_string()));
+            }
+
+            let Some(rate) = market_data
+                .fx_from_store(iso_code, &reporting_currency, as_of_date)
+                .await?
+            else {
+                return Ok(None);
+            };
+
+            let fx_rate = Decimal::from_str(&rate.rate)
+                .with_context(|| format!("Invalid FX rate value: {}", rate.rate))?;
+            Ok(Some((amount * fx_rate).normalize().to_string()))
+        }
+        Asset::Equity { .. } | Asset::Crypto { .. } => {
+            let Some(price) = market_data.price_from_store(asset, as_of_date).await? else {
+                return Ok(None);
+            };
+
+            let unit_price = Decimal::from_str(&price.price)
+                .with_context(|| format!("Invalid asset price value: {}", price.price))?;
+            let value_in_quote = amount * unit_price;
+
+            if price
+                .quote_currency
+                .eq_ignore_ascii_case(&reporting_currency)
+            {
+                return Ok(Some(value_in_quote.normalize().to_string()));
+            }
+
+            let Some(rate) = market_data
+                .fx_from_store(&price.quote_currency, &reporting_currency, as_of_date)
+                .await?
+            else {
+                return Ok(None);
+            };
+
+            let fx_rate = Decimal::from_str(&rate.rate)
+                .with_context(|| format!("Invalid FX rate value: {}", rate.rate))?;
+            Ok(Some((value_in_quote * fx_rate).normalize().to_string()))
+        }
+    }
+}
+
+pub async fn list_balances(
+    storage: &dyn Storage,
+    config: &ResolvedConfig,
+) -> Result<Vec<BalanceOutput>> {
+    let market_data = MarketDataServiceBuilder::for_data_dir(&config.data_dir)
+        .with_quote_staleness(config.refresh.price_staleness)
+        .build()
+        .await;
+
     let connections = storage.list_connections().await?;
     let accounts = storage.list_accounts().await?;
     let mut accounts_by_connection: HashMap<Id, HashSet<Id>> = HashMap::new();
@@ -321,10 +391,21 @@ pub async fn list_balances(storage: &dyn Storage) -> Result<Vec<BalanceOutput>> 
         for account_id in &account_ids {
             if let Some(snapshot) = storage.get_latest_balance_snapshot(account_id).await? {
                 for balance in snapshot.balances {
+                    let value_in_reporting_currency = value_in_reporting_currency(
+                        &market_data,
+                        &balance.asset,
+                        &balance.amount,
+                        &config.reporting_currency,
+                        snapshot.timestamp.date_naive(),
+                    )
+                    .await?;
+
                     output.push(BalanceOutput {
                         account_id: account_id.to_string(),
                         asset: serde_json::to_value(&balance.asset)?,
                         amount: balance.amount,
+                        value_in_reporting_currency,
+                        reporting_currency: config.reporting_currency.to_uppercase(),
                         timestamp: snapshot.timestamp.to_rfc3339(),
                     });
                 }
@@ -362,7 +443,7 @@ pub async fn list_all(storage: &dyn Storage, config: &ResolvedConfig) -> Result<
         connections: list_connections(storage).await?,
         accounts: list_accounts(storage).await?,
         price_sources: list_price_sources(&config.data_dir)?,
-        balances: list_balances(storage).await?,
+        balances: list_balances(storage, config).await?,
     })
 }
 
@@ -721,8 +802,8 @@ fn prompt_select_index(prompt: &str, options: &[String]) -> Result<Option<usize>
 
 #[cfg(feature = "tui")]
 fn prompt_select_index_impl(prompt: &str, options: &[String]) -> Result<Option<usize>> {
-    use dialoguer::{theme::ColorfulTheme, Select};
     use dialoguer::console::Term;
+    use dialoguer::{theme::ColorfulTheme, Select};
 
     if options.is_empty() {
         return Ok(None);
@@ -777,7 +858,9 @@ fn prompt_select_index_impl(prompt: &str, options: &[String]) -> Result<Option<u
     }
 }
 
-async fn prompt_price_sync_scope(storage: &dyn Storage) -> Result<Option<(PriceSyncScope, Option<String>)>> {
+async fn prompt_price_sync_scope(
+    storage: &dyn Storage,
+) -> Result<Option<(PriceSyncScope, Option<String>)>> {
     let mode_options = vec![
         "All (use latest balances across all accounts)".to_string(),
         "A connection".to_string(),
@@ -801,7 +884,10 @@ async fn prompt_price_sync_scope(storage: &dyn Storage) -> Result<Option<(PriceS
                 .collect();
             let sel = prompt_select_index("Select a connection:", &options)?;
             let Some(sel) = sel else { return Ok(None) };
-            Ok(Some((PriceSyncScope::Connection, Some(connections[sel].id().to_string()))))
+            Ok(Some((
+                PriceSyncScope::Connection,
+                Some(connections[sel].id().to_string()),
+            )))
         }
         2 => {
             let accounts = storage.list_accounts().await?;
@@ -826,7 +912,10 @@ async fn prompt_price_sync_scope(storage: &dyn Storage) -> Result<Option<(PriceS
                 .collect();
             let sel = prompt_select_index("Select an account:", &options)?;
             let Some(sel) = sel else { return Ok(None) };
-            Ok(Some((PriceSyncScope::Account, Some(accounts[sel].id.to_string()))))
+            Ok(Some((
+                PriceSyncScope::Account,
+                Some(accounts[sel].id.to_string()),
+            )))
         }
         _ => unreachable!(),
     }
@@ -985,8 +1074,12 @@ pub async fn sync_prices(
 
     let scope_json = match (scope, target) {
         (PriceSyncScope::All, _) => serde_json::json!({ "type": "all" }),
-        (PriceSyncScope::Connection, Some(t)) => serde_json::json!({ "type": "connection", "id_or_name": t }),
-        (PriceSyncScope::Account, Some(t)) => serde_json::json!({ "type": "account", "id_or_name": t }),
+        (PriceSyncScope::Connection, Some(t)) => {
+            serde_json::json!({ "type": "connection", "id_or_name": t })
+        }
+        (PriceSyncScope::Account, Some(t)) => {
+            serde_json::json!({ "type": "account", "id_or_name": t })
+        }
         _ => serde_json::Value::Null,
     };
 
@@ -2122,8 +2215,8 @@ mod tests {
     use crate::config::{GitConfig, RefreshConfig, ResolvedConfig};
     use crate::models::FixedIdGenerator;
     use crate::models::{Account, ConnectionConfig};
-    use crate::storage::MemoryStorage;
     use crate::storage::JsonFileStorage;
+    use crate::storage::MemoryStorage;
     use chrono::TimeZone;
     use chrono::{DateTime, NaiveDate, Utc};
     use std::collections::HashMap;
@@ -2220,28 +2313,21 @@ mod tests {
             )])
             .await?;
 
-        let output = portfolio_change_points(
-            storage,
-            &config,
-            None,
-            None,
-            "none".to_string(),
-            true,
-        )
-        .await?;
+        let output =
+            portfolio_change_points(storage, &config, None, None, "none".to_string(), true).await?;
 
         assert!(
-            output.points.iter().any(|p| p.triggers.iter().any(|t| matches!(
-                t,
-                crate::portfolio::ChangeTrigger::Balance { .. }
-            ))),
+            output.points.iter().any(|p| p
+                .triggers
+                .iter()
+                .any(|t| matches!(t, crate::portfolio::ChangeTrigger::Balance { .. }))),
             "expected at least one balance-triggered change point"
         );
         assert!(
-            output.points.iter().any(|p| p.triggers.iter().any(|t| matches!(
-                t,
-                crate::portfolio::ChangeTrigger::Price { .. }
-            ))),
+            output.points.iter().any(|p| p
+                .triggers
+                .iter()
+                .any(|t| matches!(t, crate::portfolio::ChangeTrigger::Price { .. }))),
             "expected at least one price-triggered change point"
         );
 
