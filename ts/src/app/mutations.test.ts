@@ -3,8 +3,6 @@ import { MemoryStorage } from '../storage/memory.js';
 import { FixedClock } from '../clock.js';
 import { FixedIdGenerator } from '../models/id-generator.js';
 import { Id } from '../models/id.js';
-import { Connection, type ConnectionType } from '../models/connection.js';
-import { Account } from '../models/account.js';
 import { addConnection, addAccount, removeConnection, setBalance } from './mutations.js';
 
 // ---------------------------------------------------------------------------
@@ -12,12 +10,22 @@ import { addConnection, addAccount, removeConnection, setBalance } from './mutat
 // ---------------------------------------------------------------------------
 
 function makeIdGen(...ids: string[]): FixedIdGenerator {
-  return new FixedIdGenerator(ids.map(s => Id.fromString(s)));
+  return new FixedIdGenerator(ids.map((s) => Id.fromString(s)));
 }
 
 function makeClock(iso: string): FixedClock {
   return new FixedClock(new Date(iso));
 }
+
+type SetBalanceSuccessResult = {
+  success: boolean;
+  balance: {
+    account_id: string;
+    asset: Record<string, string>;
+    amount: string;
+    timestamp: string;
+  };
+};
 
 // ---------------------------------------------------------------------------
 // addConnection
@@ -105,10 +113,7 @@ describe('addAccount', () => {
     await addConnection(storage, 'My Bank', makeIdGen('conn-1'), clock);
 
     // Add an account
-    const result = await addAccount(
-      storage, 'My Bank', 'Checking', [],
-      makeIdGen('acct-1'), clock,
-    );
+    const result = await addAccount(storage, 'My Bank', 'Checking', [], makeIdGen('acct-1'), clock);
 
     expect(result).toEqual({
       success: true,
@@ -131,8 +136,12 @@ describe('addAccount', () => {
     const clock = makeClock('2024-06-01T12:00:00Z');
 
     const result = await addAccount(
-      storage, 'nonexistent', 'Checking', [],
-      makeIdGen('acct-1'), clock,
+      storage,
+      'nonexistent',
+      'Checking',
+      [],
+      makeIdGen('acct-1'),
+      clock,
     );
 
     expect(result).toEqual({
@@ -148,8 +157,12 @@ describe('addAccount', () => {
     await addConnection(storage, 'My Bank', makeIdGen('conn-1'), clock);
 
     await addAccount(
-      storage, 'My Bank', 'Checking', ['bank', 'primary'],
-      makeIdGen('acct-1'), clock,
+      storage,
+      'My Bank',
+      'Checking',
+      ['bank', 'primary'],
+      makeIdGen('acct-1'),
+      clock,
     );
 
     const acct = await storage.getAccount(Id.fromString('acct-1'));
@@ -163,14 +176,11 @@ describe('addAccount', () => {
 
     await addConnection(storage, 'My Bank', makeIdGen('conn-1'), clock);
 
-    await addAccount(
-      storage, 'My Bank', 'Checking', [],
-      makeIdGen('acct-1'), clock,
-    );
+    await addAccount(storage, 'My Bank', 'Checking', [], makeIdGen('acct-1'), clock);
 
     const conn = await storage.getConnection(Id.fromString('conn-1'));
     expect(conn).not.toBeNull();
-    const accountIdStrs = conn!.state.account_ids.map(id => id.asStr());
+    const accountIdStrs = conn!.state.account_ids.map((id) => id.asStr());
     expect(accountIdStrs).toContain('acct-1');
   });
 
@@ -180,10 +190,7 @@ describe('addAccount', () => {
 
     await addConnection(storage, 'My Bank', makeIdGen('conn-1'), clock);
 
-    const result = await addAccount(
-      storage, 'conn-1', 'Savings', [],
-      makeIdGen('acct-2'), clock,
-    );
+    const result = await addAccount(storage, 'conn-1', 'Savings', [], makeIdGen('acct-2'), clock);
 
     expect(result).toEqual({
       success: true,
@@ -201,10 +208,7 @@ describe('addAccount', () => {
 
     await addConnection(storage, 'My Bank', makeIdGen('conn-1'), clock);
 
-    await addAccount(
-      storage, 'My Bank', 'Checking', [],
-      makeIdGen('acct-1'), clock,
-    );
+    await addAccount(storage, 'My Bank', 'Checking', [], makeIdGen('acct-1'), clock);
 
     const acct = await storage.getAccount(Id.fromString('acct-1'));
     expect(acct!.tags).toEqual([]);
@@ -363,7 +367,13 @@ describe('setBalance', () => {
     await addAccount(storage, 'conn-1', 'Checking', [], makeIdGen('acct-1'), clock);
 
     const balanceClock = makeClock('2024-07-01T10:00:00Z');
-    const result = await setBalance(storage, 'acct-1', 'EUR', '500', balanceClock) as any;
+    const result = (await setBalance(
+      storage,
+      'acct-1',
+      'EUR',
+      '500',
+      balanceClock,
+    )) as SetBalanceSuccessResult;
 
     expect(result.success).toBe(true);
     expect(result.balance.asset).toEqual({ type: 'currency', iso_code: 'EUR' });
@@ -377,7 +387,13 @@ describe('setBalance', () => {
     await addAccount(storage, 'conn-1', 'Brokerage', [], makeIdGen('acct-1'), clock);
 
     const balanceClock = makeClock('2024-07-01T10:00:00Z');
-    const result = await setBalance(storage, 'acct-1', 'equity:AAPL', '100', balanceClock) as any;
+    const result = (await setBalance(
+      storage,
+      'acct-1',
+      'equity:AAPL',
+      '100',
+      balanceClock,
+    )) as SetBalanceSuccessResult;
 
     expect(result.success).toBe(true);
     expect(result.balance.asset).toEqual({ type: 'equity', ticker: 'AAPL' });
@@ -391,7 +407,13 @@ describe('setBalance', () => {
     await addAccount(storage, 'conn-1', 'Wallet', [], makeIdGen('acct-1'), clock);
 
     const balanceClock = makeClock('2024-07-01T10:00:00Z');
-    const result = await setBalance(storage, 'acct-1', 'crypto:BTC', '0.5', balanceClock) as any;
+    const result = (await setBalance(
+      storage,
+      'acct-1',
+      'crypto:BTC',
+      '0.5',
+      balanceClock,
+    )) as SetBalanceSuccessResult;
 
     expect(result.success).toBe(true);
     expect(result.balance.asset).toEqual({ type: 'crypto', symbol: 'BTC' });
@@ -406,7 +428,13 @@ describe('setBalance', () => {
     await addAccount(storage, 'conn-1', 'Checking', [], makeIdGen('acct-1'), clock);
 
     const balanceClock = makeClock('2024-07-01T10:00:00Z');
-    const result = await setBalance(storage, 'acct-1', 'USD', '100.00', balanceClock) as any;
+    const result = (await setBalance(
+      storage,
+      'acct-1',
+      'USD',
+      '100.00',
+      balanceClock,
+    )) as SetBalanceSuccessResult;
 
     expect(result.success).toBe(true);
     expect(result.balance.amount).toBe('100');
@@ -420,7 +448,13 @@ describe('setBalance', () => {
     await addAccount(storage, 'conn-1', 'Checking', [], makeIdGen('acct-1'), clock);
 
     const balanceClock = makeClock('2024-07-01T10:00:00Z');
-    const result = await setBalance(storage, 'Checking', 'USD', '500', balanceClock) as any;
+    const result = (await setBalance(
+      storage,
+      'Checking',
+      'USD',
+      '500',
+      balanceClock,
+    )) as SetBalanceSuccessResult;
 
     expect(result.success).toBe(true);
     expect(result.balance.account_id).toBe('acct-1');
@@ -434,7 +468,13 @@ describe('setBalance', () => {
     await addAccount(storage, 'conn-1', 'Checking', [], makeIdGen('acct-1'), clock);
 
     const balanceClock = makeClock('2024-07-01T10:30:00.123Z');
-    const result = await setBalance(storage, 'acct-1', 'USD', '100', balanceClock) as any;
+    const result = (await setBalance(
+      storage,
+      'acct-1',
+      'USD',
+      '100',
+      balanceClock,
+    )) as SetBalanceSuccessResult;
 
     expect(result.balance.timestamp).toBe('2024-07-01T10:30:00.123000000+00:00');
   });

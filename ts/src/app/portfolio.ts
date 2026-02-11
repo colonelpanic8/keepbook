@@ -18,11 +18,30 @@ import type {
   Grouping,
 } from '../portfolio/models.js';
 import { type Clock, SystemClock } from '../clock.js';
-import { formatChronoSerde, parseGranularity, formatDateYMD, formatRfc3339, decStr } from './format.js';
+import {
+  formatChronoSerde,
+  parseGranularity,
+  formatDateYMD,
+  formatRfc3339,
+  decStr,
+} from './format.js';
 import type { ResolvedConfig } from '../config.js';
-import { collectChangePoints, filterByDateRange, filterByGranularity, type ChangePoint, type ChangeTrigger } from '../portfolio/change-points.js';
-import type { HistoryOutput, HistoryPoint, HistorySummary, SerializedChangePoint, SerializedChangeTrigger, ChangePointsOutput } from './types.js';
-import Decimal from 'decimal.js';
+import {
+  collectChangePoints,
+  filterByDateRange,
+  filterByGranularity,
+  type ChangePoint,
+  type ChangeTrigger,
+} from '../portfolio/change-points.js';
+import type {
+  HistoryOutput,
+  HistoryPoint,
+  HistorySummary,
+  SerializedChangePoint,
+  SerializedChangeTrigger,
+  ChangePointsOutput,
+} from './types.js';
+import { Decimal } from 'decimal.js';
 
 // ---------------------------------------------------------------------------
 // Serialization
@@ -158,11 +177,7 @@ export async function portfolioSnapshot(
   const includeDetail = options.detail ?? false;
 
   const marketDataService = new MarketDataService(marketDataStore);
-  const portfolioService = new PortfolioService(
-    storage,
-    marketDataService,
-    effectiveClock,
-  );
+  const portfolioService = new PortfolioService(storage, marketDataService, effectiveClock);
 
   const snapshot = await portfolioService.calculate({
     as_of_date: asOfDate,
@@ -237,11 +252,7 @@ export async function portfolioHistory(
   // Calculate portfolio value at each change point
   const historyPoints: HistoryPoint[] = [];
   for (const point of points) {
-    const portfolioService = new PortfolioService(
-      storage,
-      marketDataService,
-      effectiveClock,
-    );
+    const portfolioService = new PortfolioService(storage, marketDataService, effectiveClock);
 
     const snapshot = await portfolioService.calculate({
       as_of_date: formatDateYMD(point.timestamp),
@@ -349,9 +360,9 @@ export interface PortfolioChangePointsOptions {
 export async function portfolioChangePoints(
   storage: Storage,
   marketDataStore: MarketDataStore,
-  config: ResolvedConfig,
+  _config: ResolvedConfig,
   options: PortfolioChangePointsOptions,
-  clock?: Clock,
+  _clock?: Clock,
 ): Promise<ChangePointsOutput> {
   const granularity = parseGranularity(options.granularity ?? 'none');
 

@@ -29,7 +29,7 @@ export async function listConnections(storage: Storage): Promise<ConnectionOutpu
     storage.listAccounts(),
   ]);
 
-  return connections.map(conn => {
+  return connections.map((conn) => {
     // Union of account_ids from connection state and accounts whose connection_id matches
     const accountIdSet = new Set<string>();
     for (const id of conn.state.account_ids) {
@@ -41,9 +41,7 @@ export async function listConnections(storage: Storage): Promise<ConnectionOutpu
       }
     }
 
-    const last_sync = conn.state.last_sync
-      ? formatRfc3339(conn.state.last_sync.at)
-      : null;
+    const last_sync = conn.state.last_sync ? formatRfc3339(conn.state.last_sync.at) : null;
 
     return {
       id: conn.state.id.asStr(),
@@ -65,7 +63,7 @@ export async function listConnections(storage: Storage): Promise<ConnectionOutpu
  */
 export async function listAccounts(storage: Storage): Promise<AccountOutput[]> {
   const accounts = await storage.listAccounts();
-  return accounts.map(a => ({
+  return accounts.map((a) => ({
     id: a.id.asStr(),
     name: a.name,
     connection_id: a.connection_id.asStr(),
@@ -162,10 +160,7 @@ export function listPriceSources(): PriceSourceOutput[] {
 /**
  * Combine all list outputs into a single object.
  */
-export async function listAll(
-  storage: Storage,
-  reportingCurrency: string,
-): Promise<AllOutput> {
+export async function listAll(storage: Storage, reportingCurrency: string): Promise<AllOutput> {
   const [connections, accounts, balances] = await Promise.all([
     listConnections(storage),
     listAccounts(storage),

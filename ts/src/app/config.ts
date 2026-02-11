@@ -6,9 +6,9 @@
  * producing the JSON output shape expected by the `config` command.
  */
 
-import fs from "node:fs";
-import path from "node:path";
-import os from "node:os";
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 
 import {
   type Config,
@@ -18,7 +18,7 @@ import {
   DEFAULT_CONFIG,
   DEFAULT_GIT_CONFIG,
   DEFAULT_REFRESH_CONFIG,
-} from "../config.js";
+} from '../config.js';
 
 // ---------------------------------------------------------------------------
 // Default config path discovery
@@ -34,14 +34,13 @@ import {
  * 3. The XDG path from step 2 (even if it does not yet exist) as the default.
  */
 export function defaultConfigPath(): string {
-  const localConfig = path.resolve("keepbook.toml");
+  const localConfig = path.resolve('keepbook.toml');
   if (fs.existsSync(localConfig)) {
     return localConfig;
   }
 
-  const xdgConfigHome =
-    process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config");
-  const xdgConfig = path.join(xdgConfigHome, "keepbook", "config.toml");
+  const xdgConfigHome = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
+  const xdgConfig = path.join(xdgConfigHome, 'keepbook', 'config.toml');
   if (fs.existsSync(xdgConfig)) {
     return xdgConfig;
   }
@@ -64,12 +63,10 @@ export function defaultConfigPath(): string {
 export async function loadConfig(
   configPath?: string,
 ): Promise<{ configPath: string; config: ResolvedConfig }> {
-  const resolvedPath = configPath
-    ? path.resolve(configPath)
-    : defaultConfigPath();
+  const resolvedPath = configPath ? path.resolve(configPath) : defaultConfigPath();
 
   if (fs.existsSync(resolvedPath)) {
-    const tomlStr = fs.readFileSync(resolvedPath, "utf-8");
+    const tomlStr = fs.readFileSync(resolvedPath, 'utf-8');
     const parsed: Config = parseConfig(tomlStr);
     const configDir = path.dirname(resolvedPath);
     const dataDir = resolveDataDir(parsed, configDir);
@@ -107,10 +104,7 @@ export async function loadConfig(
  *
  * Shape matches Rust: `src/app.rs:204-212`.
  */
-export function configOutput(
-  configPath: string,
-  config: ResolvedConfig,
-): object {
+export function configOutput(configPath: string, config: ResolvedConfig): object {
   return {
     config_file: configPath,
     data_directory: config.data_dir,

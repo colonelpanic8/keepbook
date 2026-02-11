@@ -15,7 +15,7 @@ import { Id } from '../models/id.js';
 import { type IdGenerator, UuidIdGenerator } from '../models/id-generator.js';
 import { type Clock, SystemClock } from '../clock.js';
 import { parseAsset, formatRfc3339, decStr } from './format.js';
-import Decimal from 'decimal.js';
+import { Decimal } from 'decimal.js';
 
 // ---------------------------------------------------------------------------
 // addConnection
@@ -133,10 +133,7 @@ export async function addAccount(
  * Finds the connection by ID string. If not found, returns an error object.
  * Deletes all accounts whose connection_id matches, then deletes the connection.
  */
-export async function removeConnection(
-  storage: Storage,
-  idStr: string,
-): Promise<object> {
+export async function removeConnection(storage: Storage, idStr: string): Promise<object> {
   const id = Id.fromString(idStr);
   const conn = await storage.getConnection(id);
   if (conn === null) {
@@ -149,9 +146,7 @@ export async function removeConnection(
 
   // Find all accounts belonging to this connection
   const allAccounts = await storage.listAccounts();
-  const matchingAccounts = allAccounts.filter(a =>
-    a.connection_id.equals(id),
-  );
+  const matchingAccounts = allAccounts.filter((a) => a.connection_id.equals(id));
 
   const deletedAccountIds: string[] = [];
   for (const account of matchingAccounts) {
@@ -201,7 +196,7 @@ export async function setBalance(
   let asset;
   try {
     asset = parseAsset(assetStr);
-  } catch (e) {
+  } catch {
     return {
       success: false,
       error: `Invalid asset: '${assetStr}'`,

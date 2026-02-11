@@ -11,9 +11,14 @@ import { Asset } from '../models/asset.js';
 import { AssetId } from '../market-data/asset-id.js';
 import type { ResolvedConfig } from '../config.js';
 import type { PortfolioSnapshot, AssetSummary } from '../portfolio/models.js';
-import { serializeSnapshot, portfolioSnapshot, portfolioHistory, serializeChangeTrigger, serializeChangePoint, portfolioChangePoints } from './portfolio.js';
-import { formatChronoSerde } from './format.js';
-import type { HistoryOutput, ChangePointsOutput } from './types.js';
+import {
+  serializeSnapshot,
+  portfolioSnapshot,
+  portfolioHistory,
+  serializeChangeTrigger,
+  serializeChangePoint,
+  portfolioChangePoints,
+} from './portfolio.js';
 import type { ChangeTrigger, ChangePoint } from '../portfolio/change-points.js';
 
 // ---------------------------------------------------------------------------
@@ -21,7 +26,7 @@ import type { ChangeTrigger, ChangePoint } from '../portfolio/change-points.js';
 // ---------------------------------------------------------------------------
 
 function makeIdGen(...ids: string[]): FixedIdGenerator {
-  return new FixedIdGenerator(ids.map(s => Id.fromString(s)));
+  return new FixedIdGenerator(ids.map((s) => Id.fromString(s)));
 }
 
 function makeClock(iso: string): FixedClock {
@@ -51,25 +56,16 @@ async function setupStorageWithBalance(
 ): Promise<{ storage: MemoryStorage; accountId: Id; connectionId: Id }> {
   const storage = new MemoryStorage();
   const connIdGen = makeIdGen('conn-1');
-  const conn = Connection.new(
-    { name: 'Test Bank', synchronizer: 'manual' },
-    connIdGen,
-    clock,
-  );
+  const conn = Connection.new({ name: 'Test Bank', synchronizer: 'manual' }, connIdGen, clock);
   await storage.saveConnection(conn);
 
   const acctIdGen = makeIdGen('acct-1');
-  const acct = Account.newWithGenerator(
-    acctIdGen,
-    clock,
-    'Checking',
-    Id.fromString('conn-1'),
-  );
+  const acct = Account.newWithGenerator(acctIdGen, clock, 'Checking', Id.fromString('conn-1'));
   await storage.saveAccount(acct);
 
   const snapshot = BalanceSnapshot.new(
     new Date(balanceTimestamp),
-    balances.map(b => AssetBalance.new(b.asset, b.amount)),
+    balances.map((b) => AssetBalance.new(b.asset, b.amount)),
   );
   await storage.appendBalanceSnapshot(acct.id, snapshot);
 
@@ -164,9 +160,7 @@ describe('serializeSnapshot', () => {
     };
     const result = serializeSnapshot(snapshot) as Record<string, unknown>;
     const byAsset = result.by_asset as Record<string, unknown>[];
-    expect(byAsset[0].price_timestamp).toBe(
-      '2024-06-15T10:30:00.456000000Z',
-    );
+    expect(byAsset[0].price_timestamp).toBe('2024-06-15T10:30:00.456000000Z');
   });
 
   it('omits undefined optional fields from asset summaries', () => {
@@ -279,13 +273,7 @@ describe('portfolioSnapshot', () => {
     const config = makeConfig();
     const clock = makeClock('2024-06-15T12:00:00Z');
 
-    const result = await portfolioSnapshot(
-      storage,
-      store,
-      config,
-      {},
-      clock,
-    );
+    const result = await portfolioSnapshot(storage, store, config, {}, clock);
 
     expect(result).toEqual({
       as_of_date: '2024-06-15',
@@ -302,21 +290,16 @@ describe('portfolioSnapshot', () => {
 
   it('computes correct snapshot for single USD balance', async () => {
     const clock = makeClock('2024-06-15T12:00:00Z');
-    const { storage } = await setupStorageWithBalance(
-      clock,
-      '2024-06-14T10:00:00Z',
-      [{ asset: Asset.currency('USD'), amount: '100.50' }],
-    );
+    const { storage } = await setupStorageWithBalance(clock, '2024-06-14T10:00:00Z', [
+      { asset: Asset.currency('USD'), amount: '100.50' },
+    ]);
     const store = new NullMarketDataStore();
     const config = makeConfig();
 
-    const result = (await portfolioSnapshot(
-      storage,
-      store,
-      config,
-      {},
-      clock,
-    )) as Record<string, unknown>;
+    const result = (await portfolioSnapshot(storage, store, config, {}, clock)) as Record<
+      string,
+      unknown
+    >;
 
     expect(result.as_of_date).toBe('2024-06-15');
     expect(result.currency).toBe('USD');
@@ -343,21 +326,13 @@ describe('portfolioSnapshot', () => {
 
   it('groupBy "asset" omits by_account', async () => {
     const clock = makeClock('2024-06-15T12:00:00Z');
-    const { storage } = await setupStorageWithBalance(
-      clock,
-      '2024-06-14T10:00:00Z',
-      [{ asset: Asset.currency('USD'), amount: '50' }],
-    );
+    const { storage } = await setupStorageWithBalance(clock, '2024-06-14T10:00:00Z', [
+      { asset: Asset.currency('USD'), amount: '50' },
+    ]);
     const store = new NullMarketDataStore();
     const config = makeConfig();
 
-    const result = await portfolioSnapshot(
-      storage,
-      store,
-      config,
-      { groupBy: 'asset' },
-      clock,
-    );
+    const result = await portfolioSnapshot(storage, store, config, { groupBy: 'asset' }, clock);
 
     const obj = result as Record<string, unknown>;
     expect(obj.by_asset).toBeDefined();
@@ -371,21 +346,13 @@ describe('portfolioSnapshot', () => {
 
   it('groupBy "account" omits by_asset', async () => {
     const clock = makeClock('2024-06-15T12:00:00Z');
-    const { storage } = await setupStorageWithBalance(
-      clock,
-      '2024-06-14T10:00:00Z',
-      [{ asset: Asset.currency('USD'), amount: '50' }],
-    );
+    const { storage } = await setupStorageWithBalance(clock, '2024-06-14T10:00:00Z', [
+      { asset: Asset.currency('USD'), amount: '50' },
+    ]);
     const store = new NullMarketDataStore();
     const config = makeConfig();
 
-    const result = await portfolioSnapshot(
-      storage,
-      store,
-      config,
-      { groupBy: 'account' },
-      clock,
-    );
+    const result = await portfolioSnapshot(storage, store, config, { groupBy: 'account' }, clock);
 
     const obj = result as Record<string, unknown>;
     expect(obj.by_account).toBeDefined();
@@ -403,13 +370,10 @@ describe('portfolioSnapshot', () => {
     const config = makeConfig({ reporting_currency: 'EUR' });
     const clock = makeClock('2024-06-15T12:00:00Z');
 
-    const result = (await portfolioSnapshot(
-      storage,
-      store,
-      config,
-      {},
-      clock,
-    )) as Record<string, unknown>;
+    const result = (await portfolioSnapshot(storage, store, config, {}, clock)) as Record<
+      string,
+      unknown
+    >;
 
     expect(result.currency).toBe('EUR');
   });
@@ -445,13 +409,10 @@ describe('portfolioSnapshot', () => {
     const config = makeConfig();
     const clock = makeClock('2024-12-25T15:00:00Z');
 
-    const result = (await portfolioSnapshot(
-      storage,
-      store,
-      config,
-      {},
-      clock,
-    )) as Record<string, unknown>;
+    const result = (await portfolioSnapshot(storage, store, config, {}, clock)) as Record<
+      string,
+      unknown
+    >;
 
     expect(result.as_of_date).toBe('2024-12-25');
   });
@@ -487,26 +448,16 @@ describe('portfolioSnapshot', () => {
     // Set up an account with a crypto balance that requires a price lookup
     const storage = new MemoryStorage();
     const connIdGen = makeIdGen('conn-1');
-    const conn = Connection.new(
-      { name: 'Exchange', synchronizer: 'manual' },
-      connIdGen,
-      clock,
-    );
+    const conn = Connection.new({ name: 'Exchange', synchronizer: 'manual' }, connIdGen, clock);
     await storage.saveConnection(conn);
 
     const acctIdGen = makeIdGen('acct-1');
-    const acct = Account.newWithGenerator(
-      acctIdGen,
-      clock,
-      'Crypto',
-      Id.fromString('conn-1'),
-    );
+    const acct = Account.newWithGenerator(acctIdGen, clock, 'Crypto', Id.fromString('conn-1'));
     await storage.saveAccount(acct);
 
-    const snapshot = BalanceSnapshot.new(
-      new Date('2024-06-14T10:00:00Z'),
-      [AssetBalance.new(Asset.crypto('BTC'), '1')],
-    );
+    const snapshot = BalanceSnapshot.new(new Date('2024-06-14T10:00:00Z'), [
+      AssetBalance.new(Asset.crypto('BTC'), '1'),
+    ]);
     await storage.appendBalanceSnapshot(acct.id, snapshot);
 
     // Set up market data store with a BTC price
@@ -527,18 +478,14 @@ describe('portfolioSnapshot', () => {
     ]);
 
     const config = makeConfig();
-    const result = (await portfolioSnapshot(
-      storage,
-      mdStore,
-      config,
-      {},
-      clock,
-    )) as Record<string, unknown>;
+    const result = (await portfolioSnapshot(storage, mdStore, config, {}, clock)) as Record<
+      string,
+      unknown
+    >;
 
     const byAsset = result.by_asset as Record<string, unknown>[];
     const btcEntry = byAsset.find(
-      (a: Record<string, unknown>) =>
-        (a.asset as Record<string, unknown>).type === 'crypto',
+      (a: Record<string, unknown>) => (a.asset as Record<string, unknown>).type === 'crypto',
     );
     expect(btcEntry).toBeDefined();
     expect(btcEntry!.price_timestamp).toBe('2024-06-15T09:00:00Z');
@@ -552,21 +499,13 @@ describe('portfolioSnapshot', () => {
 
   it('undefined fields are absent from JSON.stringify output', async () => {
     const clock = makeClock('2024-06-15T12:00:00Z');
-    const { storage } = await setupStorageWithBalance(
-      clock,
-      '2024-06-14T10:00:00Z',
-      [{ asset: Asset.currency('USD'), amount: '100' }],
-    );
+    const { storage } = await setupStorageWithBalance(clock, '2024-06-14T10:00:00Z', [
+      { asset: Asset.currency('USD'), amount: '100' },
+    ]);
     const store = new NullMarketDataStore();
     const config = makeConfig();
 
-    const result = await portfolioSnapshot(
-      storage,
-      store,
-      config,
-      {},
-      clock,
-    );
+    const result = await portfolioSnapshot(storage, store, config, {}, clock);
 
     const json = JSON.stringify(result);
     const parsed = JSON.parse(json);
@@ -588,21 +527,13 @@ describe('portfolioSnapshot', () => {
 
   it('JSON round-trip preserves the serialized structure', async () => {
     const clock = makeClock('2024-06-15T12:00:00Z');
-    const { storage } = await setupStorageWithBalance(
-      clock,
-      '2024-06-14T10:00:00Z',
-      [{ asset: Asset.currency('USD'), amount: '250.75' }],
-    );
+    const { storage } = await setupStorageWithBalance(clock, '2024-06-14T10:00:00Z', [
+      { asset: Asset.currency('USD'), amount: '250.75' },
+    ]);
     const store = new NullMarketDataStore();
     const config = makeConfig();
 
-    const result = await portfolioSnapshot(
-      storage,
-      store,
-      config,
-      {},
-      clock,
-    );
+    const result = await portfolioSnapshot(storage, store, config, {}, clock);
 
     const json = JSON.stringify(result);
     const parsed = JSON.parse(json);
@@ -651,13 +582,7 @@ describe('portfolioSnapshot', () => {
     const config = makeConfig();
     const clock = makeClock('2024-06-15T12:00:00Z');
 
-    const result = await portfolioSnapshot(
-      storage,
-      store,
-      config,
-      { groupBy: 'both' },
-      clock,
-    );
+    const result = await portfolioSnapshot(storage, store, config, { groupBy: 'both' }, clock);
 
     const json = JSON.stringify(result);
     const parsed = JSON.parse(json);
@@ -673,21 +598,16 @@ describe('portfolioSnapshot', () => {
 
   it('strips trailing zeros from total_value', async () => {
     const clock = makeClock('2024-06-15T12:00:00Z');
-    const { storage } = await setupStorageWithBalance(
-      clock,
-      '2024-06-14T10:00:00Z',
-      [{ asset: Asset.currency('USD'), amount: '100.50' }],
-    );
+    const { storage } = await setupStorageWithBalance(clock, '2024-06-14T10:00:00Z', [
+      { asset: Asset.currency('USD'), amount: '100.50' },
+    ]);
     const store = new NullMarketDataStore();
     const config = makeConfig();
 
-    const result = (await portfolioSnapshot(
-      storage,
-      store,
-      config,
-      {},
-      clock,
-    )) as Record<string, unknown>;
+    const result = (await portfolioSnapshot(storage, store, config, {}, clock)) as Record<
+      string,
+      unknown
+    >;
 
     // "100.50" -> "100.5" (trailing zero stripped by Decimal normalize)
     expect(result.total_value).toBe('100.5');
@@ -699,21 +619,16 @@ describe('portfolioSnapshot', () => {
 
   it('includes account summary with value_in_base for grouping "both"', async () => {
     const clock = makeClock('2024-06-15T12:00:00Z');
-    const { storage } = await setupStorageWithBalance(
-      clock,
-      '2024-06-14T10:00:00Z',
-      [{ asset: Asset.currency('USD'), amount: '500' }],
-    );
+    const { storage } = await setupStorageWithBalance(clock, '2024-06-14T10:00:00Z', [
+      { asset: Asset.currency('USD'), amount: '500' },
+    ]);
     const store = new NullMarketDataStore();
     const config = makeConfig();
 
-    const result = (await portfolioSnapshot(
-      storage,
-      store,
-      config,
-      {},
-      clock,
-    )) as Record<string, unknown>;
+    const result = (await portfolioSnapshot(storage, store, config, {}, clock)) as Record<
+      string,
+      unknown
+    >;
 
     const byAccount = result.by_account as Record<string, unknown>[];
     expect(byAccount).toHaveLength(1);
@@ -741,26 +656,17 @@ async function setupStorageWithBalances(
 ): Promise<{ storage: MemoryStorage; accountId: Id }> {
   const storage = new MemoryStorage();
   const connIdGen = makeIdGen('conn-1');
-  const conn = Connection.new(
-    { name: 'Test Bank', synchronizer: 'manual' },
-    connIdGen,
-    clock,
-  );
+  const conn = Connection.new({ name: 'Test Bank', synchronizer: 'manual' }, connIdGen, clock);
   await storage.saveConnection(conn);
 
   const acctIdGen = makeIdGen('acct-1');
-  const acct = Account.newWithGenerator(
-    acctIdGen,
-    clock,
-    'Checking',
-    Id.fromString('conn-1'),
-  );
+  const acct = Account.newWithGenerator(acctIdGen, clock, 'Checking', Id.fromString('conn-1'));
   await storage.saveAccount(acct);
 
   for (const snap of snapshots) {
     const balanceSnapshot = BalanceSnapshot.new(
       new Date(snap.timestamp),
-      snap.balances.map(b => AssetBalance.new(b.asset, b.amount)),
+      snap.balances.map((b) => AssetBalance.new(b.asset, b.amount)),
     );
     await storage.appendBalanceSnapshot(acct.id, balanceSnapshot);
   }
@@ -779,13 +685,7 @@ describe('portfolioHistory', () => {
     const config = makeConfig();
     const clock = makeClock('2024-06-15T12:00:00Z');
 
-    const result = await portfolioHistory(
-      storage,
-      store,
-      config,
-      {},
-      clock,
-    );
+    const result = await portfolioHistory(storage, store, config, {}, clock);
 
     expect(result).toEqual({
       currency: 'USD',
@@ -981,26 +881,16 @@ describe('portfolioHistory', () => {
     // Set up storage with an equity balance
     const storage = new MemoryStorage();
     const connIdGen = makeIdGen('conn-1');
-    const conn = Connection.new(
-      { name: 'Broker', synchronizer: 'manual' },
-      connIdGen,
-      clock,
-    );
+    const conn = Connection.new({ name: 'Broker', synchronizer: 'manual' }, connIdGen, clock);
     await storage.saveConnection(conn);
 
     const acctIdGen = makeIdGen('acct-1');
-    const acct = Account.newWithGenerator(
-      acctIdGen,
-      clock,
-      'Trading',
-      Id.fromString('conn-1'),
-    );
+    const acct = Account.newWithGenerator(acctIdGen, clock, 'Trading', Id.fromString('conn-1'));
     await storage.saveAccount(acct);
 
-    const snapshot = BalanceSnapshot.new(
-      new Date('2024-06-13T10:00:00Z'),
-      [AssetBalance.new(Asset.equity('AAPL'), '10')],
-    );
+    const snapshot = BalanceSnapshot.new(new Date('2024-06-13T10:00:00Z'), [
+      AssetBalance.new(Asset.equity('AAPL'), '10'),
+    ]);
     await storage.appendBalanceSnapshot(acct.id, snapshot);
 
     // Set up market data with a price for AAPL (creates price change points)
@@ -1020,17 +910,11 @@ describe('portfolioHistory', () => {
     ]);
 
     const config = makeConfig();
-    const result = await portfolioHistory(
-      storage,
-      mdStore,
-      config,
-      { includePrices: true },
-      clock,
-    );
+    const result = await portfolioHistory(storage, mdStore, config, { includePrices: true }, clock);
 
     // Find a point with a price trigger
-    const pricePoint = result.points.find(p =>
-      p.change_triggers?.some(t => t.startsWith('price:')),
+    const pricePoint = result.points.find((p) =>
+      p.change_triggers?.some((t) => t.startsWith('price:')),
     );
     expect(pricePoint).toBeDefined();
     expect(pricePoint!.change_triggers).toContain('price:equity/AAPL');
@@ -1138,13 +1022,7 @@ describe('portfolioHistory', () => {
     const config = makeConfig({ reporting_currency: 'USD' });
     const clock = makeClock('2024-06-15T12:00:00Z');
 
-    const result = await portfolioHistory(
-      storage,
-      store,
-      config,
-      { currency: 'GBP' },
-      clock,
-    );
+    const result = await portfolioHistory(storage, store, config, { currency: 'GBP' }, clock);
     expect(result.currency).toBe('GBP');
   });
 
@@ -1158,13 +1036,7 @@ describe('portfolioHistory', () => {
     const config = makeConfig();
     const clock = makeClock('2024-06-15T12:00:00Z');
 
-    const result = await portfolioHistory(
-      storage,
-      store,
-      config,
-      { granularity: 'daily' },
-      clock,
-    );
+    const result = await portfolioHistory(storage, store, config, { granularity: 'daily' }, clock);
     expect(result.granularity).toBe('daily');
   });
 
@@ -1283,26 +1155,16 @@ describe('portfolioHistory', () => {
 
     const storage = new MemoryStorage();
     const connIdGen = makeIdGen('conn-1');
-    const conn = Connection.new(
-      { name: 'Broker', synchronizer: 'manual' },
-      connIdGen,
-      clock,
-    );
+    const conn = Connection.new({ name: 'Broker', synchronizer: 'manual' }, connIdGen, clock);
     await storage.saveConnection(conn);
 
     const acctIdGen = makeIdGen('acct-1');
-    const acct = Account.newWithGenerator(
-      acctIdGen,
-      clock,
-      'Trading',
-      Id.fromString('conn-1'),
-    );
+    const acct = Account.newWithGenerator(acctIdGen, clock, 'Trading', Id.fromString('conn-1'));
     await storage.saveAccount(acct);
 
-    const snapshot = BalanceSnapshot.new(
-      new Date('2024-06-13T10:00:00Z'),
-      [AssetBalance.new(Asset.equity('AAPL'), '10')],
-    );
+    const snapshot = BalanceSnapshot.new(new Date('2024-06-13T10:00:00Z'), [
+      AssetBalance.new(Asset.equity('AAPL'), '10'),
+    ]);
     await storage.appendBalanceSnapshot(acct.id, snapshot);
 
     // Set up market data with a price
@@ -1325,13 +1187,7 @@ describe('portfolioHistory', () => {
 
     // Without explicitly setting includePrices, it should default to true
     // and include price change points
-    const result = await portfolioHistory(
-      storage,
-      mdStore,
-      config,
-      {},
-      clock,
-    );
+    const result = await portfolioHistory(storage, mdStore, config, {}, clock);
 
     // Should have at least 2 points: one for balance, one for price change
     expect(result.points.length).toBeGreaterThanOrEqual(2);
@@ -1447,13 +1303,7 @@ describe('portfolioChangePoints', () => {
     const config = makeConfig();
     const clock = makeClock('2024-06-15T12:00:00Z');
 
-    const result = await portfolioChangePoints(
-      storage,
-      store,
-      config,
-      {},
-      clock,
-    );
+    const result = await portfolioChangePoints(storage, store, config, {}, clock);
 
     expect(result).toEqual({
       start_date: null,

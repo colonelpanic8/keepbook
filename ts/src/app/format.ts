@@ -5,7 +5,7 @@
  * CLI's serde-serialized format, especially for timestamps and decimals.
  */
 
-import Decimal from 'decimal.js';
+import { Decimal } from 'decimal.js';
 import { type AssetType, Asset } from '../models/asset.js';
 import { type Granularity } from '../portfolio/change-points.js';
 
@@ -160,7 +160,12 @@ export function decStr(d: Decimal): string {
 // ---------------------------------------------------------------------------
 
 const VALID_GRANULARITIES = new Set<string>([
-  'full', 'hourly', 'daily', 'weekly', 'monthly', 'yearly',
+  'full',
+  'hourly',
+  'daily',
+  'weekly',
+  'monthly',
+  'yearly',
 ]);
 
 /**

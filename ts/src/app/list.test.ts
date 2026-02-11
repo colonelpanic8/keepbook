@@ -22,7 +22,7 @@ import {
 // ---------------------------------------------------------------------------
 
 function makeIdGen(...ids: string[]): FixedIdGenerator {
-  return new FixedIdGenerator(ids.map(s => Id.fromString(s)));
+  return new FixedIdGenerator(ids.map((s) => Id.fromString(s)));
 }
 
 function makeClock(iso: string): FixedClock {
@@ -44,11 +44,7 @@ describe('listConnections', () => {
     const storage = new MemoryStorage();
     const clock = makeClock('2024-06-01T12:00:00Z');
     const connIdGen = makeIdGen('conn-1');
-    const conn = Connection.new(
-      { name: 'My Bank', synchronizer: 'plaid' },
-      connIdGen,
-      clock,
-    );
+    const conn = Connection.new({ name: 'My Bank', synchronizer: 'plaid' }, connIdGen, clock);
     await storage.saveConnection(conn);
 
     // Create two accounts linked to this connection
@@ -76,11 +72,7 @@ describe('listConnections', () => {
     const storage = new MemoryStorage();
     const clock = makeClock('2024-06-01T12:00:00Z');
     const connIdGen = makeIdGen('conn-1');
-    const conn = Connection.new(
-      { name: 'Bank', synchronizer: 'plaid' },
-      connIdGen,
-      clock,
-    );
+    const conn = Connection.new({ name: 'Bank', synchronizer: 'plaid' }, connIdGen, clock);
 
     // Add an account_id in state that doesn't exist as a real account
     const connWithStateIds: ConnectionType = {
@@ -106,11 +98,7 @@ describe('listConnections', () => {
     const storage = new MemoryStorage();
     const clock = makeClock('2024-06-01T12:00:00Z');
     const connIdGen = makeIdGen('conn-1');
-    const conn = Connection.new(
-      { name: 'Bank', synchronizer: 'plaid' },
-      connIdGen,
-      clock,
-    );
+    const conn = Connection.new({ name: 'Bank', synchronizer: 'plaid' }, connIdGen, clock);
 
     const connWithSync: ConnectionType = {
       config: conn.config,
@@ -134,11 +122,7 @@ describe('listConnections', () => {
 
     // Connection with 'error' status
     const connIdGen = makeIdGen('conn-err');
-    const conn = Connection.new(
-      { name: 'Broken', synchronizer: 'plaid' },
-      connIdGen,
-      clock,
-    );
+    const conn = Connection.new({ name: 'Broken', synchronizer: 'plaid' }, connIdGen, clock);
     const connWithError: ConnectionType = {
       config: conn.config,
       state: {
@@ -156,11 +140,7 @@ describe('listConnections', () => {
     const storage = new MemoryStorage();
     const clock = makeClock('2024-06-01T12:00:00Z');
     const connIdGen = makeIdGen('conn-1');
-    const conn = Connection.new(
-      { name: 'Bank', synchronizer: 'plaid' },
-      connIdGen,
-      clock,
-    );
+    const conn = Connection.new({ name: 'Bank', synchronizer: 'plaid' }, connIdGen, clock);
     await storage.saveConnection(conn);
 
     const result = await listConnections(storage);
@@ -253,10 +233,9 @@ describe('listBalances', () => {
     await storage.saveAccount(acct);
 
     // Add a BTC balance
-    const snapshot = BalanceSnapshot.new(
-      new Date('2024-07-01T10:00:00Z'),
-      [AssetBalance.new(Asset.crypto('BTC'), '1.5')],
-    );
+    const snapshot = BalanceSnapshot.new(new Date('2024-07-01T10:00:00Z'), [
+      AssetBalance.new(Asset.crypto('BTC'), '1.5'),
+    ]);
     await storage.appendBalanceSnapshot(acct.id, snapshot);
 
     const result = await listBalances(storage, 'USD');
@@ -279,10 +258,9 @@ describe('listBalances', () => {
     const acct = Account.newWithGenerator(idGen, clock, 'Checking', Id.fromString('conn-1'));
     await storage.saveAccount(acct);
 
-    const snapshot = BalanceSnapshot.new(
-      new Date('2024-07-01T10:00:00Z'),
-      [AssetBalance.new(Asset.currency('USD'), '1000.50')],
-    );
+    const snapshot = BalanceSnapshot.new(new Date('2024-07-01T10:00:00Z'), [
+      AssetBalance.new(Asset.currency('USD'), '1000.50'),
+    ]);
     await storage.appendBalanceSnapshot(acct.id, snapshot);
 
     const result = await listBalances(storage, 'USD');
@@ -298,10 +276,9 @@ describe('listBalances', () => {
     const acct = Account.newWithGenerator(idGen, clock, 'Euro Account', Id.fromString('conn-1'));
     await storage.saveAccount(acct);
 
-    const snapshot = BalanceSnapshot.new(
-      new Date('2024-07-01T10:00:00Z'),
-      [AssetBalance.new(Asset.currency('EUR'), '500')],
-    );
+    const snapshot = BalanceSnapshot.new(new Date('2024-07-01T10:00:00Z'), [
+      AssetBalance.new(Asset.currency('EUR'), '500'),
+    ]);
     await storage.appendBalanceSnapshot(acct.id, snapshot);
 
     const result = await listBalances(storage, 'USD');
@@ -317,10 +294,9 @@ describe('listBalances', () => {
     const acct = Account.newWithGenerator(idGen, clock, 'Test', Id.fromString('conn-1'));
     await storage.saveAccount(acct);
 
-    const snapshot = BalanceSnapshot.new(
-      new Date('2024-07-01T10:30:00.123Z'),
-      [AssetBalance.new(Asset.currency('USD'), '100')],
-    );
+    const snapshot = BalanceSnapshot.new(new Date('2024-07-01T10:30:00.123Z'), [
+      AssetBalance.new(Asset.currency('USD'), '100'),
+    ]);
     await storage.appendBalanceSnapshot(acct.id, snapshot);
 
     const result = await listBalances(storage, 'USD');
@@ -335,13 +311,10 @@ describe('listBalances', () => {
     const acct = Account.newWithGenerator(idGen, clock, 'Multi', Id.fromString('conn-1'));
     await storage.saveAccount(acct);
 
-    const snapshot = BalanceSnapshot.new(
-      new Date('2024-07-01T10:00:00Z'),
-      [
-        AssetBalance.new(Asset.currency('USD'), '1000'),
-        AssetBalance.new(Asset.crypto('BTC'), '0.5'),
-      ],
-    );
+    const snapshot = BalanceSnapshot.new(new Date('2024-07-01T10:00:00Z'), [
+      AssetBalance.new(Asset.currency('USD'), '1000'),
+      AssetBalance.new(Asset.crypto('BTC'), '0.5'),
+    ]);
     await storage.appendBalanceSnapshot(acct.id, snapshot);
 
     const result = await listBalances(storage, 'USD');
@@ -410,11 +383,23 @@ describe('listTransactions', () => {
     await storage.saveAccount(acct2);
 
     const txIdGen1 = makeIdGen('tx-1');
-    const tx1 = Transaction.newWithGenerator(txIdGen1, clock, '100', Asset.currency('USD'), 'Deposit');
+    const tx1 = Transaction.newWithGenerator(
+      txIdGen1,
+      clock,
+      '100',
+      Asset.currency('USD'),
+      'Deposit',
+    );
     await storage.appendTransactions(acct1.id, [tx1]);
 
     const txIdGen2 = makeIdGen('tx-2');
-    const tx2 = Transaction.newWithGenerator(txIdGen2, clock, '0.01', Asset.crypto('BTC'), 'Mining');
+    const tx2 = Transaction.newWithGenerator(
+      txIdGen2,
+      clock,
+      '0.01',
+      Asset.crypto('BTC'),
+      'Mining',
+    );
     await storage.appendTransactions(acct2.id, [tx2]);
 
     const result = await listTransactions(storage);
@@ -478,11 +463,7 @@ describe('listAll', () => {
 
     // Connection
     const connIdGen = makeIdGen('conn-1');
-    const conn = Connection.new(
-      { name: 'Bank', synchronizer: 'plaid' },
-      connIdGen,
-      clock,
-    );
+    const conn = Connection.new({ name: 'Bank', synchronizer: 'plaid' }, connIdGen, clock);
     await storage.saveConnection(conn);
 
     // Account
@@ -491,10 +472,9 @@ describe('listAll', () => {
     await storage.saveAccount(acct);
 
     // Balance
-    const snapshot = BalanceSnapshot.new(
-      new Date('2024-07-01T10:00:00Z'),
-      [AssetBalance.new(Asset.currency('USD'), '500')],
-    );
+    const snapshot = BalanceSnapshot.new(new Date('2024-07-01T10:00:00Z'), [
+      AssetBalance.new(Asset.currency('USD'), '500'),
+    ]);
     await storage.appendBalanceSnapshot(acct.id, snapshot);
 
     const result = await listAll(storage, 'USD');
@@ -533,11 +513,7 @@ describe('JSON output format', () => {
     const storage = new MemoryStorage();
     const clock = makeClock('2024-06-01T12:00:00Z');
     const connIdGen = makeIdGen('conn-abc');
-    const conn = Connection.new(
-      { name: 'Test Bank', synchronizer: 'plaid' },
-      connIdGen,
-      clock,
-    );
+    const conn = Connection.new({ name: 'Test Bank', synchronizer: 'plaid' }, connIdGen, clock);
     const connWithSync: ConnectionType = {
       config: conn.config,
       state: {
@@ -554,14 +530,16 @@ describe('JSON output format', () => {
     const json = JSON.stringify(result);
 
     // Verify the JSON matches the expected Rust format exactly
-    const expected = JSON.stringify([{
-      id: 'conn-abc',
-      name: 'Test Bank',
-      synchronizer: 'plaid',
-      status: 'active',
-      account_count: 0,
-      last_sync: '2024-07-15T09:30:00+00:00',
-    }]);
+    const expected = JSON.stringify([
+      {
+        id: 'conn-abc',
+        name: 'Test Bank',
+        synchronizer: 'plaid',
+        status: 'active',
+        account_count: 0,
+        last_sync: '2024-07-15T09:30:00+00:00',
+      },
+    ]);
     expect(json).toBe(expected);
   });
 
@@ -573,23 +551,24 @@ describe('JSON output format', () => {
     const acct = Account.newWithGenerator(idGen, clock, 'Savings', Id.fromString('conn-1'));
     await storage.saveAccount(acct);
 
-    const snapshot = BalanceSnapshot.new(
-      new Date('2024-07-01T10:00:00Z'),
-      [AssetBalance.new(Asset.currency('USD'), '1234.56')],
-    );
+    const snapshot = BalanceSnapshot.new(new Date('2024-07-01T10:00:00Z'), [
+      AssetBalance.new(Asset.currency('USD'), '1234.56'),
+    ]);
     await storage.appendBalanceSnapshot(acct.id, snapshot);
 
     const result = await listBalances(storage, 'USD');
     const json = JSON.stringify(result);
 
-    const expected = JSON.stringify([{
-      account_id: 'acct-xyz',
-      asset: { type: 'currency', iso_code: 'USD' },
-      amount: '1234.56',
-      value_in_reporting_currency: '1234.56',
-      reporting_currency: 'USD',
-      timestamp: '2024-07-01T10:00:00+00:00',
-    }]);
+    const expected = JSON.stringify([
+      {
+        account_id: 'acct-xyz',
+        asset: { type: 'currency', iso_code: 'USD' },
+        amount: '1234.56',
+        value_in_reporting_currency: '1234.56',
+        reporting_currency: 'USD',
+        timestamp: '2024-07-01T10:00:00+00:00',
+      },
+    ]);
     expect(json).toBe(expected);
   });
 

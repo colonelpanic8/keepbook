@@ -20,10 +20,7 @@ import { findConnection } from '../storage/lookup.js';
  * - Other synchronizers return a "not implemented" error.
  * - Unknown connections return a "not found" error.
  */
-export async function syncConnection(
-  storage: Storage,
-  idOrName: string,
-): Promise<object> {
+export async function syncConnection(storage: Storage, idOrName: string): Promise<object> {
   const conn = await findConnection(storage, idOrName);
 
   if (conn === null) {
@@ -47,8 +44,7 @@ export async function syncConnection(
 
   return {
     success: false,
-    error:
-      `Synchronizer '${conn.config.synchronizer}' not implemented in TypeScript CLI`,
+    error: `Synchronizer '${conn.config.synchronizer}' not implemented in TypeScript CLI`,
     connection: {
       id: conn.state.id.asStr(),
       name: conn.config.name,
@@ -108,10 +104,7 @@ export async function syncSymlinks(): Promise<object> {
 /**
  * Stub: auth login is not yet implemented for any provider.
  */
-export async function authLogin(
-  provider: string,
-  _idOrName?: string,
-): Promise<object> {
+export async function authLogin(provider: string, _idOrName?: string): Promise<object> {
   return {
     success: false,
     error: `Auth login for '${provider}' not yet implemented in TypeScript CLI`,

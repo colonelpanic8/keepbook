@@ -11,12 +11,26 @@ import { syncConnection, syncAll, syncPrices, syncSymlinks, authLogin } from './
 // ---------------------------------------------------------------------------
 
 function makeIdGen(...ids: string[]): FixedIdGenerator {
-  return new FixedIdGenerator(ids.map(s => Id.fromString(s)));
+  return new FixedIdGenerator(ids.map((s) => Id.fromString(s)));
 }
 
 function makeClock(iso: string): FixedClock {
   return new FixedClock(new Date(iso));
 }
+
+type SyncConnectionResultShape = {
+  success: boolean;
+  skipped?: boolean;
+  connection?: {
+    id: string;
+    name?: string;
+  };
+};
+
+type SyncAllResultShape = {
+  total: number;
+  results: SyncConnectionResultShape[];
+};
 
 async function addManualConnection(
   storage: MemoryStorage,
@@ -101,10 +115,14 @@ describe('syncConnection', () => {
     const storage = new MemoryStorage();
     await addManualConnection(storage, 'My Bank', 'conn-1');
 
-    const result = await syncConnection(storage, 'My Bank') as any;
+    const result = (await syncConnection(storage, 'My Bank')) as SyncConnectionResultShape;
 
     expect(result.success).toBe(true);
     expect(result.skipped).toBe(true);
+    expect(result.connection).toBeDefined();
+    if (result.connection === undefined) {
+      throw new Error('Expected connection in sync result');
+    }
     expect(result.connection.id).toBe('conn-1');
   });
 });
@@ -127,18 +145,14 @@ describe('syncAll', () => {
     await addManualConnection(storage, 'My Bank', 'conn-1');
     await addNonManualConnection(storage, 'Coinbase', 'conn-2', 'coinbase');
 
-    const result = await syncAll(storage) as any;
+    const result = (await syncAll(storage)) as SyncAllResultShape;
 
     expect(result.total).toBe(2);
     expect(result.results).toHaveLength(2);
 
     // Find results by connection id (order may vary)
-    const manualResult = result.results.find(
-      (r: any) => r.connection?.id === 'conn-1',
-    );
-    const coinbaseResult = result.results.find(
-      (r: any) => r.connection?.id === 'conn-2',
-    );
+    const manualResult = result.results.find((r) => r.connection?.id === 'conn-1');
+    const coinbaseResult = result.results.find((r) => r.connection?.id === 'conn-2');
 
     expect(manualResult).toEqual({
       success: true,

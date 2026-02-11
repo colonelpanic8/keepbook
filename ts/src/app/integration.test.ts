@@ -24,7 +24,7 @@ import type { ResolvedConfig } from '../config.js';
 // ---------------------------------------------------------------------------
 
 function makeIdGen(...ids: string[]): FixedIdGenerator {
-  return new FixedIdGenerator(ids.map(s => Id.fromString(s)));
+  return new FixedIdGenerator(ids.map((s) => Id.fromString(s)));
 }
 
 function makeClock(iso: string): FixedClock {
@@ -44,6 +44,37 @@ function makeConfig(overrides?: Partial<ResolvedConfig>): ResolvedConfig {
   };
 }
 
+type SetBalanceResultShape = {
+  success: boolean;
+  balance: {
+    amount: string;
+    asset: Record<string, unknown>;
+    timestamp: string;
+  };
+};
+
+type SnapshotAssetRow = {
+  asset: {
+    type: string;
+    iso_code?: string;
+  };
+  total_amount: string;
+  value_in_base?: string;
+};
+
+type SnapshotAccountRow = {
+  account_name: string;
+  connection_name: string;
+  value_in_base?: string;
+};
+
+type SnapshotResultShape = {
+  total_value: string;
+  currency?: string;
+  by_asset?: SnapshotAssetRow[];
+  by_account?: SnapshotAccountRow[];
+};
+
 // ===========================================================================
 // 1. Full workflow test
 // ===========================================================================
@@ -56,12 +87,7 @@ describe('Integration: full workflow', () => {
     const clock = makeClock('2024-06-15T12:00:00Z');
 
     // --- Step 1: Add a connection ---
-    const connResult = await addConnection(
-      storage,
-      'My Bank',
-      makeIdGen('conn-1'),
-      clock,
-    );
+    const connResult = await addConnection(storage, 'My Bank', makeIdGen('conn-1'), clock);
     expect(connResult).toEqual({
       success: true,
       connection: {
@@ -91,16 +117,11 @@ describe('Integration: full workflow', () => {
 
     // --- Step 3: Set balance ---
     const balanceClock = makeClock('2024-06-15T10:00:00Z');
-    const balResult = await setBalance(
-      storage,
-      'Checking',
-      'USD',
-      '1500.50',
-      balanceClock,
-    );
-    expect((balResult as any).success).toBe(true);
-    expect((balResult as any).balance.amount).toBe('1500.5');
-    expect((balResult as any).balance.asset).toEqual({ type: 'currency', iso_code: 'USD' });
+    const balResult = await setBalance(storage, 'Checking', 'USD', '1500.50', balanceClock);
+    const balanceResult = balResult as SetBalanceResultShape;
+    expect(balanceResult.success).toBe(true);
+    expect(balanceResult.balance.amount).toBe('1500.5');
+    expect(balanceResult.balance.asset).toEqual({ type: 'currency', iso_code: 'USD' });
 
     // --- Step 4: List connections ---
     const connections = await listConnections(storage);
@@ -135,13 +156,10 @@ describe('Integration: full workflow', () => {
     expect(all.price_sources).toEqual([]);
 
     // --- Step 8: Portfolio snapshot ---
-    const snap = (await portfolioSnapshot(
-      storage,
-      marketDataStore,
-      config,
-      {},
-      clock,
-    )) as Record<string, unknown>;
+    const snap = (await portfolioSnapshot(storage, marketDataStore, config, {}, clock)) as Record<
+      string,
+      unknown
+    >;
     expect(snap.total_value).toBe('1500.5');
     expect(snap.currency).toBe('USD');
     expect(snap.as_of_date).toBe('2024-06-15');
@@ -301,7 +319,13 @@ describe('Integration: JSON compatibility checks', () => {
     const clock = makeClock('2024-01-15T10:00:00Z');
     await addConnection(storage, 'Bank', makeIdGen('conn-1'), clock);
     await addAccount(storage, 'conn-1', 'Checking', [], makeIdGen('acct-1'), clock);
-    const result = await setBalance(storage, 'acct-1', 'USD', '100', clock) as any;
+    const result = (await setBalance(
+      storage,
+      'acct-1',
+      'USD',
+      '100',
+      clock,
+    )) as SetBalanceResultShape;
     expect(result.balance.timestamp).toBe('2024-01-15T10:00:00+00:00');
   });
 
@@ -345,7 +369,13 @@ describe('Integration: JSON compatibility checks', () => {
     await addConnection(storage, 'Bank', makeIdGen('conn-1'), clock);
     await addAccount(storage, 'conn-1', 'Checking', [], makeIdGen('acct-1'), clock);
 
-    const result = await setBalance(storage, 'acct-1', 'USD', '100.50', clock) as any;
+    const result = (await setBalance(
+      storage,
+      'acct-1',
+      'USD',
+      '100.50',
+      clock,
+    )) as SetBalanceResultShape;
     expect(result.balance.amount).toBe('100.5');
   });
 
@@ -355,7 +385,13 @@ describe('Integration: JSON compatibility checks', () => {
     await addConnection(storage, 'Bank', makeIdGen('conn-1'), clock);
     await addAccount(storage, 'conn-1', 'Checking', [], makeIdGen('acct-1'), clock);
 
-    const result = await setBalance(storage, 'acct-1', 'USD', '0.00', clock) as any;
+    const result = (await setBalance(
+      storage,
+      'acct-1',
+      'USD',
+      '0.00',
+      clock,
+    )) as SetBalanceResultShape;
     expect(result.balance.amount).toBe('0');
   });
 
@@ -369,7 +405,13 @@ describe('Integration: JSON compatibility checks', () => {
     await addAccount(storage, 'conn-1', 'Checking', [], makeIdGen('acct-1'), clock);
     await setBalance(storage, 'acct-1', 'USD', '100.50', makeClock('2024-06-14T10:00:00Z'));
 
-    const snap = (await portfolioSnapshot(storage, marketDataStore, config, {}, clock)) as any;
+    const snap = (await portfolioSnapshot(
+      storage,
+      marketDataStore,
+      config,
+      {},
+      clock,
+    )) as SnapshotResultShape;
     expect(snap.total_value).toBe('100.5');
   });
 
@@ -585,29 +627,27 @@ describe('Integration: multi-asset portfolio', () => {
       config,
       {},
       clock,
-    )) as Record<string, unknown>;
+    )) as SnapshotResultShape;
 
     // Total value should be 1000 (USD only, since EUR has no FX rate)
     expect(snap.total_value).toBe('1000');
     expect(snap.currency).toBe('USD');
 
-    const byAsset = snap.by_asset as Record<string, unknown>[];
+    const byAsset = snap.by_asset ?? [];
     expect(byAsset).toHaveLength(2);
 
     // Find USD and EUR entries
-    const usdEntry = byAsset.find(
-      (a: any) => a.asset.type === 'currency' && a.asset.iso_code === 'USD',
-    );
-    const eurEntry = byAsset.find(
-      (a: any) => a.asset.type === 'currency' && a.asset.iso_code === 'EUR',
-    );
+    const usdEntry = byAsset.find((a) => a.asset.type === 'currency' && a.asset.iso_code === 'USD');
+    const eurEntry = byAsset.find((a) => a.asset.type === 'currency' && a.asset.iso_code === 'EUR');
 
     expect(usdEntry).toBeDefined();
-    expect((usdEntry as any).total_amount).toBe('1000');
-    expect((usdEntry as any).value_in_base).toBe('1000');
-
     expect(eurEntry).toBeDefined();
-    expect((eurEntry as any).total_amount).toBe('500');
+    if (usdEntry === undefined || eurEntry === undefined) {
+      throw new Error('Expected both USD and EUR rows');
+    }
+    expect(usdEntry.total_amount).toBe('1000');
+    expect(usdEntry.value_in_base).toBe('1000');
+    expect(eurEntry.total_amount).toBe('500');
 
     // EUR has no FX rate, so value_in_base should be absent (undefined -> omitted from JSON)
     const eurJson = JSON.stringify(eurEntry);
@@ -615,15 +655,18 @@ describe('Integration: multi-asset portfolio', () => {
     expect('value_in_base' in eurParsed).toBe(false);
 
     // Verify by_account shows correct account names
-    const byAccount = snap.by_account as Record<string, unknown>[];
+    const byAccount = snap.by_account ?? [];
     expect(byAccount).toHaveLength(2);
 
-    const acctNames = byAccount.map((a: any) => a.account_name).sort();
+    const acctNames = byAccount.map((a) => a.account_name).sort();
     expect(acctNames).toEqual(['Checking EUR', 'Checking USD']);
 
     // USD account has value_in_base, EUR account does not
-    const usdAcct = byAccount.find((a: any) => a.account_name === 'Checking USD') as any;
-    const eurAcct = byAccount.find((a: any) => a.account_name === 'Checking EUR') as any;
+    const usdAcct = byAccount.find((a) => a.account_name === 'Checking USD');
+    const eurAcct = byAccount.find((a) => a.account_name === 'Checking EUR');
+    if (usdAcct === undefined || eurAcct === undefined) {
+      throw new Error('Expected both USD and EUR account rows');
+    }
 
     expect(usdAcct.value_in_base).toBe('1000');
     expect(usdAcct.connection_name).toBe('US Bank');
@@ -945,14 +988,14 @@ describe('Integration: full JSON round-trip verification', () => {
     // Verify list commands reflect all mutations
     const connections = await listConnections(storage);
     expect(connections).toHaveLength(2);
-    expect(connections.every(c => c.account_count === 1)).toBe(true);
+    expect(connections.every((c) => c.account_count === 1)).toBe(true);
 
     const accounts = await listAccounts(storage);
     expect(accounts).toHaveLength(2);
 
     const balances = await listBalances(storage, 'USD');
     expect(balances).toHaveLength(2);
-    const amounts = balances.map(b => b.amount).sort();
+    const amounts = balances.map((b) => b.amount).sort();
     expect(amounts).toEqual(['1000', '2000']);
 
     // Portfolio total should be sum
@@ -964,7 +1007,7 @@ describe('Integration: full JSON round-trip verification', () => {
       config,
       {},
       clock,
-    )) as any;
+    )) as SnapshotResultShape;
     expect(snap.total_value).toBe('3000');
   });
 
@@ -982,7 +1025,7 @@ describe('Integration: full JSON round-trip verification', () => {
 
     // Remove
     const result = await removeConnection(storage, 'conn-1');
-    expect((result as any).success).toBe(true);
+    expect((result as { success: boolean }).success).toBe(true);
 
     // After removal
     expect(await listConnections(storage)).toHaveLength(0);

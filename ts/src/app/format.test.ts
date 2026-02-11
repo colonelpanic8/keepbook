@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import Decimal from 'decimal.js';
+import { Decimal } from 'decimal.js';
 import {
   formatRfc3339,
   formatChronoSerde,
@@ -137,7 +137,10 @@ describe('parseAsset', () => {
 
   it('treats unknown prefix as currency', () => {
     // e.g. "unknown:something" has unknown prefix, so the whole thing is treated as currency
-    expect(parseAsset('unknown:something')).toEqual({ type: 'currency', iso_code: 'unknown:something' });
+    expect(parseAsset('unknown:something')).toEqual({
+      type: 'currency',
+      iso_code: 'unknown:something',
+    });
   });
 
   it('trims whitespace from input', () => {

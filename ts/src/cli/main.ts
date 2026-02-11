@@ -3,8 +3,15 @@ import { Command } from 'commander';
 import path from 'node:path';
 
 // App layer
-import { defaultConfigPath, loadConfig, configOutput } from '../app/config.js';
-import { listConnections, listAccounts, listBalances, listTransactions, listPriceSources, listAll } from '../app/list.js';
+import { loadConfig, configOutput } from '../app/config.js';
+import {
+  listConnections,
+  listAccounts,
+  listBalances,
+  listTransactions,
+  listPriceSources,
+  listAll,
+} from '../app/list.js';
 import { addConnection, addAccount, removeConnection, setBalance } from '../app/mutations.js';
 import { portfolioSnapshot, portfolioHistory, portfolioChangePoints } from '../app/portfolio.js';
 import { syncConnection, syncAll, syncPrices, syncSymlinks, authLogin } from '../app/sync.js';
@@ -80,7 +87,12 @@ add
   .command('account <name>')
   .description('Add a new account')
   .requiredOption('--connection <id>', 'connection ID or name')
-  .option('--tag <tag>', 'tag (repeatable)', (val: string, arr: string[]) => [...arr, val], [] as string[])
+  .option(
+    '--tag <tag>',
+    'tag (repeatable)',
+    (val: string, arr: string[]) => [...arr, val],
+    [] as string[],
+  )
   .action(async (name: string, opts: { connection: string; tag: string[] }) => {
     await run(async () => {
       const cfg = await loadConfig(program.opts().config);
@@ -325,24 +337,23 @@ portfolio
   .option('--offline', 'offline mode')
   .option('--dry-run', 'dry run')
   .option('--force-refresh', 'force refresh prices')
-  .action(async (opts: {
-    currency?: string;
-    date?: string;
-    groupBy?: string;
-    detail?: boolean;
-  }) => {
-    await run(async () => {
-      const cfg = await loadConfig(program.opts().config);
-      const storage = new JsonFileStorage(cfg.config.data_dir);
-      const marketDataStore = new JsonlMarketDataStore(path.join(cfg.config.data_dir, 'market-data'));
-      return portfolioSnapshot(storage, marketDataStore, cfg.config, {
-        currency: opts.currency,
-        date: opts.date,
-        groupBy: opts.groupBy,
-        detail: opts.detail,
+  .action(
+    async (opts: { currency?: string; date?: string; groupBy?: string; detail?: boolean }) => {
+      await run(async () => {
+        const cfg = await loadConfig(program.opts().config);
+        const storage = new JsonFileStorage(cfg.config.data_dir);
+        const marketDataStore = new JsonlMarketDataStore(
+          path.join(cfg.config.data_dir, 'market-data'),
+        );
+        return portfolioSnapshot(storage, marketDataStore, cfg.config, {
+          currency: opts.currency,
+          date: opts.date,
+          groupBy: opts.groupBy,
+          detail: opts.detail,
+        });
       });
-    });
-  });
+    },
+  );
 
 portfolio
   .command('history')
@@ -353,26 +364,30 @@ portfolio
   .option('--granularity <granularity>', 'granularity: none, daily, weekly, monthly')
   .option('--include-prices', 'include price change points', true)
   .option('--no-include-prices', 'exclude price change points')
-  .action(async (opts: {
-    currency?: string;
-    start?: string;
-    end?: string;
-    granularity?: string;
-    includePrices?: boolean;
-  }) => {
-    await run(async () => {
-      const cfg = await loadConfig(program.opts().config);
-      const storage = new JsonFileStorage(cfg.config.data_dir);
-      const marketDataStore = new JsonlMarketDataStore(path.join(cfg.config.data_dir, 'market-data'));
-      return portfolioHistory(storage, marketDataStore, cfg.config, {
-        currency: opts.currency,
-        start: opts.start,
-        end: opts.end,
-        granularity: opts.granularity,
-        includePrices: opts.includePrices,
+  .action(
+    async (opts: {
+      currency?: string;
+      start?: string;
+      end?: string;
+      granularity?: string;
+      includePrices?: boolean;
+    }) => {
+      await run(async () => {
+        const cfg = await loadConfig(program.opts().config);
+        const storage = new JsonFileStorage(cfg.config.data_dir);
+        const marketDataStore = new JsonlMarketDataStore(
+          path.join(cfg.config.data_dir, 'market-data'),
+        );
+        return portfolioHistory(storage, marketDataStore, cfg.config, {
+          currency: opts.currency,
+          start: opts.start,
+          end: opts.end,
+          granularity: opts.granularity,
+          includePrices: opts.includePrices,
+        });
       });
-    });
-  });
+    },
+  );
 
 portfolio
   .command('change-points')
@@ -382,24 +397,28 @@ portfolio
   .option('--granularity <granularity>', 'granularity: none, daily, weekly, monthly')
   .option('--include-prices', 'include price change points', true)
   .option('--no-include-prices', 'exclude price change points')
-  .action(async (opts: {
-    start?: string;
-    end?: string;
-    granularity?: string;
-    includePrices?: boolean;
-  }) => {
-    await run(async () => {
-      const cfg = await loadConfig(program.opts().config);
-      const storage = new JsonFileStorage(cfg.config.data_dir);
-      const marketDataStore = new JsonlMarketDataStore(path.join(cfg.config.data_dir, 'market-data'));
-      return portfolioChangePoints(storage, marketDataStore, cfg.config, {
-        start: opts.start,
-        end: opts.end,
-        granularity: opts.granularity,
-        includePrices: opts.includePrices,
+  .action(
+    async (opts: {
+      start?: string;
+      end?: string;
+      granularity?: string;
+      includePrices?: boolean;
+    }) => {
+      await run(async () => {
+        const cfg = await loadConfig(program.opts().config);
+        const storage = new JsonFileStorage(cfg.config.data_dir);
+        const marketDataStore = new JsonlMarketDataStore(
+          path.join(cfg.config.data_dir, 'market-data'),
+        );
+        return portfolioChangePoints(storage, marketDataStore, cfg.config, {
+          start: opts.start,
+          end: opts.end,
+          granularity: opts.granularity,
+          includePrices: opts.includePrices,
+        });
       });
-    });
-  });
+    },
+  );
 
 // ---------------------------------------------------------------------------
 // Parse and execute
