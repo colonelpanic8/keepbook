@@ -293,7 +293,7 @@ export async function portfolioHistory(
       percentageChange = 'N/A';
     } else {
       const pct = finalValue.minus(initialValue).div(initialValue).times(100);
-      percentageChange = pct.toDecimalPlaces(2).toFixed(2);
+      percentageChange = decStr(pct.toDecimalPlaces(2));
     }
 
     summary = {
