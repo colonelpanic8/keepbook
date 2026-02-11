@@ -27,6 +27,9 @@
           buildInputs = [
             toolchain
             pkgs.pkg-config
+            pkgs.just
+            pkgs.nodejs_22
+            pkgs.yarn
           ];
         };
       }

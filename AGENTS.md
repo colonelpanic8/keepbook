@@ -34,8 +34,13 @@ See `ts/src/app/types.ts` for the complete mapping.
 1. Implement in one language first
 2. Write/update tests that verify exact JSON output
 3. Port to the other language
-4. Run both test suites: `cargo test` (Rust) and `cd ts && npx vitest run` (TS)
+4. Run both test suites: `cargo test` (Rust) and `cd ts && yarn test` (TS)
 5. Diff JSON output of both CLIs against the same data directory to verify compatibility
+
+## TypeScript Package Manager
+
+- Prefer `yarn` for TypeScript workflows in `ts/` (install, build, test, and CLI execution).
+- Use `npm`/`npx` only when explicitly required.
 
 ## Project Structure
 
@@ -97,7 +102,7 @@ auto_commit = false
 ## Testing
 
 - Rust: `cargo test`
-- TypeScript: `cd ts && npx vitest run`
+- TypeScript: `cd ts && yarn test`
 
 Both must pass before any push.
 
