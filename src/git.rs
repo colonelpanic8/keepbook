@@ -11,7 +11,11 @@ pub enum AutoCommitOutcome {
     Committed,
 }
 
-pub fn try_auto_commit(data_dir: &Path, action: &str) -> Result<AutoCommitOutcome> {
+pub fn try_auto_commit(
+    data_dir: &Path,
+    action: &str,
+    auto_push: bool,
+) -> Result<AutoCommitOutcome> {
     let repo_root = git_repo_root(data_dir)?;
     let Some(repo_root) = repo_root else {
         return Ok(AutoCommitOutcome::SkippedNotRepo {
@@ -62,6 +66,14 @@ pub fn try_auto_commit(data_dir: &Path, action: &str) -> Result<AutoCommitOutcom
     if !commit.status.success() {
         let stderr = String::from_utf8_lossy(&commit.stderr);
         anyhow::bail!("git commit failed: {stderr}");
+    }
+
+    if auto_push {
+        let push = git_output(&data_dir, &["push"])?;
+        if !push.status.success() {
+            let stderr = String::from_utf8_lossy(&push.stderr);
+            anyhow::bail!("git push failed: {stderr}");
+        }
     }
 
     Ok(AutoCommitOutcome::Committed)
@@ -139,7 +151,7 @@ mod tests {
         }
 
         let dir = TempDir::new()?;
-        let outcome = try_auto_commit(dir.path(), "test")?;
+        let outcome = try_auto_commit(dir.path(), "test", false)?;
         assert_eq!(
             outcome,
             AutoCommitOutcome::SkippedNotRepo {
@@ -160,7 +172,7 @@ mod tests {
         let data_dir = dir.path().join("data");
         fs::create_dir_all(&data_dir)?;
 
-        let outcome = try_auto_commit(&data_dir, "test")?;
+        let outcome = try_auto_commit(&data_dir, "test", false)?;
         match outcome {
             AutoCommitOutcome::SkippedNotRepo { .. } => Ok(()),
             other => anyhow::bail!("unexpected outcome: {other:?}"),
@@ -178,7 +190,7 @@ mod tests {
 
         fs::write(dir.path().join("sample.txt"), "hello")?;
 
-        let outcome = try_auto_commit(dir.path(), "sync mock")?;
+        let outcome = try_auto_commit(dir.path(), "sync mock", false)?;
         assert_eq!(outcome, AutoCommitOutcome::Committed);
 
         let log = run_git(dir.path(), &["log", "-1", "--pretty=%s"])?;
@@ -211,8 +223,68 @@ mod tests {
             anyhow::bail!("git commit failed");
         }
 
-        let outcome = try_auto_commit(dir.path(), "sync mock")?;
+        let outcome = try_auto_commit(dir.path(), "sync mock", false)?;
         assert_eq!(outcome, AutoCommitOutcome::SkippedNoChanges);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_auto_commit_pushes_when_enabled() -> Result<()> {
+        if !git_available() {
+            return Ok(());
+        }
+
+        let remote = TempDir::new()?;
+        let remote_init = run_git(remote.path(), &["init", "--bare"])?;
+        if !remote_init.status.success() {
+            anyhow::bail!("git init --bare failed");
+        }
+
+        let dir = TempDir::new()?;
+        init_repo(dir.path())?;
+
+        let remote_path = remote.path().to_string_lossy().to_string();
+        let add_remote = run_git(dir.path(), &["remote", "add", "origin", &remote_path])?;
+        if !add_remote.status.success() {
+            anyhow::bail!("git remote add failed");
+        }
+
+        fs::write(dir.path().join("initial.txt"), "initial")?;
+        let add = run_git(dir.path(), &["add", "-A"])?;
+        if !add.status.success() {
+            anyhow::bail!("git add failed");
+        }
+        let commit = run_git(dir.path(), &["commit", "-m", "initial"])?;
+        if !commit.status.success() {
+            anyhow::bail!("git commit failed");
+        }
+
+        let branch_output = run_git(dir.path(), &["rev-parse", "--abbrev-ref", "HEAD"])?;
+        if !branch_output.status.success() {
+            anyhow::bail!("git rev-parse failed");
+        }
+        let branch = String::from_utf8_lossy(&branch_output.stdout)
+            .trim()
+            .to_string();
+        let push_initial = run_git(dir.path(), &["push", "-u", "origin", &branch])?;
+        if !push_initial.status.success() {
+            anyhow::bail!("git push -u failed");
+        }
+
+        fs::write(dir.path().join("sample.txt"), "hello")?;
+
+        let outcome = try_auto_commit(dir.path(), "sync mock", true)?;
+        assert_eq!(outcome, AutoCommitOutcome::Committed);
+
+        let remote_log = run_git(remote.path(), &["log", "-1", "--pretty=%s"])?;
+        if !remote_log.status.success() {
+            anyhow::bail!("git log failed on remote");
+        }
+        let remote_subject = String::from_utf8_lossy(&remote_log.stdout)
+            .trim()
+            .to_string();
+        assert_eq!(remote_subject, "keepbook: sync mock");
 
         Ok(())
     }

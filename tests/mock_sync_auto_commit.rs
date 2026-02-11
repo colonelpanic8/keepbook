@@ -22,7 +22,7 @@ async fn test_mock_sync_auto_commit() -> Result<()> {
     let result = synchronizer.sync(&mut connection, &storage).await?;
     result.save(&storage).await?;
 
-    let outcome = try_auto_commit(dir.path(), "sync mock")?;
+    let outcome = try_auto_commit(dir.path(), "sync mock", false)?;
     assert_eq!(outcome, AutoCommitOutcome::Committed);
 
     let log = run_git(dir.path(), &["log", "-1", "--pretty=%s"])?;

@@ -31,6 +31,10 @@ pub use types::{
 };
 
 fn maybe_auto_commit(config: &ResolvedConfig, action: &str) {
-    let committer = GitAutoCommitter::new(config.data_dir.clone(), config.git.auto_commit);
+    let committer = GitAutoCommitter::new(
+        config.data_dir.clone(),
+        config.git.auto_commit,
+        config.git.auto_push,
+    );
     committer.maybe_commit(action);
 }

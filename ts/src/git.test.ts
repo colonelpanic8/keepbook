@@ -19,6 +19,11 @@ async function getLastCommitMessage(dir: string): Promise<string> {
   return stdout.trim();
 }
 
+async function getCurrentBranch(dir: string): Promise<string> {
+  const { stdout } = await execFileAsync('git', ['-C', dir, 'rev-parse', '--abbrev-ref', 'HEAD']);
+  return stdout.trim();
+}
+
 describe('tryAutoCommit', () => {
   const tmpDirs: string[] = [];
 
@@ -135,5 +140,29 @@ describe('tryAutoCommit', () => {
 
     const message = await getLastCommitMessage(dir);
     expect(message).toBe('keepbook: update data');
+  });
+
+  it('pushes to remote when autoPush is enabled', async () => {
+    const dir = await makeTmpDir();
+    const remote = await makeTmpDir();
+    await execFileAsync('git', ['-C', remote, 'init', '--bare']);
+
+    await initRepo(dir);
+    await execFileAsync('git', ['-C', dir, 'remote', 'add', 'origin', remote]);
+
+    // Create initial commit and establish upstream tracking branch.
+    await fs.writeFile(path.join(dir, 'initial.txt'), 'initial');
+    await execFileAsync('git', ['-C', dir, 'add', '-A']);
+    await execFileAsync('git', ['-C', dir, 'commit', '-m', 'initial']);
+    const branch = await getCurrentBranch(dir);
+    await execFileAsync('git', ['-C', dir, 'push', '-u', 'origin', branch]);
+
+    await fs.writeFile(path.join(dir, 'data.txt'), 'data');
+
+    const result = await tryAutoCommit(dir, 'sync mock', true);
+    expect(result).toEqual({ type: 'committed' });
+
+    const { stdout } = await execFileAsync('git', ['-C', remote, 'log', '-1', '--format=%s']);
+    expect(stdout.trim()).toBe('keepbook: sync mock');
   });
 });

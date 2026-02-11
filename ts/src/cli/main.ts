@@ -76,7 +76,11 @@ add
       const storage = new JsonFileStorage(cfg.config.data_dir);
       const result = await addConnection(storage, name);
       if (cfg.config.git.auto_commit) {
-        await tryAutoCommit(cfg.config.data_dir, `add connection '${name}'`);
+        await tryAutoCommit(
+          cfg.config.data_dir,
+          `add connection '${name}'`,
+          cfg.config.git.auto_push,
+        );
       }
       return result;
     });
@@ -98,7 +102,7 @@ add
       const storage = new JsonFileStorage(cfg.config.data_dir);
       const result = await addAccount(storage, opts.connection, name, opts.tag);
       if (cfg.config.git.auto_commit) {
-        await tryAutoCommit(cfg.config.data_dir, `add account '${name}'`);
+        await tryAutoCommit(cfg.config.data_dir, `add account '${name}'`, cfg.config.git.auto_push);
       }
       return result;
     });
@@ -119,7 +123,11 @@ remove
       const storage = new JsonFileStorage(cfg.config.data_dir);
       const result = await removeConnection(storage, id);
       if (cfg.config.git.auto_commit) {
-        await tryAutoCommit(cfg.config.data_dir, `remove connection '${id}'`);
+        await tryAutoCommit(
+          cfg.config.data_dir,
+          `remove connection '${id}'`,
+          cfg.config.git.auto_push,
+        );
       }
       return result;
     });
@@ -143,7 +151,11 @@ set
       const storage = new JsonFileStorage(cfg.config.data_dir);
       const result = await setBalance(storage, opts.account, opts.asset, opts.amount);
       if (cfg.config.git.auto_commit) {
-        await tryAutoCommit(cfg.config.data_dir, `set balance for '${opts.account}'`);
+        await tryAutoCommit(
+          cfg.config.data_dir,
+          `set balance for '${opts.account}'`,
+          cfg.config.git.auto_push,
+        );
       }
       return result;
     });

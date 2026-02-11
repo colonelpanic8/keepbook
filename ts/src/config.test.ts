@@ -26,6 +26,10 @@ describe('default constants', () => {
     it('has auto_commit false', () => {
       expect(DEFAULT_GIT_CONFIG.auto_commit).toBe(false);
     });
+
+    it('has auto_push false', () => {
+      expect(DEFAULT_GIT_CONFIG.auto_push).toBe(false);
+    });
   });
 
   describe('DEFAULT_CONFIG', () => {
@@ -55,6 +59,7 @@ describe('parseConfig', () => {
     expect(config.refresh.balance_staleness).toBe(14 * MS_PER_DAY);
     expect(config.refresh.price_staleness).toBe(24 * MS_PER_HOUR);
     expect(config.git.auto_commit).toBe(false);
+    expect(config.git.auto_push).toBe(false);
   });
 
   it('parses data_dir only', () => {
@@ -95,9 +100,21 @@ balance_staleness = "7d"
     const toml = `
 [git]
 auto_commit = true
+auto_push = true
 `;
     const config = parseConfig(toml);
     expect(config.git.auto_commit).toBe(true);
+    expect(config.git.auto_push).toBe(true);
+  });
+
+  it('defaults auto_push to false when omitted', () => {
+    const toml = `
+[git]
+auto_commit = true
+`;
+    const config = parseConfig(toml);
+    expect(config.git.auto_commit).toBe(true);
+    expect(config.git.auto_push).toBe(false);
   });
 
   it('parses full config', () => {
@@ -111,6 +128,7 @@ price_staleness = "1h"
 
 [git]
 auto_commit = true
+auto_push = true
 `;
     const config = parseConfig(toml);
     expect(config.data_dir).toBe('./my-data');
@@ -118,6 +136,7 @@ auto_commit = true
     expect(config.refresh.balance_staleness).toBe(7 * MS_PER_DAY);
     expect(config.refresh.price_staleness).toBe(1 * MS_PER_HOUR);
     expect(config.git.auto_commit).toBe(true);
+    expect(config.git.auto_push).toBe(true);
   });
 });
 

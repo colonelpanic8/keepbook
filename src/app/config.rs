@@ -7,7 +7,8 @@ pub fn config_output(config_path: &Path, config: &ResolvedConfig) -> serde_json:
         "config_file": config_path.display().to_string(),
         "data_directory": config.data_dir.display().to_string(),
         "git": {
-            "auto_commit": config.git.auto_commit
+            "auto_commit": config.git.auto_commit,
+            "auto_push": config.git.auto_push
         }
     })
 }

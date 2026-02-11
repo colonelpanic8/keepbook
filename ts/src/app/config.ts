@@ -111,6 +111,7 @@ export function configOutput(configPath: string, config: ResolvedConfig): object
     data_directory: config.data_dir,
     git: {
       auto_commit: config.git.auto_commit,
+      auto_push: config.git.auto_push,
     },
   };
 }

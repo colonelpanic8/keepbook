@@ -24,6 +24,8 @@ export interface RefreshConfig {
 export interface GitConfig {
   /** Whether to auto-commit data changes. */
   auto_commit: boolean;
+  /** Whether to auto-push after successful auto-commits. */
+  auto_push: boolean;
 }
 
 export interface Config {
@@ -62,6 +64,7 @@ export const DEFAULT_REFRESH_CONFIG: RefreshConfig = {
 
 export const DEFAULT_GIT_CONFIG: GitConfig = {
   auto_commit: false,
+  auto_push: false,
 };
 
 export const DEFAULT_CONFIG: Config = {
@@ -104,6 +107,8 @@ export function parseConfig(tomlStr: string): Config {
   const git: GitConfig = {
     auto_commit:
       typeof gitRaw.auto_commit === 'boolean' ? gitRaw.auto_commit : DEFAULT_GIT_CONFIG.auto_commit,
+    auto_push:
+      typeof gitRaw.auto_push === 'boolean' ? gitRaw.auto_push : DEFAULT_GIT_CONFIG.auto_push,
   };
 
   const config: Config = {

@@ -39,7 +39,7 @@ function makeConfig(overrides?: Partial<ResolvedConfig>): ResolvedConfig {
       balance_staleness: 14 * 86400000,
       price_staleness: 86400000,
     },
-    git: { auto_commit: false },
+    git: { auto_commit: false, auto_push: false },
     ...overrides,
   };
 }
@@ -282,6 +282,7 @@ describe('Integration: JSON snapshot tests', () => {
       data_directory: '/tmp/test',
       git: {
         auto_commit: false,
+        auto_push: false,
       },
     });
   });

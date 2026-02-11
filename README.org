@@ -19,7 +19,7 @@ This repository is no longer at the initial MVP design stage. Current implementa
 - Synchronizers for Chase, Schwab, Coinbase, and Plaid.
 - Price/FX source routing with configurable providers.
 - Portfolio snapshot/history/change-point valuation commands.
-- Optional git auto-commit after data-changing operations.
+- Optional git auto-commit and auto-push after data-changing operations.
 
 Not implemented yet:
 
@@ -86,6 +86,7 @@ price_staleness = "24h"
 
 [git]
 auto_commit = false
+auto_push = false
 #+END_SRC
 
 * Storage Layout

@@ -54,11 +54,17 @@ impl Default for RefreshConfig {
 pub struct GitConfig {
     /// Enable automatic commits after data changes.
     pub auto_commit: bool,
+
+    /// Enable automatic pushes after successful auto-commits.
+    pub auto_push: bool,
 }
 
 impl Default for GitConfig {
     fn default() -> Self {
-        Self { auto_commit: false }
+        Self {
+            auto_commit: false,
+            auto_push: false,
+        }
     }
 }
 
@@ -320,9 +326,27 @@ mod tests {
         let mut file = std::fs::File::create(&config_path)?;
         writeln!(file, "[git]")?;
         writeln!(file, "auto_commit = true")?;
+        writeln!(file, "auto_push = true")?;
 
         let config = Config::load(&config_path)?;
         assert!(config.git.auto_commit);
+        assert!(config.git.auto_push);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_load_git_config_defaults_auto_push_false() -> Result<()> {
+        let dir = TempDir::new()?;
+        let config_path = dir.path().join("keepbook.toml");
+
+        let mut file = std::fs::File::create(&config_path)?;
+        writeln!(file, "[git]")?;
+        writeln!(file, "auto_commit = true")?;
+
+        let config = Config::load(&config_path)?;
+        assert!(config.git.auto_commit);
+        assert!(!config.git.auto_push);
 
         Ok(())
     }
@@ -344,6 +368,7 @@ mod tests {
     fn test_default_git_config() {
         let config = Config::default();
         assert!(!config.git.auto_commit);
+        assert!(!config.git.auto_push);
     }
 
     #[test]

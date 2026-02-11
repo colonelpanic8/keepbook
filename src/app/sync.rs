@@ -50,6 +50,7 @@ async fn build_sync_service_with_quote_staleness(
         .with_auto_committer(Arc::new(GitAutoCommitter::new(
             config.data_dir.clone(),
             config.git.auto_commit,
+            config.git.auto_push,
         )))
         .with_factory(Arc::new(DefaultSynchronizerFactory::new(Some(
             config.data_dir.clone(),

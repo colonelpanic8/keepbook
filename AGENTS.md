@@ -97,6 +97,7 @@ price_staleness = "24h"
 
 [git]
 auto_commit = false
+auto_push = false
 ```
 
 ## Testing

@@ -10,7 +10,11 @@ export type AutoCommitOutcome =
   | { type: 'skipped_no_changes' }
   | { type: 'committed' };
 
-export async function tryAutoCommit(dataDir: string, action: string): Promise<AutoCommitOutcome> {
+export async function tryAutoCommit(
+  dataDir: string,
+  action: string,
+  autoPush = false,
+): Promise<AutoCommitOutcome> {
   // 1. Find git repo root
   const repoRoot = await gitRepoRoot(dataDir);
   if (repoRoot === null) {
@@ -41,6 +45,11 @@ export async function tryAutoCommit(dataDir: string, action: string): Promise<Au
   const trimmedAction = action.trim();
   const message = trimmedAction === '' ? 'keepbook: update data' : `keepbook: ${trimmedAction}`;
   await gitOutput(canonicalDir, ['commit', '-m', message]);
+
+  // 6. git push
+  if (autoPush) {
+    await gitOutput(canonicalDir, ['push']);
+  }
 
   return { type: 'committed' };
 }

@@ -53,25 +53,31 @@ impl AutoCommitter for NoopAutoCommitter {
 #[derive(Debug, Clone)]
 pub struct GitAutoCommitter {
     data_dir: std::path::PathBuf,
-    enabled: bool,
+    auto_commit: bool,
+    auto_push: bool,
 }
 
 impl GitAutoCommitter {
-    pub fn new(data_dir: impl Into<std::path::PathBuf>, enabled: bool) -> Self {
+    pub fn new(
+        data_dir: impl Into<std::path::PathBuf>,
+        auto_commit: bool,
+        auto_push: bool,
+    ) -> Self {
         Self {
             data_dir: data_dir.into(),
-            enabled,
+            auto_commit,
+            auto_push,
         }
     }
 }
 
 impl AutoCommitter for GitAutoCommitter {
     fn maybe_commit(&self, action: &str) {
-        if !self.enabled {
+        if !self.auto_commit {
             return;
         }
 
-        match try_auto_commit(&self.data_dir, action) {
+        match try_auto_commit(&self.data_dir, action, self.auto_push) {
             Ok(AutoCommitOutcome::Committed) => {
                 tracing::info!("Auto-committed keepbook data");
             }
