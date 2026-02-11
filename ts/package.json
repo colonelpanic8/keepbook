@@ -2,6 +2,9 @@
   "name": "keepbook",
   "version": "0.1.0",
   "type": "module",
+  "bin": {
+    "keepbook": "./dist/cli/main.js"
+  },
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
