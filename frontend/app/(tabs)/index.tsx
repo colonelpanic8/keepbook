@@ -37,9 +37,13 @@ export default function TabOneScreen() {
   const [connectionsJson, setConnectionsJson] = useState<string>('[]');
   const [accountsJson, setAccountsJson] = useState<string>('[]');
 
-  const refreshDir = useCallback((dir: string) => {
-    setConnectionsJson(KeepbookNative.listConnections(dir));
-    setAccountsJson(KeepbookNative.listAccounts(dir));
+  const refreshDir = useCallback(async (dir: string) => {
+    const [connections, accounts] = await Promise.all([
+      KeepbookNative.listConnections(dir),
+      KeepbookNative.listAccounts(dir),
+    ]);
+    setConnectionsJson(connections);
+    setAccountsJson(accounts);
   }, []);
 
   const parsedConnections = useMemo(() => {
@@ -69,7 +73,7 @@ export default function TabOneScreen() {
       const saved = await AsyncStorage.getItem('keepbook.data_dir');
       const next = saved || demoDir;
       setDataDir(next);
-      refreshDir(next);
+      await refreshDir(next);
     })();
   }, [demoDir, refreshDir]);
 
@@ -86,7 +90,7 @@ export default function TabOneScreen() {
         if (cancelled) return;
 
         setDataDir(next);
-        refreshDir(next);
+        await refreshDir(next);
       })();
 
       return () => {
@@ -95,26 +99,27 @@ export default function TabOneScreen() {
     }, [demoDir, refreshDir])
   );
 
-  const initDemo = () => {
+  const initDemo = async () => {
     setInitError('');
-    const err = KeepbookNative.initDemo(demoDir);
+    const err = await KeepbookNative.initDemo(demoDir);
     setInitError(err);
+    await refreshDir(demoDir);
   };
 
-  const refresh = () => {
-    refreshDir(dataDir);
+  const refresh = async () => {
+    await refreshDir(dataDir);
   };
 
   const useDemo = async () => {
     setDataDir(demoDir);
     await AsyncStorage.setItem('keepbook.data_dir', demoDir);
-    refreshDir(demoDir);
+    await refreshDir(demoDir);
   };
 
   const useGit = async () => {
     setDataDir(gitDir);
     await AsyncStorage.setItem('keepbook.data_dir', gitDir);
-    refreshDir(gitDir);
+    await refreshDir(gitDir);
   };
 
   return (
@@ -122,13 +127,13 @@ export default function TabOneScreen() {
       <Text style={styles.title}>keepbook</Text>
       <View style={styles.separator} lightColor="#eee" darkColor="rgba(255,255,255,0.1)" />
 
-      <Text>keepbook-native version: {version}</Text>
+      <Text>keepbook runtime: {version}</Text>
       <Text>{hello}</Text>
       <Text>Data dir: {dataDir}</Text>
 
       <View style={styles.buttonRow}>
-        <Button title="Init demo data" onPress={initDemo} />
-        <Button title="Refresh" onPress={refresh} />
+        <Button title="Init demo data" onPress={() => void initDemo()} />
+        <Button title="Refresh" onPress={() => void refresh()} />
       </View>
 
       <View style={styles.buttonRow}>

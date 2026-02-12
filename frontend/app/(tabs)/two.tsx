@@ -221,12 +221,10 @@ export default function TabTwoScreen() {
         placeholder={'-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----'}
         multiline
       />
-      {Platform.OS === 'web' ? (
-        <Text style={styles.note}>
-          Web sync is read-only and uses GitHub HTTP (tree via api.github.com + content via raw.githubusercontent.com). SSH
-          key is ignored on web.
-        </Text>
-      ) : null}
+      <Text style={styles.note}>
+        TS sync is read-only and uses GitHub HTTP (tree via api.github.com + content via raw.githubusercontent.com). SSH
+        key is currently ignored.
+      </Text>
 
       <Text style={styles.label}>GitHub token (for private repos, web sync)</Text>
       <TextInput
