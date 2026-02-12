@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { Decimal } from '../decimal.js';
 import {
   formatRfc3339,
+  formatRfc3339FromEpochNanos,
   formatChronoSerde,
+  formatChronoSerdeFromEpochNanos,
   formatDateYMD,
   parseAsset,
   decStr,
@@ -73,6 +75,35 @@ describe('formatChronoSerde', () => {
   it('formats single-digit ms with leading zeros', () => {
     const d = new Date('2024-01-15T10:00:00.007Z');
     expect(formatChronoSerde(d)).toBe('2024-01-15T10:00:00.007000000Z');
+  });
+});
+
+describe('formatRfc3339FromEpochNanos', () => {
+  it('uses 3 fractional digits for millisecond precision', () => {
+    expect(formatRfc3339FromEpochNanos('1705312800123000000')).toBe(
+      '2024-01-15T10:00:00.123+00:00',
+    );
+  });
+
+  it('uses 6 fractional digits for microsecond precision', () => {
+    expect(formatRfc3339FromEpochNanos('1733345127765747000')).toBe(
+      '2024-12-04T20:45:27.765747+00:00',
+    );
+  });
+
+  it('uses 9 fractional digits for nanosecond precision', () => {
+    expect(formatRfc3339FromEpochNanos('1760544000123456789')).toBe(
+      '2025-10-15T16:00:00.123456789+00:00',
+    );
+  });
+});
+
+describe('formatChronoSerdeFromEpochNanos', () => {
+  it('mirrors chrono serde precision trimming', () => {
+    expect(formatChronoSerdeFromEpochNanos('1705312800123000000')).toBe('2024-01-15T10:00:00.123Z');
+    expect(formatChronoSerdeFromEpochNanos('1733345127765747000')).toBe(
+      '2024-12-04T20:45:27.765747Z',
+    );
   });
 });
 

@@ -89,7 +89,7 @@ add
 add
   .command('account <name>')
   .description('Add a new account')
-  .requiredOption('--connection <id>', 'connection ID or name')
+  .requiredOption('--connection <id>', 'connection ID')
   .option(
     '--tag <tag>',
     'tag (repeatable)',
@@ -142,7 +142,7 @@ const set = program.command('set').description('Set a value');
 set
   .command('balance')
   .description('Set a balance for an account')
-  .requiredOption('--account <id>', 'account ID or name')
+  .requiredOption('--account <id>', 'account ID')
   .requiredOption('--asset <str>', 'asset identifier')
   .requiredOption('--amount <str>', 'balance amount')
   .action(async (opts: { account: string; asset: string; amount: string }) => {
@@ -196,7 +196,8 @@ list
     await run(async () => {
       const cfg = await loadConfig(program.opts().config);
       const storage = new JsonFileStorage(cfg.config.data_dir);
-      return listBalances(storage, cfg.config.reporting_currency);
+      const marketDataStore = new JsonlMarketDataStore(cfg.config.data_dir);
+      return listBalances(storage, cfg.config.reporting_currency, marketDataStore);
     });
   });
 
@@ -216,7 +217,8 @@ list
   .description('List price sources')
   .action(async () => {
     await run(async () => {
-      return listPriceSources();
+      const cfg = await loadConfig(program.opts().config);
+      return listPriceSources(cfg.config.data_dir);
     });
   });
 
@@ -227,7 +229,8 @@ list
     await run(async () => {
       const cfg = await loadConfig(program.opts().config);
       const storage = new JsonFileStorage(cfg.config.data_dir);
-      return listAll(storage, cfg.config.reporting_currency);
+      const marketDataStore = new JsonlMarketDataStore(cfg.config.data_dir);
+      return listAll(storage, cfg.config.reporting_currency, marketDataStore, cfg.config.data_dir);
     });
   });
 

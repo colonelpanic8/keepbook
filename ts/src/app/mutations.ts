@@ -7,7 +7,6 @@
  */
 
 import { type Storage } from '../storage/storage.js';
-import { findConnection, findAccount } from '../storage/lookup.js';
 import { Connection, type ConnectionType } from '../models/connection.js';
 import { Account } from '../models/account.js';
 import { AssetBalance, BalanceSnapshot } from '../models/balance.js';
@@ -72,26 +71,35 @@ export async function addConnection(
 /**
  * Create a new account under an existing connection.
  *
- * Finds the connection by ID or name. If not found, returns an error object.
+ * Finds the connection by ID. If not found, returns an error object.
  * After creating the account, updates the connection's state.account_ids.
  */
 export async function addAccount(
   storage: Storage,
-  connectionIdOrName: string,
+  connectionIdStr: string,
   name: string,
   tags: string[],
   ids?: IdGenerator,
   clock?: Clock,
 ): Promise<object> {
-  const conn = await findConnection(storage, connectionIdOrName);
-  if (conn === null) {
+  let connectionId: Id;
+  try {
+    connectionId = Id.fromStringChecked(connectionIdStr);
+  } catch {
     return {
       success: false,
-      error: `Connection not found: '${connectionIdOrName}'`,
+      error: `Invalid connection id: ${connectionIdStr}`,
     };
   }
 
-  const connectionId = conn.state.id;
+  const conn = await storage.getConnection(connectionId);
+  if (conn === null) {
+    return {
+      success: false,
+      error: `Connection not found: '${connectionIdStr}'`,
+    };
+  }
+
   const account = Account.newWithGenerator(
     ids ?? new UuidIdGenerator(),
     clock ?? new SystemClock(),
@@ -118,7 +126,7 @@ export async function addAccount(
     account: {
       id: accountWithTags.id.asStr(),
       name,
-      connection_id: connectionId.asStr(),
+      connection_id: connectionIdStr,
     },
   };
 }
@@ -174,22 +182,32 @@ export async function removeConnection(storage: Storage, idStr: string): Promise
 /**
  * Set a balance for an account.
  *
- * Finds the account by ID or name. Parses the asset string and validates the
+ * Finds the account by ID. Parses the asset string and validates the
  * amount as a valid decimal. Creates a balance snapshot at the current time
  * (or injected clock time).
  */
 export async function setBalance(
   storage: Storage,
-  accountIdOrName: string,
+  accountIdStr: string,
   assetStr: string,
   amountStr: string,
   clock?: Clock,
 ): Promise<object> {
-  const account = await findAccount(storage, accountIdOrName);
+  let accountId: Id;
+  try {
+    accountId = Id.fromStringChecked(accountIdStr);
+  } catch {
+    return {
+      success: false,
+      error: `Invalid account id: ${accountIdStr}`,
+    };
+  }
+
+  const account = await storage.getAccount(accountId);
   if (account === null) {
     return {
       success: false,
-      error: `Account not found: '${accountIdOrName}'`,
+      error: `Account not found: '${accountIdStr}'`,
     };
   }
 

@@ -100,7 +100,7 @@ describe('Integration: full workflow', () => {
     // --- Step 2: Add an account ---
     const acctResult = await addAccount(
       storage,
-      'My Bank',
+      'conn-1',
       'Checking',
       [],
       makeIdGen('acct-1'),
@@ -117,7 +117,7 @@ describe('Integration: full workflow', () => {
 
     // --- Step 3: Set balance ---
     const balanceClock = makeClock('2024-06-15T10:00:00Z');
-    const balResult = await setBalance(storage, 'Checking', 'USD', '1500.50', balanceClock);
+    const balResult = await setBalance(storage, 'acct-1', 'USD', '1500.50', balanceClock);
     const balanceResult = balResult as SetBalanceResultShape;
     expect(balanceResult.success).toBe(true);
     expect(balanceResult.balance.amount).toBe('1500.5');
@@ -297,7 +297,7 @@ describe('Integration: JSON compatibility checks', () => {
   // Asset serialization format
   // -------------------------------------------------------------------------
 
-  it('asset serialization uses snake_case: {"type":"currency","iso_code":"USD"}', async () => {
+  it('list asset serialization uses snake_case with Rust key order', async () => {
     const storage = new MemoryStorage();
     const clock = makeClock('2024-01-15T10:00:00Z');
     await addConnection(storage, 'Bank', makeIdGen('conn-1'), clock);
@@ -306,7 +306,7 @@ describe('Integration: JSON compatibility checks', () => {
 
     const balances = await listBalances(storage, 'USD');
     const json = JSON.stringify(balances[0].asset);
-    expect(json).toBe('{"type":"currency","iso_code":"USD"}');
+    expect(json).toBe('{"iso_code":"USD","type":"currency"}');
     // NOT camelCase
     expect(json).not.toContain('isoCode');
   });
@@ -950,7 +950,7 @@ describe('Integration: full JSON round-trip verification', () => {
     expect(parsed.summary.initial_value).toBe('100');
     expect(parsed.summary.final_value).toBe('150');
     expect(parsed.summary.absolute_change).toBe('50');
-    expect(parsed.summary.percentage_change).toBe('50');
+    expect(parsed.summary.percentage_change).toBe('50.00');
   });
 
   it('portfolio snapshot with empty storage shows zero total and empty arrays', async () => {

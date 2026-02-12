@@ -113,7 +113,7 @@ describe('addAccount', () => {
     await addConnection(storage, 'My Bank', makeIdGen('conn-1'), clock);
 
     // Add an account
-    const result = await addAccount(storage, 'My Bank', 'Checking', [], makeIdGen('acct-1'), clock);
+    const result = await addAccount(storage, 'conn-1', 'Checking', [], makeIdGen('acct-1'), clock);
 
     expect(result).toEqual({
       success: true,
@@ -137,7 +137,7 @@ describe('addAccount', () => {
 
     const result = await addAccount(
       storage,
-      'nonexistent',
+      'missing-conn',
       'Checking',
       [],
       makeIdGen('acct-1'),
@@ -146,7 +146,16 @@ describe('addAccount', () => {
 
     expect(result).toEqual({
       success: false,
-      error: "Connection not found: 'nonexistent'",
+      error: "Connection not found: 'missing-conn'",
+    });
+  });
+
+  it('returns error when connection id is invalid', async () => {
+    const storage = new MemoryStorage();
+    const result = await addAccount(storage, '../bad-id', 'Checking', [], makeIdGen('acct-1'));
+    expect(result).toEqual({
+      success: false,
+      error: 'Invalid connection id: ../bad-id',
     });
   });
 
@@ -158,7 +167,7 @@ describe('addAccount', () => {
 
     await addAccount(
       storage,
-      'My Bank',
+      'conn-1',
       'Checking',
       ['bank', 'primary'],
       makeIdGen('acct-1'),
@@ -176,7 +185,7 @@ describe('addAccount', () => {
 
     await addConnection(storage, 'My Bank', makeIdGen('conn-1'), clock);
 
-    await addAccount(storage, 'My Bank', 'Checking', [], makeIdGen('acct-1'), clock);
+    await addAccount(storage, 'conn-1', 'Checking', [], makeIdGen('acct-1'), clock);
 
     const conn = await storage.getConnection(Id.fromString('conn-1'));
     expect(conn).not.toBeNull();
@@ -184,7 +193,7 @@ describe('addAccount', () => {
     expect(accountIdStrs).toContain('acct-1');
   });
 
-  it('finds connection by ID', async () => {
+  it('adds account by connection ID', async () => {
     const storage = new MemoryStorage();
     const clock = makeClock('2024-06-01T12:00:00Z');
 
@@ -208,7 +217,7 @@ describe('addAccount', () => {
 
     await addConnection(storage, 'My Bank', makeIdGen('conn-1'), clock);
 
-    await addAccount(storage, 'My Bank', 'Checking', [], makeIdGen('acct-1'), clock);
+    await addAccount(storage, 'conn-1', 'Checking', [], makeIdGen('acct-1'), clock);
 
     const acct = await storage.getAccount(Id.fromString('acct-1'));
     expect(acct!.tags).toEqual([]);
@@ -344,6 +353,15 @@ describe('setBalance', () => {
     });
   });
 
+  it('returns error for invalid account id', async () => {
+    const storage = new MemoryStorage();
+    const result = await setBalance(storage, '../bad-id', 'USD', '100');
+    expect(result).toEqual({
+      success: false,
+      error: 'Invalid account id: ../bad-id',
+    });
+  });
+
   it('returns error for invalid amount', async () => {
     const storage = new MemoryStorage();
     const clock = makeClock('2024-06-01T12:00:00Z');
@@ -440,7 +458,7 @@ describe('setBalance', () => {
     expect(result.balance.amount).toBe('100');
   });
 
-  it('finds account by name', async () => {
+  it('does not resolve account by name', async () => {
     const storage = new MemoryStorage();
     const clock = makeClock('2024-06-01T12:00:00Z');
 
@@ -448,16 +466,18 @@ describe('setBalance', () => {
     await addAccount(storage, 'conn-1', 'Checking', [], makeIdGen('acct-1'), clock);
 
     const balanceClock = makeClock('2024-07-01T10:00:00Z');
-    const result = (await setBalance(
+    const result = await setBalance(
       storage,
       'Checking',
       'USD',
       '500',
       balanceClock,
-    )) as SetBalanceSuccessResult;
+    );
 
-    expect(result.success).toBe(true);
-    expect(result.balance.account_id).toBe('acct-1');
+    expect(result).toEqual({
+      success: false,
+      error: "Account not found: 'Checking'",
+    });
   });
 
   it('formats timestamp with rfc3339', async () => {

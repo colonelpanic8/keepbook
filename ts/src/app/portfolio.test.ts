@@ -777,7 +777,27 @@ describe('portfolioHistory', () => {
     expect(result.summary!.initial_value).toBe('100');
     expect(result.summary!.final_value).toBe('150');
     expect(result.summary!.absolute_change).toBe('50');
-    expect(result.summary!.percentage_change).toBe('50');
+    expect(result.summary!.percentage_change).toBe('50.00');
+  });
+
+  it('percentage_change keeps two decimal places when trailing zero is needed', async () => {
+    const clock = makeClock('2024-06-15T12:00:00Z');
+    const { storage } = await setupStorageWithBalances(clock, [
+      {
+        timestamp: '2024-06-13T10:00:00Z',
+        balances: [{ asset: Asset.currency('USD'), amount: '100' }],
+      },
+      {
+        timestamp: '2024-06-14T10:00:00Z',
+        balances: [{ asset: Asset.currency('USD'), amount: '112.2' }],
+      },
+    ]);
+    const store = new NullMarketDataStore();
+    const config = makeConfig();
+
+    const result = await portfolioHistory(storage, store, config, {}, clock);
+    expect(result.summary).toBeDefined();
+    expect(result.summary!.percentage_change).toBe('12.20');
   });
 
   // -------------------------------------------------------------------------
@@ -1080,7 +1100,7 @@ describe('portfolioHistory', () => {
     expect(result.summary!.initial_value).toBe('200');
     expect(result.summary!.final_value).toBe('300');
     expect(result.summary!.absolute_change).toBe('100');
-    expect(result.summary!.percentage_change).toBe('50');
+    expect(result.summary!.percentage_change).toBe('50.00');
   });
 
   // -------------------------------------------------------------------------

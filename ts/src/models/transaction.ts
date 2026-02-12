@@ -12,6 +12,7 @@ export type TransactionStatus = 'pending' | 'posted' | 'reversed' | 'canceled' |
 export interface TransactionType {
   readonly id: Id;
   readonly timestamp: Date;
+  readonly timestamp_raw?: string;
   readonly amount: string;
   readonly asset: AssetType;
   readonly description: string;
@@ -38,7 +39,7 @@ export interface TransactionJSON {
 // ---------------------------------------------------------------------------
 
 export function withTimestamp(tx: TransactionType, timestamp: Date): TransactionType {
-  return { ...tx, timestamp };
+  return { ...tx, timestamp, timestamp_raw: undefined };
 }
 
 export function withStatus(tx: TransactionType, status: TransactionStatus): TransactionType {
@@ -101,7 +102,7 @@ export const Transaction = {
   toJSON(tx: TransactionType): TransactionJSON {
     const json: TransactionJSON = {
       id: tx.id.toJSON(),
-      timestamp: tx.timestamp.toISOString(),
+      timestamp: tx.timestamp_raw ?? tx.timestamp.toISOString(),
       amount: tx.amount,
       asset: tx.asset,
       description: tx.description,
@@ -120,6 +121,7 @@ export const Transaction = {
     return {
       id: Id.fromString(json.id),
       timestamp: new Date(json.timestamp),
+      timestamp_raw: json.timestamp,
       amount: json.amount,
       asset: json.asset,
       description: json.description,

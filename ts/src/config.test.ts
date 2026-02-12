@@ -151,13 +151,19 @@ describe('resolveDataDir', () => {
   it('joins relative data_dir with configDir', () => {
     const config: Config = { ...DEFAULT_CONFIG, data_dir: './my-data' };
     const result = resolveDataDir(config, '/home/user/.config/keepbook');
-    expect(result).toBe('/home/user/.config/keepbook/my-data');
+    expect(result).toBe('/home/user/.config/keepbook/./my-data');
   });
 
   it('joins bare relative data_dir with configDir', () => {
     const config: Config = { ...DEFAULT_CONFIG, data_dir: 'data' };
     const result = resolveDataDir(config, '/home/user/.config/keepbook');
     expect(result).toBe('/home/user/.config/keepbook/data');
+  });
+
+  it('preserves dot segment for data_dir "." to match Rust PathBuf join behavior', () => {
+    const config: Config = { ...DEFAULT_CONFIG, data_dir: '.' };
+    const result = resolveDataDir(config, '/home/user/.config/keepbook');
+    expect(result).toBe('/home/user/.config/keepbook/.');
   });
 
   it('uses absolute data_dir directly', () => {

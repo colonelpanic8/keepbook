@@ -288,6 +288,8 @@ impl JsonFileStorage {
             }
         }
 
+        ids.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+
         Ok(ids)
     }
 
@@ -799,6 +801,10 @@ impl Storage for JsonFileStorage {
 #[cfg(test)]
 mod tests {
     use super::JsonFileStorage;
+    use chrono::{TimeZone, Utc};
+
+    use crate::models::{Account, Connection, ConnectionConfig, ConnectionState, Id};
+    use crate::storage::Storage;
 
     #[test]
     fn sanitize_name_replaces_path_separators() {
@@ -813,5 +819,83 @@ mod tests {
         assert_eq!(JsonFileStorage::sanitize_name("   "), None);
         assert_eq!(JsonFileStorage::sanitize_name("."), None);
         assert_eq!(JsonFileStorage::sanitize_name(".."), None);
+    }
+
+    #[tokio::test]
+    async fn list_accounts_returns_ids_in_sorted_order() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let storage = JsonFileStorage::new(temp.path());
+        let created_at = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let connection_id = Id::from_string("conn-1");
+
+        storage
+            .save_account(&Account::new_with(
+                Id::from_string("acct-b"),
+                created_at,
+                "B",
+                connection_id.clone(),
+            ))
+            .await?;
+        storage
+            .save_account(&Account::new_with(
+                Id::from_string("acct-a"),
+                created_at,
+                "A",
+                connection_id,
+            ))
+            .await?;
+
+        let ids: Vec<String> = storage
+            .list_accounts()
+            .await?
+            .into_iter()
+            .map(|a| a.id.to_string())
+            .collect();
+        assert_eq!(ids, vec!["acct-a".to_string(), "acct-b".to_string()]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn list_connections_returns_ids_in_sorted_order() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let storage = JsonFileStorage::new(temp.path());
+        let created_at = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+
+        let conn_b = Connection {
+            config: ConnectionConfig {
+                name: "B".to_string(),
+                synchronizer: "manual".to_string(),
+                credentials: None,
+                balance_staleness: None,
+            },
+            state: ConnectionState::new_with(Id::from_string("conn-b"), created_at),
+        };
+        let conn_a = Connection {
+            config: ConnectionConfig {
+                name: "A".to_string(),
+                synchronizer: "manual".to_string(),
+                credentials: None,
+                balance_staleness: None,
+            },
+            state: ConnectionState::new_with(Id::from_string("conn-a"), created_at),
+        };
+
+        storage
+            .save_connection_config(conn_b.id(), &conn_b.config)
+            .await?;
+        storage.save_connection(&conn_b).await?;
+        storage
+            .save_connection_config(conn_a.id(), &conn_a.config)
+            .await?;
+        storage.save_connection(&conn_a).await?;
+
+        let ids: Vec<String> = storage
+            .list_connections()
+            .await?
+            .into_iter()
+            .map(|c| c.id().to_string())
+            .collect();
+        assert_eq!(ids, vec!["conn-a".to_string(), "conn-b".to_string()]);
+        Ok(())
     }
 }

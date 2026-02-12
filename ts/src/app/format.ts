@@ -52,18 +52,26 @@ function formatFromEpochNanos(epochNanos: string, suffix: '+00:00' | 'Z'): strin
   const wholeSeconds = nanos / 1000000000n;
   const fractionNanos = nanos % 1000000000n;
   const date = new Date(Number(wholeSeconds * 1000n));
-  const core = formatCore(date);
-  if (fractionNanos === 0n) {
-    return `${core}${suffix}`;
-  }
   const y = pad(date.getUTCFullYear(), 4);
   const mo = pad(date.getUTCMonth() + 1, 2);
   const d = pad(date.getUTCDate(), 2);
   const h = pad(date.getUTCHours(), 2);
   const mi = pad(date.getUTCMinutes(), 2);
   const s = pad(date.getUTCSeconds(), 2);
-  const frac = fractionNanos.toString().padStart(9, '0');
-  return `${y}-${mo}-${d}T${h}:${mi}:${s}.${frac}${suffix}`;
+
+  let frac = '';
+  if (fractionNanos !== 0n) {
+    // Match chrono's AutoSi formatting: 3, 6, or 9 digits depending on precision.
+    if (fractionNanos % 1000000n === 0n) {
+      frac = '.' + (fractionNanos / 1000000n).toString().padStart(3, '0');
+    } else if (fractionNanos % 1000n === 0n) {
+      frac = '.' + (fractionNanos / 1000n).toString().padStart(6, '0');
+    } else {
+      frac = '.' + fractionNanos.toString().padStart(9, '0');
+    }
+  }
+
+  return `${y}-${mo}-${d}T${h}:${mi}:${s}${frac}${suffix}`;
 }
 
 /**

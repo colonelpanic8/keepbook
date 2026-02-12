@@ -515,4 +515,68 @@ describe('collectChangePoints', () => {
     const priceTriggers = points.flatMap((p) => p.triggers.filter((t) => t.type === 'price'));
     expect(priceTriggers.length).toBeGreaterThanOrEqual(1);
   });
+
+  it('orders same-timestamp price triggers by asset id for deterministic output', async () => {
+    const storage = new MemoryStorage();
+    const marketData = new MemoryMarketDataStore();
+
+    const connId = Id.fromString('conn-1');
+    await storage.saveConnection({
+      config: { name: 'Test Connection', synchronizer: 'test' } as ConnectionConfig,
+      state: ConnectionState.newWith(connId, new Date('2024-01-01T00:00:00Z')),
+    });
+
+    const accountId = Id.fromString('acct-1');
+    await storage.saveAccount(
+      Account.newWith(accountId, new Date('2024-01-01T00:00:00Z'), 'Brokerage', connId),
+    );
+
+    const vxus = Asset.equity('VXUS');
+    const googl = Asset.equity('GOOGL');
+    const vxusId = AssetId.fromAsset(vxus);
+    const googlId = AssetId.fromAsset(googl);
+
+    // Intentionally add holdings in reverse lexical order to verify deterministic sorting.
+    await storage.appendBalanceSnapshot(
+      accountId,
+      BalanceSnapshot.new(new Date('2024-06-15T10:00:00Z'), [
+        AssetBalance.new(vxus, '1'),
+        AssetBalance.new(googl, '1'),
+      ]),
+    );
+
+    await marketData.put_prices([
+      {
+        asset_id: vxusId,
+        as_of_date: '2024-06-15',
+        timestamp: new Date('2024-06-15T16:00:00Z'),
+        price: '60',
+        quote_currency: 'USD',
+        kind: 'close',
+        source: 'test',
+      },
+      {
+        asset_id: googlId,
+        as_of_date: '2024-06-15',
+        timestamp: new Date('2024-06-15T16:00:00Z'),
+        price: '170',
+        quote_currency: 'USD',
+        kind: 'close',
+        source: 'test',
+      },
+    ]);
+
+    const points = await collectChangePoints(storage, marketData, { includePrices: true });
+    const pricePoint = points.find(
+      (p) =>
+        p.timestamp.getTime() === new Date('2024-06-15T23:59:59Z').getTime() &&
+        p.triggers.some((t) => t.type === 'price'),
+    );
+
+    expect(pricePoint).toBeDefined();
+    const ids = pricePoint!.triggers
+      .filter((t) => t.type === 'price')
+      .map((t) => (t.type === 'price' ? t.asset_id.asStr() : ''));
+    expect(ids).toEqual(['equity/GOOGL', 'equity/VXUS']);
+  });
 });

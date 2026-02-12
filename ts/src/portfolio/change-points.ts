@@ -358,7 +358,7 @@ export async function collectChangePoints(
 
   // Step 3: if includePrices, add price changes for held assets
   if (options.includePrices) {
-    const heldAssets = collector.heldAssets();
+    const heldAssets = Array.from(collector.heldAssets()).sort((a, b) => a.localeCompare(b));
     for (const assetIdStr of heldAssets) {
       const assetId = AssetId.fromString(assetIdStr);
       const prices = await marketData.get_all_prices(assetId);

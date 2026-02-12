@@ -208,7 +208,8 @@ export class JsonFileStorage implements Storage {
     }
 
     const ids: Id[] = [];
-    for (const name of names) {
+    const sortedNames = [...names].sort((a, b) => a.localeCompare(b));
+    for (const name of sortedNames) {
       if (!name || !Id.isPathSafe(name)) continue;
       try {
         const stat = await fs.stat(path.join(dirPath, name));

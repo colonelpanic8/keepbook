@@ -147,5 +147,9 @@ export function resolveDataDir(config: Config, configDir: string): string {
     return config.data_dir;
   }
 
-  return path.resolve(configDir, config.data_dir);
+  // Match Rust `PathBuf::join` display semantics (preserve relative segments).
+  if (configDir.endsWith(path.sep)) {
+    return `${configDir}${config.data_dir}`;
+  }
+  return `${configDir}${path.sep}${config.data_dir}`;
 }

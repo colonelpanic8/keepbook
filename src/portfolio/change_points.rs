@@ -290,7 +290,8 @@ pub async fn collect_change_points(
 
     // Collect price change points for held assets
     if options.include_prices {
-        let held_assets = collector.held_assets().clone();
+        let mut held_assets: Vec<AssetId> = collector.held_assets().iter().cloned().collect();
+        held_assets.sort_by_key(|asset_id| asset_id.to_string());
         for asset_id in held_assets {
             let prices = market_data.get_all_prices(&asset_id).await?;
             for price in prices {
@@ -311,6 +312,11 @@ pub async fn collect_change_points(
 mod tests {
     use super::*;
     use chrono::{Datelike, TimeZone, Timelike};
+    use std::sync::Arc;
+
+    use crate::market_data::{AssetId, MarketDataStore, MemoryMarketDataStore, PriceKind, PricePoint};
+    use crate::models::{Account, AssetBalance, Connection, ConnectionConfig, ConnectionState};
+    use crate::storage::{MemoryStorage, Storage};
 
     fn make_ts(year: i32, month: u32, day: u32, hour: u32, min: u32) -> DateTime<Utc> {
         Utc.with_ymd_and_hms(year, month, day, hour, min, 0)
@@ -588,5 +594,107 @@ mod tests {
 
         assert_eq!(filtered.len(), original_len);
         assert_eq!(filtered.first().map(|p| p.timestamp), first_timestamp);
+    }
+
+    #[tokio::test]
+    async fn collect_change_points_orders_same_timestamp_price_triggers_by_asset_id() -> Result<()> {
+        let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new());
+        let market_data: Arc<dyn MarketDataStore> = Arc::new(MemoryMarketDataStore::new());
+
+        let conn_id = Id::from_string("conn-1");
+        let account_id = Id::from_string("acct-1");
+
+        storage
+            .save_connection(&Connection {
+                config: ConnectionConfig {
+                    name: "Test".to_string(),
+                    synchronizer: "manual".to_string(),
+                    credentials: None,
+                    balance_staleness: None,
+                },
+                state: ConnectionState::new_with(conn_id.clone(), make_ts(2024, 1, 1, 0, 0)),
+            })
+            .await?;
+
+        storage
+            .save_account(&Account::new_with(
+                account_id.clone(),
+                make_ts(2024, 1, 1, 0, 0),
+                "Brokerage",
+                conn_id,
+            ))
+            .await?;
+
+        // Intentionally add holdings in reverse lexical order.
+        storage
+            .append_balance_snapshot(
+                &account_id,
+                &crate::models::BalanceSnapshot::new(
+                    make_ts(2024, 6, 15, 10, 0),
+                    vec![
+                        AssetBalance::new(Asset::equity("VXUS"), "1"),
+                        AssetBalance::new(Asset::equity("GOOGL"), "1"),
+                    ],
+                ),
+            )
+            .await?;
+
+        market_data
+            .put_prices(&[
+                PricePoint {
+                    asset_id: AssetId::from_asset(&Asset::equity("VXUS")),
+                    as_of_date: chrono::NaiveDate::from_ymd_opt(2024, 6, 15).unwrap(),
+                    timestamp: make_ts(2024, 6, 15, 16, 0),
+                    price: "60".to_string(),
+                    quote_currency: "USD".to_string(),
+                    kind: PriceKind::Close,
+                    source: "test".to_string(),
+                },
+                PricePoint {
+                    asset_id: AssetId::from_asset(&Asset::equity("GOOGL")),
+                    as_of_date: chrono::NaiveDate::from_ymd_opt(2024, 6, 15).unwrap(),
+                    timestamp: make_ts(2024, 6, 15, 16, 0),
+                    price: "170".to_string(),
+                    quote_currency: "USD".to_string(),
+                    kind: PriceKind::Close,
+                    source: "test".to_string(),
+                },
+            ])
+            .await?;
+
+        let points = collect_change_points(
+            &storage,
+            &market_data,
+            &CollectOptions {
+                account_ids: vec![account_id],
+                include_prices: true,
+                include_fx: false,
+                target_currency: None,
+            },
+        )
+        .await?;
+
+        let expected_price_ts = date_to_timestamp(chrono::NaiveDate::from_ymd_opt(2024, 6, 15).unwrap());
+        let price_point = points
+            .iter()
+            .find(|p| p.timestamp == expected_price_ts)
+            .cloned()
+            .expect("price change point should exist");
+
+        let price_ids: Vec<String> = price_point
+            .triggers
+            .iter()
+            .filter_map(|trigger| match trigger {
+                ChangeTrigger::Price { asset_id } => Some(asset_id.to_string()),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(
+            price_ids,
+            vec!["equity/GOOGL".to_string(), "equity/VXUS".to_string()]
+        );
+
+        Ok(())
     }
 }

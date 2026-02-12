@@ -12,6 +12,7 @@ export type SyncStatus = 'success' | 'failed' | 'partial';
 
 export interface LastSync {
   readonly at: Date;
+  readonly at_raw?: string;
   readonly status: SyncStatus;
   readonly error?: string;
 }
@@ -111,7 +112,7 @@ export const ConnectionState = {
 
     if (state.last_sync !== undefined) {
       const syncJson: LastSyncJSON = {
-        at: state.last_sync.at.toISOString(),
+        at: state.last_sync.at_raw ?? state.last_sync.at.toISOString(),
         status: state.last_sync.status,
       };
       if (state.last_sync.error !== undefined) {
@@ -142,6 +143,7 @@ export const ConnectionState = {
     if (json.last_sync !== undefined) {
       const lastSync: LastSync = {
         at: new Date(json.last_sync.at),
+        at_raw: json.last_sync.at,
         status: json.last_sync.status,
         ...(json.last_sync.error !== undefined ? { error: json.last_sync.error } : {}),
       };
