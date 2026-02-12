@@ -189,6 +189,20 @@ describe('JsonFileStorage', () => {
       expect(fetched!.config.balance_staleness).toBe(3600);
     });
 
+    it('parses connection balance_staleness duration strings from TOML', async () => {
+      const connId = Id.fromString('conn-dur');
+      const connDir = path.join(tmpDir, 'connections', connId.asStr());
+      await fs.mkdir(connDir, { recursive: true });
+      await fs.writeFile(
+        path.join(connDir, 'connection.toml'),
+        'name = "Dur Bank"\nsynchronizer = "manual"\nbalance_staleness = "7d"\n',
+      );
+
+      const fetched = await storage.getConnection(connId);
+      expect(fetched).not.toBeNull();
+      expect(fetched!.config.balance_staleness).toBe(7 * 24 * 60 * 60 * 1000);
+    });
+
     it('listConnections skips dirs without config TOML', async () => {
       // Create a directory without a connection.toml
       const badDir = path.join(tmpDir, 'connections', 'no-config');
@@ -336,6 +350,20 @@ describe('JsonFileStorage', () => {
       expect(fetched).not.toBeNull();
       expect(fetched!.balance_staleness).toBe(1800);
       expect(fetched!.balance_backfill).toBe('carry_earliest');
+    });
+
+    it('parses account balance_staleness duration strings from TOML', async () => {
+      const acctId = Id.fromString('acct-cfg-dur');
+      const acct = makeAccount('Configured', Id.fromString('conn-1'), acctId);
+      await storage.saveAccount(acct);
+
+      const configPath = path.join(tmpDir, 'accounts', acctId.asStr(), 'account_config.toml');
+      await fs.writeFile(configPath, 'balance_staleness = "12h"\nbalance_backfill = "none"\n');
+
+      const fetched = storage.getAccountConfig(acctId);
+      expect(fetched).not.toBeNull();
+      expect(fetched!.balance_staleness).toBe(12 * 60 * 60 * 1000);
+      expect(fetched!.balance_backfill).toBe('none');
     });
   });
 

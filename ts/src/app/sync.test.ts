@@ -4,7 +4,15 @@ import { FixedClock } from '../clock.js';
 import { FixedIdGenerator } from '../models/id-generator.js';
 import { Id } from '../models/id.js';
 import { Connection } from '../models/connection.js';
-import { syncConnection, syncAll, syncPrices, syncSymlinks, authLogin } from './sync.js';
+import {
+  syncConnection,
+  syncConnectionIfStale,
+  syncAll,
+  syncAllIfStale,
+  syncPrices,
+  syncSymlinks,
+  authLogin,
+} from './sync.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -21,16 +29,30 @@ function makeClock(iso: string): FixedClock {
 type SyncConnectionResultShape = {
   success: boolean;
   skipped?: boolean;
-  connection?: {
-    id: string;
-    name?: string;
-  };
+  connection?:
+    | {
+        id: string;
+        name?: string;
+      }
+    | string;
 };
 
 type SyncAllResultShape = {
   total: number;
   results: SyncConnectionResultShape[];
 };
+
+function connectionId(result: SyncConnectionResultShape): string | undefined {
+  if (result.connection === undefined || typeof result.connection === 'string') {
+    return undefined;
+  }
+  return result.connection.id;
+}
+
+const DEFAULT_REFRESH = {
+  balance_staleness: 24 * 60 * 60 * 1000,
+  price_staleness: 24 * 60 * 60 * 1000,
+} as const;
 
 async function addManualConnection(
   storage: MemoryStorage,
@@ -43,6 +65,29 @@ async function addManualConnection(
     makeClock('2024-06-01T12:00:00Z'),
   );
   await storage.saveConnection(conn);
+}
+
+async function addManualConnectionWithLastSync(
+  storage: MemoryStorage,
+  name: string,
+  id: string,
+  lastSyncAt: string,
+): Promise<void> {
+  const conn = Connection.new(
+    { name, synchronizer: 'manual' },
+    makeIdGen(id),
+    makeClock('2024-06-01T12:00:00Z'),
+  );
+  await storage.saveConnection({
+    config: conn.config,
+    state: {
+      ...conn.state,
+      last_sync: {
+        at: new Date(lastSyncAt),
+        status: 'success',
+      },
+    },
+  });
 }
 
 async function addNonManualConnection(
@@ -120,7 +165,7 @@ describe('syncConnection', () => {
     expect(result.success).toBe(true);
     expect(result.skipped).toBe(true);
     expect(result.connection).toBeDefined();
-    if (result.connection === undefined) {
+    if (result.connection === undefined || typeof result.connection === 'string') {
       throw new Error('Expected connection in sync result');
     }
     expect(result.connection.id).toBe('conn-1');
@@ -151,8 +196,8 @@ describe('syncAll', () => {
     expect(result.results).toHaveLength(2);
 
     // Find results by connection id (order may vary)
-    const manualResult = result.results.find((r) => r.connection?.id === 'conn-1');
-    const coinbaseResult = result.results.find((r) => r.connection?.id === 'conn-2');
+    const manualResult = result.results.find((r) => connectionId(r) === 'conn-1');
+    const coinbaseResult = result.results.find((r) => connectionId(r) === 'conn-2');
 
     expect(manualResult).toEqual({
       success: true,
@@ -168,6 +213,78 @@ describe('syncAll', () => {
       success: false,
       error: "Synchronizer 'coinbase' not implemented in TypeScript CLI",
       connection: { id: 'conn-2', name: 'Coinbase' },
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// syncConnectionIfStale
+// ---------------------------------------------------------------------------
+
+describe('syncConnectionIfStale', () => {
+  it('skips with "not stale" when connection has fresh last_sync', async () => {
+    const storage = new MemoryStorage();
+    await addManualConnectionWithLastSync(storage, 'Fresh Bank', 'conn-fresh', '2100-01-01T00:00:00Z');
+
+    const result = await syncConnectionIfStale(storage, 'conn-fresh', DEFAULT_REFRESH);
+
+    expect(result).toEqual({
+      success: true,
+      skipped: true,
+      reason: 'not stale',
+      connection: 'Fresh Bank',
+    });
+  });
+
+  it('syncs when stale (manual connection returns manual skip shape)', async () => {
+    const storage = new MemoryStorage();
+    await addManualConnectionWithLastSync(storage, 'Stale Bank', 'conn-stale', '2000-01-01T00:00:00Z');
+
+    const result = await syncConnectionIfStale(storage, 'conn-stale', DEFAULT_REFRESH);
+
+    expect(result).toEqual({
+      success: true,
+      skipped: true,
+      reason: 'manual',
+      connection: {
+        id: 'conn-stale',
+        name: 'Stale Bank',
+      },
+      accounts_synced: 0,
+      prices_stored: 0,
+      last_sync: null,
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// syncAllIfStale
+// ---------------------------------------------------------------------------
+
+describe('syncAllIfStale', () => {
+  it('returns mixed stale/fresh outcomes', async () => {
+    const storage = new MemoryStorage();
+    await addManualConnectionWithLastSync(storage, 'Fresh Bank', 'conn-fresh', '2100-01-01T00:00:00Z');
+    await addManualConnectionWithLastSync(storage, 'Stale Bank', 'conn-stale', '2000-01-01T00:00:00Z');
+
+    const result = (await syncAllIfStale(storage, DEFAULT_REFRESH)) as SyncAllResultShape;
+
+    expect(result.total).toBe(2);
+    expect(result.results).toHaveLength(2);
+    expect(result.results[0]).toEqual({
+      success: true,
+      skipped: true,
+      reason: 'not stale',
+      connection: 'Fresh Bank',
+    });
+    expect(result.results[1]).toEqual({
+      success: true,
+      skipped: true,
+      reason: 'manual',
+      connection: { id: 'conn-stale', name: 'Stale Bank' },
+      accounts_synced: 0,
+      prices_stored: 0,
+      last_sync: null,
     });
   });
 });

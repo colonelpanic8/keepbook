@@ -13,7 +13,15 @@ import {
 } from '../app/list.js';
 import { addConnection, addAccount, removeConnection, setBalance } from '../app/mutations.js';
 import { portfolioSnapshot, portfolioHistory, portfolioChangePoints } from '../app/portfolio.js';
-import { syncConnection, syncAll, syncPrices, syncSymlinks, authLogin } from '../app/sync.js';
+import {
+  syncConnection,
+  syncConnectionIfStale,
+  syncAll,
+  syncAllIfStale,
+  syncPrices,
+  syncSymlinks,
+  authLogin,
+} from '../app/sync.js';
 
 // Library
 import { JsonFileStorage } from '../storage/json-file.js';
@@ -257,9 +265,12 @@ sync
   .command('connection <id_or_name>')
   .description('Sync a single connection')
   .option('--if-stale', 'only sync if data is stale')
-  .action(async (idOrName: string, _opts: { ifStale?: boolean }) => {
+  .action(async (idOrName: string, opts: { ifStale?: boolean }) => {
     await runWithConfig(async (cfg) => {
       const storage = new JsonFileStorage(cfg.config.data_dir);
+      if (opts.ifStale) {
+        return syncConnectionIfStale(storage, idOrName, cfg.config.refresh);
+      }
       return syncConnection(storage, idOrName);
     });
   });
@@ -268,9 +279,12 @@ sync
   .command('all')
   .description('Sync all connections')
   .option('--if-stale', 'only sync if data is stale')
-  .action(async (_opts: { ifStale?: boolean }) => {
+  .action(async (opts: { ifStale?: boolean }) => {
     await runWithConfig(async (cfg) => {
       const storage = new JsonFileStorage(cfg.config.data_dir);
+      if (opts.ifStale) {
+        return syncAllIfStale(storage, cfg.config.refresh);
+      }
       return syncAll(storage);
     });
   });

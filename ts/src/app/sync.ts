@@ -8,25 +8,11 @@
 
 import { type Storage } from '../storage/storage.js';
 import { findConnection } from '../storage/lookup.js';
+import type { RefreshConfig } from '../config.js';
+import { checkBalanceStaleness, resolveBalanceStaleness } from '../staleness.js';
+import type { ConnectionType } from '../models/connection.js';
 
-// ---------------------------------------------------------------------------
-// syncConnection
-// ---------------------------------------------------------------------------
-
-/**
- * Attempt to sync a single connection by ID or name.
- *
- * - Manual connections are skipped with a descriptive result.
- * - Other synchronizers return a "not implemented" error.
- * - Unknown connections return a "not found" error.
- */
-export async function syncConnection(storage: Storage, idOrName: string): Promise<object> {
-  const conn = await findConnection(storage, idOrName);
-
-  if (conn === null) {
-    return { success: false, error: `Connection not found: '${idOrName}'` };
-  }
-
+function syncConnectionImpl(conn: ConnectionType): object {
   if (conn.config.synchronizer === 'manual') {
     return {
       success: true,
@@ -53,6 +39,58 @@ export async function syncConnection(storage: Storage, idOrName: string): Promis
 }
 
 // ---------------------------------------------------------------------------
+// syncConnection
+// ---------------------------------------------------------------------------
+
+/**
+ * Attempt to sync a single connection by ID or name.
+ *
+ * - Manual connections are skipped with a descriptive result.
+ * - Other synchronizers return a "not implemented" error.
+ * - Unknown connections return a "not found" error.
+ */
+export async function syncConnection(storage: Storage, idOrName: string): Promise<object> {
+  const conn = await findConnection(storage, idOrName);
+
+  if (conn === null) {
+    return { success: false, error: `Connection not found: '${idOrName}'` };
+  }
+
+  return syncConnectionImpl(conn);
+}
+
+/**
+ * Attempt to sync a single connection only if it's stale.
+ *
+ * Uses balance staleness threshold resolution:
+ * connection override -> global refresh config.
+ */
+export async function syncConnectionIfStale(
+  storage: Storage,
+  idOrName: string,
+  refresh: RefreshConfig,
+): Promise<object> {
+  const conn = await findConnection(storage, idOrName);
+
+  if (conn === null) {
+    return { success: false, error: `Connection not found: '${idOrName}'` };
+  }
+
+  const threshold = resolveBalanceStaleness(null, conn, refresh);
+  const check = checkBalanceStaleness(conn, threshold);
+  if (!check.is_stale) {
+    return {
+      success: true,
+      skipped: true,
+      reason: 'not stale',
+      connection: conn.config.name,
+    };
+  }
+
+  return syncConnectionImpl(conn);
+}
+
+// ---------------------------------------------------------------------------
 // syncAll
 // ---------------------------------------------------------------------------
 
@@ -64,8 +102,32 @@ export async function syncAll(storage: Storage): Promise<object> {
   const results: object[] = [];
 
   for (const conn of connections) {
-    const result = await syncConnection(storage, conn.state.id.asStr());
-    results.push(result);
+    results.push(syncConnectionImpl(conn));
+  }
+
+  return { results, total: connections.length };
+}
+
+/**
+ * Sync every connection only if stale. Fresh connections are skipped.
+ */
+export async function syncAllIfStale(storage: Storage, refresh: RefreshConfig): Promise<object> {
+  const connections = await storage.listConnections();
+  const results: object[] = [];
+
+  for (const conn of connections) {
+    const threshold = resolveBalanceStaleness(null, conn, refresh);
+    const check = checkBalanceStaleness(conn, threshold);
+    if (!check.is_stale) {
+      results.push({
+        success: true,
+        skipped: true,
+        reason: 'not stale',
+        connection: conn.config.name,
+      });
+      continue;
+    }
+    results.push(syncConnectionImpl(conn));
   }
 
   return { results, total: connections.length };

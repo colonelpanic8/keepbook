@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import TOML from 'toml';
 
 import { Id, IdError } from '../models/id.js';
+import { parseDuration } from '../duration.js';
 import {
   Account,
   type AccountType,
@@ -166,6 +167,41 @@ export class JsonFileStorage implements Storage {
     }
   }
 
+  private parseOptionalDuration(value: unknown, fieldName: string): number | undefined {
+    if (value === undefined || value === null) {
+      return undefined;
+    }
+    if (typeof value === 'number') {
+      return value;
+    }
+    if (typeof value === 'string') {
+      return parseDuration(value);
+    }
+    throw new Error(`Invalid ${fieldName}: expected number or duration string`);
+  }
+
+  private normalizeConnectionConfig(config: ConnectionConfig): ConnectionConfig {
+    const balanceStaleness = this.parseOptionalDuration(
+      (config as { balance_staleness?: unknown }).balance_staleness,
+      'connection balance_staleness',
+    );
+    return {
+      ...config,
+      ...(balanceStaleness !== undefined ? { balance_staleness: balanceStaleness } : {}),
+    };
+  }
+
+  private normalizeAccountConfig(config: AccountConfig): AccountConfig {
+    const balanceStaleness = this.parseOptionalDuration(
+      (config as { balance_staleness?: unknown }).balance_staleness,
+      'account balance_staleness',
+    );
+    return {
+      ...config,
+      ...(balanceStaleness !== undefined ? { balance_staleness: balanceStaleness } : {}),
+    };
+  }
+
   private async readJsonl<T>(filePath: string): Promise<T[]> {
     try {
       const content = await fs.readFile(filePath, 'utf-8');
@@ -236,10 +272,11 @@ export class JsonFileStorage implements Storage {
     const statePath = this.connectionStateFile(id);
 
     // Config is required
-    const config = this.readTomlSync<ConnectionConfig>(configPath);
-    if (config === null) {
+    const rawConfig = this.readTomlSync<ConnectionConfig>(configPath);
+    if (rawConfig === null) {
       return null;
     }
+    const config = this.normalizeConnectionConfig(rawConfig);
 
     // State may not exist yet (new connection with only config TOML)
     const stateJson = await this.readJson<ConnectionStateJSON>(statePath);
@@ -274,7 +311,11 @@ export class JsonFileStorage implements Storage {
   getAccountConfig(accountId: Id): AccountConfig | null {
     try {
       const configPath = this.accountConfigFile(accountId);
-      return this.readTomlSync<AccountConfig>(configPath);
+      const config = this.readTomlSync<AccountConfig>(configPath);
+      if (config === null) {
+        return null;
+      }
+      return this.normalizeAccountConfig(config);
     } catch (e: unknown) {
       if (e instanceof IdError) {
         return null;
