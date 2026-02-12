@@ -524,6 +524,50 @@ describe('listTransactions', () => {
     });
   });
 
+  it('includes materialized transaction annotation when present', async () => {
+    const storage = new MemoryStorage();
+    const clock = makeClock('2024-06-15T14:30:00Z');
+
+    // Create account
+    const acctIdGen = makeIdGen('acct-1');
+    const acct = Account.newWithGenerator(acctIdGen, clock, 'Checking', Id.fromString('conn-1'));
+    await storage.saveAccount(acct);
+
+    // Create transaction
+    const txIdGen = makeIdGen('tx-1');
+    const tx = Transaction.newWithGenerator(
+      txIdGen,
+      clock,
+      '-50.00',
+      Asset.currency('USD'),
+      'Coffee shop',
+    );
+    await storage.appendTransactions(acct.id, [tx]);
+
+    // Apply an annotation patch (set category + tags)
+    await storage.appendTransactionAnnotationPatches(acct.id, [
+      {
+        transaction_id: Id.fromString('tx-1'),
+        timestamp: new Date('2024-06-15T15:00:00Z'),
+        category: 'food',
+        tags: ['coffee', 'treat'],
+      },
+    ]);
+
+    const result = await listTransactions(storage);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual({
+      id: 'tx-1',
+      account_id: 'acct-1',
+      timestamp: '2024-06-15T14:30:00+00:00',
+      description: 'Coffee shop',
+      amount: '-50.00',
+      asset: { type: 'currency', iso_code: 'USD' },
+      status: 'posted',
+      annotation: { category: 'food', tags: ['coffee', 'treat'] },
+    });
+  });
+
   it('includes transactions from multiple accounts', async () => {
     const storage = new MemoryStorage();
     const clock = makeClock('2024-06-15T14:30:00Z');

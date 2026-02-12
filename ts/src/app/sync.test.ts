@@ -137,7 +137,7 @@ describe('syncConnection', () => {
 
     expect(result).toEqual({
       success: false,
-      error: "Synchronizer 'coinbase' not implemented in TypeScript CLI",
+      error: 'Missing credential store for connection',
       connection: {
         id: 'conn-2',
         name: 'Coinbase',
@@ -211,7 +211,7 @@ describe('syncAll', () => {
 
     expect(coinbaseResult).toEqual({
       success: false,
-      error: "Synchronizer 'coinbase' not implemented in TypeScript CLI",
+      error: 'Missing credential store for connection',
       connection: { id: 'conn-2', name: 'Coinbase' },
     });
   });
@@ -326,16 +326,18 @@ describe('syncSymlinks', () => {
 
 describe('authLogin', () => {
   it('returns error with provider name', async () => {
-    const result = await authLogin('schwab');
+    const storage = new MemoryStorage();
+    const result = await authLogin(storage, 'schwab');
 
     expect(result).toEqual({
       success: false,
-      error: "Auth login for 'schwab' not yet implemented in TypeScript CLI",
+      error: 'No schwab connections found',
     });
   });
 
   it('returns error with different provider name', async () => {
-    const result = await authLogin('plaid');
+    const storage = new MemoryStorage();
+    const result = await authLogin(storage, 'plaid');
 
     expect(result).toEqual({
       success: false,

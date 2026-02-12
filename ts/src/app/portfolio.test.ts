@@ -41,7 +41,7 @@ function makeConfig(overrides?: Partial<ResolvedConfig>): ResolvedConfig {
       balance_staleness: 14 * 86400000,
       price_staleness: 86400000,
     },
-    git: { auto_commit: false, auto_push: false },
+    git: { auto_commit: false, auto_push: false, merge_master_before_command: false },
     ...overrides,
   };
 }

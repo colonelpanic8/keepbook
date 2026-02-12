@@ -15,7 +15,7 @@ pub use list::{
 };
 pub use mutations::{
     add_account, add_account_with, add_connection, add_connection_with, parse_asset,
-    remove_connection, set_balance,
+    remove_connection, set_balance, set_transaction_annotation,
 };
 pub use portfolio::{
     fetch_historical_prices, portfolio_change_points, portfolio_history, portfolio_snapshot,
@@ -30,6 +30,7 @@ pub use types::{
     AccountOutput, AllOutput, AssetInfoOutput, BalanceOutput, ChangePointsOutput, ConnectionOutput,
     HistoryOutput, HistoryPoint, HistorySummary, PriceHistoryFailure, PriceHistoryOutput,
     PriceHistoryScopeOutput, PriceHistoryStats, PriceSourceOutput, TransactionOutput,
+    TransactionAnnotationOutput,
 };
 
 fn maybe_auto_commit(config: &ResolvedConfig, action: &str) {

@@ -23,7 +23,14 @@ import {
   type ConnectionStateJSON,
 } from '../models/connection.js';
 import { Transaction, type TransactionType, type TransactionJSON } from '../models/transaction.js';
+import {
+  TransactionAnnotationPatch,
+  type TransactionAnnotationPatchType,
+  type TransactionAnnotationPatchJSON,
+} from '../models/transaction-annotation.js';
 import { type Storage, type CredentialStore } from './storage.js';
+import { parseCredentialConfigValue } from '../credentials/credential-config.js';
+import { PassCredentialStore } from '../credentials/pass.js';
 
 // ---------------------------------------------------------------------------
 // TOML serialization helper
@@ -66,6 +73,7 @@ function toToml(obj: Record<string, unknown>): string {
  *       account_config.toml   # optional
  *       balances.jsonl
  *       transactions.jsonl
+ *       transaction_annotations.jsonl
  * ```
  */
 export class JsonFileStorage implements Storage {
@@ -126,6 +134,10 @@ export class JsonFileStorage implements Storage {
 
   private transactionsFile(accountId: Id): string {
     return path.join(this.accountDir(accountId), 'transactions.jsonl');
+  }
+
+  private transactionAnnotationsFile(accountId: Id): string {
+    return path.join(this.accountDir(accountId), 'transaction_annotations.jsonl');
   }
 
   // -----------------------------------------------------------------------
@@ -300,8 +312,35 @@ export class JsonFileStorage implements Storage {
   // Credentials
   // -----------------------------------------------------------------------
 
-  getCredentialStore(_connectionId: Id): CredentialStore | null {
-    return null;
+  getCredentialStore(connectionId: Id): CredentialStore | null {
+    try {
+      // First: inline credentials in connection.toml ([credentials] table).
+      const configPath = this.connectionConfigFile(connectionId);
+      const rawConfig = this.readTomlSync<ConnectionConfig>(configPath);
+      const inlineCreds = rawConfig !== null ? (rawConfig as { credentials?: unknown }).credentials : undefined;
+      if (inlineCreds !== undefined && inlineCreds !== null) {
+        const cfg = parseCredentialConfigValue(inlineCreds);
+        if (cfg.backend === 'pass') {
+          return new PassCredentialStore(cfg);
+        }
+      }
+
+      // Fallback: separate credentials.toml (backwards compatibility with Rust).
+      const credsPath = path.join(this.connectionDir(connectionId), 'credentials.toml');
+      const rawCreds = this.readTomlSync<Record<string, unknown>>(credsPath);
+      if (rawCreds !== null) {
+        const cfg = parseCredentialConfigValue(rawCreds);
+        if (cfg.backend === 'pass') {
+          return new PassCredentialStore(cfg);
+        }
+      }
+
+      return null;
+    } catch (e: unknown) {
+      if (e instanceof IdError) return null;
+      // If TOML exists but is invalid, treat as "no credentials" rather than crashing CLI commands.
+      return null;
+    }
   }
 
   // -----------------------------------------------------------------------
@@ -540,6 +579,26 @@ export class JsonFileStorage implements Storage {
     if (txns.length === 0) return;
     const filePath = this.transactionsFile(accountId);
     const jsonItems = txns.map(Transaction.toJSON);
+    await this.appendJsonl(filePath, jsonItems);
+  }
+
+  // -----------------------------------------------------------------------
+  // Transaction annotations
+  // -----------------------------------------------------------------------
+
+  async getTransactionAnnotationPatches(accountId: Id): Promise<TransactionAnnotationPatchType[]> {
+    const filePath = this.transactionAnnotationsFile(accountId);
+    const jsonItems = await this.readJsonl<TransactionAnnotationPatchJSON>(filePath);
+    return jsonItems.map(TransactionAnnotationPatch.fromJSON);
+  }
+
+  async appendTransactionAnnotationPatches(
+    accountId: Id,
+    patches: TransactionAnnotationPatchType[],
+  ): Promise<void> {
+    if (patches.length === 0) return;
+    const filePath = this.transactionAnnotationsFile(accountId);
+    const jsonItems = patches.map(TransactionAnnotationPatch.toJSON);
     await this.appendJsonl(filePath, jsonItems);
   }
 }

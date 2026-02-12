@@ -55,6 +55,21 @@ pub struct TransactionOutput {
     pub amount: String,
     pub asset: serde_json::Value,
     pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub annotation: Option<TransactionAnnotationOutput>,
+}
+
+/// Materialized transaction annotation state.
+#[derive(Serialize)]
+pub struct TransactionAnnotationOutput {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<String>>,
 }
 
 /// Combined output for list all

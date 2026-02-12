@@ -1,0 +1,696 @@
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
+
+use anyhow::{Context, Result};
+use chrono::{DateTime, Local};
+use clap::Parser;
+use keepbook::app;
+use keepbook::config::{default_config_path, ResolvedConfig};
+use keepbook::storage::{JsonFileStorage, Storage};
+use ksni::menu::*;
+use ksni::MenuItem;
+use ksni::TrayMethods;
+use rand::Rng;
+use tokio::sync::mpsc::{self, UnboundedSender};
+use tracing::{info, warn};
+use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+
+fn parse_duration_arg(s: &str) -> Result<Duration, String> {
+    keepbook::duration::parse_duration(s).map_err(|e| e.to_string())
+}
+
+#[derive(Parser, Debug)]
+#[command(name = "keepbook-sync-daemon")]
+#[command(about = "Long-running keepbook sync daemon with tray controls")]
+struct Cli {
+    /// Path to keepbook config file.
+    #[arg(short, long, default_value_os_t = default_config_path())]
+    config: PathBuf,
+
+    /// Base sync interval (e.g. "30m", "1h", "1d").
+    #[arg(long, default_value = "30m", value_parser = parse_duration_arg)]
+    interval: Duration,
+
+    /// Add random jitter in the range [-jitter, +jitter] to each interval.
+    #[arg(long, default_value = "0s", value_parser = parse_duration_arg)]
+    jitter: Duration,
+
+    /// Override balance staleness threshold for `sync --if-stale` behavior.
+    #[arg(long, value_name = "DURATION", value_parser = parse_duration_arg)]
+    balance_staleness: Option<Duration>,
+
+    /// Override price staleness threshold used by price refresh.
+    #[arg(long, value_name = "DURATION", value_parser = parse_duration_arg)]
+    price_staleness: Option<Duration>,
+
+    /// Number of recent portfolio history points shown in tray menu.
+    #[arg(long, default_value_t = 8)]
+    history_points: usize,
+
+    /// Skip the immediate startup sync cycle.
+    #[arg(long)]
+    no_sync_on_start: bool,
+
+    /// Disable periodic price refresh.
+    #[arg(long)]
+    no_sync_prices: bool,
+
+    /// Disable periodic symlink rebuild.
+    #[arg(long)]
+    no_sync_symlinks: bool,
+
+    /// Base freedesktop icon name for idle state.
+    #[arg(long, default_value = "wallet")]
+    tray_icon: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum DaemonStatus {
+    Idle,
+    Syncing,
+    Error(String),
+}
+
+#[derive(Debug, Clone)]
+enum DaemonCommand {
+    SyncNow,
+    Quit,
+}
+
+#[derive(Debug, Clone)]
+struct KeepbookTrayState {
+    status: DaemonStatus,
+    last_cycle: Option<DateTime<Local>>,
+    next_cycle: Option<DateTime<Local>>,
+    last_summary: String,
+    history_lines: Vec<String>,
+}
+
+impl Default for KeepbookTrayState {
+    fn default() -> Self {
+        Self {
+            status: DaemonStatus::Idle,
+            last_cycle: None,
+            next_cycle: None,
+            last_summary: "No sync cycle has run yet".to_string(),
+            history_lines: vec!["No portfolio history loaded".to_string()],
+        }
+    }
+}
+
+impl KeepbookTrayState {
+    fn status_text(&self) -> String {
+        match &self.status {
+            DaemonStatus::Idle => "Idle".to_string(),
+            DaemonStatus::Syncing => "Syncing...".to_string(),
+            DaemonStatus::Error(msg) => format!("Error: {msg}"),
+        }
+    }
+
+    fn last_cycle_text(&self) -> String {
+        match self.last_cycle {
+            Some(ts) => format!("Last cycle: {}", ts.format("%Y-%m-%d %H:%M:%S %Z")),
+            None => "Last cycle: never".to_string(),
+        }
+    }
+
+    fn next_cycle_text(&self) -> String {
+        match self.next_cycle {
+            Some(ts) => format!("Next cycle: {}", ts.format("%Y-%m-%d %H:%M:%S %Z")),
+            None => "Next cycle: unscheduled".to_string(),
+        }
+    }
+}
+
+struct KeepbookTray {
+    state: KeepbookTrayState,
+    cmd_tx: UnboundedSender<DaemonCommand>,
+    base_icon_name: String,
+}
+
+impl KeepbookTray {
+    fn new(
+        state: KeepbookTrayState,
+        cmd_tx: UnboundedSender<DaemonCommand>,
+        base_icon_name: String,
+    ) -> Self {
+        Self {
+            state,
+            cmd_tx,
+            base_icon_name,
+        }
+    }
+
+    fn effective_icon_name(&self) -> String {
+        match &self.state.status {
+            DaemonStatus::Syncing => "view-refresh".to_string(),
+            DaemonStatus::Error(_) => "dialog-error".to_string(),
+            DaemonStatus::Idle => self.base_icon_name.clone(),
+        }
+    }
+}
+
+impl ksni::Tray for KeepbookTray {
+    const MENU_ON_ACTIVATE: bool = true;
+
+    fn id(&self) -> String {
+        "keepbook-sync-daemon".to_string()
+    }
+
+    fn title(&self) -> String {
+        "keepbook sync daemon".to_string()
+    }
+
+    fn icon_name(&self) -> String {
+        self.effective_icon_name()
+    }
+
+    fn tool_tip(&self) -> ksni::ToolTip {
+        ksni::ToolTip {
+            title: "keepbook sync daemon".to_string(),
+            description: format!(
+                "{}\n{}\n{}\n{}",
+                self.state.status_text(),
+                self.state.last_cycle_text(),
+                self.state.next_cycle_text(),
+                self.state.last_summary,
+            ),
+            ..Default::default()
+        }
+    }
+
+    fn menu(&self) -> Vec<MenuItem<Self>> {
+        let mut history_menu: Vec<MenuItem<Self>> = if self.state.history_lines.is_empty() {
+            vec![StandardItem {
+                label: "No portfolio history available".to_string(),
+                enabled: false,
+                ..Default::default()
+            }
+            .into()]
+        } else {
+            self.state
+                .history_lines
+                .iter()
+                .map(|line| {
+                    StandardItem {
+                        label: line.clone(),
+                        enabled: false,
+                        ..Default::default()
+                    }
+                    .into()
+                })
+                .collect()
+        };
+
+        if history_menu.is_empty() {
+            history_menu.push(
+                StandardItem {
+                    label: "No portfolio history available".to_string(),
+                    enabled: false,
+                    ..Default::default()
+                }
+                .into(),
+            );
+        }
+
+        vec![
+            StandardItem {
+                label: "keepbook sync daemon".to_string(),
+                enabled: false,
+                ..Default::default()
+            }
+            .into(),
+            MenuItem::Separator,
+            StandardItem {
+                label: format!("Status: {}", self.state.status_text()),
+                enabled: false,
+                ..Default::default()
+            }
+            .into(),
+            StandardItem {
+                label: self.state.last_cycle_text(),
+                enabled: false,
+                ..Default::default()
+            }
+            .into(),
+            StandardItem {
+                label: self.state.next_cycle_text(),
+                enabled: false,
+                ..Default::default()
+            }
+            .into(),
+            StandardItem {
+                label: self.state.last_summary.clone(),
+                enabled: false,
+                ..Default::default()
+            }
+            .into(),
+            MenuItem::Separator,
+            SubMenu {
+                label: "Recent Portfolio History".to_string(),
+                icon_name: "view-calendar-timeline".to_string(),
+                submenu: history_menu,
+                ..Default::default()
+            }
+            .into(),
+            MenuItem::Separator,
+            StandardItem {
+                label: "Sync Now".to_string(),
+                icon_name: "view-refresh".to_string(),
+                activate: Box::new(|this: &mut Self| {
+                    let _ = this.cmd_tx.send(DaemonCommand::SyncNow);
+                }),
+                ..Default::default()
+            }
+            .into(),
+            StandardItem {
+                label: "Quit".to_string(),
+                icon_name: "application-exit".to_string(),
+                activate: Box::new(|this: &mut Self| {
+                    let _ = this.cmd_tx.send(DaemonCommand::Quit);
+                }),
+                ..Default::default()
+            }
+            .into(),
+        ]
+    }
+}
+
+#[derive(Debug, Default)]
+struct SyncCounts {
+    total: usize,
+    synced: usize,
+    skipped_manual: usize,
+    skipped_not_stale: usize,
+    failed: usize,
+}
+
+fn parse_sync_counts(value: &serde_json::Value) -> SyncCounts {
+    let mut counts = SyncCounts {
+        total: value
+            .get("total")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0) as usize,
+        ..Default::default()
+    };
+
+    let Some(results) = value.get("results").and_then(serde_json::Value::as_array) else {
+        return counts;
+    };
+
+    for result in results {
+        let success = result
+            .get("success")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+
+        if !success {
+            counts.failed += 1;
+            continue;
+        }
+
+        let skipped = result
+            .get("skipped")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+
+        if !skipped {
+            counts.synced += 1;
+            continue;
+        }
+
+        match result
+            .get("reason")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+        {
+            "manual" => counts.skipped_manual += 1,
+            "not stale" => counts.skipped_not_stale += 1,
+            _ => counts.skipped_not_stale += 1,
+        }
+    }
+
+    counts
+}
+
+fn parse_price_counts(value: &serde_json::Value) -> (usize, usize, usize) {
+    let result = value.get("result").cloned().unwrap_or_default();
+    let fetched = result
+        .get("fetched")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0) as usize;
+    let skipped = result
+        .get("skipped")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0) as usize;
+    let failed = result
+        .get("failed_count")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0) as usize;
+    (fetched, skipped, failed)
+}
+
+fn parse_symlink_counts(value: &serde_json::Value) -> (usize, usize) {
+    let connection_symlinks = value
+        .get("connection_symlinks_created")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0) as usize;
+    let account_symlinks = value
+        .get("account_symlinks_created")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0) as usize;
+    (connection_symlinks, account_symlinks)
+}
+
+fn compute_next_delay(interval: Duration, jitter: Duration) -> Duration {
+    if jitter.is_zero() {
+        return interval;
+    }
+
+    let base_ms = interval.as_millis().min(u128::from(u64::MAX)) as i128;
+    let jitter_ms = jitter.as_millis().min(u128::from(u64::MAX)) as i128;
+    let offset = rand::thread_rng().gen_range(-jitter_ms..=jitter_ms);
+
+    let min_ms = 1_000_i128;
+    let max_ms = i128::from(u64::MAX);
+    let delay_ms = (base_ms + offset).clamp(min_ms, max_ms) as u64;
+    Duration::from_millis(delay_ms)
+}
+
+fn local_now_plus(duration: Duration) -> DateTime<Local> {
+    match chrono::Duration::from_std(duration) {
+        Ok(d) => Local::now() + d,
+        Err(_) => Local::now() + chrono::Duration::days(365 * 100),
+    }
+}
+
+async fn apply_tray_state(
+    tray_handle: &mut Option<ksni::Handle<KeepbookTray>>,
+    state: &KeepbookTrayState,
+) {
+    let Some(handle) = tray_handle.as_ref() else {
+        return;
+    };
+
+    let new_state = state.clone();
+    let update_result = handle
+        .update(move |tray: &mut KeepbookTray| {
+            tray.state = new_state;
+        })
+        .await;
+
+    if update_result.is_none() {
+        warn!("Tray update failed; disabling tray updates for this process");
+        *tray_handle = None;
+    }
+}
+
+struct Daemon {
+    storage: Arc<dyn Storage>,
+    symlink_storage: JsonFileStorage,
+    config: ResolvedConfig,
+    interval: Duration,
+    jitter: Duration,
+    sync_on_start: bool,
+    sync_prices: bool,
+    sync_symlinks: bool,
+    history_points: usize,
+}
+
+impl Daemon {
+    async fn refresh_history_lines(&self, state: &mut KeepbookTrayState) {
+        match app::portfolio_history(
+            self.storage.clone(),
+            &self.config,
+            None,
+            None,
+            None,
+            "daily".to_string(),
+            false,
+        )
+        .await
+        {
+            Ok(history) => {
+                let mut lines: Vec<String> = history
+                    .points
+                    .iter()
+                    .rev()
+                    .take(self.history_points)
+                    .map(|point| {
+                        format!("{}: {} {}", point.date, point.total_value, history.currency)
+                    })
+                    .collect();
+
+                if lines.is_empty() {
+                    lines.push("No portfolio history available".to_string());
+                }
+
+                state.history_lines = lines;
+            }
+            Err(err) => {
+                state.history_lines = vec![format!("History unavailable: {err}")];
+            }
+        }
+    }
+
+    async fn run_cycle(
+        &self,
+        reason: &str,
+        state: &mut KeepbookTrayState,
+        tray_handle: &mut Option<ksni::Handle<KeepbookTray>>,
+    ) {
+        state.status = DaemonStatus::Syncing;
+        state.last_summary = format!("Running sync cycle ({reason})");
+        apply_tray_state(tray_handle, state).await;
+
+        let cycle_result = async {
+            app::run_preflight(
+                &self.config,
+                app::PreflightOptions {
+                    merge_origin_master: self.config.git.merge_master_before_command,
+                },
+            )?;
+
+            let sync_json = app::sync_all_if_stale(self.storage.clone(), &self.config).await?;
+            let sync_counts = parse_sync_counts(&sync_json);
+
+            let (prices_fetched, prices_skipped, prices_failed) = if self.sync_prices {
+                let prices_json = app::sync_prices(
+                    self.storage.clone(),
+                    &self.config,
+                    app::SyncPricesScopeArg::All,
+                    false,
+                    Some(self.config.refresh.price_staleness),
+                )
+                .await?;
+                parse_price_counts(&prices_json)
+            } else {
+                (0, 0, 0)
+            };
+
+            let (symlink_connections, symlink_accounts) = if self.sync_symlinks {
+                let symlink_json = app::sync_symlinks(&self.symlink_storage, &self.config).await?;
+                parse_symlink_counts(&symlink_json)
+            } else {
+                (0, 0)
+            };
+
+            let summary = format!(
+                "sync total={} synced={} manual={} fresh={} failed={} | prices fetched={} skipped={} failed={} | symlinks conn={} acct={}",
+                sync_counts.total,
+                sync_counts.synced,
+                sync_counts.skipped_manual,
+                sync_counts.skipped_not_stale,
+                sync_counts.failed,
+                prices_fetched,
+                prices_skipped,
+                prices_failed,
+                symlink_connections,
+                symlink_accounts,
+            );
+
+            Ok::<String, anyhow::Error>(summary)
+        }
+        .await;
+
+        state.last_cycle = Some(Local::now());
+
+        match cycle_result {
+            Ok(summary) => {
+                info!(summary = %summary, "keepbook daemon sync cycle complete");
+                state.status = DaemonStatus::Idle;
+                state.last_summary = summary;
+            }
+            Err(err) => {
+                warn!(error = %err, "keepbook daemon sync cycle failed");
+                state.status = DaemonStatus::Error(err.to_string());
+                state.last_summary = format!("Cycle failed: {err}");
+            }
+        }
+
+        self.refresh_history_lines(state).await;
+        apply_tray_state(tray_handle, state).await;
+    }
+
+    async fn run(self, tray_icon: String) -> Result<()> {
+        let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel();
+
+        let mut tray_state = KeepbookTrayState::default();
+        self.refresh_history_lines(&mut tray_state).await;
+
+        let mut tray_handle = match KeepbookTray::new(tray_state.clone(), cmd_tx, tray_icon)
+            .assume_sni_available(true)
+            .spawn()
+            .await
+        {
+            Ok(handle) => Some(handle),
+            Err(err) => {
+                warn!(error = %err, "Unable to start tray; daemon will continue headless");
+                None
+            }
+        };
+
+        apply_tray_state(&mut tray_handle, &tray_state).await;
+
+        if self.sync_on_start {
+            self.run_cycle("startup", &mut tray_state, &mut tray_handle)
+                .await;
+        }
+
+        let mut next_delay = compute_next_delay(self.interval, self.jitter);
+        tray_state.next_cycle = Some(local_now_plus(next_delay));
+        apply_tray_state(&mut tray_handle, &tray_state).await;
+
+        loop {
+            let sleep = tokio::time::sleep(next_delay);
+            tokio::pin!(sleep);
+
+            tokio::select! {
+                _ = &mut sleep => {
+                    self.run_cycle("scheduled", &mut tray_state, &mut tray_handle).await;
+                    next_delay = compute_next_delay(self.interval, self.jitter);
+                    tray_state.next_cycle = Some(local_now_plus(next_delay));
+                    apply_tray_state(&mut tray_handle, &tray_state).await;
+                }
+                Some(cmd) = cmd_rx.recv() => {
+                    match cmd {
+                        DaemonCommand::SyncNow => {
+                            self.run_cycle("manual", &mut tray_state, &mut tray_handle).await;
+                            next_delay = compute_next_delay(self.interval, self.jitter);
+                            tray_state.next_cycle = Some(local_now_plus(next_delay));
+                            apply_tray_state(&mut tray_handle, &tray_state).await;
+                        }
+                        DaemonCommand::Quit => {
+                            if let Some(handle) = tray_handle.as_ref() {
+                                handle.shutdown().await;
+                            }
+                            break;
+                        }
+                    }
+                }
+                _ = tokio::signal::ctrl_c() => {
+                    if let Some(handle) = tray_handle.as_ref() {
+                        handle.shutdown().await;
+                    }
+                    break;
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    tracing_subscriber::registry()
+        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+            EnvFilter::new(
+                "info,chromiumoxide=warn,chromiumoxide::conn=off,chromiumoxide::handler=off",
+            )
+        }))
+        .with(
+            fmt::layer()
+                .with_writer(std::io::stderr)
+                .with_target(true)
+                .with_level(true)
+                .json(),
+        )
+        .init();
+
+    let cli = Cli::parse();
+
+    let mut config = ResolvedConfig::load_or_default(&cli.config)
+        .with_context(|| format!("Failed to load keepbook config: {}", cli.config.display()))?;
+
+    if let Some(balance_staleness) = cli.balance_staleness {
+        config.refresh.balance_staleness = balance_staleness;
+    }
+
+    if let Some(price_staleness) = cli.price_staleness {
+        config.refresh.price_staleness = price_staleness;
+    }
+
+    let storage_impl = JsonFileStorage::new(&config.data_dir);
+    let storage: Arc<dyn Storage> = Arc::new(storage_impl.clone());
+
+    let daemon = Daemon {
+        storage,
+        symlink_storage: storage_impl,
+        config,
+        interval: cli.interval,
+        jitter: cli.jitter,
+        sync_on_start: !cli.no_sync_on_start,
+        sync_prices: !cli.no_sync_prices,
+        sync_symlinks: !cli.no_sync_symlinks,
+        history_points: cli.history_points,
+    };
+
+    daemon.run(cli.tray_icon).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compute_next_delay_without_jitter_is_constant() {
+        let interval = Duration::from_secs(1800);
+        let jitter = Duration::ZERO;
+        let delay = compute_next_delay(interval, jitter);
+        assert_eq!(delay, interval);
+    }
+
+    #[test]
+    fn compute_next_delay_with_jitter_stays_in_range() {
+        let interval = Duration::from_secs(600);
+        let jitter = Duration::from_secs(120);
+
+        for _ in 0..100 {
+            let delay = compute_next_delay(interval, jitter);
+            assert!(delay >= Duration::from_secs(480));
+            assert!(delay <= Duration::from_secs(720));
+        }
+    }
+
+    #[test]
+    fn parse_sync_counts_handles_mixed_results() {
+        let value = serde_json::json!({
+            "total": 4,
+            "results": [
+                {"success": true},
+                {"success": true, "skipped": true, "reason": "manual"},
+                {"success": true, "skipped": true, "reason": "not stale"},
+                {"success": false, "error": "boom"}
+            ]
+        });
+
+        let counts = parse_sync_counts(&value);
+        assert_eq!(counts.total, 4);
+        assert_eq!(counts.synced, 1);
+        assert_eq!(counts.skipped_manual, 1);
+        assert_eq!(counts.skipped_not_stale, 1);
+        assert_eq!(counts.failed, 1);
+    }
+}

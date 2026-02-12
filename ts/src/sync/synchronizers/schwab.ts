@@ -1,0 +1,137 @@
+import type { Storage } from '../../storage/storage.js';
+import { Id } from '../../models/id.js';
+import { Account, type AccountType } from '../../models/account.js';
+import { Asset } from '../../models/asset.js';
+import { AssetBalance } from '../../models/balance.js';
+import type { ConnectionType } from '../../models/connection.js';
+import { AssetId } from '../../market-data/asset-id.js';
+import type { PricePoint } from '../../market-data/models.js';
+import { SessionCache, type SessionData } from '../../credentials/session.js';
+import { SchwabClient, type Position, type SchwabAccount } from '../schwab.js';
+import type { SyncResult, SyncedAssetBalance, Synchronizer } from '../mod.js';
+
+function todayUtc(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+export class SchwabSynchronizer implements Synchronizer {
+  private readonly connectionId: Id;
+  private readonly sessionCache: SessionCache;
+
+  constructor(connectionId: Id, sessionCache?: SessionCache) {
+    this.connectionId = connectionId;
+    this.sessionCache = sessionCache ?? SessionCache.new();
+  }
+
+  name(): string {
+    return 'schwab';
+  }
+
+  private sessionKey(): string {
+    return this.connectionId.asStr();
+  }
+
+  private getSession(): SessionData | null {
+    return this.sessionCache.get(this.sessionKey());
+  }
+
+  async sync(connection: ConnectionType, storage: Storage): Promise<SyncResult> {
+    const session = this.getSession();
+    if (session === null) {
+      throw new Error('No session found. Run login first.');
+    }
+
+    const existing = await storage.listAccounts();
+    const existingById = new Map<string, AccountType>();
+    for (const a of existing) {
+      if (a.connection_id.equals(connection.state.id)) {
+        existingById.set(a.id.asStr(), a);
+      }
+    }
+
+    const client = new SchwabClient(session);
+    const accountsResp = await client.getAccounts();
+    const positionsResp = await client.getPositions();
+    const allPositions: Position[] = positionsResp.security_groupings.flatMap((g) => g.Positions ?? []);
+
+    const now = new Date();
+    const asOfDate = todayUtc();
+
+    const accounts: AccountType[] = [];
+    const balances: Array<[Id, SyncedAssetBalance[]]> = [];
+
+    for (const schwabAccount of accountsResp.accounts) {
+      const accountId = Id.fromExternal(schwabAccount.AccountId);
+      const createdAt = existingById.get(accountId.asStr())?.created_at ?? now;
+
+      const name = schwabAccount.NickName.trim() === '' ? schwabAccount.DefaultName : schwabAccount.NickName;
+      const account: AccountType = {
+        ...Account.newWith(accountId, createdAt, name, connection.state.id),
+        tags: ['schwab', schwabAccount.AccountType.toLowerCase()],
+        synchronizer_data: { account_number: schwabAccount.AccountNumberDisplayFull },
+      };
+
+      const accountBalances: SyncedAssetBalance[] = [];
+
+      if (schwabAccount.IsBrokerage) {
+        for (const position of allPositions) {
+          if (position.DefaultSymbol === 'CASH') continue;
+
+          const asset = Asset.equity(position.DefaultSymbol);
+          const assetBalance = AssetBalance.new(asset, position.Quantity.toString());
+
+          const price: PricePoint = {
+            asset_id: AssetId.fromAsset(asset),
+            as_of_date: asOfDate,
+            timestamp: now,
+            price: position.Price.toString(),
+            quote_currency: 'USD',
+            kind: 'close',
+            source: 'schwab',
+          };
+
+          accountBalances.push({ asset_balance: assetBalance, price });
+        }
+
+        const cash = schwabAccount.Balances?.Cash;
+        if (cash !== undefined) {
+          accountBalances.push({
+            asset_balance: AssetBalance.new(Asset.currency('USD'), cash.toString()),
+          });
+        }
+      } else {
+        const bal = schwabAccount.Balances?.Balance;
+        if (bal !== undefined) {
+          accountBalances.push({
+            asset_balance: AssetBalance.new(Asset.currency('USD'), bal.toString()),
+          });
+        }
+      }
+
+      accounts.push(account);
+      balances.push([accountId, accountBalances]);
+    }
+
+    const updatedConnection: ConnectionType = {
+      config: connection.config,
+      state: {
+        ...connection.state,
+        account_ids: accounts.map((a) => a.id),
+        last_sync: {
+          at: now,
+          at_raw: now.toISOString(),
+          status: 'success',
+        },
+        status: 'active',
+      },
+    };
+
+    return {
+      connection: updatedConnection,
+      accounts,
+      balances,
+      transactions: [],
+    };
+  }
+}
+

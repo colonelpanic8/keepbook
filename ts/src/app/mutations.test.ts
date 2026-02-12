@@ -3,7 +3,15 @@ import { MemoryStorage } from '../storage/memory.js';
 import { FixedClock } from '../clock.js';
 import { FixedIdGenerator } from '../models/id-generator.js';
 import { Id } from '../models/id.js';
-import { addConnection, addAccount, removeConnection, setBalance } from './mutations.js';
+import { Asset } from '../models/asset.js';
+import { Transaction } from '../models/transaction.js';
+import {
+  addConnection,
+  addAccount,
+  removeConnection,
+  setBalance,
+  setTransactionAnnotation,
+} from './mutations.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -497,5 +505,98 @@ describe('setBalance', () => {
     )) as SetBalanceSuccessResult;
 
     expect(result.balance.timestamp).toBe('2024-07-01T10:30:00.123000000+00:00');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// setTransactionAnnotation
+// ---------------------------------------------------------------------------
+
+describe('setTransactionAnnotation', () => {
+  it('appends a patch and returns materialized annotation', async () => {
+    const storage = new MemoryStorage();
+    const clock = makeClock('2024-06-15T14:30:00Z');
+
+    await addConnection(storage, 'My Bank', makeIdGen('conn-1'), clock);
+    await addAccount(storage, 'conn-1', 'Checking', [], makeIdGen('acct-1'), clock);
+
+    const tx = Transaction.newWithGenerator(
+      makeIdGen('tx-1'),
+      clock,
+      '-50.00',
+      Asset.currency('USD'),
+      'Coffee shop',
+    );
+    await storage.appendTransactions(Id.fromString('acct-1'), [tx]);
+
+    const patchClock = makeClock('2024-06-15T15:00:00Z');
+    const result = await setTransactionAnnotation(
+      storage,
+      'acct-1',
+      'tx-1',
+      { category: 'food', tags: ['coffee', 'treat'] },
+      patchClock,
+    );
+
+    expect(result).toEqual({
+      success: true,
+      account_id: 'acct-1',
+      transaction_id: 'tx-1',
+      patch: {
+        timestamp: '2024-06-15T15:00:00+00:00',
+        category: 'food',
+        tags: ['coffee', 'treat'],
+      },
+      annotation: {
+        category: 'food',
+        tags: ['coffee', 'treat'],
+      },
+    });
+  });
+
+  it('clears a field when requested', async () => {
+    const storage = new MemoryStorage();
+    const clock = makeClock('2024-06-15T14:30:00Z');
+
+    await addConnection(storage, 'My Bank', makeIdGen('conn-1'), clock);
+    await addAccount(storage, 'conn-1', 'Checking', [], makeIdGen('acct-1'), clock);
+
+    const tx = Transaction.newWithGenerator(
+      makeIdGen('tx-1'),
+      clock,
+      '-1.00',
+      Asset.currency('USD'),
+      'Test',
+    );
+    await storage.appendTransactions(Id.fromString('acct-1'), [tx]);
+
+    const setNoteClock = makeClock('2024-06-15T15:00:00Z');
+    await setTransactionAnnotation(
+      storage,
+      'acct-1',
+      'tx-1',
+      { note: 'hello' },
+      setNoteClock,
+    );
+
+    const clearNoteClock = makeClock('2024-06-15T15:00:01Z');
+    const result = await setTransactionAnnotation(
+      storage,
+      'acct-1',
+      'tx-1',
+      { clear_note: true },
+      clearNoteClock,
+    );
+
+    expect(result).toEqual({
+      success: true,
+      account_id: 'acct-1',
+      transaction_id: 'tx-1',
+      patch: {
+        timestamp: '2024-06-15T15:00:01+00:00',
+        note: null,
+      },
+      annotation: null,
+    });
   });
 });

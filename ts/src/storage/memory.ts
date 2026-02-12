@@ -7,6 +7,7 @@ import {
   type ConnectionConfig,
 } from '../models/connection.js';
 import { type TransactionType } from '../models/transaction.js';
+import { type TransactionAnnotationPatchType } from '../models/transaction-annotation.js';
 import { type Storage, type CredentialStore } from './storage.js';
 
 /**
@@ -21,6 +22,7 @@ export class MemoryStorage implements Storage {
   private readonly accountConfigs = new Map<string, AccountConfig>();
   private readonly balances = new Map<string, BalanceSnapshotType[]>();
   private readonly transactions = new Map<string, TransactionType[]>();
+  private readonly transactionAnnotationPatches = new Map<string, TransactionAnnotationPatchType[]>();
 
   // -----------------------------------------------------------------------
   // Credentials
@@ -190,6 +192,24 @@ export class MemoryStorage implements Storage {
       existing.push(...txns);
     } else {
       this.transactions.set(key, [...txns]);
+    }
+  }
+
+  async getTransactionAnnotationPatches(accountId: Id): Promise<TransactionAnnotationPatchType[]> {
+    return this.transactionAnnotationPatches.get(accountId.asStr()) ?? [];
+  }
+
+  async appendTransactionAnnotationPatches(
+    accountId: Id,
+    patches: TransactionAnnotationPatchType[],
+  ): Promise<void> {
+    if (patches.length === 0) return;
+    const key = accountId.asStr();
+    const existing = this.transactionAnnotationPatches.get(key);
+    if (existing) {
+      existing.push(...patches);
+    } else {
+      this.transactionAnnotationPatches.set(key, [...patches]);
     }
   }
 }

@@ -17,6 +17,11 @@ name = "keepbook"
 path = "src/main.rs"
 required-features = ["cli"]
 
+[[bin]]
+name = "keepbook-sync-daemon"
+path = "src/bin/keepbook-sync-daemon.rs"
+required-features = ["cli", "tray"]
+
 [[example]]
 name = "plaid"
 path = "examples/plaid.rs"
@@ -69,6 +74,7 @@ sync = [
   "dep:p256",
   "dep:rand",
 ]
+tray = ["dep:ksni"]
 
 [dependencies]
 # Async runtime
@@ -120,6 +126,7 @@ futures = { version = "0.3", optional = true }
 # Structured logging
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"], optional = true }
+ksni = { version = "0.3", optional = true }
 
 [dev-dependencies]
 tempfile = "3"

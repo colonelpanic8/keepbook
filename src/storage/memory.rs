@@ -10,7 +10,7 @@ use tokio::sync::Mutex;
 use crate::credentials::CredentialStore;
 use crate::models::{
     Account, AccountConfig, BalanceSnapshot, Connection, ConnectionConfig, ConnectionState, Id,
-    Transaction,
+    Transaction, TransactionAnnotationPatch,
 };
 
 use super::Storage;
@@ -22,6 +22,7 @@ pub struct MemoryStorage {
     account_configs: StdMutex<HashMap<Id, AccountConfig>>,
     balances: Mutex<HashMap<Id, Vec<BalanceSnapshot>>>,
     transactions: Mutex<HashMap<Id, Vec<Transaction>>>,
+    transaction_annotation_patches: Mutex<HashMap<Id, Vec<TransactionAnnotationPatch>>>,
 }
 
 impl MemoryStorage {
@@ -32,6 +33,7 @@ impl MemoryStorage {
             account_configs: StdMutex::new(HashMap::new()),
             balances: Mutex::new(HashMap::new()),
             transactions: Mutex::new(HashMap::new()),
+            transaction_annotation_patches: Mutex::new(HashMap::new()),
         }
     }
 
@@ -239,6 +241,30 @@ impl Storage for MemoryStorage {
         txns.entry(account_id.clone())
             .or_default()
             .extend(new_txns.iter().cloned());
+        Ok(())
+    }
+
+    async fn get_transaction_annotation_patches(
+        &self,
+        account_id: &Id,
+    ) -> Result<Vec<TransactionAnnotationPatch>> {
+        let patches = self.transaction_annotation_patches.lock().await;
+        Ok(patches.get(account_id).cloned().unwrap_or_default())
+    }
+
+    async fn append_transaction_annotation_patches(
+        &self,
+        account_id: &Id,
+        new_patches: &[TransactionAnnotationPatch],
+    ) -> Result<()> {
+        if new_patches.is_empty() {
+            return Ok(());
+        }
+        let mut patches = self.transaction_annotation_patches.lock().await;
+        patches
+            .entry(account_id.clone())
+            .or_default()
+            .extend(new_patches.iter().cloned());
         Ok(())
     }
 }

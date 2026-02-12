@@ -15,6 +15,13 @@ import { type IdGenerator, UuidIdGenerator } from '../models/id-generator.js';
 import { type Clock, SystemClock } from '../clock.js';
 import { parseAsset, formatRfc3339, decStr } from './format.js';
 import { Decimal } from '../decimal.js';
+import {
+  TransactionAnnotationPatch,
+  applyTransactionAnnotationPatch,
+  isEmptyTransactionAnnotation,
+  type TransactionAnnotationPatchType,
+  type TransactionAnnotationType,
+} from '../models/transaction-annotation.js';
 
 // ---------------------------------------------------------------------------
 // addConnection
@@ -244,5 +251,141 @@ export async function setBalance(
       amount: decStr(amount),
       timestamp: formatRfc3339(snapshot.timestamp),
     },
+  };
+}
+
+export type SetTransactionAnnotationArgs = {
+  description?: string;
+  clear_description?: boolean;
+  note?: string;
+  clear_note?: boolean;
+  category?: string;
+  clear_category?: boolean;
+  tags?: string[];
+  tags_empty?: boolean;
+  clear_tags?: boolean;
+};
+
+/**
+ * Append a transaction annotation patch for a transaction in an account.
+ *
+ * This does not modify the underlying transaction record; it stores a separate
+ * append-only patch stream.
+ */
+export async function setTransactionAnnotation(
+  storage: Storage,
+  accountIdStr: string,
+  transactionIdStr: string,
+  args: SetTransactionAnnotationArgs,
+  clock?: Clock,
+): Promise<object> {
+  const description = args.description;
+  const clearDescription = args.clear_description ?? false;
+  const note = args.note;
+  const clearNote = args.clear_note ?? false;
+  const category = args.category;
+  const clearCategory = args.clear_category ?? false;
+  const tags = args.tags ?? [];
+  const tagsEmpty = args.tags_empty ?? false;
+  const clearTags = args.clear_tags ?? false;
+
+  if (clearDescription && description !== undefined) {
+    return { success: false, error: 'Cannot use description and clear_description together' };
+  }
+  if (clearNote && note !== undefined) {
+    return { success: false, error: 'Cannot use note and clear_note together' };
+  }
+  if (clearCategory && category !== undefined) {
+    return { success: false, error: 'Cannot use category and clear_category together' };
+  }
+  if (clearTags && (tagsEmpty || tags.length > 0)) {
+    return { success: false, error: 'Cannot use clear_tags with tags/tags_empty' };
+  }
+
+  const hasChange =
+    description !== undefined ||
+    clearDescription ||
+    note !== undefined ||
+    clearNote ||
+    category !== undefined ||
+    clearCategory ||
+    tags.length > 0 ||
+    tagsEmpty ||
+    clearTags;
+  if (!hasChange) {
+    return { success: false, error: 'No annotation fields specified' };
+  }
+
+  let accountId: Id;
+  let transactionId: Id;
+  try {
+    accountId = Id.fromStringChecked(accountIdStr);
+  } catch {
+    return { success: false, error: `Invalid account id: ${accountIdStr}` };
+  }
+  try {
+    transactionId = Id.fromStringChecked(transactionIdStr);
+  } catch {
+    return { success: false, error: `Invalid transaction id: ${transactionIdStr}` };
+  }
+
+  const account = await storage.getAccount(accountId);
+  if (account === null) {
+    return { success: false, error: `Account not found: '${accountIdStr}'` };
+  }
+
+  const txns = await storage.getTransactions(accountId);
+  if (!txns.some((t) => t.id.equals(transactionId))) {
+    return { success: false, error: `Transaction not found for account: '${transactionIdStr}'` };
+  }
+
+  const now = (clock ?? new SystemClock()).now();
+  const patch: TransactionAnnotationPatchType = {
+    transaction_id: transactionId,
+    timestamp: now,
+  };
+  if (clearDescription) patch.description = null;
+  else if (description !== undefined) patch.description = description;
+  if (clearNote) patch.note = null;
+  else if (note !== undefined) patch.note = note;
+  if (clearCategory) patch.category = null;
+  else if (category !== undefined) patch.category = category;
+  if (clearTags) patch.tags = null;
+  else if (tagsEmpty) patch.tags = [];
+  else if (tags.length > 0) patch.tags = [...tags];
+
+  await storage.appendTransactionAnnotationPatches(accountId, [patch]);
+
+  // Materialize current annotation state for the transaction.
+  const patches = await storage.getTransactionAnnotationPatches(accountId);
+  let ann: TransactionAnnotationType = { transaction_id: transactionId };
+  for (const p of patches) {
+    if (!p.transaction_id.equals(transactionId)) continue;
+    ann = applyTransactionAnnotationPatch(ann, p);
+  }
+
+  const patchJson = TransactionAnnotationPatch.toJSON(patch);
+  const patchOut: Record<string, unknown> = { timestamp: formatRfc3339(now) };
+  if (patchJson.description !== undefined) patchOut.description = patchJson.description;
+  if (patchJson.note !== undefined) patchOut.note = patchJson.note;
+  if (patchJson.category !== undefined) patchOut.category = patchJson.category;
+  if (patchJson.tags !== undefined) patchOut.tags = patchJson.tags;
+
+  let annotationOut: Record<string, unknown> | null = null;
+  if (!isEmptyTransactionAnnotation(ann)) {
+    const m: Record<string, unknown> = {};
+    if (ann.description !== undefined) m.description = ann.description;
+    if (ann.note !== undefined) m.note = ann.note;
+    if (ann.category !== undefined) m.category = ann.category;
+    if (ann.tags !== undefined) m.tags = ann.tags;
+    annotationOut = m;
+  }
+
+  return {
+    success: true,
+    account_id: account.id.asStr(),
+    transaction_id: transactionIdStr,
+    patch: patchOut,
+    annotation: annotationOut,
   };
 }

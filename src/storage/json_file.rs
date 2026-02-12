@@ -28,6 +28,7 @@ use crate::models::{
 ///       account.json
 ///       balances.jsonl
 ///       transactions.jsonl
+///       transaction_annotations.jsonl
 /// ```
 #[derive(Clone)]
 pub struct JsonFileStorage {
@@ -146,6 +147,10 @@ impl JsonFileStorage {
 
     fn transactions_file(&self, account_id: &Id) -> Result<PathBuf> {
         Ok(self.account_dir(account_id)?.join("transactions.jsonl"))
+    }
+
+    fn transaction_annotations_file(&self, account_id: &Id) -> Result<PathBuf> {
+        Ok(self.account_dir(account_id)?.join("transaction_annotations.jsonl"))
     }
 
     /// Sanitize a name for use as a symlink filename.
@@ -752,6 +757,23 @@ impl Storage for JsonFileStorage {
     async fn append_transactions(&self, account_id: &Id, txns: &[Transaction]) -> Result<()> {
         let path = self.transactions_file(account_id)?;
         self.append_jsonl(&path, txns).await
+    }
+
+    async fn get_transaction_annotation_patches(
+        &self,
+        account_id: &Id,
+    ) -> Result<Vec<crate::models::TransactionAnnotationPatch>> {
+        let path = self.transaction_annotations_file(account_id)?;
+        self.read_jsonl(&path).await
+    }
+
+    async fn append_transaction_annotation_patches(
+        &self,
+        account_id: &Id,
+        patches: &[crate::models::TransactionAnnotationPatch],
+    ) -> Result<()> {
+        let path = self.transaction_annotations_file(account_id)?;
+        self.append_jsonl(&path, patches).await
     }
 
     async fn get_latest_balance_snapshot(

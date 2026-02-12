@@ -57,6 +57,14 @@ export interface TransactionOutput {
   amount: string;
   asset: AssetType;
   status: string;
+  annotation?: TransactionAnnotationOutput;
+}
+
+export interface TransactionAnnotationOutput {
+  description?: string;
+  note?: string;
+  category?: string;
+  tags?: string[];
 }
 
 // ---------------------------------------------------------------------------

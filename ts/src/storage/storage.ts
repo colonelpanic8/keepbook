@@ -3,6 +3,7 @@ import { type AccountType, type AccountConfig } from '../models/account.js';
 import { type BalanceSnapshotType } from '../models/balance.js';
 import { type ConnectionType, type ConnectionConfig } from '../models/connection.js';
 import { type TransactionType } from '../models/transaction.js';
+import { type TransactionAnnotationPatchType } from '../models/transaction-annotation.js';
 
 // ---------------------------------------------------------------------------
 // CredentialStore
@@ -58,4 +59,11 @@ export interface Storage {
   getTransactions(accountId: Id): Promise<TransactionType[]>;
   getTransactionsRaw(accountId: Id): Promise<TransactionType[]>;
   appendTransactions(accountId: Id, txns: TransactionType[]): Promise<void>;
+
+  // Transaction annotations (append-only patches)
+  getTransactionAnnotationPatches(accountId: Id): Promise<TransactionAnnotationPatchType[]>;
+  appendTransactionAnnotationPatches(
+    accountId: Id,
+    patches: TransactionAnnotationPatchType[],
+  ): Promise<void>;
 }

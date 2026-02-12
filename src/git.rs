@@ -126,7 +126,9 @@ pub fn try_merge_origin_master(data_dir: &Path) -> Result<MergeOriginMasterOutco
         let stderr = String::from_utf8_lossy(&head_before.stderr);
         anyhow::bail!("git rev-parse HEAD failed: {stderr}");
     }
-    let head_before = String::from_utf8_lossy(&head_before.stdout).trim().to_string();
+    let head_before = String::from_utf8_lossy(&head_before.stdout)
+        .trim()
+        .to_string();
 
     let fetch = git_output(&data_dir, &["fetch", "origin", "master"])?;
     if !fetch.status.success() {
@@ -141,7 +143,9 @@ pub fn try_merge_origin_master(data_dir: &Path) -> Result<MergeOriginMasterOutco
             let stderr = String::from_utf8_lossy(&head_after.stderr);
             anyhow::bail!("git rev-parse HEAD failed: {stderr}");
         }
-        let head_after = String::from_utf8_lossy(&head_after.stdout).trim().to_string();
+        let head_after = String::from_utf8_lossy(&head_after.stdout)
+            .trim()
+            .to_string();
         if head_before == head_after {
             return Ok(MergeOriginMasterOutcome::UpToDate);
         }

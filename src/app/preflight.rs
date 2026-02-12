@@ -32,4 +32,3 @@ pub fn run_preflight(config: &ResolvedConfig, opts: PreflightOptions) -> Result<
 
     Ok(())
 }
-

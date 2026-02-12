@@ -19,6 +19,11 @@ import { NullMarketDataStore, type MarketDataStore } from '../market-data/store.
 import { Decimal } from '../decimal.js';
 import { formatDateYMD, formatRfc3339, formatRfc3339FromEpochNanos, decStr } from './format.js';
 import {
+  applyTransactionAnnotationPatch,
+  isEmptyTransactionAnnotation,
+  type TransactionAnnotationType,
+} from '../models/transaction-annotation.js';
+import {
   type ConnectionOutput,
   type AccountOutput,
   type BalanceOutput,
@@ -285,8 +290,29 @@ export async function listTransactions(storage: Storage): Promise<TransactionOut
 
   for (const account of accounts) {
     const transactions = await storage.getTransactions(account.id);
+    const patches = await storage.getTransactionAnnotationPatches(account.id);
+
+    // Materialize last-write-wins annotation state per transaction id.
+    const annByTx = new Map<string, TransactionAnnotationType>();
+    for (const p of patches) {
+      const key = p.transaction_id.asStr();
+      const base = annByTx.get(key) ?? { transaction_id: p.transaction_id };
+      annByTx.set(key, applyTransactionAnnotationPatch(base, p));
+    }
+
     for (const tx of transactions) {
-      result.push({
+      const ann = annByTx.get(tx.id.asStr());
+      const annotation =
+        ann && !isEmptyTransactionAnnotation(ann)
+          ? {
+              ...(ann.description !== undefined ? { description: ann.description } : {}),
+              ...(ann.note !== undefined ? { note: ann.note } : {}),
+              ...(ann.category !== undefined ? { category: ann.category } : {}),
+              ...(ann.tags !== undefined ? { tags: ann.tags } : {}),
+            }
+          : undefined;
+
+      const out: TransactionOutput = {
         id: tx.id.asStr(),
         account_id: account.id.asStr(),
         timestamp: formatRfc3339PreservingRaw(tx.timestamp, tx.timestamp_raw),
@@ -294,7 +320,11 @@ export async function listTransactions(storage: Storage): Promise<TransactionOut
         amount: tx.amount,
         asset: assetForListOutput(tx.asset),
         status: tx.status,
-      });
+      };
+      if (annotation !== undefined) {
+        out.annotation = annotation;
+      }
+      result.push(out);
     }
   }
 

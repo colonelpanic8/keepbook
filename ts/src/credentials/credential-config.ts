@@ -37,7 +37,22 @@ export type CredentialConfig = PassConfig;
  * @throws Error if the TOML is invalid or required fields are missing.
  */
 export function parseCredentialConfig(input: string): CredentialConfig {
-  const raw = toml.parse(input) as Record<string, unknown>;
+  const raw = toml.parse(input) as unknown;
+  return parseCredentialConfigValue(raw);
+}
+
+/**
+ * Parse a value (typically already TOML-parsed) into a `CredentialConfig`.
+ *
+ * This is useful when credential config is embedded inside another TOML file
+ * (e.g. `connection.toml` has a `[credentials]` table).
+ */
+export function parseCredentialConfigValue(input: unknown): CredentialConfig {
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) {
+    throw new Error('Credential config must be a table/object');
+  }
+
+  const raw = input as Record<string, unknown>;
 
   const backend = raw['backend'];
   if (typeof backend !== 'string') {

@@ -60,7 +60,11 @@ struct Cli {
     git_merge_master: bool,
 
     /// Skip merging origin/master even if enabled in config.
-    #[arg(long = "skip-git-merge-master", global = true, conflicts_with = "git_merge_master")]
+    #[arg(
+        long = "skip-git-merge-master",
+        global = true,
+        conflicts_with = "git_merge_master"
+    )]
     skip_git_merge_master: bool,
 
     #[command(subcommand)]
@@ -143,6 +147,53 @@ enum SetCommand {
         /// Amount
         #[arg(long)]
         amount: String,
+    },
+
+    /// Set a transaction annotation (append-only patch)
+    Transaction {
+        /// Account ID
+        #[arg(long)]
+        account: String,
+
+        /// Transaction ID
+        #[arg(long)]
+        transaction: String,
+
+        /// Override description
+        #[arg(long, conflicts_with = "clear_description")]
+        description: Option<String>,
+
+        /// Clear description override
+        #[arg(long)]
+        clear_description: bool,
+
+        /// Set note
+        #[arg(long, conflicts_with = "clear_note")]
+        note: Option<String>,
+
+        /// Clear note
+        #[arg(long)]
+        clear_note: bool,
+
+        /// Set category
+        #[arg(long, conflicts_with = "clear_category")]
+        category: Option<String>,
+
+        /// Clear category
+        #[arg(long)]
+        clear_category: bool,
+
+        /// Set tags (repeatable)
+        #[arg(long, short)]
+        tag: Vec<String>,
+
+        /// Set tags to empty array
+        #[arg(long, conflicts_with = "clear_tags")]
+        tags_empty: bool,
+
+        /// Clear tags field
+        #[arg(long)]
+        clear_tags: bool,
     },
 }
 
@@ -443,6 +494,37 @@ async fn main() -> Result<()> {
                 let result =
                     app::set_balance(storage_arc.as_ref(), &config, &account, &asset, &amount)
                         .await?;
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
+            SetCommand::Transaction {
+                account,
+                transaction,
+                description,
+                clear_description,
+                note,
+                clear_note,
+                category,
+                clear_category,
+                tag,
+                tags_empty,
+                clear_tags,
+            } => {
+                let result = app::set_transaction_annotation(
+                    storage_arc.as_ref(),
+                    &config,
+                    &account,
+                    &transaction,
+                    description,
+                    clear_description,
+                    note,
+                    clear_note,
+                    category,
+                    clear_category,
+                    tag,
+                    tags_empty,
+                    clear_tags,
+                )
+                .await?;
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
         },

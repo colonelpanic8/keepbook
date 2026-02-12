@@ -9,6 +9,7 @@ pub use memory::MemoryStorage;
 use crate::credentials::CredentialStore;
 use crate::models::{
     Account, AccountConfig, BalanceSnapshot, Connection, ConnectionConfig, Id, Transaction,
+    TransactionAnnotationPatch,
 };
 use anyhow::Result;
 
@@ -63,6 +64,17 @@ pub trait Storage: Send + Sync {
         self.get_transactions(account_id).await
     }
     async fn append_transactions(&self, account_id: &Id, txns: &[Transaction]) -> Result<()>;
+
+    // Transaction annotations (append-only patches)
+    async fn get_transaction_annotation_patches(
+        &self,
+        account_id: &Id,
+    ) -> Result<Vec<TransactionAnnotationPatch>>;
+    async fn append_transaction_annotation_patches(
+        &self,
+        account_id: &Id,
+        patches: &[TransactionAnnotationPatch],
+    ) -> Result<()>;
 }
 
 /// Filesystem-y operations that only make sense for the JSON file layout.

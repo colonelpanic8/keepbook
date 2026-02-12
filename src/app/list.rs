@@ -7,11 +7,12 @@ use chrono::NaiveDate;
 
 use crate::config::ResolvedConfig;
 use crate::market_data::{MarketDataService, MarketDataServiceBuilder, PriceSourceRegistry};
-use crate::models::{Asset, Id};
+use crate::models::{Asset, Id, TransactionAnnotation};
 use crate::storage::Storage;
 
 use super::{
     AccountOutput, AllOutput, BalanceOutput, ConnectionOutput, PriceSourceOutput, TransactionOutput,
+    TransactionAnnotationOutput,
 };
 
 pub async fn list_connections(storage: &dyn Storage) -> Result<Vec<ConnectionOutput>> {
@@ -225,7 +226,32 @@ pub async fn list_transactions(storage: &dyn Storage) -> Result<Vec<TransactionO
 
     for account in accounts {
         let transactions = storage.get_transactions(&account.id).await?;
+        let patches = storage.get_transaction_annotation_patches(&account.id).await?;
+
+        // Materialize last-write-wins annotation state per transaction id.
+        let mut annotations_by_tx: HashMap<Id, TransactionAnnotation> = HashMap::new();
+        for patch in patches {
+            let tx_id = patch.transaction_id.clone();
+            let ann = annotations_by_tx
+                .entry(tx_id.clone())
+                .or_insert_with(|| TransactionAnnotation::new(tx_id));
+            patch.apply_to(ann);
+        }
+
         for tx in transactions {
+            let annotation = annotations_by_tx.get(&tx.id).and_then(|ann| {
+                if ann.is_empty() {
+                    None
+                } else {
+                    Some(TransactionAnnotationOutput {
+                        description: ann.description.clone(),
+                        note: ann.note.clone(),
+                        category: ann.category.clone(),
+                        tags: ann.tags.clone(),
+                    })
+                }
+            });
+
             output.push(TransactionOutput {
                 id: tx.id.to_string(),
                 account_id: account.id.to_string(),
@@ -234,6 +260,7 @@ pub async fn list_transactions(storage: &dyn Storage) -> Result<Vec<TransactionO
                 amount: tx.amount.clone(),
                 asset: serde_json::to_value(&tx.asset).unwrap_or_default(),
                 status: format!("{:?}", tx.status).to_lowercase(),
+                annotation,
             });
         }
     }
@@ -248,4 +275,49 @@ pub async fn list_all(storage: &dyn Storage, config: &ResolvedConfig) -> Result<
         price_sources: list_price_sources(&config.data_dir)?,
         balances: list_balances(storage, config).await?,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::clock::{Clock, FixedClock};
+    use crate::models::{Account, Asset, FixedIdGenerator, Transaction, TransactionAnnotationPatch};
+    use crate::storage::MemoryStorage;
+    use chrono::{TimeZone, Utc};
+
+    #[tokio::test]
+    async fn list_transactions_includes_annotation_when_present() -> Result<()> {
+        let storage = MemoryStorage::new();
+        let clock = FixedClock::new(Utc.with_ymd_and_hms(2026, 2, 5, 12, 0, 0).unwrap());
+
+        let account_id = Id::from_string("acct-1");
+        let account = Account::new_with(account_id.clone(), clock.now(), "Checking", Id::from_string("conn-1"));
+        storage.save_account(&account).await?;
+
+        let ids = FixedIdGenerator::new([Id::from_string("tx-1")]);
+        let tx = Transaction::new_with_generator(&ids, &clock, "-1", Asset::currency("USD"), "RAW");
+        storage.append_transactions(&account_id, &[tx]).await?;
+
+        let patch = TransactionAnnotationPatch {
+            transaction_id: Id::from_string("tx-1"),
+            timestamp: clock.now(),
+            description: None,
+            note: None,
+            category: Some(Some("food".to_string())),
+            tags: Some(Some(vec!["coffee".to_string()])),
+        };
+        storage
+            .append_transaction_annotation_patches(&account_id, &[patch])
+            .await?;
+
+        let out = list_transactions(&storage).await?;
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].id, "tx-1");
+        assert_eq!(out[0].annotation.as_ref().unwrap().category.as_deref(), Some("food"));
+        assert_eq!(
+            out[0].annotation.as_ref().unwrap().tags.clone().unwrap(),
+            vec!["coffee".to_string()]
+        );
+        Ok(())
+    }
 }

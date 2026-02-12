@@ -314,7 +314,9 @@ mod tests {
     use chrono::{Datelike, TimeZone, Timelike};
     use std::sync::Arc;
 
-    use crate::market_data::{AssetId, MarketDataStore, MemoryMarketDataStore, PriceKind, PricePoint};
+    use crate::market_data::{
+        AssetId, MarketDataStore, MemoryMarketDataStore, PriceKind, PricePoint,
+    };
     use crate::models::{Account, AssetBalance, Connection, ConnectionConfig, ConnectionState};
     use crate::storage::{MemoryStorage, Storage};
 
@@ -597,7 +599,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn collect_change_points_orders_same_timestamp_price_triggers_by_asset_id() -> Result<()> {
+    async fn collect_change_points_orders_same_timestamp_price_triggers_by_asset_id() -> Result<()>
+    {
         let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new());
         let market_data: Arc<dyn MarketDataStore> = Arc::new(MemoryMarketDataStore::new());
 
@@ -674,7 +677,8 @@ mod tests {
         )
         .await?;
 
-        let expected_price_ts = date_to_timestamp(chrono::NaiveDate::from_ymd_opt(2024, 6, 15).unwrap());
+        let expected_price_ts =
+            date_to_timestamp(chrono::NaiveDate::from_ymd_opt(2024, 6, 15).unwrap());
         let price_point = points
             .iter()
             .find(|p| p.timestamp == expected_price_ts)

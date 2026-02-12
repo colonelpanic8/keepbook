@@ -7,7 +7,7 @@ use crate::clock::{Clock, SystemClock};
 use crate::config::ResolvedConfig;
 use crate::models::{
     Account, Asset, AssetBalance, BalanceSnapshot, Connection, ConnectionConfig, ConnectionState,
-    Id, IdGenerator, UuidIdGenerator,
+    Id, IdGenerator, TransactionAnnotation, TransactionAnnotationPatch, UuidIdGenerator,
 };
 use crate::storage::Storage;
 
@@ -248,6 +248,178 @@ pub async fn set_balance(
     });
 
     maybe_auto_commit(config, &format!("set balance {account_id} {asset_str}"));
+
+    Ok(result)
+}
+
+pub async fn set_transaction_annotation(
+    storage: &dyn Storage,
+    config: &ResolvedConfig,
+    account_id: &str,
+    transaction_id: &str,
+    description: Option<String>,
+    clear_description: bool,
+    note: Option<String>,
+    clear_note: bool,
+    category: Option<String>,
+    clear_category: bool,
+    tags: Vec<String>,
+    tags_empty: bool,
+    clear_tags: bool,
+) -> Result<serde_json::Value> {
+    if clear_description && description.is_some() {
+        anyhow::bail!("Cannot use --description and --clear-description together");
+    }
+    if clear_note && note.is_some() {
+        anyhow::bail!("Cannot use --note and --clear-note together");
+    }
+    if clear_category && category.is_some() {
+        anyhow::bail!("Cannot use --category and --clear-category together");
+    }
+    if clear_tags && (tags_empty || !tags.is_empty()) {
+        anyhow::bail!("Cannot use --clear-tags with --tag/--tags-empty");
+    }
+
+    let acct_id = Id::from_string_checked(account_id)
+        .with_context(|| format!("Invalid account id: {account_id}"))?;
+    let tx_id = Id::from_string_checked(transaction_id)
+        .with_context(|| format!("Invalid transaction id: {transaction_id}"))?;
+
+    let has_change = description.is_some()
+        || clear_description
+        || note.is_some()
+        || clear_note
+        || category.is_some()
+        || clear_category
+        || !tags.is_empty()
+        || tags_empty
+        || clear_tags;
+    if !has_change {
+        anyhow::bail!("No annotation fields specified");
+    }
+
+    // Verify account exists.
+    storage
+        .get_account(&acct_id)
+        .await?
+        .context("Account not found")?;
+
+    // Verify transaction exists for this account (annotation scope is per-account).
+    let txns = storage.get_transactions(&acct_id).await?;
+    if !txns.iter().any(|t| t.id == tx_id) {
+        anyhow::bail!("Transaction not found for account");
+    }
+
+    let mut patch = TransactionAnnotationPatch {
+        transaction_id: tx_id.clone(),
+        timestamp: chrono::Utc::now(),
+        description: None,
+        note: None,
+        category: None,
+        tags: None,
+    };
+
+    if clear_description {
+        patch.description = Some(None);
+    } else if let Some(v) = description {
+        patch.description = Some(Some(v));
+    }
+    if clear_note {
+        patch.note = Some(None);
+    } else if let Some(v) = note {
+        patch.note = Some(Some(v));
+    }
+    if clear_category {
+        patch.category = Some(None);
+    } else if let Some(v) = category {
+        patch.category = Some(Some(v));
+    }
+    if clear_tags {
+        patch.tags = Some(None);
+    } else if tags_empty {
+        patch.tags = Some(Some(Vec::new()));
+    } else if !tags.is_empty() {
+        patch.tags = Some(Some(tags));
+    }
+
+    storage
+        .append_transaction_annotation_patches(&acct_id, &[patch.clone()])
+        .await?;
+
+    // Materialize current annotation state for the transaction.
+    let patches = storage.get_transaction_annotation_patches(&acct_id).await?;
+    let mut ann = TransactionAnnotation::new(tx_id.clone());
+    for p in patches.into_iter().filter(|p| p.transaction_id == tx_id) {
+        p.apply_to(&mut ann);
+    }
+
+    let mut patch_json = serde_json::Map::new();
+    patch_json.insert("timestamp".to_string(), serde_json::json!(patch.timestamp.to_rfc3339()));
+    if let Some(v) = patch.description {
+        patch_json.insert(
+            "description".to_string(),
+            match v {
+                Some(s) => serde_json::json!(s),
+                None => serde_json::Value::Null,
+            },
+        );
+    }
+    if let Some(v) = patch.note {
+        patch_json.insert(
+            "note".to_string(),
+            match v {
+                Some(s) => serde_json::json!(s),
+                None => serde_json::Value::Null,
+            },
+        );
+    }
+    if let Some(v) = patch.category {
+        patch_json.insert(
+            "category".to_string(),
+            match v {
+                Some(s) => serde_json::json!(s),
+                None => serde_json::Value::Null,
+            },
+        );
+    }
+    if let Some(v) = patch.tags {
+        patch_json.insert(
+            "tags".to_string(),
+            match v {
+                Some(tags) => serde_json::json!(tags),
+                None => serde_json::Value::Null,
+            },
+        );
+    }
+
+    let annotation_json = if ann.is_empty() {
+        serde_json::Value::Null
+    } else {
+        let mut m = serde_json::Map::new();
+        if let Some(v) = ann.description {
+            m.insert("description".to_string(), serde_json::json!(v));
+        }
+        if let Some(v) = ann.note {
+            m.insert("note".to_string(), serde_json::json!(v));
+        }
+        if let Some(v) = ann.category {
+            m.insert("category".to_string(), serde_json::json!(v));
+        }
+        if let Some(v) = ann.tags {
+            m.insert("tags".to_string(), serde_json::json!(v));
+        }
+        serde_json::Value::Object(m)
+    };
+
+    let result = serde_json::json!({
+        "success": true,
+        "account_id": account_id,
+        "transaction_id": transaction_id,
+        "patch": serde_json::Value::Object(patch_json),
+        "annotation": annotation_json
+    });
+
+    maybe_auto_commit(config, &format!("set transaction annotation {account_id} {transaction_id}"));
 
     Ok(result)
 }

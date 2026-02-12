@@ -9,6 +9,7 @@ import { Asset } from '../models/asset.js';
 import { BalanceSnapshot, AssetBalance } from '../models/balance.js';
 import { Connection, ConnectionState, type ConnectionConfig } from '../models/connection.js';
 import { Transaction } from '../models/transaction.js';
+import { type TransactionAnnotationPatchType } from '../models/transaction-annotation.js';
 import { FixedIdGenerator } from '../models/id-generator.js';
 import { FixedClock } from '../clock.js';
 
@@ -71,9 +72,57 @@ describe('JsonFileStorage', () => {
   // -----------------------------------------------------------------------
 
   describe('getCredentialStore', () => {
-    it('always returns null', () => {
-      const result = storage.getCredentialStore(Id.new());
+    it('returns null when no credentials configured', async () => {
+      const connId = Id.fromString('conn-creds-none');
+      await writeConnectionConfig(tmpDir, connId, { name: 'No Creds', synchronizer: 'coinbase' });
+      const result = storage.getCredentialStore(connId);
       expect(result).toBeNull();
+    });
+
+    it('returns a pass store when inline credentials exist in connection.toml', async () => {
+      const connId = Id.fromString('conn-creds-inline');
+      const dir = path.join(tmpDir, 'connections', connId.asStr());
+      await fs.mkdir(dir, { recursive: true });
+
+      const toml = [
+        'name = "Inline Creds"',
+        'synchronizer = "coinbase"',
+        '',
+        '[credentials]',
+        'backend = "pass"',
+        'path = "finance/coinbase-api"',
+        '',
+        '[credentials.fields]',
+        'key_name = "key-name"',
+        'private_key = "private-key"',
+        '',
+      ].join('\n');
+      await fs.writeFile(path.join(dir, 'connection.toml'), toml);
+
+      const store = storage.getCredentialStore(connId);
+      expect(store).not.toBeNull();
+      expect(store!.supportsWrite()).toBe(true);
+    });
+
+    it('falls back to credentials.toml when connection.toml has no inline credentials', async () => {
+      const connId = Id.fromString('conn-creds-file');
+      await writeConnectionConfig(tmpDir, connId, { name: 'File Creds', synchronizer: 'coinbase' });
+
+      const dir = path.join(tmpDir, 'connections', connId.asStr());
+      const credsToml = [
+        'backend = "pass"',
+        'path = "finance/coinbase-api"',
+        '',
+        '[fields]',
+        'key_name = "key-name"',
+        'private_key = "private-key"',
+        '',
+      ].join('\n');
+      await fs.writeFile(path.join(dir, 'credentials.toml'), credsToml);
+
+      const store = storage.getCredentialStore(connId);
+      expect(store).not.toBeNull();
+      expect(store!.supportsWrite()).toBe(true);
     });
   });
 
@@ -579,6 +628,49 @@ describe('JsonFileStorage', () => {
   });
 
   // -----------------------------------------------------------------------
+  // Transaction annotations
+  // -----------------------------------------------------------------------
+
+  describe('transaction annotations', () => {
+    it('append and get transaction annotation patches (JSONL)', async () => {
+      const acctId = Id.fromString('acct-ann');
+      const acct = makeAccount('Ann', Id.fromString('conn-1'), acctId);
+      await storage.saveAccount(acct);
+
+      const p1: TransactionAnnotationPatchType = {
+        transaction_id: Id.fromString('tx-1'),
+        timestamp: new Date('2024-06-15T12:00:00Z'),
+        description: 'Coffee shop',
+      };
+      const p2: TransactionAnnotationPatchType = {
+        transaction_id: Id.fromString('tx-1'),
+        timestamp: new Date('2024-06-15T12:00:01Z'),
+        note: null, // explicit clear
+      };
+
+      await storage.appendTransactionAnnotationPatches(acctId, [p1, p2]);
+
+      const all = await storage.getTransactionAnnotationPatches(acctId);
+      expect(all).toHaveLength(2);
+      expect(all[0].transaction_id.asStr()).toBe('tx-1');
+      expect(all[0].description).toBe('Coffee shop');
+      expect(all[1].note).toBeNull();
+    });
+
+    it('returns empty array for unknown account', async () => {
+      const all = await storage.getTransactionAnnotationPatches(Id.fromString('no-such'));
+      expect(all).toEqual([]);
+    });
+
+    it('appendTransactionAnnotationPatches with empty array is a no-op', async () => {
+      const acctId = Id.fromString('acct-ann-empty');
+      await storage.appendTransactionAnnotationPatches(acctId, []);
+      const all = await storage.getTransactionAnnotationPatches(acctId);
+      expect(all).toEqual([]);
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // Path safety validation
   // -----------------------------------------------------------------------
 
@@ -645,6 +737,30 @@ describe('JsonFileStorage', () => {
       const parsed = JSON.parse(lines[0]);
       expect(parsed.id).toBe('tx-j1');
       expect(parsed.amount).toBe('42.00');
+    });
+
+    it('transaction annotations file is valid JSONL', async () => {
+      const acctId = Id.fromString('acct-annjsonl');
+      const acct = makeAccount('AnnJSONL', Id.fromString('conn-1'), acctId);
+      await storage.saveAccount(acct);
+
+      const p: TransactionAnnotationPatchType = {
+        transaction_id: Id.fromString('tx-1'),
+        timestamp: new Date('2024-06-15T12:00:00Z'),
+        category: 'food',
+        tags: ['coffee', 'treat'],
+      };
+      await storage.appendTransactionAnnotationPatches(acctId, [p]);
+
+      const filePath = path.join(tmpDir, 'accounts', acctId.asStr(), 'transaction_annotations.jsonl');
+      const content = await fs.readFile(filePath, 'utf-8');
+      const lines = content.trim().split('\n');
+      expect(lines).toHaveLength(1);
+
+      const parsed = JSON.parse(lines[0]);
+      expect(parsed.transaction_id).toBe('tx-1');
+      expect(parsed.category).toBe('food');
+      expect(parsed.tags).toEqual(['coffee', 'treat']);
     });
   });
 

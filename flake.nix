@@ -21,8 +21,34 @@
           "rustfmt"
           "rust-analyzer"
         ];
+        mkKeepbookPackage = {
+          pname,
+          buildFeatures ? [ ],
+          extraBuildInputs ? [ ],
+          extraNativeBuildInputs ? [ ],
+        }:
+          pkgs.rustPlatform.buildRustPackage {
+            inherit pname buildFeatures;
+            version = "0.1.0";
+            src = ./.;
+            cargoLock = {
+              lockFile = ./Cargo.lock;
+            };
+            nativeBuildInputs = [ pkgs.pkg-config ] ++ extraNativeBuildInputs;
+            buildInputs = extraBuildInputs;
+          };
       in
       {
+        packages = {
+          default = mkKeepbookPackage { pname = "keepbook"; };
+          keepbook = mkKeepbookPackage { pname = "keepbook"; };
+          keepbook-tray = mkKeepbookPackage {
+            pname = "keepbook-tray";
+            buildFeatures = [ "tray" ];
+            extraBuildInputs = [ pkgs.dbus ];
+          };
+        };
+
         devShells.default = pkgs.mkShell {
           buildInputs = [
             toolchain
@@ -30,6 +56,7 @@
             pkgs.just
             pkgs.nodejs_22
             pkgs.yarn
+            pkgs.dbus
           ];
         };
       }

@@ -11,7 +11,13 @@ import {
   listPriceSources,
   listAll,
 } from '../app/list.js';
-import { addConnection, addAccount, removeConnection, setBalance } from '../app/mutations.js';
+import {
+  addConnection,
+  addAccount,
+  removeConnection,
+  setBalance,
+  setTransactionAnnotation,
+} from '../app/mutations.js';
 import { portfolioSnapshot, portfolioHistory, portfolioChangePoints } from '../app/portfolio.js';
 import {
   syncConnection,
@@ -188,6 +194,69 @@ set
     });
   });
 
+set
+  .command('transaction')
+  .description('Set a transaction annotation (append-only patch)')
+  .requiredOption('--account <id>', 'account ID')
+  .requiredOption('--transaction <id>', 'transaction ID')
+  .option('--description <text>', 'override description')
+  .option('--clear-description', 'clear description override')
+  .option('--note <text>', 'set note')
+  .option('--clear-note', 'clear note')
+  .option('--category <text>', 'set category')
+  .option('--clear-category', 'clear category')
+  .option(
+    '--tag <tag>',
+    'tag (repeatable)',
+    (val: string, arr: string[]) => [...arr, val],
+    [] as string[],
+  )
+  .option('--tags-empty', 'set tags to empty array')
+  .option('--clear-tags', 'clear tags field')
+  .action(
+    async (opts: {
+      account: string;
+      transaction: string;
+      description?: string;
+      clearDescription?: boolean;
+      note?: string;
+      clearNote?: boolean;
+      category?: string;
+      clearCategory?: boolean;
+      tag: string[];
+      tagsEmpty?: boolean;
+      clearTags?: boolean;
+    }) => {
+      await runWithConfig(async (cfg) => {
+        const storage = new JsonFileStorage(cfg.config.data_dir);
+        const result = await setTransactionAnnotation(
+          storage,
+          opts.account,
+          opts.transaction,
+          {
+            description: opts.description,
+            clear_description: opts.clearDescription,
+            note: opts.note,
+            clear_note: opts.clearNote,
+            category: opts.category,
+            clear_category: opts.clearCategory,
+            tags: opts.tag,
+            tags_empty: opts.tagsEmpty,
+            clear_tags: opts.clearTags,
+          },
+        );
+        if ((result as { success?: boolean }).success && cfg.config.git.auto_commit) {
+          await tryAutoCommit(
+            cfg.config.data_dir,
+            `set transaction annotation '${opts.transaction}'`,
+            cfg.config.git.auto_push,
+          );
+        }
+        return result;
+      });
+    },
+  );
+
 // ---------------------------------------------------------------------------
 // list
 // ---------------------------------------------------------------------------
@@ -320,8 +389,9 @@ authSchwab
   .command('login [id_or_name]')
   .description('Login to Schwab')
   .action(async (idOrName?: string) => {
-    await runWithConfig(async (_cfg) => {
-      return authLogin('schwab', idOrName);
+    await runWithConfig(async (cfg) => {
+      const storage = new JsonFileStorage(cfg.config.data_dir);
+      return authLogin(storage, 'schwab', idOrName);
     });
   });
 
@@ -330,8 +400,9 @@ authChase
   .command('login [id_or_name]')
   .description('Login to Chase')
   .action(async (idOrName?: string) => {
-    await runWithConfig(async (_cfg) => {
-      return authLogin('chase', idOrName);
+    await runWithConfig(async (cfg) => {
+      const storage = new JsonFileStorage(cfg.config.data_dir);
+      return authLogin(storage, 'chase', idOrName);
     });
   });
 
