@@ -55,6 +55,14 @@ struct Cli {
     #[arg(short, long, default_value_os_t = default_config_path())]
     config: PathBuf,
 
+    /// Merge origin/master before executing the command.
+    #[arg(long, global = true, conflicts_with = "skip_git_merge_master")]
+    git_merge_master: bool,
+
+    /// Skip merging origin/master even if enabled in config.
+    #[arg(long = "skip-git-merge-master", global = true, conflicts_with = "git_merge_master")]
+    skip_git_merge_master: bool,
+
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -380,6 +388,21 @@ async fn main() -> Result<()> {
     let config = ResolvedConfig::load_or_default(&cli.config)?;
     let storage = JsonFileStorage::new(&config.data_dir);
     let storage_arc: Arc<dyn Storage> = Arc::new(storage.clone());
+
+    // Pre-command hook (decoupled from CLI parsing; CLI only computes enablement).
+    let merge_enabled = if cli.git_merge_master {
+        true
+    } else if cli.skip_git_merge_master {
+        false
+    } else {
+        config.git.merge_master_before_command
+    };
+    app::run_preflight(
+        &config,
+        app::PreflightOptions {
+            merge_origin_master: merge_enabled,
+        },
+    )?;
 
     match cli.command {
         Some(Command::Config) => {

@@ -4,7 +4,7 @@ import { promisify } from 'node:util';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { tryAutoCommit } from './git.js';
+import { tryAutoCommit, tryMergeOriginMaster } from './git.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -164,5 +164,97 @@ describe('tryAutoCommit', () => {
 
     const { stdout } = await execFileAsync('git', ['-C', remote, 'log', '-1', '--format=%s']);
     expect(stdout.trim()).toBe('keepbook: sync mock');
+  });
+});
+
+describe('tryMergeOriginMaster', () => {
+  const tmpDirs: string[] = [];
+
+  async function makeTmpDir(): Promise<string> {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'keepbook-git-'));
+    const resolved = await fs.realpath(dir);
+    tmpDirs.push(resolved);
+    return resolved;
+  }
+
+  afterEach(async () => {
+    for (const dir of tmpDirs) {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+    tmpDirs.length = 0;
+  });
+
+  it('skips when not a git repo', async () => {
+    const dir = await makeTmpDir();
+    const result = await tryMergeOriginMaster(dir);
+    expect(result).toEqual({
+      type: 'skipped_not_repo',
+      reason: 'data directory is not a git repository',
+    });
+  });
+
+  it('merges remote master fast-forward', async () => {
+    const remote = await makeTmpDir();
+    await execFileAsync('git', ['-C', remote, 'init', '--bare']);
+
+    const source = await makeTmpDir();
+    await initRepo(source);
+    await execFileAsync('git', ['-C', source, 'remote', 'add', 'origin', remote]);
+    await fs.writeFile(path.join(source, 'file.txt'), 'base\n');
+    await execFileAsync('git', ['-C', source, 'add', '-A']);
+    await execFileAsync('git', ['-C', source, 'commit', '-m', 'base']);
+    const branch = await getCurrentBranch(source);
+    await execFileAsync('git', ['-C', source, 'push', '-u', 'origin', branch]);
+
+    const local = await makeTmpDir();
+    await execFileAsync('git', ['-C', local, 'clone', remote, '.']);
+    await execFileAsync('git', ['-C', local, 'config', 'user.email', 'test@example.com']);
+    await execFileAsync('git', ['-C', local, 'config', 'user.name', 'Keepbook Test']);
+
+    await fs.writeFile(path.join(source, 'file.txt'), 'base\nremote\n');
+    await execFileAsync('git', ['-C', source, 'add', '-A']);
+    await execFileAsync('git', ['-C', source, 'commit', '-m', 'remote update']);
+    await execFileAsync('git', ['-C', source, 'push']);
+
+    const result = await tryMergeOriginMaster(local);
+    expect(result).toEqual({ type: 'merged' });
+
+    const content = await fs.readFile(path.join(local, 'file.txt'), 'utf-8');
+    expect(content).toContain('remote');
+  });
+
+  it('aborts and reports conflicts', async () => {
+    const remote = await makeTmpDir();
+    await execFileAsync('git', ['-C', remote, 'init', '--bare']);
+
+    const source = await makeTmpDir();
+    await initRepo(source);
+    await execFileAsync('git', ['-C', source, 'remote', 'add', 'origin', remote]);
+    await fs.writeFile(path.join(source, 'conflict.txt'), 'line\n');
+    await execFileAsync('git', ['-C', source, 'add', '-A']);
+    await execFileAsync('git', ['-C', source, 'commit', '-m', 'base']);
+    const branch = await getCurrentBranch(source);
+    await execFileAsync('git', ['-C', source, 'push', '-u', 'origin', branch]);
+
+    const local = await makeTmpDir();
+    await execFileAsync('git', ['-C', local, 'clone', remote, '.']);
+    await execFileAsync('git', ['-C', local, 'config', 'user.email', 'test@example.com']);
+    await execFileAsync('git', ['-C', local, 'config', 'user.name', 'Keepbook Test']);
+    await execFileAsync('git', ['-C', local, 'checkout', '-b', 'work']);
+
+    await fs.writeFile(path.join(local, 'conflict.txt'), 'local\n');
+    await execFileAsync('git', ['-C', local, 'add', '-A']);
+    await execFileAsync('git', ['-C', local, 'commit', '-m', 'local change']);
+
+    await fs.writeFile(path.join(source, 'conflict.txt'), 'remote\n');
+    await execFileAsync('git', ['-C', source, 'add', '-A']);
+    await execFileAsync('git', ['-C', source, 'commit', '-m', 'remote change']);
+    await execFileAsync('git', ['-C', source, 'push']);
+
+    const result = await tryMergeOriginMaster(local);
+    expect(result).toEqual({ type: 'conflict_aborted' });
+
+    const content = await fs.readFile(path.join(local, 'conflict.txt'), 'utf-8');
+    expect(content).toBe('local\n');
   });
 });

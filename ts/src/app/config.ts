@@ -112,6 +112,7 @@ export function configOutput(configPath: string, config: ResolvedConfig): object
     git: {
       auto_commit: config.git.auto_commit,
       auto_push: config.git.auto_push,
+      merge_master_before_command: config.git.merge_master_before_command,
     },
   };
 }

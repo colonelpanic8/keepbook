@@ -184,4 +184,9 @@ export {
 // Git
 // ---------------------------------------------------------------------------
 
-export { type AutoCommitOutcome, tryAutoCommit } from './git.js';
+export {
+  type AutoCommitOutcome,
+  tryAutoCommit,
+  type MergeOriginMasterOutcome,
+  tryMergeOriginMaster,
+} from './git.js';

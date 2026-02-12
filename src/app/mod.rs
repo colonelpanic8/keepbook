@@ -2,6 +2,7 @@ mod config;
 mod list;
 mod mutations;
 mod portfolio;
+mod preflight;
 mod sync;
 mod types;
 
@@ -20,6 +21,7 @@ pub use portfolio::{
     fetch_historical_prices, portfolio_change_points, portfolio_history, portfolio_snapshot,
     PriceHistoryRequest,
 };
+pub use preflight::{run_preflight, PreflightOptions};
 pub use sync::{
     chase_login, schwab_login, sync_all, sync_all_if_stale, sync_connection,
     sync_connection_if_stale, sync_prices, sync_symlinks, SyncPricesScopeArg,

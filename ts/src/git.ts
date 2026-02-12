@@ -10,6 +10,12 @@ export type AutoCommitOutcome =
   | { type: 'skipped_no_changes' }
   | { type: 'committed' };
 
+export type MergeOriginMasterOutcome =
+  | { type: 'skipped_not_repo'; reason: string }
+  | { type: 'up_to_date' }
+  | { type: 'merged' }
+  | { type: 'conflict_aborted' };
+
 export async function tryAutoCommit(
   dataDir: string,
   action: string,
@@ -52,6 +58,54 @@ export async function tryAutoCommit(
   }
 
   return { type: 'committed' };
+}
+
+export async function tryMergeOriginMaster(dataDir: string): Promise<MergeOriginMasterOutcome> {
+  const repoRoot = await gitRepoRoot(dataDir);
+  if (repoRoot === null) {
+    return { type: 'skipped_not_repo', reason: 'data directory is not a git repository' };
+  }
+
+  const canonicalRoot = await canonicalize(repoRoot);
+  const canonicalDir = await canonicalize(dataDir);
+
+  if (canonicalRoot !== canonicalDir) {
+    return {
+      type: 'skipped_not_repo',
+      reason: `data directory is not the git repo root (repo root: ${canonicalRoot})`,
+    };
+  }
+
+  // Refuse to merge with a dirty worktree; it can either fail or create hard-to-debug state.
+  const { stdout: statusOut } = await gitOutput(canonicalDir, ['status', '--porcelain']);
+  if (statusOut.trim() !== '') {
+    throw new Error('git working tree is not clean; cannot merge origin/master');
+  }
+
+  const { stdout: headBefore } = await gitOutput(canonicalDir, ['rev-parse', 'HEAD']);
+
+  await gitOutput(canonicalDir, ['fetch', 'origin', 'master']);
+
+  try {
+    await gitOutput(canonicalDir, ['merge', '--no-edit', 'origin/master']);
+  } catch (err) {
+    const { stdout: unmergedOut } = await gitOutput(canonicalDir, [
+      'diff',
+      '--name-only',
+      '--diff-filter=U',
+    ]);
+    if (unmergedOut.trim() !== '') {
+      await gitOutput(canonicalDir, ['merge', '--abort']);
+      return { type: 'conflict_aborted' };
+    }
+    throw err;
+  }
+
+  const { stdout: headAfter } = await gitOutput(canonicalDir, ['rev-parse', 'HEAD']);
+  if (headBefore.trim() === headAfter.trim()) {
+    return { type: 'up_to_date' };
+  }
+  return { type: 'merged' };
 }
 
 async function canonicalize(p: string): Promise<string> {

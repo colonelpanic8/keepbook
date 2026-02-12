@@ -57,6 +57,9 @@ pub struct GitConfig {
 
     /// Enable automatic pushes after successful auto-commits.
     pub auto_push: bool,
+
+    /// Merge `origin/master` before running commands.
+    pub merge_master_before_command: bool,
 }
 
 impl Default for GitConfig {
@@ -64,6 +67,7 @@ impl Default for GitConfig {
         Self {
             auto_commit: false,
             auto_push: false,
+            merge_master_before_command: false,
         }
     }
 }
@@ -327,10 +331,12 @@ mod tests {
         writeln!(file, "[git]")?;
         writeln!(file, "auto_commit = true")?;
         writeln!(file, "auto_push = true")?;
+        writeln!(file, "merge_master_before_command = true")?;
 
         let config = Config::load(&config_path)?;
         assert!(config.git.auto_commit);
         assert!(config.git.auto_push);
+        assert!(config.git.merge_master_before_command);
 
         Ok(())
     }
@@ -347,6 +353,7 @@ mod tests {
         let config = Config::load(&config_path)?;
         assert!(config.git.auto_commit);
         assert!(!config.git.auto_push);
+        assert!(!config.git.merge_master_before_command);
 
         Ok(())
     }
@@ -369,6 +376,7 @@ mod tests {
         let config = Config::default();
         assert!(!config.git.auto_commit);
         assert!(!config.git.auto_push);
+        assert!(!config.git.merge_master_before_command);
     }
 
     #[test]

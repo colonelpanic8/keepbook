@@ -26,6 +26,8 @@ export interface GitConfig {
   auto_commit: boolean;
   /** Whether to auto-push after successful auto-commits. */
   auto_push: boolean;
+  /** Whether to merge origin/master before each command. */
+  merge_master_before_command: boolean;
 }
 
 export interface Config {
@@ -65,6 +67,7 @@ export const DEFAULT_REFRESH_CONFIG: RefreshConfig = {
 export const DEFAULT_GIT_CONFIG: GitConfig = {
   auto_commit: false,
   auto_push: false,
+  merge_master_before_command: false,
 };
 
 export const DEFAULT_CONFIG: Config = {
@@ -109,6 +112,10 @@ export function parseConfig(tomlStr: string): Config {
       typeof gitRaw.auto_commit === 'boolean' ? gitRaw.auto_commit : DEFAULT_GIT_CONFIG.auto_commit,
     auto_push:
       typeof gitRaw.auto_push === 'boolean' ? gitRaw.auto_push : DEFAULT_GIT_CONFIG.auto_push,
+    merge_master_before_command:
+      typeof gitRaw.merge_master_before_command === 'boolean'
+        ? gitRaw.merge_master_before_command
+        : DEFAULT_GIT_CONFIG.merge_master_before_command,
   };
 
   const config: Config = {

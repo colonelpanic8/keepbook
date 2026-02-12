@@ -19,6 +19,7 @@ import { syncConnection, syncAll, syncPrices, syncSymlinks, authLogin } from '..
 import { JsonFileStorage } from '../storage/json-file.js';
 import { JsonlMarketDataStore } from '../market-data/jsonl-store.js';
 import { tryAutoCommit } from '../git.js';
+import { runPreflight } from '../app/preflight.js';
 
 // ---------------------------------------------------------------------------
 // Helper
@@ -35,6 +36,24 @@ async function run(fn: () => Promise<unknown>): Promise<void> {
   }
 }
 
+async function runWithConfig(
+  fn: (cfg: Awaited<ReturnType<typeof loadConfig>>) => Promise<unknown>,
+): Promise<void> {
+  await run(async () => {
+    const cfg = await loadConfig(program.opts().config);
+
+    const opts = program.opts() as { gitMergeMaster?: boolean; skipGitMergeMaster?: boolean };
+    const mergeEnabled = opts.gitMergeMaster
+      ? true
+      : opts.skipGitMergeMaster
+        ? false
+        : cfg.config.git.merge_master_before_command;
+
+    await runPreflight(cfg.config, { merge_origin_master: mergeEnabled });
+    return fn(cfg);
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Program
 // ---------------------------------------------------------------------------
@@ -45,7 +64,12 @@ program
   .name('keepbook')
   .description('Personal finance tracking CLI')
   .version('0.1.0')
-  .option('-c, --config <path>', 'path to config file');
+  .option('-c, --config <path>', 'path to config file')
+  .option('--git-merge-master', 'merge origin/master before executing the command')
+  .option(
+    '--skip-git-merge-master',
+    'skip merging origin/master even if enabled in config',
+  );
 
 // ---------------------------------------------------------------------------
 // config
@@ -55,8 +79,7 @@ program
   .command('config')
   .description('Print configuration as JSON')
   .action(async () => {
-    await run(async () => {
-      const cfg = await loadConfig(program.opts().config);
+    await runWithConfig(async (cfg) => {
       return configOutput(cfg.configPath, cfg.config);
     });
   });
@@ -71,8 +94,7 @@ add
   .command('connection <name>')
   .description('Add a new manual connection')
   .action(async (name: string) => {
-    await run(async () => {
-      const cfg = await loadConfig(program.opts().config);
+    await runWithConfig(async (cfg) => {
       const storage = new JsonFileStorage(cfg.config.data_dir);
       const result = await addConnection(storage, name);
       if (cfg.config.git.auto_commit) {
@@ -97,8 +119,7 @@ add
     [] as string[],
   )
   .action(async (name: string, opts: { connection: string; tag: string[] }) => {
-    await run(async () => {
-      const cfg = await loadConfig(program.opts().config);
+    await runWithConfig(async (cfg) => {
       const storage = new JsonFileStorage(cfg.config.data_dir);
       const result = await addAccount(storage, opts.connection, name, opts.tag);
       if (cfg.config.git.auto_commit) {
@@ -118,8 +139,7 @@ remove
   .command('connection <id>')
   .description('Remove a connection and its accounts')
   .action(async (id: string) => {
-    await run(async () => {
-      const cfg = await loadConfig(program.opts().config);
+    await runWithConfig(async (cfg) => {
       const storage = new JsonFileStorage(cfg.config.data_dir);
       const result = await removeConnection(storage, id);
       if (cfg.config.git.auto_commit) {
@@ -146,8 +166,7 @@ set
   .requiredOption('--asset <str>', 'asset identifier')
   .requiredOption('--amount <str>', 'balance amount')
   .action(async (opts: { account: string; asset: string; amount: string }) => {
-    await run(async () => {
-      const cfg = await loadConfig(program.opts().config);
+    await runWithConfig(async (cfg) => {
       const storage = new JsonFileStorage(cfg.config.data_dir);
       const result = await setBalance(storage, opts.account, opts.asset, opts.amount);
       if (cfg.config.git.auto_commit) {
@@ -171,8 +190,7 @@ list
   .command('connections')
   .description('List all connections')
   .action(async () => {
-    await run(async () => {
-      const cfg = await loadConfig(program.opts().config);
+    await runWithConfig(async (cfg) => {
       const storage = new JsonFileStorage(cfg.config.data_dir);
       return listConnections(storage);
     });
@@ -182,8 +200,7 @@ list
   .command('accounts')
   .description('List all accounts')
   .action(async () => {
-    await run(async () => {
-      const cfg = await loadConfig(program.opts().config);
+    await runWithConfig(async (cfg) => {
       const storage = new JsonFileStorage(cfg.config.data_dir);
       return listAccounts(storage);
     });
@@ -193,8 +210,7 @@ list
   .command('balances')
   .description('List latest balances')
   .action(async () => {
-    await run(async () => {
-      const cfg = await loadConfig(program.opts().config);
+    await runWithConfig(async (cfg) => {
       const storage = new JsonFileStorage(cfg.config.data_dir);
       const marketDataStore = new JsonlMarketDataStore(cfg.config.data_dir);
       return listBalances(storage, cfg.config.reporting_currency, marketDataStore);
@@ -205,8 +221,7 @@ list
   .command('transactions')
   .description('List all transactions')
   .action(async () => {
-    await run(async () => {
-      const cfg = await loadConfig(program.opts().config);
+    await runWithConfig(async (cfg) => {
       const storage = new JsonFileStorage(cfg.config.data_dir);
       return listTransactions(storage);
     });
@@ -216,8 +231,7 @@ list
   .command('price-sources')
   .description('List price sources')
   .action(async () => {
-    await run(async () => {
-      const cfg = await loadConfig(program.opts().config);
+    await runWithConfig(async (cfg) => {
       return listPriceSources(cfg.config.data_dir);
     });
   });
@@ -226,8 +240,7 @@ list
   .command('all')
   .description('List everything')
   .action(async () => {
-    await run(async () => {
-      const cfg = await loadConfig(program.opts().config);
+    await runWithConfig(async (cfg) => {
       const storage = new JsonFileStorage(cfg.config.data_dir);
       const marketDataStore = new JsonlMarketDataStore(cfg.config.data_dir);
       return listAll(storage, cfg.config.reporting_currency, marketDataStore, cfg.config.data_dir);
@@ -245,8 +258,7 @@ sync
   .description('Sync a single connection')
   .option('--if-stale', 'only sync if data is stale')
   .action(async (idOrName: string, _opts: { ifStale?: boolean }) => {
-    await run(async () => {
-      const cfg = await loadConfig(program.opts().config);
+    await runWithConfig(async (cfg) => {
       const storage = new JsonFileStorage(cfg.config.data_dir);
       return syncConnection(storage, idOrName);
     });
@@ -257,8 +269,7 @@ sync
   .description('Sync all connections')
   .option('--if-stale', 'only sync if data is stale')
   .action(async (_opts: { ifStale?: boolean }) => {
-    await run(async () => {
-      const cfg = await loadConfig(program.opts().config);
+    await runWithConfig(async (cfg) => {
       const storage = new JsonFileStorage(cfg.config.data_dir);
       return syncAll(storage);
     });
@@ -270,7 +281,7 @@ sync
   .option('--force', 'force refresh')
   .option('--quote-staleness <dur>', 'quote staleness duration')
   .action(async (_scope?: string, _id?: string, _opts?: object) => {
-    await run(async () => {
+    await runWithConfig(async (_cfg) => {
       return syncPrices();
     });
   });
@@ -279,7 +290,7 @@ sync
   .command('symlinks')
   .description('Create symlinks')
   .action(async () => {
-    await run(async () => {
+    await runWithConfig(async (_cfg) => {
       return syncSymlinks();
     });
   });
@@ -295,7 +306,7 @@ authSchwab
   .command('login [id_or_name]')
   .description('Login to Schwab')
   .action(async (idOrName?: string) => {
-    await run(async () => {
+    await runWithConfig(async (_cfg) => {
       return authLogin('schwab', idOrName);
     });
   });
@@ -305,7 +316,7 @@ authChase
   .command('login [id_or_name]')
   .description('Login to Chase')
   .action(async (idOrName?: string) => {
-    await run(async () => {
+    await runWithConfig(async (_cfg) => {
       return authLogin('chase', idOrName);
     });
   });
@@ -329,7 +340,7 @@ marketData
   .option('--currency <code>', 'currency code')
   .option('--no-fx', 'disable FX conversion')
   .action(async () => {
-    await run(async () => {
+    await runWithConfig(async (_cfg) => {
       return { success: false, error: 'Market data fetch not yet implemented in TypeScript CLI' };
     });
   });
@@ -353,8 +364,7 @@ portfolio
   .option('--force-refresh', 'force refresh prices')
   .action(
     async (opts: { currency?: string; date?: string; groupBy?: string; detail?: boolean }) => {
-      await run(async () => {
-        const cfg = await loadConfig(program.opts().config);
+      await runWithConfig(async (cfg) => {
         const storage = new JsonFileStorage(cfg.config.data_dir);
         const marketDataStore = new JsonlMarketDataStore(cfg.config.data_dir);
         return portfolioSnapshot(storage, marketDataStore, cfg.config, {
@@ -384,8 +394,7 @@ portfolio
       granularity?: string;
       includePrices?: boolean;
     }) => {
-      await run(async () => {
-        const cfg = await loadConfig(program.opts().config);
+      await runWithConfig(async (cfg) => {
         const storage = new JsonFileStorage(cfg.config.data_dir);
         const marketDataStore = new JsonlMarketDataStore(cfg.config.data_dir);
         return portfolioHistory(storage, marketDataStore, cfg.config, {
@@ -414,8 +423,7 @@ portfolio
       granularity?: string;
       includePrices?: boolean;
     }) => {
-      await run(async () => {
-        const cfg = await loadConfig(program.opts().config);
+      await runWithConfig(async (cfg) => {
         const storage = new JsonFileStorage(cfg.config.data_dir);
         const marketDataStore = new JsonlMarketDataStore(cfg.config.data_dir);
         return portfolioChangePoints(storage, marketDataStore, cfg.config, {
