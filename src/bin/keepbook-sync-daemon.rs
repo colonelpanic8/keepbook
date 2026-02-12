@@ -427,7 +427,7 @@ impl Daemon {
             None,
             None,
             "daily".to_string(),
-            false,
+            true,
         )
         .await
         {
