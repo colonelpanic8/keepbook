@@ -1,0 +1,11 @@
+[
+  {
+    "id": "conn-1",
+    "name": "Bank",
+    "synchronizer": "manual",
+    "status": "active",
+    "account_count": 1,
+    "last_sync": null
+  }
+]
+

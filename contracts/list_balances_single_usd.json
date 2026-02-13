@@ -1,0 +1,11 @@
+[
+  {
+    "account_id": "acct-1",
+    "asset": { "iso_code": "USD", "type": "currency" },
+    "amount": "100.5",
+    "value_in_reporting_currency": "100.5",
+    "reporting_currency": "USD",
+    "timestamp": "2024-01-15T10:00:00+00:00"
+  }
+]
+

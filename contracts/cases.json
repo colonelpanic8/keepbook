@@ -1,0 +1,157 @@
+[
+  {
+    "name": "portfolio_snapshot_empty",
+    "reporting_currency": "USD",
+    "seed": {},
+    "command": ["portfolio", "snapshot", "--date", "2024-06-15"]
+  },
+  {
+    "name": "list_connections_single",
+    "reporting_currency": "USD",
+    "seed": {
+      "connections": [
+        {
+          "id": "conn-1",
+          "name": "Bank",
+          "synchronizer": "manual",
+          "status": "active",
+          "account_ids": ["acct-1"]
+        }
+      ],
+      "accounts": [
+        {
+          "id": "acct-1",
+          "name": "Checking",
+          "connection_id": "conn-1",
+          "tags": [],
+          "active": true
+        }
+      ]
+    },
+    "command": ["list", "connections"]
+  },
+  {
+    "name": "list_accounts_single",
+    "reporting_currency": "USD",
+    "seed": {
+      "connections": [
+        {
+          "id": "conn-1",
+          "name": "Bank",
+          "synchronizer": "manual",
+          "status": "active",
+          "account_ids": ["acct-1"]
+        }
+      ],
+      "accounts": [
+        {
+          "id": "acct-1",
+          "name": "Checking",
+          "connection_id": "conn-1",
+          "tags": [],
+          "active": true
+        }
+      ]
+    },
+    "command": ["list", "accounts"]
+  },
+  {
+    "name": "list_balances_single_usd",
+    "reporting_currency": "USD",
+    "seed": {
+      "connections": [
+        {
+          "id": "conn-1",
+          "name": "Bank",
+          "synchronizer": "manual",
+          "status": "active",
+          "account_ids": ["acct-1"]
+        }
+      ],
+      "accounts": [
+        {
+          "id": "acct-1",
+          "name": "Checking",
+          "connection_id": "conn-1",
+          "tags": [],
+          "active": true
+        }
+      ],
+      "balance_snapshots": [
+        {
+          "account_id": "acct-1",
+          "timestamp": "2024-01-15T10:00:00Z",
+          "balances": [
+            { "asset": { "type": "currency", "iso_code": "USD" }, "amount": "100.5" }
+          ]
+        }
+      ]
+    },
+    "command": ["list", "balances"]
+  },
+  {
+    "name": "list_balances_single_eur_reporting_usd",
+    "reporting_currency": "USD",
+    "seed": {
+      "connections": [
+        {
+          "id": "conn-1",
+          "name": "Bank",
+          "synchronizer": "manual",
+          "status": "active",
+          "account_ids": ["acct-1"]
+        }
+      ],
+      "accounts": [
+        {
+          "id": "acct-1",
+          "name": "Euro Account",
+          "connection_id": "conn-1",
+          "tags": [],
+          "active": true
+        }
+      ],
+      "balance_snapshots": [
+        {
+          "account_id": "acct-1",
+          "timestamp": "2024-01-15T10:00:00Z",
+          "balances": [
+            { "asset": { "type": "currency", "iso_code": "EUR" }, "amount": "500" }
+          ]
+        }
+      ]
+    },
+    "command": ["list", "balances"]
+  },
+  {
+    "name": "portfolio_history_empty_range",
+    "reporting_currency": "USD",
+    "seed": {},
+    "command": [
+      "portfolio",
+      "history",
+      "--start",
+      "2024-06-01",
+      "--end",
+      "2024-06-30",
+      "--granularity",
+      "none"
+    ]
+  },
+  {
+    "name": "portfolio_change_points_empty_range",
+    "reporting_currency": "USD",
+    "seed": {},
+    "command": [
+      "portfolio",
+      "change-points",
+      "--start",
+      "2024-06-01",
+      "--end",
+      "2024-06-30",
+      "--granularity",
+      "none"
+    ]
+  }
+]
+

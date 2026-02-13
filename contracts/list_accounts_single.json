@@ -1,0 +1,10 @@
+[
+  {
+    "id": "acct-1",
+    "name": "Checking",
+    "connection_id": "conn-1",
+    "tags": [],
+    "active": true
+  }
+]
+
