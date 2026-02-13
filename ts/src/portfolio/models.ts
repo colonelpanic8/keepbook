@@ -21,6 +21,11 @@ export interface PortfolioQuery {
   as_of_date: string;
   /** Target currency ISO code (e.g. "USD", "EUR"). */
   currency: string;
+  /**
+   * If set, values denominated in `currency` are rounded to this many decimal
+   * places before being rendered as strings.
+   */
+  currency_decimals?: number;
   /** Which breakdowns to include. */
   grouping: Grouping;
   /** Whether to include per-account holdings detail in asset summaries. */

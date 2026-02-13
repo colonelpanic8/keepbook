@@ -8,6 +8,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 
 use crate::clock::{Clock, SystemClock};
+use crate::format::format_base_currency_value;
 use crate::market_data::{AssetId, MarketDataService};
 use crate::models::{Account, Asset, BalanceBackfillPolicy, BalanceSnapshot, Connection, Id};
 use crate::storage::Storage;
@@ -89,6 +90,7 @@ impl PortfolioService {
             &price_cache,
             &ctx.account_map,
             query.include_detail,
+            query.currency_decimals,
         )?;
 
         // Build account summaries
@@ -98,6 +100,7 @@ impl PortfolioService {
             &price_cache,
             &ctx.account_map,
             &ctx.connection_map,
+            query.currency_decimals,
         )?;
 
         // Sort for consistent output
@@ -118,7 +121,7 @@ impl PortfolioService {
         Ok(PortfolioSnapshot {
             as_of_date: query.as_of_date,
             currency: query.currency.clone(),
-            total_value: total_value.normalize().to_string(),
+            total_value: format_base_currency_value(total_value, query.currency_decimals),
             by_asset,
             by_account,
         })
@@ -254,6 +257,7 @@ impl PortfolioService {
         price_cache: &HashMap<Asset, AssetValuation>,
         account_map: &HashMap<Id, Account>,
         include_detail: bool,
+        currency_decimals: Option<u32>,
     ) -> Result<(Vec<AssetSummary>, Decimal)> {
         let mut summaries = Vec::new();
         let mut total_value = Decimal::ZERO;
@@ -285,7 +289,7 @@ impl PortfolioService {
                 price_timestamp: valuation.price_timestamp,
                 fx_rate: valuation.fx_rate.clone(),
                 fx_date: valuation.fx_date,
-                value_in_base: asset_value.map(|v| v.normalize().to_string()),
+                value_in_base: asset_value.map(|v| format_base_currency_value(v, currency_decimals)),
                 holdings: holdings_detail,
             });
         }
@@ -324,6 +328,7 @@ impl PortfolioService {
         price_cache: &HashMap<Asset, AssetValuation>,
         account_map: &HashMap<Id, Account>,
         connection_map: &HashMap<Id, Connection>,
+        currency_decimals: Option<u32>,
     ) -> Result<Vec<AccountSummary>> {
         // Track (sum, has_missing_values) per account
         let mut by_account: HashMap<Id, (Decimal, bool)> = HashMap::new();
@@ -362,7 +367,7 @@ impl PortfolioService {
                     value_in_base: if has_missing {
                         None
                     } else {
-                        Some(value.normalize().to_string())
+                        Some(format_base_currency_value(value, currency_decimals))
                     },
                 })
             })
@@ -387,7 +392,7 @@ impl PortfolioService {
                 account_id: account_id.to_string(),
                 account_name: account.name.clone(),
                 connection_name: connection.name().to_string(),
-                value_in_base: Some("0".to_string()),
+                value_in_base: Some(format_base_currency_value(Decimal::ZERO, currency_decimals)),
             });
         }
 
@@ -560,7 +565,7 @@ mod tests {
         let account_map: std::collections::HashMap<Id, Account> = std::collections::HashMap::new();
 
         let err = service
-            .build_asset_summaries(&by_asset, &price_cache, &account_map, false)
+            .build_asset_summaries(&by_asset, &price_cache, &account_map, false, None)
             .unwrap_err();
         assert!(err.to_string().contains("missing valuation"));
     }
@@ -586,6 +591,7 @@ mod tests {
             &price_cache,
             &account_map,
             &connection_map,
+            None,
         )
         .unwrap_err();
         assert!(err.to_string().contains("missing valuation"));
@@ -623,6 +629,7 @@ mod tests {
         let query = PortfolioQuery {
             as_of_date: chrono::NaiveDate::from_ymd_opt(2026, 2, 2).unwrap(),
             currency: "USD".to_string(),
+            currency_decimals: None,
             grouping: Grouping::Both,
             include_detail: false,
         };
@@ -694,6 +701,7 @@ mod tests {
         let query = PortfolioQuery {
             as_of_date: chrono::NaiveDate::from_ymd_opt(2026, 2, 2).unwrap(),
             currency: "EUR".to_string(),
+            currency_decimals: None,
             grouping: Grouping::Asset,
             include_detail: false,
         };
@@ -754,6 +762,7 @@ mod tests {
         let query = PortfolioQuery {
             as_of_date: chrono::NaiveDate::from_ymd_opt(2026, 2, 2).unwrap(),
             currency: "USD".to_string(),
+            currency_decimals: None,
             grouping: Grouping::Asset,
             include_detail: true,
         };
@@ -821,6 +830,7 @@ mod tests {
         let query = PortfolioQuery {
             as_of_date: chrono::NaiveDate::from_ymd_opt(2026, 2, 2).unwrap(),
             currency: "USD".to_string(),
+            currency_decimals: None,
             grouping: Grouping::Asset,
             include_detail: false,
         };
@@ -873,6 +883,7 @@ mod tests {
         let query = PortfolioQuery {
             as_of_date: chrono::NaiveDate::from_ymd_opt(2026, 2, 2).unwrap(),
             currency: "USD".to_string(),
+            currency_decimals: None,
             grouping: Grouping::Both,
             include_detail: false,
         };
@@ -920,6 +931,7 @@ mod tests {
         let query = PortfolioQuery {
             as_of_date: chrono::NaiveDate::from_ymd_opt(2026, 2, 1).unwrap(),
             currency: "USD".to_string(),
+            currency_decimals: None,
             grouping: Grouping::Account,
             include_detail: false,
         };
@@ -971,6 +983,7 @@ mod tests {
         let query = PortfolioQuery {
             as_of_date: chrono::NaiveDate::from_ymd_opt(2026, 2, 1).unwrap(),
             currency: "USD".to_string(),
+            currency_decimals: None,
             grouping: Grouping::Both,
             include_detail: false,
         };

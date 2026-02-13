@@ -184,6 +184,7 @@ export async function portfolioSnapshot(
   const snapshot = await portfolioService.calculate({
     as_of_date: asOfDate,
     currency,
+    currency_decimals: config.display.currency_decimals,
     grouping,
     include_detail: includeDetail,
   });
@@ -259,6 +260,7 @@ export async function portfolioHistory(
     const snapshot = await portfolioService.calculate({
       as_of_date: formatDateYMD(point.timestamp),
       currency,
+      currency_decimals: config.display.currency_decimals,
       grouping: 'both',
       include_detail: false,
     });

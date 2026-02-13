@@ -17,6 +17,7 @@ import type { Id } from '../models/id.js';
 import type { Storage } from '../storage/storage.js';
 import { MarketDataService } from '../market-data/service.js';
 import { AssetId } from '../market-data/asset-id.js';
+import { decStr, decStrRounded } from '../format/decimal.js';
 
 import type {
   PortfolioQuery,
@@ -73,11 +74,6 @@ function dateToString(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** Normalize a Decimal to a string without trailing zeros. */
-function decStr(d: Decimal): string {
-  return d.toDecimalPlaces(d.decimalPlaces()).toFixed();
-}
-
 // ---------------------------------------------------------------------------
 // PortfolioService
 // ---------------------------------------------------------------------------
@@ -113,6 +109,7 @@ export class PortfolioService {
       priceCache,
       ctx.account_map,
       query.include_detail,
+      query.currency_decimals,
     );
 
     // 5. Build account summaries
@@ -122,6 +119,7 @@ export class PortfolioService {
       priceCache,
       ctx.account_map,
       ctx.connection_map,
+      query.currency_decimals,
     );
 
     // 6. Sort for consistent output
@@ -141,7 +139,7 @@ export class PortfolioService {
     return {
       as_of_date: query.as_of_date,
       currency: query.currency,
-      total_value: decStr(totalValue),
+      total_value: decStrRounded(totalValue, query.currency_decimals),
       by_asset: byAsset,
       by_account: byAccount,
     };
@@ -437,6 +435,7 @@ export class PortfolioService {
     priceCache: Map<string, AssetValuation>,
     accountMap: Map<string, AccountType>,
     includeDetail: boolean,
+    currencyDecimals: number | undefined,
   ): { summaries: AssetSummary[]; totalValue: Decimal } {
     const summaries: AssetSummary[] = [];
     let totalValue = new Decimal(0);
@@ -462,7 +461,8 @@ export class PortfolioService {
         asset,
         total_amount: decStr(agg.total_amount),
         amount_date: agg.latest_balance_date,
-        value_in_base: assetValue !== undefined ? decStr(assetValue) : undefined,
+        value_in_base:
+          assetValue !== undefined ? decStrRounded(assetValue, currencyDecimals) : undefined,
         holdings,
       };
 
@@ -515,6 +515,7 @@ export class PortfolioService {
     priceCache: Map<string, AssetValuation>,
     accountMap: Map<string, AccountType>,
     connectionMap: Map<string, ConnectionType>,
+    currencyDecimals: number | undefined,
   ): AccountSummary[] {
     // Track (sum, hasMissing) per account
     const byAccount = new Map<string, { sum: Decimal; hasMissing: boolean }>();
@@ -560,7 +561,7 @@ export class PortfolioService {
         account_id: accountKey,
         account_name: account.name,
         connection_name: connection.config.name,
-        value_in_base: hasMissing ? undefined : decStr(sum),
+        value_in_base: hasMissing ? undefined : decStrRounded(sum, currencyDecimals),
       });
     }
 
@@ -582,7 +583,7 @@ export class PortfolioService {
         account_id: accountKey,
         account_name: account.name,
         connection_name: connection.config.name,
-        value_in_base: '0',
+        value_in_base: decStrRounded(new Decimal(0), currencyDecimals),
       });
     }
 

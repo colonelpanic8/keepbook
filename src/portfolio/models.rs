@@ -17,6 +17,9 @@ pub enum Grouping {
 pub struct PortfolioQuery {
     pub as_of_date: NaiveDate,
     pub currency: String,
+    /// If set, values denominated in `currency` are rounded to this many
+    /// decimal places before being rendered as strings.
+    pub currency_decimals: Option<u32>,
     pub grouping: Grouping,
     pub include_detail: bool,
 }

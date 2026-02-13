@@ -24,6 +24,8 @@ reporting_currency = "USD"
             config_path.to_str().unwrap(),
             "portfolio",
             "snapshot",
+            "--date",
+            "2024-06-15",
         ])
         .output()?;
 
@@ -32,8 +34,13 @@ reporting_currency = "USD"
     let stdout = String::from_utf8(output.stdout)?;
     let json: serde_json::Value = serde_json::from_str(&stdout)?;
 
-    assert_eq!(json["total_value"], "0");
-    assert_eq!(json["currency"], "USD");
+    let contract_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("contracts")
+        .join("portfolio_snapshot_empty.json");
+    let contract = std::fs::read_to_string(contract_path)?;
+    let expected: serde_json::Value = serde_json::from_str(&contract)?;
+
+    assert_eq!(json, expected);
 
     Ok(())
 }

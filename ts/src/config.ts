@@ -30,11 +30,23 @@ export interface GitConfig {
   merge_master_before_command: boolean;
 }
 
+export interface DisplayConfig {
+  /**
+   * If set, values denominated in the output/base currency are rounded to this
+   * many decimal places before being rendered as strings.
+   *
+   * This is purely a presentation setting and does not affect calculations.
+   */
+  currency_decimals?: number;
+}
+
 export interface Config {
   /** Optional path to the data directory. */
   data_dir?: string;
   /** Currency code used for reporting. */
   reporting_currency: string;
+  /** Display/output formatting settings. */
+  display: DisplayConfig;
   /** Refresh / staleness settings. */
   refresh: RefreshConfig;
   /** Git integration settings. */
@@ -46,6 +58,8 @@ export interface ResolvedConfig {
   data_dir: string;
   /** Currency code used for reporting. */
   reporting_currency: string;
+  /** Display/output formatting settings. */
+  display: DisplayConfig;
   /** Refresh / staleness settings. */
   refresh: RefreshConfig;
   /** Git integration settings. */
@@ -73,6 +87,7 @@ export const DEFAULT_GIT_CONFIG: GitConfig = {
 export const DEFAULT_CONFIG: Config = {
   data_dir: undefined,
   reporting_currency: 'USD',
+  display: {},
   refresh: { ...DEFAULT_REFRESH_CONFIG },
   git: { ...DEFAULT_GIT_CONFIG },
 };
@@ -95,6 +110,7 @@ export function parseConfig(tomlStr: string): Config {
 
   const refreshRaw = (raw.refresh ?? {}) as Record<string, unknown>;
   const gitRaw = (raw.git ?? {}) as Record<string, unknown>;
+  const displayRaw = (raw.display ?? {}) as Record<string, unknown>;
 
   const refresh: RefreshConfig = {
     balance_staleness:
@@ -123,12 +139,21 @@ export function parseConfig(tomlStr: string): Config {
       typeof raw.reporting_currency === 'string'
         ? raw.reporting_currency
         : DEFAULT_CONFIG.reporting_currency,
+    display: {},
     refresh,
     git,
   };
 
   if (typeof raw.data_dir === 'string') {
     config.data_dir = raw.data_dir;
+  }
+
+  const currencyDecimals = (displayRaw as { currency_decimals?: unknown }).currency_decimals;
+  if (typeof currencyDecimals === 'number' && Number.isFinite(currencyDecimals)) {
+    // TOML numbers may be floats; treat non-integers or negatives as invalid input.
+    if (Number.isInteger(currencyDecimals) && currencyDecimals >= 0) {
+      config.display.currency_decimals = currencyDecimals;
+    }
   }
 
   return config;

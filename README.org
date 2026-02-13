@@ -80,6 +80,11 @@ Config fields (currently used):
 
 reporting_currency = "USD"
 
+[display]
+# Optional; if set, values denominated in the reporting currency are rounded to
+# this many decimal places in CLI output.
+# currency_decimals = 2
+
 [refresh]
 balance_staleness = "14d"
 price_staleness = "24h"

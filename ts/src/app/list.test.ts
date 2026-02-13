@@ -14,6 +14,7 @@ import { FixedIdGenerator } from '../models/id-generator.js';
 import { Asset } from '../models/asset.js';
 import { AssetId } from '../market-data/asset-id.js';
 import { MemoryMarketDataStore } from '../market-data/store.js';
+import type { ResolvedConfig } from '../config.js';
 import {
   listConnections,
   listAccounts,
@@ -33,6 +34,20 @@ function makeIdGen(...ids: string[]): FixedIdGenerator {
 
 function makeClock(iso: string): FixedClock {
   return new FixedClock(new Date(iso));
+}
+
+function makeConfig(overrides?: Partial<ResolvedConfig>): ResolvedConfig {
+  return {
+    data_dir: '/tmp/test',
+    reporting_currency: 'USD',
+    display: {},
+    refresh: {
+      balance_staleness: 14 * 86400000,
+      price_staleness: 24 * 60 * 60 * 1000,
+    },
+    git: { auto_commit: false, auto_push: false, merge_master_before_command: false },
+    ...overrides,
+  };
 }
 
 async function createConnection(storage: MemoryStorage, id: string, name = 'Bank'): Promise<void> {
@@ -274,7 +289,7 @@ describe('listAccounts', () => {
 describe('listBalances', () => {
   it('returns [] when storage is empty', async () => {
     const storage = new MemoryStorage();
-    const result = await listBalances(storage, 'USD');
+    const result = await listBalances(storage, makeConfig());
     expect(result).toEqual([]);
   });
 
@@ -294,7 +309,7 @@ describe('listBalances', () => {
     ]);
     await storage.appendBalanceSnapshot(acct.id, snapshot);
 
-    const result = await listBalances(storage, 'USD');
+    const result = await listBalances(storage, makeConfig());
     expect(result).toHaveLength(1);
     expect(result[0]).toEqual({
       account_id: 'acct-1',
@@ -320,7 +335,7 @@ describe('listBalances', () => {
     ]);
     await storage.appendBalanceSnapshot(acct.id, snapshot);
 
-    const result = await listBalances(storage, 'USD');
+    const result = await listBalances(storage, makeConfig());
     expect(result).toHaveLength(1);
     expect(result[0].value_in_reporting_currency).toBe('1000.5');
   });
@@ -339,7 +354,7 @@ describe('listBalances', () => {
     ]);
     await storage.appendBalanceSnapshot(acct.id, snapshot);
 
-    const result = await listBalances(storage, 'USD');
+    const result = await listBalances(storage, makeConfig());
     expect(result).toHaveLength(1);
     expect(result[0].value_in_reporting_currency).toBeNull();
   });
@@ -358,7 +373,7 @@ describe('listBalances', () => {
     ]);
     await storage.appendBalanceSnapshot(acct.id, snapshot);
 
-    const result = await listBalances(storage, 'USD');
+    const result = await listBalances(storage, makeConfig());
     expect(result[0].timestamp).toBe('2024-07-01T10:30:00.123000000+00:00');
   });
 
@@ -377,7 +392,7 @@ describe('listBalances', () => {
     ]);
     await storage.appendBalanceSnapshot(acct.id, snapshot);
 
-    const result = await listBalances(storage, 'USD');
+    const result = await listBalances(storage, makeConfig());
     expect(result).toHaveLength(2);
     expect(result[0].asset).toEqual({ type: 'currency', iso_code: 'USD' });
     expect(result[0].value_in_reporting_currency).toBe('1000');
@@ -412,7 +427,7 @@ describe('listBalances', () => {
       },
     ]);
 
-    const result = await listBalances(storage, 'usd', marketDataStore);
+    const result = await listBalances(storage, makeConfig({ reporting_currency: 'usd' }), marketDataStore);
     expect(result).toHaveLength(1);
     expect(result[0].reporting_currency).toBe('USD');
     expect(result[0].value_in_reporting_currency).toBe('250');
@@ -470,7 +485,7 @@ describe('listBalances', () => {
     );
 
     try {
-      const result = await listBalances(new JsonFileStorage(dir), 'USD');
+      const result = await listBalances(new JsonFileStorage(dir), makeConfig({ data_dir: dir }));
       expect(result).toHaveLength(1);
       expect(result[0].timestamp).toBe('2026-02-11T10:49:12.651636216+00:00');
       expect(JSON.stringify(result[0].asset)).toBe('{"ticker":"AAPL","type":"equity"}');
@@ -774,7 +789,7 @@ describe('listAll', () => {
     ]);
     await storage.appendBalanceSnapshot(acct.id, snapshot);
 
-    const result = await listAll(storage, 'USD');
+    const result = await listAll(storage, makeConfig());
 
     expect(result.connections).toHaveLength(1);
     expect(result.connections[0].id).toBe('conn-1');
@@ -791,7 +806,7 @@ describe('listAll', () => {
 
   it('returns all empty arrays when storage is empty', async () => {
     const storage = new MemoryStorage();
-    const result = await listAll(storage, 'USD');
+    const result = await listAll(storage, makeConfig());
     expect(result).toEqual({
       connections: [],
       accounts: [],
@@ -854,7 +869,7 @@ describe('JSON output format', () => {
     ]);
     await storage.appendBalanceSnapshot(acct.id, snapshot);
 
-    const result = await listBalances(storage, 'USD');
+    const result = await listBalances(storage, makeConfig());
     const json = JSON.stringify(result);
 
     const expected = JSON.stringify([
@@ -872,7 +887,7 @@ describe('JSON output format', () => {
 
   it('matches expected Rust JSON format for listAll with empty storage', async () => {
     const storage = new MemoryStorage();
-    const result = await listAll(storage, 'USD');
+    const result = await listAll(storage, makeConfig());
     const json = JSON.stringify(result);
 
     const expected = JSON.stringify({

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use chrono::Utc;
 use keepbook::app::portfolio_snapshot;
-use keepbook::config::{GitConfig, RefreshConfig, ResolvedConfig};
+use keepbook::config::{DisplayConfig, GitConfig, RefreshConfig, ResolvedConfig};
 use keepbook::market_data::{
     AssetId, JsonlMarketDataStore, MarketDataStore, PriceKind, PricePoint,
 };
@@ -27,6 +27,7 @@ async fn portfolio_snapshot_offline_uses_cached_quote() -> Result<()> {
     let config = ResolvedConfig {
         data_dir: dir.path().to_path_buf(),
         reporting_currency: "USD".to_string(),
+        display: DisplayConfig::default(),
         refresh: RefreshConfig::default(),
         git: GitConfig::default(),
     };

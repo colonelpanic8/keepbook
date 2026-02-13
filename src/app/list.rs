@@ -14,6 +14,7 @@ use super::{
     AccountOutput, AllOutput, BalanceOutput, ConnectionOutput, PriceSourceOutput, TransactionOutput,
     TransactionAnnotationOutput,
 };
+use crate::format::format_base_currency_value;
 
 pub async fn list_connections(storage: &dyn Storage) -> Result<Vec<ConnectionOutput>> {
     let connections = storage.list_connections().await?;
@@ -97,6 +98,7 @@ async fn value_in_reporting_currency(
     amount: &str,
     reporting_currency: &str,
     as_of_date: NaiveDate,
+    currency_decimals: Option<u32>,
 ) -> Result<Option<String>> {
     use rust_decimal::Decimal;
 
@@ -107,7 +109,7 @@ async fn value_in_reporting_currency(
     match asset {
         Asset::Currency { iso_code } => {
             if iso_code.eq_ignore_ascii_case(&reporting_currency) {
-                return Ok(Some(amount.normalize().to_string()));
+                return Ok(Some(format_base_currency_value(amount, currency_decimals)));
             }
 
             let Some(rate) = market_data
@@ -119,7 +121,7 @@ async fn value_in_reporting_currency(
 
             let fx_rate = Decimal::from_str(&rate.rate)
                 .with_context(|| format!("Invalid FX rate value: {}", rate.rate))?;
-            Ok(Some((amount * fx_rate).normalize().to_string()))
+            Ok(Some(format_base_currency_value(amount * fx_rate, currency_decimals)))
         }
         Asset::Equity { .. } | Asset::Crypto { .. } => {
             let Some(price) = market_data.price_from_store(asset, as_of_date).await? else {
@@ -134,7 +136,10 @@ async fn value_in_reporting_currency(
                 .quote_currency
                 .eq_ignore_ascii_case(&reporting_currency)
             {
-                return Ok(Some(value_in_quote.normalize().to_string()));
+                return Ok(Some(format_base_currency_value(
+                    value_in_quote,
+                    currency_decimals,
+                )));
             }
 
             let Some(rate) = market_data
@@ -146,7 +151,10 @@ async fn value_in_reporting_currency(
 
             let fx_rate = Decimal::from_str(&rate.rate)
                 .with_context(|| format!("Invalid FX rate value: {}", rate.rate))?;
-            Ok(Some((value_in_quote * fx_rate).normalize().to_string()))
+            Ok(Some(format_base_currency_value(
+                value_in_quote * fx_rate,
+                currency_decimals,
+            )))
         }
     }
 }
@@ -201,6 +209,7 @@ pub async fn list_balances(
                         &balance.amount,
                         &config.reporting_currency,
                         snapshot.timestamp.date_naive(),
+                        config.display.currency_decimals,
                     )
                     .await?;
 

@@ -5,7 +5,7 @@ use std::path::Path;
 use anyhow::Result;
 use chrono::{NaiveDate, TimeZone, Utc};
 use keepbook::app::{fetch_historical_prices, PriceHistoryRequest};
-use keepbook::config::{GitConfig, RefreshConfig, ResolvedConfig};
+use keepbook::config::{DisplayConfig, GitConfig, RefreshConfig, ResolvedConfig};
 use keepbook::market_data::{JsonlMarketDataStore, MarketDataStore, PriceKind};
 use keepbook::models::{Account, Asset, AssetBalance, BalanceSnapshot, Id};
 use keepbook::storage::{JsonFileStorage, Storage};
@@ -16,6 +16,7 @@ fn resolved_config(data_dir: &Path) -> ResolvedConfig {
     ResolvedConfig {
         data_dir: data_dir.to_path_buf(),
         reporting_currency: "USD".to_string(),
+        display: DisplayConfig::default(),
         refresh: RefreshConfig::default(),
         git: GitConfig::default(),
     }

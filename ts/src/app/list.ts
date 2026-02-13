@@ -17,7 +17,14 @@ import { Id } from '../models/id.js';
 import { MarketDataService } from '../market-data/service.js';
 import { NullMarketDataStore, type MarketDataStore } from '../market-data/store.js';
 import { Decimal } from '../decimal.js';
-import { formatDateYMD, formatRfc3339, formatRfc3339FromEpochNanos, decStr } from './format.js';
+import {
+  formatDateYMD,
+  formatRfc3339,
+  formatRfc3339FromEpochNanos,
+  decStr,
+  decStrRounded,
+} from './format.js';
+import type { ResolvedConfig } from '../config.js';
 import {
   applyTransactionAnnotationPatch,
   isEmptyTransactionAnnotation,
@@ -141,17 +148,18 @@ async function valueInReportingCurrency(
   amount: string,
   reportingCurrency: string,
   asOfDate: string,
+  currencyDecimals: number | undefined,
 ): Promise<string | null> {
   const amountValue = new Decimal(amount);
 
   if (asset.type === 'currency') {
     if (asset.iso_code.toUpperCase() === reportingCurrency) {
-      return decStr(amountValue);
+      return decStrRounded(amountValue, currencyDecimals);
     }
 
     const rate = await marketData.fxFromStore(asset.iso_code, reportingCurrency, asOfDate);
     if (rate === null) return null;
-    return decStr(amountValue.times(new Decimal(rate.rate)));
+    return decStrRounded(amountValue.times(new Decimal(rate.rate)), currencyDecimals);
   }
 
   const price = await marketData.priceFromStore(asset, asOfDate);
@@ -159,12 +167,12 @@ async function valueInReportingCurrency(
 
   const valueInQuote = amountValue.times(new Decimal(price.price));
   if (price.quote_currency.toUpperCase() === reportingCurrency) {
-    return decStr(valueInQuote);
+    return decStrRounded(valueInQuote, currencyDecimals);
   }
 
   const rate = await marketData.fxFromStore(price.quote_currency, reportingCurrency, asOfDate);
   if (rate === null) return null;
-  return decStr(valueInQuote.times(new Decimal(rate.rate)));
+  return decStrRounded(valueInQuote.times(new Decimal(rate.rate)), currencyDecimals);
 }
 
 // ---------------------------------------------------------------------------
@@ -232,7 +240,7 @@ export async function listAccounts(storage: Storage): Promise<AccountOutput[]> {
  */
 export async function listBalances(
   storage: Storage,
-  reportingCurrency: string,
+  config: ResolvedConfig,
   marketDataStore?: MarketDataStore,
 ): Promise<BalanceOutput[]> {
   const [connections, accounts] = await Promise.all([
@@ -240,7 +248,8 @@ export async function listBalances(
     storage.listAccounts(),
   ]);
   const accountsByConnection = buildAccountsByConnection(accounts);
-  const reportingCurrencyUpper = reportingCurrency.trim().toUpperCase();
+  const reportingCurrencyUpper = config.reporting_currency.trim().toUpperCase();
+  const currencyDecimals = config.display.currency_decimals;
   const marketData = new MarketDataService(marketDataStore ?? new NullMarketDataStore());
   const result: BalanceOutput[] = [];
 
@@ -260,6 +269,7 @@ export async function listBalances(
           balance.amount,
           reportingCurrencyUpper,
           asOfDate,
+          currencyDecimals,
         );
 
         result.push({
@@ -437,15 +447,14 @@ export async function listPriceSources(dataDir?: string): Promise<PriceSourceOut
  */
 export async function listAll(
   storage: Storage,
-  reportingCurrency: string,
+  config: ResolvedConfig,
   marketDataStore?: MarketDataStore,
-  dataDir?: string,
 ): Promise<AllOutput> {
   const [connections, accounts, balances, priceSources] = await Promise.all([
     listConnections(storage),
     listAccounts(storage),
-    listBalances(storage, reportingCurrency, marketDataStore),
-    listPriceSources(dataDir),
+    listBalances(storage, config, marketDataStore),
+    listPriceSources(config.data_dir),
   ]);
 
   return {

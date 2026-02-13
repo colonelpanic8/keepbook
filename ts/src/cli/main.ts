@@ -290,7 +290,7 @@ list
     await runWithConfig(async (cfg) => {
       const storage = new JsonFileStorage(cfg.config.data_dir);
       const marketDataStore = new JsonlMarketDataStore(cfg.config.data_dir);
-      return listBalances(storage, cfg.config.reporting_currency, marketDataStore);
+      return listBalances(storage, cfg.config, marketDataStore);
     });
   });
 
@@ -320,7 +320,7 @@ list
     await runWithConfig(async (cfg) => {
       const storage = new JsonFileStorage(cfg.config.data_dir);
       const marketDataStore = new JsonlMarketDataStore(cfg.config.data_dir);
-      return listAll(storage, cfg.config.reporting_currency, marketDataStore, cfg.config.data_dir);
+      return listAll(storage, cfg.config, marketDataStore);
     });
   });
 

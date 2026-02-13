@@ -75,6 +75,7 @@ export async function loadConfig(
     const config: ResolvedConfig = {
       data_dir: dataDir,
       reporting_currency: parsed.reporting_currency,
+      display: parsed.display,
       refresh: parsed.refresh,
       git: parsed.git,
     };
@@ -89,6 +90,7 @@ export async function loadConfig(
   const config: ResolvedConfig = {
     data_dir: configDir,
     reporting_currency: DEFAULT_CONFIG.reporting_currency,
+    display: DEFAULT_CONFIG.display,
     refresh: { ...DEFAULT_REFRESH_CONFIG },
     git: { ...DEFAULT_GIT_CONFIG },
   };

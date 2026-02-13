@@ -5,9 +5,9 @@
  * CLI's serde-serialized format, especially for timestamps and decimals.
  */
 
-import { Decimal } from '../decimal.js';
 import { type AssetType, Asset } from '../models/asset.js';
 import { type Granularity } from '../portfolio/change-points.js';
+export { decStr, decStrRounded } from '../format/decimal.js';
 
 // ---------------------------------------------------------------------------
 // Timestamp formatting
@@ -170,30 +170,6 @@ export function parseAsset(s: string): AssetType {
 
   // Default: assume it's a currency code
   return Asset.currency(trimmed);
-}
-
-// ---------------------------------------------------------------------------
-// Decimal formatting
-// ---------------------------------------------------------------------------
-
-/**
- * Format a Decimal to string, stripping trailing zeros.
- *
- * Matches Rust `Decimal::normalize().to_string()`.
- */
-export function decStr(d: Decimal): string {
-  // Decimal.js toFixed() keeps trailing zeros; we need to strip them.
-  // Using the string representation and trimming.
-  const s = d.toFixed();
-  // If there's no decimal point, return as-is
-  if (!s.includes('.')) return s;
-  // Strip trailing zeros, then strip trailing dot if present
-  let result = s.replace(/0+$/, '');
-  if (result.endsWith('.')) {
-    result = result.slice(0, -1);
-  }
-  if (result === '-0') return '0';
-  return result;
 }
 
 // ---------------------------------------------------------------------------

@@ -10,6 +10,25 @@ fn default_reporting_currency() -> String {
     "USD".to_string()
 }
 
+/// Display/output formatting configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DisplayConfig {
+    /// If set, values denominated in the output/base currency are rounded to
+    /// this many decimal places before being rendered as strings.
+    ///
+    /// This is purely a presentation setting and does not affect calculations.
+    pub currency_decimals: Option<u32>,
+}
+
+impl Default for DisplayConfig {
+    fn default() -> Self {
+        Self {
+            currency_decimals: None,
+        }
+    }
+}
+
 /// Default balance staleness (14 days).
 fn default_balance_staleness() -> std::time::Duration {
     std::time::Duration::from_secs(14 * 24 * 60 * 60)
@@ -84,6 +103,10 @@ pub struct Config {
     #[serde(default = "default_reporting_currency")]
     pub reporting_currency: String,
 
+    /// Display/output formatting settings.
+    #[serde(default)]
+    pub display: DisplayConfig,
+
     /// Refresh/staleness settings.
     #[serde(default)]
     pub refresh: RefreshConfig,
@@ -98,6 +121,7 @@ impl Default for Config {
         Self {
             data_dir: None,
             reporting_currency: default_reporting_currency(),
+            display: DisplayConfig::default(),
             refresh: RefreshConfig::default(),
             git: GitConfig::default(),
         }
@@ -147,6 +171,9 @@ pub struct ResolvedConfig {
     /// Currency for reporting all values (e.g., "USD")
     pub reporting_currency: String,
 
+    /// Display/output formatting settings.
+    pub display: DisplayConfig,
+
     /// Refresh/staleness settings.
     pub refresh: RefreshConfig,
 
@@ -193,6 +220,7 @@ impl ResolvedConfig {
         Ok(Self {
             data_dir,
             reporting_currency: config.reporting_currency,
+            display: config.display,
             refresh: config.refresh,
             git: config.git,
         })
@@ -223,6 +251,7 @@ impl ResolvedConfig {
             Ok(Self {
                 data_dir: config_dir.to_path_buf(),
                 reporting_currency: default_reporting_currency(),
+                display: DisplayConfig::default(),
                 refresh: RefreshConfig::default(),
                 git: GitConfig::default(),
             })
@@ -354,6 +383,21 @@ mod tests {
         assert!(config.git.auto_commit);
         assert!(!config.git.auto_push);
         assert!(!config.git.merge_master_before_command);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_load_display_currency_decimals() -> Result<()> {
+        let dir = TempDir::new()?;
+        let config_path = dir.path().join("keepbook.toml");
+
+        let mut file = std::fs::File::create(&config_path)?;
+        writeln!(file, "[display]")?;
+        writeln!(file, "currency_decimals = 2")?;
+
+        let config = Config::load(&config_path)?;
+        assert_eq!(config.display.currency_decimals, Some(2));
 
         Ok(())
     }

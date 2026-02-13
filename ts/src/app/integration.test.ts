@@ -8,6 +8,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { MemoryStorage } from '../storage/memory.js';
 import { NullMarketDataStore } from '../market-data/store.js';
 import { FixedClock } from '../clock.js';
@@ -35,6 +36,7 @@ function makeConfig(overrides?: Partial<ResolvedConfig>): ResolvedConfig {
   return {
     data_dir: '/tmp/test',
     reporting_currency: 'USD',
+    display: {},
     refresh: {
       balance_staleness: 14 * 86400000,
       price_staleness: 86400000,
@@ -42,6 +44,12 @@ function makeConfig(overrides?: Partial<ResolvedConfig>): ResolvedConfig {
     git: { auto_commit: false, auto_push: false, merge_master_before_command: false },
     ...overrides,
   };
+}
+
+function readContractFixture(name: string): unknown {
+  // Repo root is 3 levels up from ts/src/app/.
+  const url = new URL(`../../../contracts/${name}.json`, import.meta.url);
+  return JSON.parse(readFileSync(url, 'utf8')) as unknown;
 }
 
 type SetBalanceResultShape = {
@@ -139,7 +147,7 @@ describe('Integration: full workflow', () => {
     expect(accounts[0].connection_id).toBe('conn-1');
 
     // --- Step 6: List balances ---
-    const balances = await listBalances(storage, 'USD');
+    const balances = await listBalances(storage, config);
     expect(balances).toHaveLength(1);
     expect(balances[0].account_id).toBe('acct-1');
     expect(balances[0].amount).toBe('1500.5');
@@ -149,7 +157,7 @@ describe('Integration: full workflow', () => {
     expect(balances[0].reporting_currency).toBe('USD');
 
     // --- Step 7: List all ---
-    const all = await listAll(storage, 'USD');
+    const all = await listAll(storage, config);
     expect(all.connections).toHaveLength(1);
     expect(all.accounts).toHaveLength(1);
     expect(all.balances).toHaveLength(1);
@@ -218,11 +226,12 @@ describe('Integration: JSON snapshot tests', () => {
   it('listBalances JSON matches expected shape with value_in_reporting_currency', async () => {
     const storage = new MemoryStorage();
     const clock = makeClock('2024-01-15T10:00:00Z');
+    const config = makeConfig();
     await addConnection(storage, 'Test Bank', makeIdGen('conn-1'), clock);
     await addAccount(storage, 'conn-1', 'Savings', [], makeIdGen('acct-1'), clock);
     await setBalance(storage, 'acct-1', 'USD', '100.5', clock);
 
-    const result = await listBalances(storage, 'USD');
+    const result = await listBalances(storage, config);
     const json = JSON.stringify(result, null, 2);
     const parsed = JSON.parse(json);
 
@@ -301,11 +310,12 @@ describe('Integration: JSON compatibility checks', () => {
   it('list asset serialization uses snake_case with Rust key order', async () => {
     const storage = new MemoryStorage();
     const clock = makeClock('2024-01-15T10:00:00Z');
+    const config = makeConfig();
     await addConnection(storage, 'Bank', makeIdGen('conn-1'), clock);
     await addAccount(storage, 'conn-1', 'Checking', [], makeIdGen('acct-1'), clock);
     await setBalance(storage, 'acct-1', 'USD', '100', clock);
 
-    const balances = await listBalances(storage, 'USD');
+    const balances = await listBalances(storage, config);
     const json = JSON.stringify(balances[0].asset);
     expect(json).toBe('{"iso_code":"USD","type":"currency"}');
     // NOT camelCase
@@ -334,11 +344,12 @@ describe('Integration: JSON compatibility checks', () => {
   it('listBalances timestamp uses formatRfc3339: +00:00 suffix', async () => {
     const storage = new MemoryStorage();
     const clock = makeClock('2024-01-15T10:00:00Z');
+    const config = makeConfig();
     await addConnection(storage, 'Bank', makeIdGen('conn-1'), clock);
     await addAccount(storage, 'conn-1', 'Checking', [], makeIdGen('acct-1'), clock);
     await setBalance(storage, 'acct-1', 'USD', '100', clock);
 
-    const balances = await listBalances(storage, 'USD');
+    const balances = await listBalances(storage, config);
     expect(balances[0].timestamp).toBe('2024-01-15T10:00:00+00:00');
     // NOT Z suffix
     expect(balances[0].timestamp).not.toMatch(/Z$/);
@@ -424,11 +435,12 @@ describe('Integration: JSON compatibility checks', () => {
   it('value_in_reporting_currency is null (present) when currency does not match', async () => {
     const storage = new MemoryStorage();
     const clock = makeClock('2024-01-15T10:00:00Z');
+    const config = makeConfig();
     await addConnection(storage, 'Bank', makeIdGen('conn-1'), clock);
     await addAccount(storage, 'conn-1', 'Euro Acct', [], makeIdGen('acct-1'), clock);
     await setBalance(storage, 'acct-1', 'EUR', '500', clock);
 
-    const balances = await listBalances(storage, 'USD');
+    const balances = await listBalances(storage, config);
     const json = JSON.stringify(balances[0]);
     const parsed = JSON.parse(json);
 
@@ -891,12 +903,13 @@ describe('Integration: full JSON round-trip verification', () => {
   it('listAll JSON includes all expected top-level keys', async () => {
     const storage = new MemoryStorage();
     const clock = makeClock('2024-06-15T12:00:00Z');
+    const config = makeConfig();
 
     await addConnection(storage, 'Bank', makeIdGen('conn-1'), clock);
     await addAccount(storage, 'conn-1', 'Checking', ['primary'], makeIdGen('acct-1'), clock);
     await setBalance(storage, 'acct-1', 'USD', '500', clock);
 
-    const result = await listAll(storage, 'USD');
+    const result = await listAll(storage, config);
     const json = JSON.stringify(result, null, 2);
     const parsed = JSON.parse(json);
 
@@ -961,21 +974,14 @@ describe('Integration: full JSON round-trip verification', () => {
     const clock = makeClock('2024-06-15T12:00:00Z');
 
     const result = await portfolioSnapshot(storage, marketDataStore, config, {}, clock);
-    const json = JSON.stringify(result, null, 2);
-    const parsed = JSON.parse(json);
-
-    expect(parsed).toEqual({
-      as_of_date: '2024-06-15',
-      currency: 'USD',
-      total_value: '0',
-      by_asset: [],
-      by_account: [],
-    });
+    const parsed = JSON.parse(JSON.stringify(result));
+    expect(parsed).toEqual(readContractFixture('portfolio_snapshot_empty'));
   });
 
   it('multiple mutations build up state correctly', async () => {
     const storage = new MemoryStorage();
     const clock = makeClock('2024-06-15T12:00:00Z');
+    const config = makeConfig();
 
     // Add two connections with accounts
     await addConnection(storage, 'Bank A', makeIdGen('conn-a'), clock);
@@ -995,14 +1001,13 @@ describe('Integration: full JSON round-trip verification', () => {
     const accounts = await listAccounts(storage);
     expect(accounts).toHaveLength(2);
 
-    const balances = await listBalances(storage, 'USD');
+    const balances = await listBalances(storage, config);
     expect(balances).toHaveLength(2);
     const amounts = balances.map((b) => b.amount).sort();
     expect(amounts).toEqual(['1000', '2000']);
 
     // Portfolio total should be sum
     const marketDataStore = new NullMarketDataStore();
-    const config = makeConfig();
     const snap = (await portfolioSnapshot(
       storage,
       marketDataStore,

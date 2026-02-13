@@ -37,6 +37,7 @@ function makeConfig(overrides?: Partial<ResolvedConfig>): ResolvedConfig {
   return {
     data_dir: '/tmp/test',
     reporting_currency: 'USD',
+    display: {},
     refresh: {
       balance_staleness: 14 * 86400000,
       price_staleness: 86400000,

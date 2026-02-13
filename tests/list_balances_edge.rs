@@ -2,7 +2,7 @@ use std::path::Path;
 
 use anyhow::Result;
 use keepbook::app::list_balances;
-use keepbook::config::{GitConfig, RefreshConfig, ResolvedConfig};
+use keepbook::config::{DisplayConfig, GitConfig, RefreshConfig, ResolvedConfig};
 use keepbook::models::{
     Account, Asset, AssetBalance, BalanceSnapshot, Connection, ConnectionConfig,
 };
@@ -13,6 +13,7 @@ fn resolved_config(data_dir: &Path) -> ResolvedConfig {
     ResolvedConfig {
         data_dir: data_dir.to_path_buf(),
         reporting_currency: "USD".to_string(),
+        display: DisplayConfig::default(),
         refresh: RefreshConfig::default(),
         git: GitConfig::default(),
     }

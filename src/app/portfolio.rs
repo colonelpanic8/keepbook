@@ -715,6 +715,7 @@ pub async fn portfolio_snapshot(
     let query = PortfolioQuery {
         as_of_date,
         currency: currency.unwrap_or_else(|| config.reporting_currency.clone()),
+        currency_decimals: config.display.currency_decimals,
         grouping,
         include_detail: detail,
     };
@@ -931,6 +932,7 @@ pub async fn portfolio_history(
         let query = PortfolioQuery {
             as_of_date,
             currency: target_currency.clone(),
+            currency_decimals: config.display.currency_decimals,
             grouping: Grouping::Asset,
             include_detail: false,
         };
@@ -1076,7 +1078,7 @@ mod tests {
     use super::*;
     use crate::app::*;
     use crate::clock::{Clock, FixedClock};
-    use crate::config::{GitConfig, RefreshConfig, ResolvedConfig};
+    use crate::config::{DisplayConfig, GitConfig, RefreshConfig, ResolvedConfig};
     use crate::models::FixedIdGenerator;
     use crate::models::{Account, AssetBalance, BalanceSnapshot, Connection, ConnectionConfig};
     use crate::storage::JsonFileStorage;
@@ -1141,6 +1143,7 @@ mod tests {
         let config = ResolvedConfig {
             data_dir: dir.path().to_path_buf(),
             reporting_currency: "USD".to_string(),
+            display: DisplayConfig::default(),
             refresh: RefreshConfig::default(),
             git: GitConfig::default(),
         };
@@ -1312,6 +1315,7 @@ mod tests {
         let config = ResolvedConfig {
             data_dir: dir.path().to_path_buf(),
             reporting_currency: "USD".to_string(),
+            display: DisplayConfig::default(),
             refresh: RefreshConfig::default(),
             git: GitConfig::default(),
         };
@@ -1333,6 +1337,7 @@ mod tests {
         let config = ResolvedConfig {
             data_dir: dir.path().to_path_buf(),
             reporting_currency: "USD".to_string(),
+            display: DisplayConfig::default(),
             refresh: RefreshConfig::default(),
             git: GitConfig::default(),
         };
@@ -1379,6 +1384,7 @@ mod tests {
         let config = ResolvedConfig {
             data_dir: dir.path().to_path_buf(),
             reporting_currency: "USD".to_string(),
+            display: DisplayConfig::default(),
             refresh: RefreshConfig::default(),
             git: GitConfig::default(),
         };
@@ -1409,6 +1415,7 @@ mod tests {
         let config = ResolvedConfig {
             data_dir: dir.path().to_path_buf(),
             reporting_currency: "USD".to_string(),
+            display: DisplayConfig::default(),
             refresh: RefreshConfig::default(),
             git: GitConfig::default(),
         };

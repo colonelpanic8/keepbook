@@ -43,6 +43,7 @@ async fn json_storage_reads_account_config_for_zero_backfill() -> Result<()> {
     let query = PortfolioQuery {
         as_of_date: NaiveDate::from_ymd_opt(2026, 2, 5).unwrap(),
         currency: "USD".to_string(),
+        currency_decimals: None,
         grouping: Grouping::Account,
         include_detail: false,
     };
