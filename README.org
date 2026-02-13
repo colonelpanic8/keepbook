@@ -84,6 +84,11 @@ reporting_currency = "USD"
 # Optional; if set, values denominated in the reporting currency are rounded to
 # this many decimal places in CLI output.
 # currency_decimals = 2
+#
+# Optional; UI-oriented currency display formatting (does not change canonical JSON numeric fields):
+# currency_grouping = true          # enable thousands separators
+# currency_symbol = "$"             # prefix symbol
+# currency_fixed_decimals = true    # when currency_decimals is set, pad to exactly that many dp
 
 [refresh]
 balance_staleness = "14d"

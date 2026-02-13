@@ -38,6 +38,18 @@ export interface DisplayConfig {
    * This is purely a presentation setting and does not affect calculations.
    */
   currency_decimals?: number;
+
+  /** When true, render base-currency values with thousands separators. */
+  currency_grouping?: boolean;
+
+  /** Optional currency symbol (e.g. "$", "€") for display rendering. */
+  currency_symbol?: string;
+
+  /**
+   * When true and `currency_decimals` is set, display values with exactly that
+   * many decimal places (padding with trailing zeros).
+   */
+  currency_fixed_decimals?: boolean;
 }
 
 export interface Config {
@@ -154,6 +166,24 @@ export function parseConfig(tomlStr: string): Config {
     if (Number.isInteger(currencyDecimals) && currencyDecimals >= 0) {
       config.display.currency_decimals = currencyDecimals;
     }
+  }
+
+  const currencyGrouping = (displayRaw as { currency_grouping?: unknown }).currency_grouping;
+  if (typeof currencyGrouping === 'boolean') {
+    config.display.currency_grouping = currencyGrouping;
+  }
+
+  const currencySymbol = (displayRaw as { currency_symbol?: unknown }).currency_symbol;
+  if (typeof currencySymbol === 'string') {
+    const trimmed = currencySymbol.trim();
+    if (trimmed.length > 0) {
+      config.display.currency_symbol = trimmed;
+    }
+  }
+
+  const currencyFixed = (displayRaw as { currency_fixed_decimals?: unknown }).currency_fixed_decimals;
+  if (typeof currencyFixed === 'boolean') {
+    config.display.currency_fixed_decimals = currencyFixed;
   }
 
   return config;

@@ -7,7 +7,7 @@ use chrono::{DateTime, Local};
 use clap::Parser;
 use keepbook::app;
 use keepbook::config::{default_config_path, ResolvedConfig};
-use keepbook::format::format_base_currency_value;
+use keepbook::format::format_base_currency_display;
 use keepbook::storage::{JsonFileStorage, Storage};
 use ksni::menu::*;
 use ksni::MenuItem;
@@ -468,12 +468,18 @@ fn local_now_plus(duration: Duration) -> DateTime<Local> {
     }
 }
 
-fn format_tray_currency(value: &str, currency_decimals: Option<u32>) -> String {
+fn format_tray_currency(value: &str, display: &keepbook::config::DisplayConfig) -> String {
     // The tray is a UI surface: default to sane currency rounding even when the
     // global config doesn't set `display.currency_decimals`.
-    let dp = currency_decimals.or(Some(2));
+    let dp = display.currency_decimals.or(Some(2));
     match Decimal::from_str(value) {
-        Ok(d) => format_base_currency_value(d, dp),
+        Ok(d) => format_base_currency_display(
+            d,
+            dp,
+            display.currency_grouping,
+            display.currency_symbol.as_deref(),
+            display.currency_fixed_decimals,
+        ),
         Err(_) => value.to_string(),
     }
 }
@@ -526,14 +532,13 @@ impl Daemon {
         .await
         {
             Ok(history) => {
-                let currency_decimals = self.config.display.currency_decimals;
                 let mut lines: Vec<String> = history
                     .points
                     .iter()
                     .rev()
                     .take(self.history_points)
                     .map(|point| {
-                        let value = format_tray_currency(&point.total_value, currency_decimals);
+                        let value = format_tray_currency(&point.total_value, &self.config.display);
                         format!("{}: {} {}", point.date, value, history.currency)
                     })
                     .collect();

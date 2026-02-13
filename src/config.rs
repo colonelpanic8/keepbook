@@ -19,12 +19,31 @@ pub struct DisplayConfig {
     ///
     /// This is purely a presentation setting and does not affect calculations.
     pub currency_decimals: Option<u32>,
+
+    /// When true, render base-currency values with thousands separators.
+    ///
+    /// This only affects optional `*_display` fields and UI surfaces.
+    pub currency_grouping: bool,
+
+    /// Optional currency symbol (e.g. "$", "€") for display rendering.
+    ///
+    /// This only affects optional `*_display` fields and UI surfaces.
+    pub currency_symbol: Option<String>,
+
+    /// When true and `currency_decimals` is set, display values with exactly
+    /// that many decimal places (padding with trailing zeros).
+    ///
+    /// This only affects optional `*_display` fields and UI surfaces.
+    pub currency_fixed_decimals: bool,
 }
 
 impl Default for DisplayConfig {
     fn default() -> Self {
         Self {
             currency_decimals: None,
+            currency_grouping: false,
+            currency_symbol: None,
+            currency_fixed_decimals: false,
         }
     }
 }
@@ -398,6 +417,25 @@ mod tests {
 
         let config = Config::load(&config_path)?;
         assert_eq!(config.display.currency_decimals, Some(2));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_load_display_currency_formatting_options() -> Result<()> {
+        let dir = TempDir::new()?;
+        let config_path = dir.path().join("keepbook.toml");
+
+        let mut file = std::fs::File::create(&config_path)?;
+        writeln!(file, "[display]")?;
+        writeln!(file, "currency_grouping = true")?;
+        writeln!(file, "currency_symbol = \"$\"")?;
+        writeln!(file, "currency_fixed_decimals = true")?;
+
+        let config = Config::load(&config_path)?;
+        assert_eq!(config.display.currency_grouping, true);
+        assert_eq!(config.display.currency_symbol.as_deref(), Some("$"));
+        assert_eq!(config.display.currency_fixed_decimals, true);
 
         Ok(())
     }

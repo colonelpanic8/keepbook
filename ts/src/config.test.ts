@@ -67,6 +67,21 @@ describe('parseConfig', () => {
     expect(config.git.merge_master_before_command).toBe(false);
   });
 
+  it('parses display currency formatting options', () => {
+    const toml = `
+[display]
+currency_grouping = true
+currency_symbol = "$"
+currency_fixed_decimals = true
+currency_decimals = 2
+`;
+    const config = parseConfig(toml);
+    expect(config.display.currency_grouping).toBe(true);
+    expect(config.display.currency_symbol).toBe('$');
+    expect(config.display.currency_fixed_decimals).toBe(true);
+    expect(config.display.currency_decimals).toBe(2);
+  });
+
   it('parses data_dir only', () => {
     const config = parseConfig('data_dir = "./my-data"');
     expect(config.data_dir).toBe('./my-data');
