@@ -16,6 +16,56 @@ use tokio::sync::mpsc::{self, UnboundedSender};
 use tracing::{info, warn};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
+// --- Embedded icon PNGs (compiled into the binary) ---
+const ICON_32_PNG: &[u8] = include_bytes!("../../assets/keepbook-icon-32.png");
+const ICON_48_PNG: &[u8] = include_bytes!("../../assets/keepbook-icon-48.png");
+const ICON_64_PNG: &[u8] = include_bytes!("../../assets/keepbook-icon-64.png");
+
+const OVERLAY_SYNC_32: &[u8] = include_bytes!("../../assets/overlay-sync-32.png");
+const OVERLAY_SYNC_48: &[u8] = include_bytes!("../../assets/overlay-sync-48.png");
+const OVERLAY_SYNC_64: &[u8] = include_bytes!("../../assets/overlay-sync-64.png");
+
+const OVERLAY_ERROR_32: &[u8] = include_bytes!("../../assets/overlay-error-32.png");
+const OVERLAY_ERROR_48: &[u8] = include_bytes!("../../assets/overlay-error-48.png");
+const OVERLAY_ERROR_64: &[u8] = include_bytes!("../../assets/overlay-error-64.png");
+
+fn png_to_argb32(png_data: &[u8]) -> ksni::Icon {
+    let img = image::load_from_memory_with_format(png_data, image::ImageFormat::Png)
+        .expect("embedded PNG is valid")
+        .into_rgba8();
+    let width = img.width() as i32;
+    let height = img.height() as i32;
+    // Convert RGBA → ARGB (network byte order for StatusNotifierItem)
+    let data: Vec<u8> = img
+        .pixels()
+        .flat_map(|p| [p[3], p[0], p[1], p[2]])
+        .collect();
+    ksni::Icon {
+        width,
+        height,
+        data,
+    }
+}
+
+fn load_icon_set(png_32: &[u8], png_48: &[u8], png_64: &[u8]) -> Vec<ksni::Icon> {
+    vec![
+        png_to_argb32(png_32),
+        png_to_argb32(png_48),
+        png_to_argb32(png_64),
+    ]
+}
+
+struct OverlayIcons {
+    sync: Vec<ksni::Icon>,
+    error: Vec<ksni::Icon>,
+}
+
+impl std::fmt::Debug for OverlayIcons {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OverlayIcons").finish_non_exhaustive()
+    }
+}
+
 fn parse_duration_arg(s: &str) -> Result<Duration, String> {
     keepbook::duration::parse_duration(s).map_err(|e| e.to_string())
 }
@@ -59,10 +109,6 @@ struct Cli {
     /// Disable periodic symlink rebuild.
     #[arg(long)]
     no_sync_symlinks: bool,
-
-    /// Base freedesktop icon name for idle state.
-    #[arg(long, default_value = "wallet")]
-    tray_icon: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -126,28 +172,54 @@ impl KeepbookTrayState {
 struct KeepbookTray {
     state: KeepbookTrayState,
     cmd_tx: UnboundedSender<DaemonCommand>,
-    base_icon_name: String,
+    icons: Vec<ksni::Icon>,
+    overlays: OverlayIcons,
+    icon_generation: u64,
 }
 
 impl KeepbookTray {
-    fn new(
-        state: KeepbookTrayState,
-        cmd_tx: UnboundedSender<DaemonCommand>,
-        base_icon_name: String,
-    ) -> Self {
+    fn new(state: KeepbookTrayState, cmd_tx: UnboundedSender<DaemonCommand>) -> Self {
         Self {
             state,
             cmd_tx,
-            base_icon_name,
+            icons: load_icon_set(ICON_32_PNG, ICON_48_PNG, ICON_64_PNG),
+            overlays: OverlayIcons {
+                sync: load_icon_set(OVERLAY_SYNC_32, OVERLAY_SYNC_48, OVERLAY_SYNC_64),
+                error: load_icon_set(OVERLAY_ERROR_32, OVERLAY_ERROR_48, OVERLAY_ERROR_64),
+            },
+            icon_generation: 0,
         }
     }
 
-    fn effective_icon_name(&self) -> String {
-        match &self.state.status {
-            DaemonStatus::Syncing => "view-refresh".to_string(),
-            DaemonStatus::Error(_) => "dialog-error".to_string(),
-            DaemonStatus::Idle => self.base_icon_name.clone(),
+    fn bump_icon_generation(&mut self) {
+        self.icon_generation = self.icon_generation.wrapping_add(1);
+    }
+
+    fn overlay_pixmaps_for_status(&self) -> Vec<ksni::Icon> {
+        let base = match &self.state.status {
+            DaemonStatus::Idle => return self.generation_only_pixmap(),
+            DaemonStatus::Syncing => &self.overlays.sync,
+            DaemonStatus::Error(_) => &self.overlays.error,
+        };
+        let mut icons = base.clone();
+        icons.push(self.generation_pixel());
+        icons
+    }
+
+    fn generation_pixel(&self) -> ksni::Icon {
+        let gen = self.icon_generation;
+        let r = (gen & 0xFF) as u8;
+        let g = ((gen >> 8) & 0xFF) as u8;
+        let b = ((gen >> 16) & 0xFF) as u8;
+        ksni::Icon {
+            width: 1,
+            height: 1,
+            data: vec![0, r, g, b],
         }
+    }
+
+    fn generation_only_pixmap(&self) -> Vec<ksni::Icon> {
+        vec![self.generation_pixel()]
     }
 }
 
@@ -163,7 +235,15 @@ impl ksni::Tray for KeepbookTray {
     }
 
     fn icon_name(&self) -> String {
-        self.effective_icon_name()
+        String::new()
+    }
+
+    fn icon_pixmap(&self) -> Vec<ksni::Icon> {
+        self.icons.clone()
+    }
+
+    fn overlay_icon_pixmap(&self) -> Vec<ksni::Icon> {
+        self.overlay_pixmaps_for_status()
     }
 
     fn tool_tip(&self) -> ksni::ToolTip {
@@ -397,6 +477,7 @@ async fn apply_tray_state(
     let update_result = handle
         .update(move |tray: &mut KeepbookTray| {
             tray.state = new_state;
+            tray.bump_icon_generation();
         })
         .await;
 
@@ -533,13 +614,13 @@ impl Daemon {
         apply_tray_state(tray_handle, state).await;
     }
 
-    async fn run(self, tray_icon: String) -> Result<()> {
+    async fn run(self) -> Result<()> {
         let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel();
 
         let mut tray_state = KeepbookTrayState::default();
         self.refresh_history_lines(&mut tray_state).await;
 
-        let mut tray_handle = match KeepbookTray::new(tray_state.clone(), cmd_tx, tray_icon)
+        let mut tray_handle = match KeepbookTray::new(tray_state.clone(), cmd_tx)
             .assume_sni_available(true)
             .spawn()
             .await
@@ -647,7 +728,7 @@ async fn main() -> Result<()> {
         history_points: cli.history_points,
     };
 
-    daemon.run(cli.tray_icon).await
+    daemon.run().await
 }
 
 #[cfg(test)]
