@@ -111,10 +111,14 @@ enum Command {
 
 #[derive(Subcommand)]
 enum AddCommand {
-    /// Add a new manual connection
+    /// Add a new connection
     Connection {
         /// Name for the connection
         name: String,
+
+        /// Synchronizer to use (default: manual)
+        #[arg(long, default_value = "manual")]
+        synchronizer: String,
     },
 
     /// Add a new account to a connection
@@ -462,8 +466,10 @@ async fn main() -> Result<()> {
         }
 
         Some(Command::Add(add_cmd)) => match add_cmd {
-            AddCommand::Connection { name } => {
-                let result = app::add_connection(storage_arc.as_ref(), &config, &name).await?;
+            AddCommand::Connection { name, synchronizer } => {
+                let result =
+                    app::add_connection(storage_arc.as_ref(), &config, &name, &synchronizer)
+                        .await?;
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
             AddCommand::Account {

@@ -28,17 +28,47 @@ import {
 // ---------------------------------------------------------------------------
 
 /**
- * Create a new manual connection.
+ * Create a new connection.
  *
  * Checks for duplicate names (case-insensitive). Returns an error object
  * if a connection with the same name already exists.
  */
-export async function addConnection(
+export function addConnection(
   storage: Storage,
   name: string,
   ids?: IdGenerator,
   clock?: Clock,
+): Promise<object>;
+export function addConnection(
+  storage: Storage,
+  name: string,
+  synchronizer: string,
+  ids?: IdGenerator,
+  clock?: Clock,
+): Promise<object>;
+export async function addConnection(
+  storage: Storage,
+  name: string,
+  synchronizerOrIds?: string | IdGenerator,
+  idsOrClock?: IdGenerator | Clock,
+  clock?: Clock,
 ): Promise<object> {
+  // Backwards-compatible arg parsing:
+  // Old: addConnection(storage, name, ids?, clock?)
+  // New: addConnection(storage, name, synchronizer, ids?, clock?)
+  let syncArg: string | undefined;
+  let idsArg: IdGenerator | undefined;
+  let clockArg: Clock | undefined;
+  if (typeof synchronizerOrIds === 'string' || synchronizerOrIds === undefined) {
+    syncArg = synchronizerOrIds;
+    idsArg = idsOrClock as IdGenerator | undefined;
+    clockArg = clock;
+  } else {
+    syncArg = undefined;
+    idsArg = synchronizerOrIds;
+    clockArg = idsOrClock as Clock | undefined;
+  }
+
   // Check for duplicate name (case-insensitive)
   const existing = await storage.listConnections();
   const needle = name.toLowerCase();
@@ -51,10 +81,11 @@ export async function addConnection(
     }
   }
 
+  const syncName = typeof syncArg === 'string' && syncArg.trim() !== '' ? syncArg.trim() : 'manual';
   const conn = Connection.new(
-    { name, synchronizer: 'manual' },
-    ids ?? new UuidIdGenerator(),
-    clock ?? new SystemClock(),
+    { name, synchronizer: syncName },
+    idsArg ?? new UuidIdGenerator(),
+    clockArg ?? new SystemClock(),
   );
 
   const connId = conn.state.id;
@@ -66,7 +97,7 @@ export async function addConnection(
     connection: {
       id: connId.asStr(),
       name,
-      synchronizer: 'manual',
+      synchronizer: conn.config.synchronizer,
     },
   };
 }

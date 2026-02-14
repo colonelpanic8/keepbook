@@ -106,11 +106,12 @@ const add = program.command('add').description('Add a resource');
 
 add
   .command('connection <name>')
-  .description('Add a new manual connection')
-  .action(async (name: string) => {
+  .description('Add a new connection')
+  .option('--synchronizer <name>', 'synchronizer to use (default: manual)', 'manual')
+  .action(async (name: string, opts: { synchronizer: string }) => {
     await runWithConfig(async (cfg) => {
       const storage = new JsonFileStorage(cfg.config.data_dir);
-      const result = await addConnection(storage, name);
+      const result = await addConnection(storage, name, opts.synchronizer);
       if (cfg.config.git.auto_commit) {
         await tryAutoCommit(
           cfg.config.data_dir,

@@ -1320,9 +1320,9 @@ mod tests {
             git: GitConfig::default(),
         };
 
-        add_connection(&storage, &config, "Duplicate").await?;
+        add_connection(&storage, &config, "Duplicate", "manual").await?;
 
-        let err = add_connection(&storage, &config, "duplicate")
+        let err = add_connection(&storage, &config, "duplicate", "manual")
             .await
             .expect_err("expected duplicate connection name error");
         assert!(err.to_string().contains("Connection name already exists"));
@@ -1345,7 +1345,7 @@ mod tests {
         let ids = FixedIdGenerator::new([Id::from_string("conn-id"), Id::from_string("acct-id")]);
         let clock = FixedClock::new(Utc.with_ymd_and_hms(2026, 2, 5, 12, 0, 0).unwrap());
 
-        let out = add_connection_with(&storage, &config, "Test", &ids, &clock).await?;
+        let out = add_connection_with(&storage, &config, "Test", "manual", &ids, &clock).await?;
         assert_eq!(out["connection"]["id"].as_str(), Some("conn-id"));
 
         let loaded = storage
@@ -1389,7 +1389,7 @@ mod tests {
             git: GitConfig::default(),
         };
 
-        let result = add_connection(&storage, &config, "Test Bank").await?;
+        let result = add_connection(&storage, &config, "Test Bank", "manual").await?;
         let id = result["connection"]["id"]
             .as_str()
             .expect("connection id missing");

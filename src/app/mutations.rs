@@ -87,14 +87,24 @@ pub async fn add_connection(
     storage: &dyn Storage,
     config: &ResolvedConfig,
     name: &str,
+    synchronizer: &str,
 ) -> Result<serde_json::Value> {
-    add_connection_with(storage, config, name, &UuidIdGenerator, &SystemClock).await
+    add_connection_with(
+        storage,
+        config,
+        name,
+        synchronizer,
+        &UuidIdGenerator,
+        &SystemClock,
+    )
+    .await
 }
 
 pub async fn add_connection_with(
     storage: &dyn Storage,
     config: &ResolvedConfig,
     name: &str,
+    synchronizer: &str,
     ids: &dyn IdGenerator,
     clock: &dyn Clock,
 ) -> Result<serde_json::Value> {
@@ -110,7 +120,7 @@ pub async fn add_connection_with(
     let connection = Connection {
         config: ConnectionConfig {
             name: name.to_string(),
-            synchronizer: "manual".to_string(),
+            synchronizer: synchronizer.to_string(),
             credentials: None,
             balance_staleness: None,
         },
@@ -132,7 +142,7 @@ pub async fn add_connection_with(
         "connection": {
             "id": id,
             "name": name,
-            "synchronizer": "manual"
+            "synchronizer": synchronizer
         }
     });
 
