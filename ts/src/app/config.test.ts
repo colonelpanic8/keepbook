@@ -200,6 +200,7 @@ describe('configOutput', () => {
     const result = configOutput('/path/to/keepbook.toml', {
       data_dir: '/path/to/data',
       reporting_currency: 'USD',
+      display: {},
       refresh: { ...DEFAULT_REFRESH_CONFIG },
       git: { auto_commit: false, auto_push: false, merge_master_before_command: false },
     });
@@ -219,6 +220,7 @@ describe('configOutput', () => {
     const result = configOutput('/some/file.toml', {
       data_dir: '/data',
       reporting_currency: 'EUR',
+      display: {},
       refresh: { ...DEFAULT_REFRESH_CONFIG },
       git: { auto_commit: true, auto_push: true, merge_master_before_command: true },
     });
@@ -238,6 +240,7 @@ describe('configOutput', () => {
     const result = configOutput('/f.toml', {
       data_dir: '/d',
       reporting_currency: 'GBP',
+      display: {},
       refresh: { balance_staleness: 1, price_staleness: 2 },
       git: { auto_commit: false, auto_push: false, merge_master_before_command: false },
     }) as Record<string, unknown>;
