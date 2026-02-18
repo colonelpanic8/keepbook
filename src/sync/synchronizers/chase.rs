@@ -4,7 +4,7 @@
 //! to make direct API calls for accounts, balances, and transactions.
 //! Login still uses browser automation so the user can complete 2FA.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -22,10 +22,13 @@ use crate::models::{
 };
 use crate::storage::Storage;
 use crate::sync::chase::api::{
-    ActivityAccount, AppDataResponse, CardDetailResponse, ChaseActivity, ChaseClient,
-    MortgageDetailResponse, TransactionsResponse,
+    max_card_transactions, ActivityAccount, AppDataResponse, CardDetailResponse, ChaseActivity,
+    ChaseClient, MortgageDetailResponse, TransactionsResponse, DEFAULT_CARD_TXN_PAGE_SIZE,
 };
-use crate::sync::{AuthStatus, InteractiveAuth, SyncResult, SyncedAssetBalance, Synchronizer};
+use crate::sync::{
+    AuthStatus, InteractiveAuth, SyncOptions, SyncResult, SyncedAssetBalance, Synchronizer,
+    TransactionSyncMode,
+};
 
 /// Chase synchronizer using API-based data fetching.
 pub struct ChaseSynchronizer {
@@ -210,6 +213,26 @@ impl ChaseBackend {
             Self::Browser(client) => client.get_all_card_transactions(account_id).await,
         }
     }
+
+    async fn get_card_transactions_page(
+        &self,
+        account_id: i64,
+        record_count: u32,
+        pagination_key: Option<String>,
+    ) -> Result<TransactionsResponse> {
+        match self {
+            Self::Direct(client) => {
+                client
+                    .get_card_transactions(account_id, record_count, pagination_key)
+                    .await
+            }
+            Self::Browser(client) => {
+                client
+                    .get_card_transactions(account_id, record_count, pagination_key)
+                    .await
+            }
+        }
+    }
 }
 
 impl ChaseSynchronizer {
@@ -314,6 +337,7 @@ impl ChaseSynchronizer {
         &self,
         connection: &mut Connection,
         storage: &dyn Storage,
+        options: &SyncOptions,
     ) -> Result<SyncResult> {
         let session = self
             .get_session()?
@@ -449,7 +473,21 @@ impl ChaseSynchronizer {
             // Fetch transactions for credit card accounts.
             let mut acct_txns: Vec<Transaction> = Vec::new();
             if is_credit_card {
-                match backend.get_all_card_transactions(acct.id).await {
+                let activities = match options.transactions {
+                    TransactionSyncMode::Full => backend.get_all_card_transactions(acct.id).await,
+                    TransactionSyncMode::Auto => {
+                        get_card_transactions_auto(
+                            &backend,
+                            storage,
+                            connection.id(),
+                            &account_id,
+                            acct.id,
+                        )
+                        .await
+                    }
+                };
+
+                match activities {
                     Ok(activities) => {
                         eprintln!(
                             "Chase: fetched {} transactions for {} ({})",
@@ -542,7 +580,17 @@ impl Synchronizer for ChaseSynchronizer {
     }
 
     async fn sync(&self, connection: &mut Connection, storage: &dyn Storage) -> Result<SyncResult> {
-        self.sync_internal(connection, storage).await
+        let options = SyncOptions::default();
+        self.sync_internal(connection, storage, &options).await
+    }
+
+    async fn sync_with_options(
+        &self,
+        connection: &mut Connection,
+        storage: &dyn Storage,
+        options: &SyncOptions,
+    ) -> Result<SyncResult> {
+        self.sync_internal(connection, storage, options).await
     }
 
     fn interactive(&mut self) -> Option<&mut dyn InteractiveAuth> {
@@ -557,7 +605,8 @@ impl ChaseSynchronizer {
         connection: &mut Connection,
         storage: &S,
     ) -> Result<SyncResult> {
-        self.sync_internal(connection, storage).await
+        let options = SyncOptions::default();
+        self.sync_internal(connection, storage, &options).await
     }
 }
 
@@ -722,6 +771,123 @@ fn chase_activity_to_transaction(
             "post_date": activity.transaction_post_date,
         }),
     })
+}
+
+fn chase_activity_to_transaction_id(
+    connection_id: &Id,
+    chase_account_id: i64,
+    activity: &ChaseActivity,
+) -> Id {
+    let stable_id = activity.stable_id();
+    Id::from_external(&format!(
+        "chase:{}:{}:{}",
+        connection_id, chase_account_id, stable_id
+    ))
+}
+
+fn chase_overlap_stop_threshold() -> usize {
+    std::env::var("KEEPBOOK_CHASE_OVERLAP_THRESHOLD")
+        .ok()
+        .and_then(|s| s.trim().parse::<usize>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(200)
+}
+
+async fn get_card_transactions_auto(
+    backend: &ChaseBackend,
+    storage: &dyn Storage,
+    connection_id: &Id,
+    keepbook_account_id: &Id,
+    chase_account_id: i64,
+) -> Result<Vec<ChaseActivity>> {
+    // If we have no stored transactions for this account, we need a full backfill anyway.
+    let existing = storage.get_transactions(keepbook_account_id).await?;
+    if existing.is_empty() {
+        return backend.get_all_card_transactions(chase_account_id).await;
+    }
+
+    let existing_ids: HashSet<Id> = existing.into_iter().map(|t| t.id).collect();
+
+    let page_size = DEFAULT_CARD_TXN_PAGE_SIZE;
+    let max_transactions = max_card_transactions();
+    let threshold = chase_overlap_stop_threshold();
+
+    let mut all_activities: Vec<ChaseActivity> = Vec::new();
+    let mut consecutive_existing: usize = 0;
+    let mut pagination_key: Option<String> = None;
+    let mut seen_keys: HashSet<String> = HashSet::new();
+    let mut pages: usize = 0;
+    let max_pages: usize = ((max_transactions / page_size.max(1) as usize).max(1)) + 50;
+
+    loop {
+        pages += 1;
+        if pages > max_pages {
+            eprintln!(
+                "Chase: stopping pagination at {} transactions (safety limit: max pages={max_pages}; set KEEPBOOK_CHASE_MAX_TRANSACTIONS to increase overall cap)",
+                all_activities.len()
+            );
+            break;
+        }
+
+        let resp = backend
+            .get_card_transactions_page(chase_account_id, page_size, pagination_key.clone())
+            .await?;
+
+        if resp.activities.is_empty() {
+            if resp.more_records_indicator {
+                eprintln!(
+                    "Chase: got empty transactions page but moreRecordsIndicator=true; stopping to avoid infinite pagination"
+                );
+            }
+            break;
+        }
+
+        for activity in resp.activities {
+            let id = chase_activity_to_transaction_id(connection_id, chase_account_id, &activity);
+            if existing_ids.contains(&id) {
+                consecutive_existing += 1;
+            } else {
+                consecutive_existing = 0;
+            }
+            all_activities.push(activity);
+        }
+
+        if all_activities.len() > max_transactions {
+            all_activities.truncate(max_transactions);
+            eprintln!(
+                "Chase: stopping pagination at {} transactions (safety limit; set KEEPBOOK_CHASE_MAX_TRANSACTIONS to increase)",
+                all_activities.len()
+            );
+            break;
+        }
+
+        if consecutive_existing >= threshold {
+            eprintln!(
+                "Chase: stopping pagination after detecting overlap ({} consecutive existing transactions; set KEEPBOOK_CHASE_OVERLAP_THRESHOLD or use --transactions full)",
+                consecutive_existing
+            );
+            break;
+        }
+
+        if !resp.more_records_indicator {
+            break;
+        }
+
+        match resp.pagination_contextual_text {
+            Some(ref key) if !key.is_empty() => {
+                if !seen_keys.insert(key.clone()) {
+                    eprintln!(
+                        "Chase: pagination key repeated; stopping to avoid infinite pagination"
+                    );
+                    break;
+                }
+                pagination_key = Some(key.clone());
+            }
+            _ => break,
+        }
+    }
+
+    Ok(all_activities)
 }
 
 fn default_profile_root() -> Result<PathBuf> {
