@@ -17,3 +17,6 @@ Thumbs.db
 
 # Worktrees
 .worktrees/
+
+# Browser automation artifacts
+.playwright-cli/
