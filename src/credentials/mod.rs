@@ -23,7 +23,7 @@ mod session;
 
 pub use config::CredentialConfig;
 pub use pass::{PassConfig, PassCredentialStore};
-pub use session::{SessionCache, SessionData};
+pub use session::{SessionCache, SessionData, StoredCookie};
 
 use anyhow::Result;
 use async_trait::async_trait;

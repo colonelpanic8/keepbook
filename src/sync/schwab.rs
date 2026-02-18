@@ -219,6 +219,7 @@ pub fn parse_exported_session(json: &str) -> Result<SessionData> {
     Ok(SessionData {
         token: Some(token),
         cookies: exported.cookies,
+        cookie_jar: Vec::new(),
         captured_at: Some(chrono::Utc::now().timestamp()),
         data: HashMap::new(),
     })

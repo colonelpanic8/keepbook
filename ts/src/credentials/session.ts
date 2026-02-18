@@ -5,8 +5,21 @@ import * as os from 'node:os';
 export interface SessionData {
   readonly token?: string | null;
   readonly cookies?: Record<string, string>;
+  // Optional full cookie jar (domain/path/etc). Present in the Rust session cache
+  // for some providers; safe to ignore when unused.
+  readonly cookie_jar?: ReadonlyArray<StoredCookie>;
   readonly captured_at?: number | null;
   readonly data?: Record<string, string>;
+}
+
+export interface StoredCookie {
+  readonly name: string;
+  readonly value: string;
+  readonly domain: string;
+  readonly path: string;
+  readonly secure?: boolean;
+  readonly http_only?: boolean;
+  readonly same_site?: string | null;
 }
 
 function defaultCacheDir(): string {
@@ -77,4 +90,3 @@ export class SessionCache {
     }
   }
 }
-

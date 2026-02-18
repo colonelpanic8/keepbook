@@ -20,6 +20,13 @@ pub struct SessionData {
     #[serde(default)]
     pub cookies: HashMap<String, String>,
 
+    /// Full cookie jar captured from the browser (preferred when present).
+    ///
+    /// Some sites (including Chase) rely on cookie domain/path/samesite attributes.
+    /// Storing only name/value is insufficient to restore an authenticated session.
+    #[serde(default)]
+    pub cookie_jar: Vec<StoredCookie>,
+
     /// When the session was captured (Unix timestamp).
     #[serde(default)]
     pub captured_at: Option<i64>,
@@ -27,6 +34,20 @@ pub struct SessionData {
     /// Arbitrary key-value data for synchronizer-specific needs.
     #[serde(default)]
     pub data: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoredCookie {
+    pub name: String,
+    pub value: String,
+    pub domain: String,
+    pub path: String,
+    #[serde(default)]
+    pub secure: bool,
+    #[serde(default)]
+    pub http_only: bool,
+    #[serde(default)]
+    pub same_site: Option<String>,
 }
 
 impl SessionData {
