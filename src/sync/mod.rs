@@ -20,6 +20,35 @@ use crate::models::{Account, AssetBalance, BalanceSnapshot, Connection, Id, Tran
 use crate::storage::Storage;
 use anyhow::Result;
 
+/// How to sync transactions for a connection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransactionSyncMode {
+    /// Default behavior: synchronizer may stop early when it detects overlap with stored history.
+    Auto,
+    /// Backfill as far back as the synchronizer/provider can fetch (bounded by safety limits).
+    Full,
+}
+
+impl Default for TransactionSyncMode {
+    fn default() -> Self {
+        Self::Auto
+    }
+}
+
+/// Options that control how a sync is performed.
+#[derive(Debug, Clone)]
+pub struct SyncOptions {
+    pub transactions: TransactionSyncMode,
+}
+
+impl Default for SyncOptions {
+    fn default() -> Self {
+        Self {
+            transactions: TransactionSyncMode::Auto,
+        }
+    }
+}
+
 /// An asset balance paired with optional price data from the synchronizer.
 #[derive(Debug, Clone)]
 pub struct SyncedAssetBalance {
@@ -138,6 +167,19 @@ pub trait Synchronizer: Send + Sync {
 
     /// Perform a full sync, returning all accounts, balances, and transactions.
     async fn sync(&self, connection: &mut Connection, storage: &dyn Storage) -> Result<SyncResult>;
+
+    /// Perform a sync with options.
+    ///
+    /// Default implementation ignores options and calls `sync`.
+    async fn sync_with_options(
+        &self,
+        connection: &mut Connection,
+        storage: &dyn Storage,
+        options: &SyncOptions,
+    ) -> Result<SyncResult> {
+        let _ = options;
+        self.sync(connection, storage).await
+    }
 
     /// Return interactive auth support if this synchronizer needs it.
     fn interactive(&mut self) -> Option<&mut dyn InteractiveAuth> {

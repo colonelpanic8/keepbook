@@ -11,7 +11,7 @@ use crate::market_data::MarketDataService;
 use crate::models::{Asset, Connection, Id};
 use crate::storage::Storage;
 
-use super::{SyncResult, Synchronizer};
+use super::{SyncOptions, SyncResult, Synchronizer};
 
 /// Coordinates sync + price fetching operations.
 pub struct SyncOrchestrator {
@@ -425,9 +425,12 @@ impl SyncOrchestrator {
         synchronizer: &dyn Synchronizer,
         connection: &mut Connection,
         force_refresh: bool,
+        options: &SyncOptions,
     ) -> Result<SyncWithPricesResult> {
         // 1. Run the sync
-        let result = synchronizer.sync(connection, self.storage.as_ref()).await?;
+        let result = synchronizer
+            .sync_with_options(connection, self.storage.as_ref(), options)
+            .await?;
 
         // 2. Save sync results (this stores balances)
         result

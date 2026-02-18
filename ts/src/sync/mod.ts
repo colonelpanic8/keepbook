@@ -62,6 +62,18 @@ export interface SyncResult {
 }
 
 // ---------------------------------------------------------------------------
+// SyncOptions
+// ---------------------------------------------------------------------------
+
+export type TransactionSyncMode = 'auto' | 'full';
+
+export interface SyncOptions {
+  readonly transactions: TransactionSyncMode;
+}
+
+export const DefaultSyncOptions: SyncOptions = { transactions: 'auto' } as const;
+
+// ---------------------------------------------------------------------------
 // saveSyncResult
 // ---------------------------------------------------------------------------
 
@@ -192,6 +204,13 @@ export interface Synchronizer {
 
   /** Perform a full sync, returning all accounts, balances, and transactions. */
   sync(connection: ConnectionType, storage: Storage): Promise<SyncResult>;
+
+  /**
+   * Perform a sync with options.
+   *
+   * If omitted, callers should fall back to `sync`.
+   */
+  syncWithOptions?(connection: ConnectionType, storage: Storage, options: SyncOptions): Promise<SyncResult>;
 
   /** Return interactive auth support if this synchronizer needs it. */
   interactive?(): InteractiveAuth;

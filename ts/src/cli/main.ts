@@ -23,9 +23,13 @@ import { portfolioSnapshot, portfolioHistory, portfolioChangePoints } from '../a
 import { spendingReport } from '../app/spending.js';
 import {
   syncConnection,
+  syncConnectionWithOptions,
   syncConnectionIfStale,
+  syncConnectionIfStaleWithOptions,
   syncAll,
+  syncAllWithOptions,
   syncAllIfStale,
+  syncAllIfStaleWithOptions,
   syncPrices,
   syncSymlinks,
   authLogin,
@@ -431,13 +435,17 @@ sync
   .command('connection <id_or_name>')
   .description('Sync a single connection')
   .option('--if-stale', 'only sync if data is stale')
-  .action(async (idOrName: string, opts: { ifStale?: boolean }) => {
+  .option('--transactions <mode>', 'transaction sync mode: auto|full', 'auto')
+  .action(async (idOrName: string, opts: { ifStale?: boolean; transactions?: string }) => {
     await runWithConfig(async (cfg) => {
       const storage = new JsonFileStorage(cfg.config.data_dir);
+      const txMode = opts.transactions === 'full' ? 'full' : 'auto';
       if (opts.ifStale) {
-        return syncConnectionIfStale(storage, idOrName, cfg.config.refresh);
+        return syncConnectionIfStaleWithOptions(storage, idOrName, cfg.config.refresh, {
+          transactions: txMode,
+        });
       }
-      return syncConnection(storage, idOrName);
+      return syncConnectionWithOptions(storage, idOrName, { transactions: txMode });
     });
   });
 
@@ -445,13 +453,15 @@ sync
   .command('all')
   .description('Sync all connections')
   .option('--if-stale', 'only sync if data is stale')
-  .action(async (opts: { ifStale?: boolean }) => {
+  .option('--transactions <mode>', 'transaction sync mode: auto|full', 'auto')
+  .action(async (opts: { ifStale?: boolean; transactions?: string }) => {
     await runWithConfig(async (cfg) => {
       const storage = new JsonFileStorage(cfg.config.data_dir);
+      const txMode = opts.transactions === 'full' ? 'full' : 'auto';
       if (opts.ifStale) {
-        return syncAllIfStale(storage, cfg.config.refresh);
+        return syncAllIfStaleWithOptions(storage, cfg.config.refresh, { transactions: txMode });
       }
-      return syncAll(storage);
+      return syncAllWithOptions(storage, { transactions: txMode });
     });
   });
 

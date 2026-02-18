@@ -9,8 +9,8 @@ use crate::market_data::MarketDataServiceBuilder;
 use crate::models::{Connection, Id};
 use crate::storage::{Storage, SymlinkStorage};
 use crate::sync::{
-    AuthPrompter, DefaultSynchronizerFactory, GitAutoCommitter, SyncContext, SyncOutcome,
-    SyncService,
+    AuthPrompter, DefaultSynchronizerFactory, GitAutoCommitter, SyncContext, SyncOptions,
+    SyncOutcome, SyncService, TransactionSyncMode,
 };
 
 use super::maybe_auto_commit;
@@ -272,9 +272,13 @@ pub async fn sync_connection(
     storage: Arc<dyn Storage>,
     config: &ResolvedConfig,
     id_or_name: &str,
+    transactions: TransactionSyncMode,
 ) -> Result<serde_json::Value> {
     let service = build_sync_service(storage, config).await;
-    let outcome = service.sync_connection(id_or_name).await?;
+    let options = SyncOptions { transactions };
+    let outcome = service
+        .sync_connection_with_options(id_or_name, &options)
+        .await?;
     Ok(sync_outcome_to_json(outcome))
 }
 
@@ -282,10 +286,12 @@ pub async fn sync_connection_if_stale(
     storage: Arc<dyn Storage>,
     config: &ResolvedConfig,
     id_or_name: &str,
+    transactions: TransactionSyncMode,
 ) -> Result<serde_json::Value> {
     let service = build_sync_service(storage, config).await;
+    let options = SyncOptions { transactions };
     let outcome = service
-        .sync_connection_if_stale(id_or_name, &config.refresh)
+        .sync_connection_if_stale_with_options(id_or_name, &config.refresh, &options)
         .await?;
     Ok(sync_outcome_to_json(outcome))
 }
@@ -293,9 +299,11 @@ pub async fn sync_connection_if_stale(
 pub async fn sync_all(
     storage: Arc<dyn Storage>,
     config: &ResolvedConfig,
+    transactions: TransactionSyncMode,
 ) -> Result<serde_json::Value> {
     let service = build_sync_service(storage, config).await;
-    let outcomes = service.sync_all().await?;
+    let options = SyncOptions { transactions };
+    let outcomes = service.sync_all_with_options(&options).await?;
     let results: Vec<_> = outcomes.into_iter().map(sync_outcome_to_json).collect();
 
     Ok(serde_json::json!({
@@ -307,9 +315,13 @@ pub async fn sync_all(
 pub async fn sync_all_if_stale(
     storage: Arc<dyn Storage>,
     config: &ResolvedConfig,
+    transactions: TransactionSyncMode,
 ) -> Result<serde_json::Value> {
     let service = build_sync_service(storage, config).await;
-    let outcomes = service.sync_all_if_stale(&config.refresh).await?;
+    let options = SyncOptions { transactions };
+    let outcomes = service
+        .sync_all_if_stale_with_options(&config.refresh, &options)
+        .await?;
     let results: Vec<_> = outcomes.into_iter().map(sync_outcome_to_json).collect();
 
     Ok(serde_json::json!({

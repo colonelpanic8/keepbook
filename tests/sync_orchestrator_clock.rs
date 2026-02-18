@@ -8,7 +8,7 @@ use keepbook::market_data::{
 };
 use keepbook::models::Asset;
 use keepbook::storage::{JsonFileStorage, Storage};
-use keepbook::sync::SyncOrchestrator;
+use keepbook::sync::{SyncOptions, SyncOrchestrator};
 
 mod support;
 use support::{mock_connection, MockSynchronizer};
@@ -46,8 +46,9 @@ async fn sync_orchestrator_uses_injected_clock_for_snapshot_and_price_date() -> 
     let synchronizer = MockSynchronizer::new().with_asset(asset);
     let mut connection = mock_connection("Test");
 
+    let options = SyncOptions::default();
     let report = orchestrator
-        .sync_with_prices(&synchronizer, &mut connection, false)
+        .sync_with_prices(&synchronizer, &mut connection, false, &options)
         .await?;
 
     // Snapshot timestamps should come from the orchestrator clock.

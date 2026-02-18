@@ -15,7 +15,7 @@ import { checkBalanceStaleness, resolveBalanceStaleness } from '../staleness.js'
 import type { ConnectionType } from '../models/connection.js';
 import { CoinbaseSynchronizer } from '../sync/synchronizers/coinbase.js';
 import { SchwabSynchronizer } from '../sync/synchronizers/schwab.js';
-import { saveSyncResult } from '../sync/mod.js';
+import { DefaultSyncOptions, saveSyncResult, type SyncOptions, type Synchronizer } from '../sync/mod.js';
 import { SessionCache } from '../credentials/session.js';
 import { parseExportedSession } from '../sync/schwab.js';
 
@@ -63,7 +63,11 @@ async function readStdinOnce(timeoutMs: number): Promise<string | null> {
   });
 }
 
-async function syncConnectionImpl(storage: Storage, conn: ConnectionType): Promise<object> {
+async function syncConnectionImpl(
+  storage: Storage,
+  conn: ConnectionType,
+  options: SyncOptions,
+): Promise<object> {
   if (conn.config.synchronizer === 'manual') {
     return {
       success: true,
@@ -81,8 +85,10 @@ async function syncConnectionImpl(storage: Storage, conn: ConnectionType): Promi
 
   if (conn.config.synchronizer === 'schwab') {
     try {
-      const synchronizer = new SchwabSynchronizer(conn.state.id);
-      const result = await synchronizer.sync(conn, storage);
+      const synchronizer: Synchronizer = new SchwabSynchronizer(conn.state.id);
+      const result = await (synchronizer.syncWithOptions
+        ? synchronizer.syncWithOptions(conn, storage, options)
+        : synchronizer.sync(conn, storage));
       await saveSyncResult(result, storage);
 
       return {
@@ -122,8 +128,10 @@ async function syncConnectionImpl(storage: Storage, conn: ConnectionType): Promi
     }
 
     try {
-      const synchronizer = await CoinbaseSynchronizer.fromCredentials(creds);
-      const result = await synchronizer.sync(conn, storage);
+      const synchronizer: Synchronizer = await CoinbaseSynchronizer.fromCredentials(creds);
+      const result = await (synchronizer.syncWithOptions
+        ? synchronizer.syncWithOptions(conn, storage, options)
+        : synchronizer.sync(conn, storage));
       await saveSyncResult(result, storage);
 
       return {
@@ -171,13 +179,22 @@ async function syncConnectionImpl(storage: Storage, conn: ConnectionType): Promi
  * - Unknown connections return a "not found" error.
  */
 export async function syncConnection(storage: Storage, idOrName: string): Promise<object> {
+  return await syncConnectionWithOptions(storage, idOrName, DefaultSyncOptions);
+}
+
+export async function syncConnectionWithOptions(
+  storage: Storage,
+  idOrName: string,
+  options: Partial<SyncOptions>,
+): Promise<object> {
+  const merged: SyncOptions = { ...DefaultSyncOptions, ...options };
   const conn = await findConnection(storage, idOrName);
 
   if (conn === null) {
     return { success: false, error: `Connection not found: '${idOrName}'` };
   }
 
-  return syncConnectionImpl(storage, conn);
+  return syncConnectionImpl(storage, conn, merged);
 }
 
 /**
@@ -191,6 +208,16 @@ export async function syncConnectionIfStale(
   idOrName: string,
   refresh: RefreshConfig,
 ): Promise<object> {
+  return await syncConnectionIfStaleWithOptions(storage, idOrName, refresh, DefaultSyncOptions);
+}
+
+export async function syncConnectionIfStaleWithOptions(
+  storage: Storage,
+  idOrName: string,
+  refresh: RefreshConfig,
+  options: Partial<SyncOptions>,
+): Promise<object> {
+  const merged: SyncOptions = { ...DefaultSyncOptions, ...options };
   const conn = await findConnection(storage, idOrName);
 
   if (conn === null) {
@@ -208,7 +235,7 @@ export async function syncConnectionIfStale(
     };
   }
 
-  return syncConnectionImpl(storage, conn);
+  return syncConnectionImpl(storage, conn, merged);
 }
 
 // ---------------------------------------------------------------------------
@@ -219,11 +246,19 @@ export async function syncConnectionIfStale(
  * Sync every connection. Collects per-connection results.
  */
 export async function syncAll(storage: Storage): Promise<object> {
+  return await syncAllWithOptions(storage, DefaultSyncOptions);
+}
+
+export async function syncAllWithOptions(
+  storage: Storage,
+  options: Partial<SyncOptions>,
+): Promise<object> {
+  const merged: SyncOptions = { ...DefaultSyncOptions, ...options };
   const connections = await storage.listConnections();
   const results: object[] = [];
 
   for (const conn of connections) {
-    results.push(await syncConnectionImpl(storage, conn));
+    results.push(await syncConnectionImpl(storage, conn, merged));
   }
 
   return { results, total: connections.length };
@@ -233,6 +268,15 @@ export async function syncAll(storage: Storage): Promise<object> {
  * Sync every connection only if stale. Fresh connections are skipped.
  */
 export async function syncAllIfStale(storage: Storage, refresh: RefreshConfig): Promise<object> {
+  return await syncAllIfStaleWithOptions(storage, refresh, DefaultSyncOptions);
+}
+
+export async function syncAllIfStaleWithOptions(
+  storage: Storage,
+  refresh: RefreshConfig,
+  options: Partial<SyncOptions>,
+): Promise<object> {
+  const merged: SyncOptions = { ...DefaultSyncOptions, ...options };
   const connections = await storage.listConnections();
   const results: object[] = [];
 
@@ -248,7 +292,7 @@ export async function syncAllIfStale(storage: Storage, refresh: RefreshConfig): 
       });
       continue;
     }
-    results.push(await syncConnectionImpl(storage, conn));
+    results.push(await syncConnectionImpl(storage, conn, merged));
   }
 
   return { results, total: connections.length };

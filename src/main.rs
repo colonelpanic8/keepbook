@@ -2,10 +2,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
-use clap::{Args, CommandFactory, Parser, Subcommand};
+use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use keepbook::app;
 use keepbook::config::{default_config_path, ResolvedConfig};
 use keepbook::storage::{JsonFileStorage, Storage};
+use keepbook::sync::TransactionSyncMode;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 fn parse_duration_arg(s: &str) -> Result<std::time::Duration, String> {
@@ -293,12 +294,18 @@ enum SyncCommand {
         /// Only sync if data is stale
         #[arg(long)]
         if_stale: bool,
+        /// Transaction sync mode (auto: stop when overlap detected; full: backfill as far as possible)
+        #[arg(long, value_enum, default_value = "auto")]
+        transactions: TransactionsModeArg,
     },
     /// Sync all connections
     All {
         /// Only sync connections with stale data
         #[arg(long)]
         if_stale: bool,
+        /// Transaction sync mode (auto: stop when overlap detected; full: backfill as far as possible)
+        #[arg(long, value_enum, default_value = "auto")]
+        transactions: TransactionsModeArg,
     },
     /// Refresh prices only (no balance sync).
     ///
@@ -312,6 +319,21 @@ enum SyncCommand {
     },
     /// Rebuild all symlinks (connections/by-name and account directories)
     Symlinks,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum TransactionsModeArg {
+    Auto,
+    Full,
+}
+
+impl From<TransactionsModeArg> for TransactionSyncMode {
+    fn from(value: TransactionsModeArg) -> Self {
+        match value {
+            TransactionsModeArg::Auto => TransactionSyncMode::Auto,
+            TransactionsModeArg::Full => TransactionSyncMode::Full,
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -637,19 +659,32 @@ async fn main() -> Result<()> {
             SyncCommand::Connection {
                 id_or_name,
                 if_stale,
+                transactions,
             } => {
+                let transactions: TransactionSyncMode = transactions.into();
                 let result = if if_stale {
-                    app::sync_connection_if_stale(storage_arc.clone(), &config, &id_or_name).await?
+                    app::sync_connection_if_stale(
+                        storage_arc.clone(),
+                        &config,
+                        &id_or_name,
+                        transactions,
+                    )
+                    .await?
                 } else {
-                    app::sync_connection(storage_arc.clone(), &config, &id_or_name).await?
+                    app::sync_connection(storage_arc.clone(), &config, &id_or_name, transactions)
+                        .await?
                 };
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
-            SyncCommand::All { if_stale } => {
+            SyncCommand::All {
+                if_stale,
+                transactions,
+            } => {
+                let transactions: TransactionSyncMode = transactions.into();
                 let result = if if_stale {
-                    app::sync_all_if_stale(storage_arc.clone(), &config).await?
+                    app::sync_all_if_stale(storage_arc.clone(), &config, transactions).await?
                 } else {
-                    app::sync_all(storage_arc.clone(), &config).await?
+                    app::sync_all(storage_arc.clone(), &config, transactions).await?
                 };
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }

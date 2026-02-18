@@ -9,6 +9,7 @@ use crate::staleness::{check_balance_staleness_at, resolve_balance_staleness};
 use crate::storage::{find_account, find_connection, Storage};
 use anyhow::{Context, Result};
 
+use super::SyncOptions;
 use super::{
     AuthStatus, InteractiveAuth, PriceRefreshResult, SyncOrchestrator, SyncWithPricesResult,
 };
@@ -195,16 +196,38 @@ impl SyncService {
     }
 
     pub async fn sync_connection(&self, id_or_name: &str) -> Result<SyncOutcome> {
+        let options = SyncOptions::default();
+        self.sync_connection_with_options(id_or_name, &options)
+            .await
+    }
+
+    pub async fn sync_connection_with_options(
+        &self,
+        id_or_name: &str,
+        options: &SyncOptions,
+    ) -> Result<SyncOutcome> {
         let connection = find_connection(self.storage.as_ref(), id_or_name)
             .await?
             .context(format!("Connection not found: {id_or_name}"))?;
-        self.sync_connection_internal(connection, id_or_name).await
+        self.sync_connection_internal(connection, id_or_name, options)
+            .await
     }
 
     pub async fn sync_connection_if_stale(
         &self,
         id_or_name: &str,
         refresh: &RefreshConfig,
+    ) -> Result<SyncOutcome> {
+        let options = SyncOptions::default();
+        self.sync_connection_if_stale_with_options(id_or_name, refresh, &options)
+            .await
+    }
+
+    pub async fn sync_connection_if_stale_with_options(
+        &self,
+        id_or_name: &str,
+        refresh: &RefreshConfig,
+        options: &SyncOptions,
     ) -> Result<SyncOutcome> {
         let connection = find_connection(self.storage.as_ref(), id_or_name)
             .await?
@@ -216,17 +239,23 @@ impl SyncService {
             return Ok(SyncOutcome::SkippedNotStale { connection });
         }
 
-        self.sync_connection_internal(connection, id_or_name).await
+        self.sync_connection_internal(connection, id_or_name, options)
+            .await
     }
 
     pub async fn sync_all(&self) -> Result<Vec<SyncOutcome>> {
+        let options = SyncOptions::default();
+        self.sync_all_with_options(&options).await
+    }
+
+    pub async fn sync_all_with_options(&self, options: &SyncOptions) -> Result<Vec<SyncOutcome>> {
         let connections = self.storage.list_connections().await?;
         let mut results = Vec::with_capacity(connections.len());
 
         for connection in connections {
             let id_or_name = connection.id().to_string();
             match self
-                .sync_connection_internal(connection.clone(), &id_or_name)
+                .sync_connection_internal(connection.clone(), &id_or_name, options)
                 .await
             {
                 Ok(outcome) => results.push(outcome),
@@ -243,6 +272,15 @@ impl SyncService {
     }
 
     pub async fn sync_all_if_stale(&self, refresh: &RefreshConfig) -> Result<Vec<SyncOutcome>> {
+        let options = SyncOptions::default();
+        self.sync_all_if_stale_with_options(refresh, &options).await
+    }
+
+    pub async fn sync_all_if_stale_with_options(
+        &self,
+        refresh: &RefreshConfig,
+        options: &SyncOptions,
+    ) -> Result<Vec<SyncOutcome>> {
         let connections = self.storage.list_connections().await?;
         let mut results = Vec::with_capacity(connections.len());
 
@@ -257,7 +295,7 @@ impl SyncService {
 
             let id_or_name = connection.id().to_string();
             match self
-                .sync_connection_internal(connection.clone(), &id_or_name)
+                .sync_connection_internal(connection.clone(), &id_or_name, options)
                 .await
             {
                 Ok(outcome) => results.push(outcome),
@@ -386,6 +424,7 @@ impl SyncService {
         &self,
         mut connection: Connection,
         action_label: &str,
+        options: &SyncOptions,
     ) -> Result<SyncOutcome> {
         if connection.config.synchronizer == "manual" {
             return Ok(SyncOutcome::SkippedManual { connection });
@@ -407,7 +446,7 @@ impl SyncService {
 
         let report = self
             .orchestrator
-            .sync_with_prices(synchronizer.as_ref(), &mut connection, false)
+            .sync_with_prices(synchronizer.as_ref(), &mut connection, false, options)
             .await?;
 
         self.auto_committer
