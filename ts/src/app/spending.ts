@@ -4,7 +4,7 @@ import { MarketDataService } from '../market-data/service.js';
 import { Decimal } from '../decimal.js';
 import { parseDuration } from '../duration.js';
 import type { TransactionType, TransactionStatus } from '../models/transaction.js';
-import type { AssetType } from '../models/asset.js';
+import { Asset, type AssetType } from '../models/asset.js';
 import type { ResolvedConfig } from '../config.js';
 import { findAccount, findConnection } from '../storage/lookup.js';
 import {
@@ -13,10 +13,7 @@ import {
   type TransactionAnnotationType,
 } from '../models/transaction-annotation.js';
 import { decStrRounded } from './format.js';
-import {
-  valueInReportingCurrencyDetailed,
-  type MissingMarketData,
-} from './value.js';
+import { valueInReportingCurrencyDetailed } from './value.js';
 import type {
   SpendingOutput,
   SpendingScopeOutput,
@@ -246,6 +243,37 @@ function bucketEndFor(start: Ymd, period: Period, rangeEnd: Ymd): Ymd {
   }
 }
 
+function nextBucketStart(start: Ymd, period: Period): Ymd {
+  if (typeof period === 'object') {
+    return addDays(start, period.custom_days);
+  }
+  switch (period) {
+    case 'daily':
+      return addDays(start, 1);
+    case 'weekly':
+      return addDays(start, 7);
+    case 'monthly': {
+      const y = start.y;
+      const m = start.m;
+      if (m === 12) return { y: y + 1, m: 1, d: 1 };
+      return { y, m: m + 1, d: 1 };
+    }
+    case 'quarterly': {
+      let y = start.y;
+      let m = start.m + 3;
+      while (m > 12) {
+        m -= 12;
+        y += 1;
+      }
+      return { y, m, d: 1 };
+    }
+    case 'yearly':
+      return { y: start.y + 1, m: 1, d: 1 };
+    case 'range':
+      return start;
+  }
+}
+
 export type SpendingReportOptions = {
   currency?: string;
   start?: string;
@@ -261,6 +289,8 @@ export type SpendingReportOptions = {
   group_by?: string;
   top?: number;
   lookback_days?: number;
+  include_noncurrency?: boolean;
+  include_empty?: boolean;
 };
 
 export async function spendingReport(
@@ -340,6 +370,7 @@ export async function spendingReport(
 
   const rows: Row[] = [];
   let minDate: Ymd | undefined;
+  const includeNoncurrency = options.include_noncurrency === true;
 
   for (const accountId of accountIds) {
     const account = await findAccount(storage, accountId);
@@ -360,13 +391,18 @@ export async function spendingReport(
       const localYmd = ymdFromTimestampInTimeZone(tx.timestamp, effectiveTimeZone);
       minDate = minDate === undefined ? localYmd : compareYmd(localYmd, minDate) < 0 ? localYmd : minDate;
 
+      const normalizedAsset = Asset.normalized(tx.asset);
+      if (!includeNoncurrency && normalizedAsset.type !== 'currency') {
+        continue;
+      }
+
       const ann = annByTx.get(tx.id.asStr());
       const annotation = ann && !isEmptyTransactionAnnotation(ann) ? ann : null;
       rows.push({
         account_id: account.id.asStr(),
         local_date: localYmd,
         as_of_date: ymdToString(localYmd),
-        asset: tx.asset,
+        asset: normalizedAsset,
         amount: tx.amount,
         raw_description: tx.description,
         annotation,
@@ -472,16 +508,35 @@ export async function spendingReport(
   const keysSorted = Array.from(buckets.keys()).sort();
   const periods: SpendingPeriodOutput[] = [];
 
-  for (const bkey of keysSorted) {
+  const includeEmpty = options.include_empty === true;
+  const bucketKeys: string[] = includeEmpty
+    ? (() => {
+        const keys: string[] = [];
+        let s = bucketStartFor(startDate, period, weekStart, startDate);
+        if (typeof period !== 'object' && period === 'range') {
+          keys.push(ymdToString(s));
+          return keys;
+        }
+        while (compareYmd(s, endDate) <= 0) {
+          keys.push(ymdToString(s));
+          s = nextBucketStart(s, period);
+        }
+        return keys;
+      })()
+    : keysSorted;
+
+  for (const bkey of bucketKeys) {
     const b = buckets.get(bkey);
-    if (!b) continue;
-    const bend = bucketEndFor(b.start, period, endDate);
-    const clampedStart = clampYmd(b.start, startDate, endDate);
+    const start = b?.start ?? parseYmd(bkey);
+    const bend = bucketEndFor(start, period, endDate);
+    const clampedStart = clampYmd(start, startDate, endDate);
     const clampedEnd = clampYmd(bend, startDate, endDate);
 
     let breakdown: SpendingBreakdownEntryOutput[] = [];
-    if (groupBy !== 'none') {
-      const entries: Array<[string, { total: Decimal; tx_count: number }]> = Array.from(b.agg.breakdown.entries());
+    if (groupBy !== 'none' && b !== undefined) {
+      const entries: Array<[string, { total: Decimal; tx_count: number }]> = Array.from(
+        b.agg.breakdown.entries(),
+      );
       entries.sort((a, c) => {
         const totalB = c[1].total;
         const totalA = a[1].total;
@@ -502,8 +557,8 @@ export async function spendingReport(
     const out: SpendingPeriodOutput = {
       start_date: ymdToString(clampedStart),
       end_date: ymdToString(clampedEnd),
-      total: decStrRounded(b.agg.total, config.display.currency_decimals),
-      transaction_count: b.agg.tx_count,
+      total: decStrRounded(b?.agg.total ?? new Decimal(0), config.display.currency_decimals),
+      transaction_count: b?.agg.tx_count ?? 0,
     };
     if (breakdown.length > 0) out.breakdown = breakdown;
     periods.push(out);

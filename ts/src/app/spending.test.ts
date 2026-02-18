@@ -105,6 +105,7 @@ describe('spendingReport', () => {
       direction: 'outflow',
       group_by: 'none',
       lookback_days: 7,
+      include_noncurrency: true,
     });
 
     expect(out.total).toBe('112');

@@ -170,6 +170,18 @@ enum Command {
         /// Look back this many days for cached close prices / FX rates (default: 7)
         #[arg(long, default_value_t = 7)]
         lookback_days: u32,
+
+        /// Include non-currency assets (equity/crypto) by valuing them using cached close prices.
+        ///
+        /// Default is currency-only spending (still supports FX conversion for currency txns).
+        #[arg(long, default_value_t = false)]
+        include_noncurrency: bool,
+
+        /// Emit empty periods with total 0 and transaction_count 0.
+        ///
+        /// Default output is sparse (only periods with non-zero totals).
+        #[arg(long, default_value_t = false)]
+        include_empty: bool,
     },
 }
 
@@ -878,6 +890,8 @@ async fn main() -> Result<()> {
             group_by,
             top,
             lookback_days,
+            include_noncurrency,
+            include_empty,
         }) => {
             let output = app::spending_report(
                 storage_arc.as_ref(),
@@ -897,6 +911,8 @@ async fn main() -> Result<()> {
                     group_by,
                     top,
                     lookback_days,
+                    include_noncurrency,
+                    include_empty,
                 },
             )
             .await?;

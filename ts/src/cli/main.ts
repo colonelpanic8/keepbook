@@ -131,6 +131,16 @@ program
   .option('--lookback-days <n>', 'lookback days for cached close prices / FX (default: 7)', (v: string) =>
     Number.parseInt(v, 10),
   )
+  .option(
+    '--include-noncurrency',
+    'include equity/crypto by valuing with cached close prices (default: currency-only)',
+    false,
+  )
+  .option(
+    '--include-empty',
+    'emit empty periods with total 0 (default: sparse output)',
+    false,
+  )
   .action(
     async (opts: {
       period: string;
@@ -147,6 +157,8 @@ program
       groupBy?: string;
       top?: number;
       lookbackDays?: number;
+      includeNoncurrency?: boolean;
+      includeEmpty?: boolean;
     }) => {
       await runWithConfig(async (cfg) => {
         const storage = new JsonFileStorage(cfg.config.data_dir);
@@ -166,6 +178,8 @@ program
           group_by: opts.groupBy,
           top: opts.top,
           lookback_days: opts.lookbackDays,
+          include_noncurrency: opts.includeNoncurrency,
+          include_empty: opts.includeEmpty,
         });
       });
     },

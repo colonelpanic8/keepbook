@@ -33,6 +33,8 @@ pub struct SpendingReportOptions {
     pub group_by: String,
     pub top: Option<usize>,
     pub lookback_days: u32,
+    pub include_noncurrency: bool,
+    pub include_empty: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -295,6 +297,31 @@ fn bucket_end_for(start: NaiveDate, period: Period, range_end: NaiveDate) -> Nai
     }
 }
 
+fn next_bucket_start(start: NaiveDate, period: Period) -> NaiveDate {
+    match period {
+        Period::Daily => start + chrono::Duration::days(1),
+        Period::Weekly => start + chrono::Duration::days(7),
+        Period::CustomDays(days) => start + chrono::Duration::days(days as i64),
+        Period::Monthly => {
+            let (y, m) = (start.year(), start.month());
+            let (ny, nm) = if m == 12 { (y + 1, 1) } else { (y, m + 1) };
+            NaiveDate::from_ymd_opt(ny, nm, 1).expect("valid date")
+        }
+        Period::Quarterly => {
+            let (y, m) = (start.year(), start.month());
+            let mut nm = m + 3;
+            let mut ny = y;
+            while nm > 12 {
+                nm -= 12;
+                ny += 1;
+            }
+            NaiveDate::from_ymd_opt(ny, nm, 1).expect("valid date")
+        }
+        Period::Yearly => NaiveDate::from_ymd_opt(start.year() + 1, 1, 1).expect("valid date"),
+        Period::Range => start, // caller should special-case
+    }
+}
+
 fn clamp_date(date: NaiveDate, min: NaiveDate, max: NaiveDate) -> NaiveDate {
     if date < min {
         min
@@ -440,10 +467,15 @@ async fn spending_report_with_store(
                 Some(d) => d.min(local_date),
             });
 
+            let asset = tx.asset.normalized();
+            if !opts.include_noncurrency && !matches!(asset, Asset::Currency { .. }) {
+                continue;
+            }
+
             rows.push(Row {
                 account_id: account_id.clone(),
                 local_date,
-                asset: tx.asset,
+                asset,
                 amount: tx.amount,
                 raw_description: tx.description,
                 annotation: annotations_by_tx.get(&tx.id).cloned(),
@@ -562,23 +594,47 @@ async fn spending_report_with_store(
         }
     }
 
-    let mut starts: Vec<NaiveDate> = buckets.keys().cloned().collect();
-    starts.sort();
+    let mut starts: Vec<NaiveDate> = if opts.include_empty {
+        let mut s = bucket_start_for(start_date, period, week_start, start_date);
+        let mut out = Vec::new();
+        if matches!(period, Period::Range) {
+            out.push(s);
+        } else {
+            while s <= end_date {
+                out.push(s);
+                s = next_bucket_start(s, period);
+            }
+        }
+        out
+    } else {
+        let mut out: Vec<NaiveDate> = buckets.keys().cloned().collect();
+        out.sort();
+        out
+    };
+    if opts.include_empty {
+        starts.sort();
+        starts.dedup();
+    }
 
     let mut period_outputs = Vec::new();
     for bstart in starts {
         let bend = bucket_end_for(bstart, period, end_date);
         let clamped_start = clamp_date(bstart, start_date, end_date);
         let clamped_end = clamp_date(bend, start_date, end_date);
-        let agg = buckets.get(&bstart).expect("bucket exists");
+        let agg = buckets.get(&bstart);
+        let total = agg.map(|a| a.total).unwrap_or(Decimal::ZERO);
+        let tx_count = agg.map(|a| a.tx_count).unwrap_or(0);
 
         let mut breakdown: Vec<SpendingBreakdownEntryOutput> = Vec::new();
         if group_by != GroupBy::None {
             let mut entries: Vec<(String, Decimal, usize)> = agg
-                .breakdown_total
-                .iter()
-                .map(|(k, (v, c))| (k.clone(), *v, *c))
-                .collect();
+                .map(|a| {
+                    a.breakdown_total
+                        .iter()
+                        .map(|(k, (v, c))| (k.clone(), *v, *c))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
             entries.sort_by(|a, b| {
                 b.1.partial_cmp(&a.1)
                     .unwrap_or(std::cmp::Ordering::Equal)
@@ -603,10 +659,10 @@ async fn spending_report_with_store(
             start_date: format_ymd(clamped_start),
             end_date: format_ymd(clamped_end),
             total: crate::format::format_base_currency_value(
-                agg.total,
+                total,
                 config.display.currency_decimals,
             ),
-            transaction_count: agg.tx_count,
+            transaction_count: tx_count,
             breakdown,
         });
     }
@@ -699,6 +755,8 @@ mod tests {
                 group_by: "none".to_string(),
                 top: None,
                 lookback_days: 7,
+                include_noncurrency: false,
+                include_empty: false,
             },
             store,
         )
@@ -795,6 +853,8 @@ mod tests {
                 group_by: "none".to_string(),
                 top: None,
                 lookback_days: 7,
+                include_noncurrency: true,
+                include_empty: false,
             },
             store,
         )
