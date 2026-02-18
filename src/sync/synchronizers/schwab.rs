@@ -14,9 +14,10 @@ use chromiumoxide::cdp::browser_protocol::fetch::{
 };
 use chrono::Utc;
 use futures::StreamExt;
+use secrecy::ExposeSecret;
 use tokio::sync::Mutex;
 
-use crate::credentials::{SessionCache, SessionData};
+use crate::credentials::{CredentialStore, SessionCache, SessionData};
 use crate::market_data::{AssetId, PriceKind, PricePoint};
 use crate::models::{
     Account, Asset, AssetBalance, Connection, ConnectionStatus, Id, LastSync, SyncStatus,
@@ -32,19 +33,22 @@ const SCHWAB_API_DOMAIN: &str = "ausgateway.schwab.com";
 pub struct SchwabSynchronizer {
     connection_id: Id,
     session_cache: SessionCache,
+    credential_store: Option<Box<dyn CredentialStore>>,
 }
 
 impl SchwabSynchronizer {
     /// Create a new Schwab synchronizer for a connection.
     pub async fn from_connection<S: Storage + ?Sized>(
         connection: &Connection,
-        _storage: &S,
+        storage: &S,
     ) -> Result<Self> {
         let session_cache = SessionCache::new()?;
+        let credential_store = storage.get_credential_store(connection.id())?;
 
         Ok(Self {
             connection_id: connection.id().clone(),
             session_cache,
+            credential_store,
         })
     }
 
@@ -53,6 +57,7 @@ impl SchwabSynchronizer {
         Self {
             connection_id: connection.id().clone(),
             session_cache,
+            credential_store: None,
         }
     }
 
@@ -62,6 +67,50 @@ impl SchwabSynchronizer {
 
     fn get_session(&self) -> Result<Option<SessionData>> {
         self.session_cache.get(&self.session_key())
+    }
+
+    fn should_autofill_login() -> bool {
+        match std::env::var("KEEPBOOK_SCHWAB_AUTOFILL") {
+            Ok(v) => !(v == "0" || v.eq_ignore_ascii_case("false") || v.eq_ignore_ascii_case("no")),
+            Err(_) => true,
+        }
+    }
+
+    fn env_credential(key: &str) -> Option<String> {
+        std::env::var(key)
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    }
+
+    async fn get_login_credentials(&self) -> Result<Option<(String, String)>> {
+        // Highest priority: explicit environment variables (no disk needed).
+        //
+        // Note: values may be visible to local process inspection tools; prefer pass-backed
+        // credential store where possible.
+        let env_user = Self::env_credential("KEEPBOOK_SCHWAB_USERNAME");
+        let env_pass = Self::env_credential("KEEPBOOK_SCHWAB_PASSWORD");
+        if let (Some(u), Some(p)) = (env_user, env_pass) {
+            return Ok(Some((u, p)));
+        }
+
+        let Some(store) = &self.credential_store else {
+            return Ok(None);
+        };
+
+        let username = store
+            .get("username")
+            .await?
+            .map(|s| s.expose_secret().to_string());
+        let password = store
+            .get("password")
+            .await?
+            .map(|s| s.expose_secret().to_string());
+
+        match (username, password) {
+            (Some(u), Some(p)) if !u.trim().is_empty() && !p.is_empty() => Ok(Some((u, p))),
+            _ => Ok(None),
+        }
     }
 
     async fn sync_internal<S: Storage + ?Sized>(
@@ -341,6 +390,27 @@ impl InteractiveAuth for SchwabSynchronizer {
         println!("Navigating to Schwab login page...");
         page.goto(SCHWAB_LOGIN_URL).await?;
 
+        if Self::should_autofill_login() {
+            match self.get_login_credentials().await {
+                Ok(Some((username, password))) => {
+                    eprintln!(
+                        "Schwab: attempting autofill (set KEEPBOOK_SCHWAB_AUTOFILL=0 to disable)..."
+                    );
+                    if let Err(err) = autofill_login_form(&page, &username, &password).await {
+                        eprintln!(
+                            "Schwab: autofill failed (continuing with manual login): {err:#}"
+                        );
+                    }
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    eprintln!(
+                        "Schwab: could not load credentials (continuing with manual login): {err:#}"
+                    );
+                }
+            }
+        }
+
         println!("\n========================================");
         println!("Complete the login process in the browser.");
         println!("Include any 2FA/security verification.");
@@ -385,6 +455,7 @@ impl InteractiveAuth for SchwabSynchronizer {
         let session = SessionData {
             token: Some(token.clone()),
             cookies: cookie_map,
+            cookie_jar: Vec::new(),
             captured_at: Some(Utc::now().timestamp()),
             data: HashMap::new(),
         };
@@ -403,6 +474,231 @@ impl InteractiveAuth for SchwabSynchronizer {
 
         Ok(())
     }
+}
+
+async fn autofill_login_form(
+    page: &chromiumoxide::Page,
+    username: &str,
+    password: &str,
+) -> Result<()> {
+    let creds = serde_json::json!({ "username": username, "password": password });
+
+    let js: String = format!(
+        r#"(function(creds) {{
+  function fire(el, type) {{
+    try {{ el.dispatchEvent(new Event(type, {{ bubbles: true }})); }} catch (_) {{}}
+  }}
+  function isVisible(el) {{
+    if (!el || !el.getBoundingClientRect) return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 20 && r.height > 12;
+  }}
+  function bySelectors(root, selectors) {{
+    for (const sel of selectors) {{
+      const el = root.querySelector(sel);
+      if (el && isVisible(el)) return el;
+    }}
+    return null;
+  }}
+  function collectDocs(rootDoc) {{
+    const out = [rootDoc];
+    const seen = new Set([rootDoc]);
+    const queue = [rootDoc];
+    let hops = 0;
+    while (queue.length && hops < 30) {{
+      hops += 1;
+      const doc = queue.shift();
+      const frames = Array.from(doc.querySelectorAll('iframe,frame'));
+      for (const fr of frames) {{
+        let child = null;
+        try {{
+          child = fr.contentDocument || (fr.contentWindow && fr.contentWindow.document) || null;
+        }} catch (_) {{
+          child = null;
+        }}
+        if (child && !seen.has(child)) {{
+          seen.add(child);
+          out.push(child);
+          queue.push(child);
+        }}
+      }}
+    }}
+    return out;
+  }}
+
+  const passSelectors = [
+    'input[type="password"]',
+    'input[name="password"]',
+    'input[name*="pass" i]',
+    'input[id*="password" i]',
+    'input[autocomplete="current-password"]',
+  ];
+  const userSelectors = [
+    'input[name="LoginId"]',
+    'input[autocomplete="username"]',
+    'input[id*="login" i]',
+    'input[name*="user" i]',
+    'input[name*="email" i]',
+    'input[id*="user" i]',
+    'input[type="email"]',
+    'input[type="text"]',
+  ];
+  const submitSelectors = [
+    'button[type="submit"]',
+    'input[type="submit"]',
+    'button[id*="sign" i]',
+    'button[id*="submit" i]',
+    'button[id*="login" i]',
+    'button[name*="login" i]',
+    'button[name*="submit" i]',
+    'button[aria-label*="sign in" i]',
+    'button[aria-label*="log in" i]',
+    'a[role="button"][id*="login" i]',
+  ];
+  const docs = collectDocs(document);
+  const frameNames = Array.from(document.querySelectorAll('iframe,frame'))
+    .map(f => (f.getAttribute('name') || f.id || '').toString())
+    .filter(Boolean)
+    .slice(0, 12);
+
+  let pass = null;
+  let form = null;
+  let user = null;
+  let submit = null;
+  let chosenDoc = null;
+
+  for (const doc of docs) {{
+    pass = bySelectors(doc, passSelectors);
+    if (!pass) continue;
+    form = pass.form || pass.closest('form') || doc;
+    user = bySelectors(form, userSelectors) || bySelectors(doc, userSelectors);
+    submit =
+      (form.querySelector && bySelectors(form, submitSelectors)) || bySelectors(doc, submitSelectors);
+    if (pass && user && submit) {{
+      chosenDoc = doc;
+      break;
+    }}
+  }}
+
+  if (!pass) return {{ ok: false, error: "password input not found", frameNames }};
+  if (!user) return {{ ok: false, error: "username input not found", frameNames }};
+  if (!submit) return {{ ok: false, error: "submit control not found", frameNames }};
+
+  try {{ user.focus(); }} catch (_) {{}}
+  user.value = String(creds.username || "");
+  fire(user, "input");
+  fire(user, "change");
+  fire(user, "blur");
+
+  try {{ pass.focus(); }} catch (_) {{}}
+  pass.value = String(creds.password || "");
+  fire(pass, "input");
+  fire(pass, "change");
+  fire(pass, "blur");
+
+  let submittedBy = null;
+  const actualForm = submit.form || form;
+  if (actualForm && typeof actualForm.requestSubmit === 'function') {{
+    try {{ actualForm.requestSubmit(submit); submittedBy = 'requestSubmit'; }} catch (_) {{}}
+  }}
+  if (!submittedBy && actualForm && typeof actualForm.submit === 'function') {{
+    try {{ actualForm.submit(); submittedBy = 'form.submit'; }} catch (_) {{}}
+  }}
+  if (!submittedBy) {{
+    try {{ submit.focus(); }} catch (_) {{}}
+    try {{ submit.click(); submittedBy = 'submit.click'; }} catch (_) {{}}
+  }}
+  if (!submittedBy) {{
+    try {{
+      const win = (chosenDoc && chosenDoc.defaultView) || window;
+      pass.focus();
+      pass.dispatchEvent(new win.KeyboardEvent('keydown', {{ key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }}));
+      pass.dispatchEvent(new win.KeyboardEvent('keyup', {{ key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }}));
+      submittedBy = 'enter';
+    }} catch (_) {{}}
+  }}
+
+  if (!submittedBy) return {{ ok: false, error: "submit failed", frameNames }};
+  return {{ ok: true, submittedBy, frameNames }};
+}})({})"#,
+        creds
+    );
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    let mut attempted_iframe_navigation = false;
+    loop {
+        let v: serde_json::Value = page.evaluate(js.clone()).await?.into_value()?;
+        let ok = v.get("ok").and_then(|x| x.as_bool()).unwrap_or(false);
+        if ok {
+            if let Some(by) = v.get("submittedBy").and_then(|x| x.as_str()) {
+                eprintln!("Schwab: submitted login ({by})");
+            }
+            return Ok(());
+        }
+
+        let err = v
+            .get("error")
+            .and_then(|x| x.as_str())
+            .unwrap_or("unknown error");
+
+        if err == "password input not found" && !attempted_iframe_navigation {
+            attempted_iframe_navigation = true;
+            if let Some(src) = extract_login_iframe_src(page).await? {
+                eprintln!("Schwab: trying iframe-url fallback for autofill...");
+                if let Err(nav_err) = page.goto(src).await {
+                    eprintln!("Schwab: iframe-url fallback navigation failed: {nav_err:#}");
+                } else {
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    continue;
+                }
+            }
+        }
+
+        let retryable = matches!(
+            err,
+            "password input not found" | "username input not found" | "submit control not found"
+        );
+        if retryable && std::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(250)).await;
+            continue;
+        }
+
+        let frame_names = v
+            .get("frameNames")
+            .and_then(|x| x.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str())
+                    .take(12)
+                    .collect::<Vec<_>>()
+                    .join(",")
+            })
+            .unwrap_or_default();
+
+        anyhow::bail!("Schwab autofill JS failed: {err} (frames={frame_names})");
+    }
+}
+
+async fn extract_login_iframe_src(page: &chromiumoxide::Page) -> Result<Option<String>> {
+    let js = r#"(function() {
+  const selectors = [
+    'iframe[name="lmsIframe"]',
+    'iframe#lmsIframe',
+    'iframe[id*="lms" i]',
+    'iframe[name*="lms" i]',
+    'iframe[name*="login" i]',
+  ];
+  for (const sel of selectors) {
+    const iframe = document.querySelector(sel);
+    if (!iframe) continue;
+    const src = (iframe.getAttribute('src') || iframe.src || '').trim();
+    if (src) return src;
+  }
+  return null;
+})()"#;
+
+    let src: Option<String> = page.evaluate(js).await?.into_value()?;
+    Ok(src.filter(|s| !s.trim().is_empty()))
 }
 
 /// Find Chrome/Chromium executable.
