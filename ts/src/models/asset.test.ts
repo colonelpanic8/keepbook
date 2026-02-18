@@ -36,6 +36,11 @@ describe('Asset', () => {
       expect(Asset.equals(Asset.currency('usd'), Asset.currency('USD'))).toBe(true);
     });
 
+    it('currency numeric codes normalize to alpha codes', () => {
+      expect(Asset.equals(Asset.currency('840'), Asset.currency('USD'))).toBe(true);
+      expect(Asset.normalized(Asset.currency('840'))).toEqual({ type: 'currency', iso_code: 'USD' });
+    });
+
     it('currencies with different iso_codes are not equal', () => {
       expect(Asset.equals(Asset.currency('USD'), Asset.currency('EUR'))).toBe(false);
     });

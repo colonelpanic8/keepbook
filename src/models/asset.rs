@@ -48,7 +48,7 @@ impl Asset {
     pub fn normalized(&self) -> Self {
         match self {
             Asset::Currency { iso_code } => Asset::Currency {
-                iso_code: normalize_upper(iso_code),
+                iso_code: normalize_currency_code(iso_code),
             },
             Asset::Equity { ticker, exchange } => Asset::Equity {
                 ticker: normalize_upper(ticker),
@@ -59,6 +59,16 @@ impl Asset {
                 network: normalize_opt_lower(network),
             },
         }
+    }
+}
+
+fn normalize_currency_code(value: &str) -> String {
+    let trimmed = value.trim();
+    // Some sources provide ISO 4217 numeric codes (e.g. "840" for USD).
+    // Normalize those into alpha codes where we can.
+    match trimmed {
+        "840" => "USD".to_string(),
+        _ => trimmed.to_uppercase(),
     }
 }
 
@@ -86,7 +96,7 @@ impl PartialEq for Asset {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Asset::Currency { iso_code: a }, Asset::Currency { iso_code: b }) => {
-                normalize_upper(a) == normalize_upper(b)
+                normalize_currency_code(a) == normalize_currency_code(b)
             }
             (
                 Asset::Equity {
@@ -126,7 +136,7 @@ impl Hash for Asset {
         match self {
             Asset::Currency { iso_code } => {
                 "currency".hash(state);
-                normalize_upper(iso_code).hash(state);
+                normalize_currency_code(iso_code).hash(state);
             }
             Asset::Equity { ticker, exchange } => {
                 "equity".hash(state);
@@ -169,6 +179,9 @@ mod tests {
         let usd_lower = Asset::currency("usd");
         let usd_upper = Asset::currency("USD");
         assert_eq!(usd_lower, usd_upper);
+
+        let usd_numeric = Asset::currency("840");
+        assert_eq!(usd_numeric, usd_upper);
 
         let equity_lower = Asset::equity("aapl");
         let equity_upper = Asset::equity("AAPL");

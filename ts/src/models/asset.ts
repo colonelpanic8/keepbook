@@ -37,6 +37,14 @@ function normalizeUpper(s: string): string {
   return s.trim().toUpperCase();
 }
 
+function normalizeCurrencyCode(s: string): string {
+  const trimmed = s.trim();
+  // Some sources provide ISO 4217 numeric codes (e.g. "840" for USD).
+  // Normalize those into alpha codes where we can.
+  if (trimmed === '840') return 'USD';
+  return trimmed.toUpperCase();
+}
+
 /** Uppercase an optional string; returns undefined if empty/whitespace-only. */
 function normalizeOptUpper(s: string | undefined): string | undefined {
   if (s === undefined) return undefined;
@@ -104,7 +112,7 @@ export const Asset = {
   normalized(asset: AssetType): AssetType {
     switch (asset.type) {
       case 'currency':
-        return { type: 'currency', iso_code: normalizeUpper(asset.iso_code) };
+        return { type: 'currency', iso_code: normalizeCurrencyCode(asset.iso_code) };
       case 'equity': {
         const exchange = normalizeOptUpper(asset.exchange);
         const result: EquityAsset = { type: 'equity', ticker: normalizeUpper(asset.ticker) };
