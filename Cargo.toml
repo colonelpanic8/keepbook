@@ -73,6 +73,8 @@ sync = [
   "dep:futures",
   "dep:p256",
   "dep:rand",
+  "dep:tempfile",
+  "dep:urlencoding",
 ]
 tray = ["dep:ksni", "dep:image"]
 
@@ -81,7 +83,7 @@ tray = ["dep:ksni", "dep:image"]
 tokio = { version = "1", features = ["full"] }
 
 # HTTP client (using rustls to avoid OpenSSL dependency)
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "gzip", "deflate", "brotli"], optional = true }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -122,6 +124,8 @@ async-trait = "0.1"
 # Chrome DevTools Protocol for browser automation
 chromiumoxide = { version = "0.7", default-features = false, features = ["tokio-runtime"], optional = true }
 futures = { version = "0.3", optional = true }
+tempfile = { version = "3", optional = true }
+urlencoding = { version = "2", optional = true }
 
 # Structured logging
 tracing = "0.1"
@@ -130,5 +134,4 @@ ksni = { version = "0.3", optional = true }
 image = { version = "0.25", optional = true, default-features = false, features = ["png"] }
 
 [dev-dependencies]
-tempfile = "3"
 wiremock = "0.6"
