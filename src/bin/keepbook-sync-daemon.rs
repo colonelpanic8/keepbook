@@ -3,12 +3,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use chrono::{DateTime, Local};
+use chrono::{DateTime, Local, NaiveDate};
 use clap::Parser;
 use keepbook::app;
 use keepbook::config::{default_config_path, ResolvedConfig};
 use keepbook::format::format_base_currency_display;
 use keepbook::storage::{JsonFileStorage, Storage};
+use keepbook::sync::TransactionSyncMode;
 use ksni::menu::*;
 use ksni::MenuItem;
 use ksni::TrayMethods;
@@ -134,6 +135,7 @@ struct KeepbookTrayState {
     next_cycle: Option<DateTime<Local>>,
     last_summary: String,
     history_lines: Vec<String>,
+    spending_lines: Vec<String>,
 }
 
 impl Default for KeepbookTrayState {
@@ -144,6 +146,7 @@ impl Default for KeepbookTrayState {
             next_cycle: None,
             last_summary: "No sync cycle has run yet".to_string(),
             history_lines: vec!["No portfolio history loaded".to_string()],
+            spending_lines: vec!["Spending metrics not loaded".to_string()],
         }
     }
 }
@@ -286,10 +289,42 @@ impl ksni::Tray for KeepbookTray {
                 .collect()
         };
 
+        let mut spending_menu: Vec<MenuItem<Self>> = if self.state.spending_lines.is_empty() {
+            vec![StandardItem {
+                label: "No spending metrics available".to_string(),
+                enabled: false,
+                ..Default::default()
+            }
+            .into()]
+        } else {
+            self.state
+                .spending_lines
+                .iter()
+                .map(|line| {
+                    StandardItem {
+                        label: line.clone(),
+                        enabled: false,
+                        ..Default::default()
+                    }
+                    .into()
+                })
+                .collect()
+        };
+
         if history_menu.is_empty() {
             history_menu.push(
                 StandardItem {
                     label: "No portfolio history available".to_string(),
+                    enabled: false,
+                    ..Default::default()
+                }
+                .into(),
+            );
+        }
+        if spending_menu.is_empty() {
+            spending_menu.push(
+                StandardItem {
+                    label: "No spending metrics available".to_string(),
                     enabled: false,
                     ..Default::default()
                 }
@@ -334,6 +369,13 @@ impl ksni::Tray for KeepbookTray {
                 label: "Recent Portfolio History".to_string(),
                 icon_name: "view-calendar-timeline".to_string(),
                 submenu: history_menu,
+                ..Default::default()
+            }
+            .into(),
+            SubMenu {
+                label: "Recent Spending".to_string(),
+                icon_name: "view-statistics".to_string(),
+                submenu: spending_menu,
                 ..Default::default()
             }
             .into(),
@@ -519,6 +561,65 @@ struct Daemon {
 }
 
 impl Daemon {
+    fn last_n_days_range(days: u32) -> (NaiveDate, NaiveDate) {
+        let end = Local::now().date_naive();
+        let start = end - chrono::Duration::days(days.saturating_sub(1) as i64);
+        (start, end)
+    }
+
+    async fn spending_line_for_days(&self, days: u32) -> String {
+        let (start, end) = Self::last_n_days_range(days);
+        let opts = app::SpendingReportOptions {
+            currency: None,
+            start: Some(start.format("%Y-%m-%d").to_string()),
+            end: Some(end.format("%Y-%m-%d").to_string()),
+            period: "range".to_string(),
+            tz: None,
+            week_start: None,
+            bucket: None,
+            account: None,
+            connection: None,
+            status: "posted".to_string(),
+            direction: "outflow".to_string(),
+            group_by: "none".to_string(),
+            top: None,
+            lookback_days: 7,
+            include_noncurrency: false,
+            include_empty: false,
+        };
+
+        match app::spending_report(self.storage.as_ref(), &self.config, opts).await {
+            Ok(report) => {
+                let value = format_tray_currency(&report.total, &self.config.display);
+                let tx_label = if report.transaction_count == 1 {
+                    "txn"
+                } else {
+                    "txns"
+                };
+                format!(
+                    "Last {days}d: {} {} ({} {})",
+                    value, report.currency, report.transaction_count, tx_label
+                )
+            }
+            Err(err) => {
+                warn!(
+                    window_days = days,
+                    error = %err,
+                    "unable to refresh tray spending metrics"
+                );
+                format!("Last {days}d: unavailable")
+            }
+        }
+    }
+
+    async fn refresh_spending_lines(&self, state: &mut KeepbookTrayState) {
+        let mut lines = Vec::with_capacity(3);
+        for days in [7_u32, 30, 90] {
+            lines.push(self.spending_line_for_days(days).await);
+        }
+        state.spending_lines = lines;
+    }
+
     async fn refresh_history_lines(&self, state: &mut KeepbookTrayState) {
         match app::portfolio_history(
             self.storage.clone(),
@@ -573,7 +674,9 @@ impl Daemon {
                 },
             )?;
 
-            let sync_json = app::sync_all_if_stale(self.storage.clone(), &self.config).await?;
+            let sync_json =
+                app::sync_all_if_stale(self.storage.clone(), &self.config, TransactionSyncMode::Auto)
+                    .await?;
             let sync_counts = parse_sync_counts(&sync_json);
 
             let (prices_fetched, prices_skipped, prices_failed) = if self.sync_prices {
@@ -631,6 +734,7 @@ impl Daemon {
         }
 
         self.refresh_history_lines(state).await;
+        self.refresh_spending_lines(state).await;
         apply_tray_state(tray_handle, state).await;
     }
 
@@ -639,6 +743,7 @@ impl Daemon {
 
         let mut tray_state = KeepbookTrayState::default();
         self.refresh_history_lines(&mut tray_state).await;
+        self.refresh_spending_lines(&mut tray_state).await;
 
         let mut tray_handle = match KeepbookTray::new(tray_state.clone(), cmd_tx)
             .assume_sni_available(true)
