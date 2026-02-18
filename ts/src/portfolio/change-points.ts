@@ -336,9 +336,13 @@ export async function collectChangePoints(
   let accounts;
   if (options.accountIds && options.accountIds.length > 0) {
     const results = await Promise.all(options.accountIds.map((id) => storage.getAccount(id)));
-    accounts = results.filter((a) => a !== null);
+    accounts = results.filter((a) => {
+      if (a === null) return false;
+      return storage.getAccountConfig(a.id)?.exclude_from_portfolio !== true;
+    });
   } else {
-    accounts = await storage.listAccounts();
+    const all = await storage.listAccounts();
+    accounts = all.filter((a) => storage.getAccountConfig(a.id)?.exclude_from_portfolio !== true);
   }
 
   // Step 2: collect balance changes

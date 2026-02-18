@@ -21,6 +21,7 @@ export interface AccountType {
 export interface AccountConfig {
   readonly balance_staleness?: number;
   readonly balance_backfill?: BalanceBackfillPolicy;
+  readonly exclude_from_portfolio?: boolean;
 }
 
 // ---------------------------------------------------------------------------

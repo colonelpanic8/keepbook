@@ -262,6 +262,7 @@ mod tests {
         let account_config = AccountConfig {
             balance_staleness: Some(Duration::from_secs(7 * 24 * 60 * 60)),
             balance_backfill: None,
+            exclude_from_portfolio: None,
         };
         let connection = make_connection(None);
         let global = RefreshConfig::default();

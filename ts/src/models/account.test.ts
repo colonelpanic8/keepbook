@@ -115,14 +115,17 @@ describe('AccountConfig', () => {
     const config: AccountConfig = {};
     expect(config.balance_staleness).toBeUndefined();
     expect(config.balance_backfill).toBeUndefined();
+    expect(config.exclude_from_portfolio).toBeUndefined();
   });
 
   it('can be created with all fields', () => {
     const config: AccountConfig = {
       balance_staleness: 86400000, // 1 day in ms
       balance_backfill: 'zero',
+      exclude_from_portfolio: true,
     };
     expect(config.balance_staleness).toBe(86400000);
     expect(config.balance_backfill).toBe('zero');
+    expect(config.exclude_from_portfolio).toBe(true);
   });
 });

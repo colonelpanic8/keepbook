@@ -140,6 +140,8 @@ Notes:
 - Balances are stored as full snapshots (all holdings for an account at one timestamp).
 - Transaction files are append-only; read-path logic provides a last-write-wins view by transaction id.
 - Symlinks are rebuilt with =keepbook sync symlinks=.
+- =account_config.toml= supports per-account overrides such as
+  =balance_staleness=, =balance_backfill=, and =exclude_from_portfolio=.
 
 * Price Sources
 

@@ -144,13 +144,22 @@ impl PortfolioService {
         let mut zero_accounts = Vec::new();
 
         for account in account_map.values() {
+            let account_config = self.storage.get_account_config(&account.id)?;
+            let excluded = account_config
+                .as_ref()
+                .and_then(|config| config.exclude_from_portfolio)
+                .unwrap_or(false);
+            if excluded {
+                continue;
+            }
+
             let snapshots = self.storage.get_balance_snapshots(&account.id).await?;
+            let policy = account_config
+                .as_ref()
+                .and_then(|config| config.balance_backfill)
+                .unwrap_or(BalanceBackfillPolicy::None);
+
             if snapshots.is_empty() {
-                let policy = self
-                    .storage
-                    .get_account_config(&account.id)?
-                    .and_then(|config| config.balance_backfill)
-                    .unwrap_or(BalanceBackfillPolicy::None);
                 if matches!(policy, BalanceBackfillPolicy::Zero) {
                     zero_accounts.push(account.id.clone());
                 }
@@ -167,12 +176,6 @@ impl PortfolioService {
                 filtered_snapshots.push((account.id.clone(), snapshot));
                 continue;
             }
-
-            let policy = self
-                .storage
-                .get_account_config(&account.id)?
-                .and_then(|config| config.balance_backfill)
-                .unwrap_or(BalanceBackfillPolicy::None);
 
             match policy {
                 BalanceBackfillPolicy::CarryEarliest => {
@@ -943,6 +946,68 @@ mod tests {
         let by_account = result.by_account.expect("account summaries");
         assert_eq!(by_account.len(), 1);
         assert_eq!(by_account[0].value_in_base.as_deref(), Some("0"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn calculate_excludes_accounts_marked_from_portfolio() -> Result<()> {
+        let storage = Arc::new(MemoryStorage::new());
+        let connection = Connection::new(ConnectionConfig {
+            name: "Test Bank".to_string(),
+            synchronizer: "manual".to_string(),
+            credentials: None,
+            balance_staleness: None,
+        });
+        storage.save_connection(&connection).await?;
+
+        let included = Account::new("Checking", connection.id().clone());
+        let excluded = Account::new("Mortgage", connection.id().clone());
+        storage.save_account(&included).await?;
+        storage.save_account(&excluded).await?;
+        storage
+            .set_account_config(
+                &excluded.id,
+                AccountConfig {
+                    exclude_from_portfolio: Some(true),
+                    ..AccountConfig::default()
+                },
+            )
+            .await;
+
+        let included_snapshot = BalanceSnapshot::new(
+            Utc.with_ymd_and_hms(2026, 2, 1, 12, 0, 0).unwrap(),
+            vec![AssetBalance::new(Asset::currency("USD"), "1000")],
+        );
+        let excluded_snapshot = BalanceSnapshot::new(
+            Utc.with_ymd_and_hms(2026, 2, 1, 12, 0, 0).unwrap(),
+            vec![AssetBalance::new(Asset::currency("USD"), "-500")],
+        );
+        storage
+            .append_balance_snapshot(&included.id, &included_snapshot)
+            .await?;
+        storage
+            .append_balance_snapshot(&excluded.id, &excluded_snapshot)
+            .await?;
+
+        let store = Arc::new(MemoryMarketDataStore::new());
+        let market_data = Arc::new(MarketDataService::new(store, None));
+        let service = PortfolioService::new(storage, market_data);
+
+        let query = PortfolioQuery {
+            as_of_date: chrono::NaiveDate::from_ymd_opt(2026, 2, 2).unwrap(),
+            currency: "USD".to_string(),
+            currency_decimals: None,
+            grouping: Grouping::Both,
+            include_detail: false,
+        };
+
+        let result = service.calculate(&query).await?;
+        assert_eq!(result.total_value, "1000");
+
+        let by_account = result.by_account.expect("account summaries");
+        assert_eq!(by_account.len(), 1);
+        assert_eq!(by_account[0].account_name, "Checking");
+
         Ok(())
     }
 

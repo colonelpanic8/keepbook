@@ -373,7 +373,10 @@ describe('JsonFileStorage', () => {
       await storage.saveAccount(acct);
 
       // Write the config TOML
-      const configToml = `balance_staleness = 7200\nbalance_backfill = "zero"\n`;
+      const configToml =
+        `balance_staleness = 7200\n` +
+        `balance_backfill = "zero"\n` +
+        `exclude_from_portfolio = true\n`;
       const configPath = path.join(tmpDir, 'accounts', acctId.asStr(), 'account_config.toml');
       await fs.writeFile(configPath, configToml);
 
@@ -381,6 +384,7 @@ describe('JsonFileStorage', () => {
       expect(fetched).not.toBeNull();
       expect(fetched!.balance_staleness).toBe(7200);
       expect(fetched!.balance_backfill).toBe('zero');
+      expect(fetched!.exclude_from_portfolio).toBe(true);
     });
 
     it('saveAccountConfig writes TOML and reads back', async () => {
@@ -392,6 +396,7 @@ describe('JsonFileStorage', () => {
       const config: AccountConfig = {
         balance_staleness: 1800,
         balance_backfill: 'carry_earliest',
+        exclude_from_portfolio: true,
       };
       await storage.saveAccountConfig(acctId, config);
 
@@ -399,6 +404,7 @@ describe('JsonFileStorage', () => {
       expect(fetched).not.toBeNull();
       expect(fetched!.balance_staleness).toBe(1800);
       expect(fetched!.balance_backfill).toBe('carry_earliest');
+      expect(fetched!.exclude_from_portfolio).toBe(true);
     });
 
     it('parses account balance_staleness duration strings from TOML', async () => {

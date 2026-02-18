@@ -100,4 +100,8 @@ pub struct AccountConfig {
     /// How to handle portfolio queries before the first balance snapshot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub balance_backfill: Option<BalanceBackfillPolicy>,
+
+    /// Exclude this account from portfolio totals and portfolio change points.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exclude_from_portfolio: Option<bool>,
 }

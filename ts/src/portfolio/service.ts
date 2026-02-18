@@ -168,11 +168,16 @@ export class PortfolioService {
     const zeroAccounts: Id[] = [];
 
     for (const account of accountMap.values()) {
+      const accountConfig = this.storage.getAccountConfig(account.id);
+      if (accountConfig?.exclude_from_portfolio === true) {
+        continue;
+      }
+
+      const policy = accountConfig?.balance_backfill ?? 'none';
       const snapshots = await this.storage.getBalanceSnapshots(account.id);
 
       if (snapshots.length === 0) {
         // No snapshots at all - check backfill policy
-        const policy = this.getBackfillPolicy(account.id);
         if (policy === 'zero') {
           zeroAccounts.push(account.id);
         }
@@ -198,8 +203,6 @@ export class PortfolioService {
       }
 
       // No snapshot before as_of_date - check backfill policy
-      const policy = this.getBackfillPolicy(account.id);
-
       switch (policy) {
         case 'carry_earliest': {
           // Use the earliest snapshot
@@ -230,11 +233,6 @@ export class PortfolioService {
       filtered_snapshots: filteredSnapshots,
       zero_accounts: zeroAccounts,
     };
-  }
-
-  private getBackfillPolicy(accountId: Id): string {
-    const config = this.storage.getAccountConfig(accountId);
-    return config?.balance_backfill ?? 'none';
   }
 
   // -----------------------------------------------------------------------

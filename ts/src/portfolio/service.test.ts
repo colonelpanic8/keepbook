@@ -481,6 +481,30 @@ describe('PortfolioService', () => {
     expect(byAccount[0].value_in_base).toBe('0');
   });
 
+  it('excludes accounts marked exclude_from_portfolio', async () => {
+    const conn = await createConnection(storage, 'Bank');
+    const checking = await createAccount(storage, 'Checking', conn);
+    const mortgage = await createAccount(storage, 'Mortgage', conn);
+
+    await storage.saveAccountConfig(mortgage.id, {
+      exclude_from_portfolio: true,
+    });
+
+    await addSnapshot(storage, checking.id, new Date('2026-02-01T12:00:00Z'), [
+      { asset: Asset.currency('USD'), amount: '1000' },
+    ]);
+    await addSnapshot(storage, mortgage.id, new Date('2026-02-01T12:00:00Z'), [
+      { asset: Asset.currency('USD'), amount: '-500' },
+    ]);
+
+    const service = buildService();
+    const result = await service.calculate(makeQuery({ currency: 'USD', grouping: 'both' }));
+
+    expect(result.total_value).toBe('1000');
+    expect(result.by_account).toHaveLength(1);
+    expect(result.by_account![0].account_name).toBe('Checking');
+  });
+
   it('sorts by_asset by AssetId string', async () => {
     const conn = await createConnection(storage, 'Multi');
     const account = await createAccount(storage, 'Multi-asset', conn);

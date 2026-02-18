@@ -33,6 +33,7 @@ async fn json_storage_reads_account_config_for_zero_backfill() -> Result<()> {
             &AccountConfig {
                 balance_staleness: None,
                 balance_backfill: Some(BalanceBackfillPolicy::Zero),
+                exclude_from_portfolio: None,
             },
         )
         .await?;

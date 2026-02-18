@@ -456,6 +456,45 @@ describe('collectChangePoints', () => {
     expect(points[0].timestamp).toEqual(new Date('2024-06-15T10:00:00Z'));
   });
 
+  it('excludes accounts marked exclude_from_portfolio', async () => {
+    const storage = new MemoryStorage();
+    const marketData = new MemoryMarketDataStore();
+
+    const connId = Id.fromString('conn-1');
+    const conn = {
+      config: { name: 'Test Connection', synchronizer: 'test' } as ConnectionConfig,
+      state: ConnectionState.newWith(connId, new Date('2024-01-01T00:00:00Z')),
+    };
+    await storage.saveConnection(conn);
+
+    const includedId = Id.fromString('acct-1');
+    const excludedId = Id.fromString('acct-2');
+    await storage.saveAccount(
+      Account.newWith(includedId, new Date('2024-01-01T00:00:00Z'), 'Checking', connId),
+    );
+    await storage.saveAccount(
+      Account.newWith(excludedId, new Date('2024-01-01T00:00:00Z'), 'Mortgage', connId),
+    );
+    await storage.saveAccountConfig(excludedId, { exclude_from_portfolio: true });
+
+    await storage.appendBalanceSnapshot(
+      includedId,
+      BalanceSnapshot.new(new Date('2024-06-15T10:00:00Z'), [
+        AssetBalance.new(Asset.currency('USD'), '1000'),
+      ]),
+    );
+    await storage.appendBalanceSnapshot(
+      excludedId,
+      BalanceSnapshot.new(new Date('2024-06-16T10:00:00Z'), [
+        AssetBalance.new(Asset.currency('USD'), '-500'),
+      ]),
+    );
+
+    const points = await collectChangePoints(storage, marketData, {});
+    expect(points).toHaveLength(1);
+    expect(points[0].timestamp).toEqual(new Date('2024-06-15T10:00:00Z'));
+  });
+
   it('includes price changes when includePrices is true', async () => {
     const storage = new MemoryStorage();
     const marketData = new MemoryMarketDataStore();

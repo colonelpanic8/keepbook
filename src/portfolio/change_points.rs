@@ -263,11 +263,28 @@ pub async fn collect_change_points(
 
     // Determine which accounts to process
     let accounts = if options.account_ids.is_empty() {
-        storage.list_accounts().await?
+        let mut accounts = Vec::new();
+        for account in storage.list_accounts().await? {
+            let excluded = storage
+                .get_account_config(&account.id)?
+                .and_then(|config| config.exclude_from_portfolio)
+                .unwrap_or(false);
+            if !excluded {
+                accounts.push(account);
+            }
+        }
+        accounts
     } else {
         let mut accounts = Vec::new();
         for id in &options.account_ids {
             if let Some(account) = storage.get_account(id).await? {
+                let excluded = storage
+                    .get_account_config(&account.id)?
+                    .and_then(|config| config.exclude_from_portfolio)
+                    .unwrap_or(false);
+                if excluded {
+                    continue;
+                }
                 accounts.push(account);
             }
         }
@@ -317,7 +334,9 @@ mod tests {
     use crate::market_data::{
         AssetId, MarketDataStore, MemoryMarketDataStore, PriceKind, PricePoint,
     };
-    use crate::models::{Account, AssetBalance, Connection, ConnectionConfig, ConnectionState};
+    use crate::models::{
+        Account, AccountConfig, AssetBalance, Connection, ConnectionConfig, ConnectionState,
+    };
     use crate::storage::{MemoryStorage, Storage};
 
     fn make_ts(year: i32, month: u32, day: u32, hour: u32, min: u32) -> DateTime<Utc> {
@@ -596,6 +615,79 @@ mod tests {
 
         assert_eq!(filtered.len(), original_len);
         assert_eq!(filtered.first().map(|p| p.timestamp), first_timestamp);
+    }
+
+    #[tokio::test]
+    async fn collect_change_points_excludes_accounts_marked_from_portfolio() -> Result<()> {
+        let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new());
+        let market_data: Arc<dyn MarketDataStore> = Arc::new(MemoryMarketDataStore::new());
+
+        let conn_id = Id::from_string("conn-1");
+        storage
+            .save_connection(&Connection {
+                config: ConnectionConfig {
+                    name: "Test".to_string(),
+                    synchronizer: "manual".to_string(),
+                    credentials: None,
+                    balance_staleness: None,
+                },
+                state: ConnectionState::new_with(conn_id.clone(), make_ts(2024, 1, 1, 0, 0)),
+            })
+            .await?;
+
+        let included_id = Id::from_string("acct-1");
+        let excluded_id = Id::from_string("acct-2");
+        storage
+            .save_account(&Account::new_with(
+                included_id.clone(),
+                make_ts(2024, 1, 1, 0, 0),
+                "Checking",
+                conn_id.clone(),
+            ))
+            .await?;
+        storage
+            .save_account(&Account::new_with(
+                excluded_id.clone(),
+                make_ts(2024, 1, 1, 0, 0),
+                "Mortgage",
+                conn_id,
+            ))
+            .await?;
+        storage
+            .save_account_config(
+                &excluded_id,
+                &AccountConfig {
+                    exclude_from_portfolio: Some(true),
+                    ..AccountConfig::default()
+                },
+            )
+            .await?;
+
+        storage
+            .append_balance_snapshot(
+                &included_id,
+                &crate::models::BalanceSnapshot::new(
+                    make_ts(2024, 6, 15, 10, 0),
+                    vec![AssetBalance::new(Asset::currency("USD"), "1000")],
+                ),
+            )
+            .await?;
+        storage
+            .append_balance_snapshot(
+                &excluded_id,
+                &crate::models::BalanceSnapshot::new(
+                    make_ts(2024, 6, 16, 10, 0),
+                    vec![AssetBalance::new(Asset::currency("USD"), "-500")],
+                ),
+            )
+            .await?;
+
+        let points =
+            collect_change_points(&storage, &market_data, &CollectOptions::default()).await?;
+        assert_eq!(points.len(), 1);
+        assert_eq!(points[0].timestamp, make_ts(2024, 6, 15, 10, 0));
+
+        Ok(())
     }
 
     #[tokio::test]
