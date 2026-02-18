@@ -7,8 +7,98 @@
 use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::Deserialize;
+use std::collections::HashSet;
+use std::future::Future;
 
 use crate::credentials::SessionData;
+
+pub(crate) const DEFAULT_CARD_TXN_PAGE_SIZE: u32 = 100;
+pub(crate) const DEFAULT_MAX_CARD_TRANSACTIONS: usize = 100_000;
+
+pub(crate) fn max_card_transactions() -> usize {
+    // Safety valve for pagination bugs, and a knob for users with very large histories.
+    //
+    // We intentionally use an env var (not config) because this is primarily an operational
+    // workaround for edge cases and can be tuned per-run.
+    std::env::var("KEEPBOOK_CHASE_MAX_TRANSACTIONS")
+        .ok()
+        .and_then(|s| s.trim().parse::<usize>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(DEFAULT_MAX_CARD_TRANSACTIONS)
+}
+
+pub(crate) async fn get_all_card_transactions_paginated<F, Fut>(
+    label: &str,
+    page_size: u32,
+    max_transactions: usize,
+    mut fetch_page: F,
+) -> Result<Vec<ChaseActivity>>
+where
+    F: FnMut(Option<String>) -> Fut,
+    Fut: Future<Output = Result<TransactionsResponse>>,
+{
+    let mut all_activities: Vec<ChaseActivity> = Vec::new();
+    let mut pagination_key: Option<String> = None;
+    let mut seen_keys: HashSet<String> = HashSet::new();
+    let mut pages: usize = 0;
+    // Keep a separate pages cap as another infinite-loop guard (e.g. if Chase returns
+    // moreRecordsIndicator=true with a nonsense/constant key).
+    let max_pages: usize = ((max_transactions / page_size.max(1) as usize).max(1)) + 50;
+
+    loop {
+        pages += 1;
+        if pages > max_pages {
+            eprintln!(
+                "{label}: stopping pagination at {} transactions (safety limit: max pages={max_pages}; set KEEPBOOK_CHASE_MAX_TRANSACTIONS to increase overall cap)",
+                all_activities.len()
+            );
+            break;
+        }
+
+        let resp = fetch_page(pagination_key.clone()).await?;
+
+        if resp.activities.is_empty() {
+            // Defensive stop: if Chase claims more records but gives no activities, continuing
+            // is likely to spin.
+            if resp.more_records_indicator {
+                eprintln!(
+                    "{label}: got empty transactions page but moreRecordsIndicator=true; stopping to avoid infinite pagination"
+                );
+            }
+            break;
+        }
+
+        all_activities.extend(resp.activities);
+
+        if all_activities.len() > max_transactions {
+            all_activities.truncate(max_transactions);
+            eprintln!(
+                "{label}: stopping pagination at {} transactions (safety limit; set KEEPBOOK_CHASE_MAX_TRANSACTIONS to increase)",
+                all_activities.len()
+            );
+            break;
+        }
+
+        if !resp.more_records_indicator {
+            break;
+        }
+
+        match resp.pagination_contextual_text {
+            Some(ref key) if !key.is_empty() => {
+                if !seen_keys.insert(key.clone()) {
+                    eprintln!(
+                        "{label}: pagination key repeated; stopping to avoid infinite pagination"
+                    );
+                    break;
+                }
+                pagination_key = Some(key.clone());
+            }
+            _ => break,
+        }
+    }
+
+    Ok(all_activities)
+}
 
 /// Chase API client using cookie-based authentication.
 pub struct ChaseClient {
@@ -108,7 +198,7 @@ pub struct MortgageDetail {
 }
 
 /// Transaction list response from the credit card transactions endpoint.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct TransactionsResponse {
     #[serde(default, rename = "totalPostedTransactionCount")]
     pub total_posted_transaction_count: Option<i64>,
@@ -455,14 +545,14 @@ impl ChaseClient {
         &self,
         account_id: i64,
         record_count: u32,
-        pagination_key: Option<&str>,
+        pagination_key: Option<String>,
     ) -> Result<TransactionsResponse> {
         let mut path = format!(
             "/svc/rr/accounts/secure/gateway/credit-card/transactions/inquiry-maintenance/etu-transactions/v4/accounts/transactions?digital-account-identifier={account_id}&provide-available-statement-indicator=true&record-count={record_count}&sort-order-code=D&sort-key-code=T"
         );
 
         if let Some(key) = pagination_key {
-            path.push_str(&format!("&next-page-key={}", urlencoding::encode(key)));
+            path.push_str(&format!("&next-page-key={}", urlencoding::encode(&key)));
         }
 
         self.get(&path).await
@@ -470,39 +560,12 @@ impl ChaseClient {
 
     /// Get all transactions for a card account, handling pagination.
     pub async fn get_all_card_transactions(&self, account_id: i64) -> Result<Vec<ChaseActivity>> {
-        let mut all_activities = Vec::new();
-        let mut pagination_key: Option<String> = None;
-        let page_size = 100;
-
-        loop {
-            let resp = self
-                .get_card_transactions(account_id, page_size, pagination_key.as_deref())
-                .await?;
-
-            all_activities.extend(resp.activities);
-
-            if !resp.more_records_indicator {
-                break;
-            }
-
-            match resp.pagination_contextual_text {
-                Some(ref key) if !key.is_empty() => {
-                    pagination_key = Some(key.clone());
-                }
-                _ => break,
-            }
-
-            // Safety limit
-            if all_activities.len() > 5000 {
-                eprintln!(
-                    "Chase: stopping pagination at {} transactions (safety limit)",
-                    all_activities.len()
-                );
-                break;
-            }
-        }
-
-        Ok(all_activities)
+        let page_size = DEFAULT_CARD_TXN_PAGE_SIZE;
+        let max_transactions = max_card_transactions();
+        get_all_card_transactions_paginated("Chase", page_size, max_transactions, |key| {
+            self.get_card_transactions(account_id, page_size, key)
+        })
+        .await
     }
 
     /// Test that the session is still valid by making a simple API call.
@@ -520,6 +583,99 @@ impl ChaseClient {
             anyhow::bail!("Chase auth test failed: code={code}");
         }
 
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::VecDeque;
+    use std::sync::{Arc, Mutex};
+
+    fn activity(id: &str) -> ChaseActivity {
+        ChaseActivity {
+            transaction_status_code: "P".to_string(),
+            transaction_amount: 1.23,
+            transaction_date: "2026-02-01".to_string(),
+            transaction_post_date: None,
+            sor_transaction_identifier: Some(id.to_string()),
+            derived_unique_transaction_identifier: None,
+            transaction_reference_number: None,
+            credit_debit_code: "D".to_string(),
+            etu_standard_transaction_type_name: None,
+            etu_standard_transaction_type_group_name: None,
+            etu_standard_expense_category_code: None,
+            currency_code: Some("USD".to_string()),
+            merchant_details: None,
+            last4_card_number: None,
+            digital_account_identifier: None,
+        }
+    }
+
+    fn resp(acts: Vec<ChaseActivity>, more: bool, key: Option<&str>) -> TransactionsResponse {
+        TransactionsResponse {
+            total_posted_transaction_count: None,
+            posted_transaction_count: None,
+            pending_authorization_count: None,
+            activities: acts,
+            more_records_indicator: more,
+            pagination_contextual_text: key.map(|s| s.to_string()),
+            last_sort_field_value_text: None,
+            as_of_date: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn pagination_stops_when_more_records_false() -> Result<()> {
+        let pages = vec![
+            resp(vec![activity("a1"), activity("a2")], true, Some("k1")),
+            resp(vec![activity("a3")], false, None),
+        ];
+        let q: Arc<Mutex<VecDeque<TransactionsResponse>>> =
+            Arc::new(Mutex::new(VecDeque::from(pages)));
+        let out = get_all_card_transactions_paginated("test", 2, 100, move |_key| {
+            let q = q.clone();
+            async move { Ok(q.lock().unwrap().pop_front().unwrap()) }
+        })
+        .await?;
+        assert_eq!(out.len(), 3);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn pagination_stops_on_repeated_key() -> Result<()> {
+        let pages = vec![
+            resp(vec![activity("a1")], true, Some("k1")),
+            resp(vec![activity("a2")], true, Some("k1")),
+            // Would be infinite if we kept going.
+            resp(vec![activity("a3")], true, Some("k1")),
+        ];
+        let q: Arc<Mutex<VecDeque<TransactionsResponse>>> =
+            Arc::new(Mutex::new(VecDeque::from(pages)));
+        let out = get_all_card_transactions_paginated("test", 1, 100, move |_key| {
+            let q = q.clone();
+            async move { Ok(q.lock().unwrap().pop_front().unwrap()) }
+        })
+        .await?;
+        assert_eq!(out.len(), 2);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn pagination_truncates_to_max_transactions() -> Result<()> {
+        let pages = vec![
+            resp(vec![activity("a1"), activity("a2")], true, Some("k1")),
+            resp(vec![activity("a3"), activity("a4")], true, Some("k2")),
+        ];
+        let q: Arc<Mutex<VecDeque<TransactionsResponse>>> =
+            Arc::new(Mutex::new(VecDeque::from(pages)));
+        let out = get_all_card_transactions_paginated("test", 2, 3, move |_key| {
+            let q = q.clone();
+            async move { Ok(q.lock().unwrap().pop_front().unwrap()) }
+        })
+        .await?;
+        assert_eq!(out.len(), 3);
         Ok(())
     }
 }

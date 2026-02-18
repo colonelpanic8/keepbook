@@ -145,14 +145,14 @@ impl BrowserApiClient {
         &self,
         account_id: i64,
         record_count: u32,
-        pagination_key: Option<&str>,
+        pagination_key: Option<String>,
     ) -> Result<TransactionsResponse> {
         let mut path = format!(
             "/svc/rr/accounts/secure/gateway/credit-card/transactions/inquiry-maintenance/etu-transactions/v4/accounts/transactions?digital-account-identifier={account_id}&provide-available-statement-indicator=true&record-count={record_count}&sort-order-code=D&sort-key-code=T"
         );
 
         if let Some(key) = pagination_key {
-            path.push_str(&format!("&next-page-key={}", urlencoding::encode(key)));
+            path.push_str(&format!("&next-page-key={}", urlencoding::encode(&key)));
         }
 
         let value = self.get_json(&path).await?;
@@ -160,38 +160,20 @@ impl BrowserApiClient {
     }
 
     async fn get_all_card_transactions(&self, account_id: i64) -> Result<Vec<ChaseActivity>> {
-        let mut all_activities = Vec::new();
-        let mut pagination_key: Option<String> = None;
-        let page_size = 100;
+        // The direct HTTP client and browser-backed API client should behave the same
+        // for transaction history: paginate until Chase stops, with safety guards.
+        //
+        // We reuse the shared pagination helper in the API module so fixes apply to both.
+        let page_size = crate::sync::chase::api::DEFAULT_CARD_TXN_PAGE_SIZE;
+        let max_transactions = crate::sync::chase::api::max_card_transactions();
 
-        loop {
-            let resp = self
-                .get_card_transactions(account_id, page_size, pagination_key.as_deref())
-                .await?;
-
-            all_activities.extend(resp.activities);
-
-            if !resp.more_records_indicator {
-                break;
-            }
-
-            match resp.pagination_contextual_text {
-                Some(ref key) if !key.is_empty() => {
-                    pagination_key = Some(key.clone());
-                }
-                _ => break,
-            }
-
-            if all_activities.len() > 5000 {
-                eprintln!(
-                    "Chase(browser): stopping pagination at {} transactions (safety limit)",
-                    all_activities.len()
-                );
-                break;
-            }
-        }
-
-        Ok(all_activities)
+        crate::sync::chase::api::get_all_card_transactions_paginated(
+            "Chase(browser)",
+            page_size,
+            max_transactions,
+            |key| self.get_card_transactions(account_id, page_size, key),
+        )
+        .await
     }
 }
 
