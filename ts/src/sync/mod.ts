@@ -203,6 +203,14 @@ export interface Synchronizer {
 
 /** Trait for synchronizers that require interactive (browser-based) authentication. */
 export interface InteractiveAuth extends Synchronizer {
+  /**
+   * Whether auth is required before running `sync`.
+   *
+   * Some synchronizers (e.g. Chase) can proceed without a cached session because
+   * sync itself is interactive and the user will log in during the flow.
+   */
+  authRequiredForSync?(): boolean;
+
   /** Check if the current authentication is valid. */
   checkAuth(): Promise<AuthStatus>;
 

@@ -424,6 +424,9 @@ impl SyncService {
         match synchronizer.check_auth().await? {
             AuthStatus::Valid => Ok(None),
             AuthStatus::Missing => {
+                if !synchronizer.auth_required_for_sync() {
+                    return Ok(None);
+                }
                 let prompt = format!("No {} session found. Run login now?", synchronizer.name());
                 if self.auth_prompter.confirm_login(&prompt)? {
                     match synchronizer.login().await {
@@ -441,6 +444,9 @@ impl SyncService {
                 }
             }
             AuthStatus::Expired { reason } => {
+                if !synchronizer.auth_required_for_sync() {
+                    return Ok(None);
+                }
                 let prompt = format!(
                     "{} session expired ({reason}). Run login now?",
                     synchronizer.name()

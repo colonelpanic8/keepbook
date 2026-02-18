@@ -158,6 +158,14 @@ pub enum AuthStatus {
 /// Trait for synchronizers that require interactive (browser-based) authentication.
 #[async_trait::async_trait]
 pub trait InteractiveAuth: Synchronizer {
+    /// Whether auth is required before running `sync`.
+    ///
+    /// Some synchronizers (e.g. Chase) can proceed without a cached session because the
+    /// sync itself is interactive and the user will log in during the flow.
+    fn auth_required_for_sync(&self) -> bool {
+        true
+    }
+
     /// Check if the current authentication is valid.
     async fn check_auth(&self) -> Result<AuthStatus>;
 
