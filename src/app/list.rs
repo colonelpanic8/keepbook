@@ -1,20 +1,18 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use std::str::FromStr;
 
-use anyhow::{Context, Result};
-use chrono::NaiveDate;
+use anyhow::Result;
 
 use crate::config::ResolvedConfig;
-use crate::market_data::{MarketDataService, MarketDataServiceBuilder, PriceSourceRegistry};
-use crate::models::{Asset, Id, TransactionAnnotation};
+use crate::market_data::{MarketDataServiceBuilder, PriceSourceRegistry};
+use crate::models::{Id, TransactionAnnotation};
 use crate::storage::Storage;
 
+use super::value::value_in_reporting_currency;
 use super::{
     AccountOutput, AllOutput, BalanceOutput, ConnectionOutput, PriceSourceOutput,
     TransactionAnnotationOutput, TransactionOutput,
 };
-use crate::format::format_base_currency_value;
 
 pub async fn list_connections(storage: &dyn Storage) -> Result<Vec<ConnectionOutput>> {
     let connections = storage.list_connections().await?;
@@ -90,76 +88,6 @@ pub fn list_price_sources(data_dir: &Path) -> Result<Vec<PriceSourceOutput>> {
     }
 
     Ok(output)
-}
-
-async fn value_in_reporting_currency(
-    market_data: &MarketDataService,
-    asset: &Asset,
-    amount: &str,
-    reporting_currency: &str,
-    as_of_date: NaiveDate,
-    currency_decimals: Option<u32>,
-) -> Result<Option<String>> {
-    use rust_decimal::Decimal;
-
-    let amount = Decimal::from_str(amount)
-        .with_context(|| format!("Invalid balance amount for valuation: {amount}"))?;
-    let reporting_currency = reporting_currency.trim().to_uppercase();
-
-    match asset {
-        Asset::Currency { iso_code } => {
-            if iso_code.eq_ignore_ascii_case(&reporting_currency) {
-                return Ok(Some(format_base_currency_value(amount, currency_decimals)));
-            }
-
-            let Some(rate) = market_data
-                .fx_from_store(iso_code, &reporting_currency, as_of_date)
-                .await?
-            else {
-                return Ok(None);
-            };
-
-            let fx_rate = Decimal::from_str(&rate.rate)
-                .with_context(|| format!("Invalid FX rate value: {}", rate.rate))?;
-            Ok(Some(format_base_currency_value(
-                amount * fx_rate,
-                currency_decimals,
-            )))
-        }
-        Asset::Equity { .. } | Asset::Crypto { .. } => {
-            let Some(price) = market_data.price_from_store(asset, as_of_date).await? else {
-                return Ok(None);
-            };
-
-            let unit_price = Decimal::from_str(&price.price)
-                .with_context(|| format!("Invalid asset price value: {}", price.price))?;
-            let value_in_quote = amount * unit_price;
-
-            if price
-                .quote_currency
-                .eq_ignore_ascii_case(&reporting_currency)
-            {
-                return Ok(Some(format_base_currency_value(
-                    value_in_quote,
-                    currency_decimals,
-                )));
-            }
-
-            let Some(rate) = market_data
-                .fx_from_store(&price.quote_currency, &reporting_currency, as_of_date)
-                .await?
-            else {
-                return Ok(None);
-            };
-
-            let fx_rate = Decimal::from_str(&rate.rate)
-                .with_context(|| format!("Invalid FX rate value: {}", rate.rate))?;
-            Ok(Some(format_base_currency_value(
-                value_in_quote * fx_rate,
-                currency_decimals,
-            )))
-        }
-    }
 }
 
 pub async fn list_balances(

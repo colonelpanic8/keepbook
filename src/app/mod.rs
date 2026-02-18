@@ -6,6 +6,7 @@ mod portfolio;
 mod preflight;
 mod sync;
 mod types;
+mod value;
 
 use crate::config::ResolvedConfig;
 use crate::sync::{AutoCommitter, GitAutoCommitter};

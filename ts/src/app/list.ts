@@ -16,13 +16,10 @@ import { type AssetType } from '../models/asset.js';
 import { Id } from '../models/id.js';
 import { MarketDataService } from '../market-data/service.js';
 import { NullMarketDataStore, type MarketDataStore } from '../market-data/store.js';
-import { Decimal } from '../decimal.js';
 import {
   formatDateYMD,
   formatRfc3339,
   formatRfc3339FromEpochNanos,
-  decStr,
-  decStrRounded,
 } from './format.js';
 import type { ResolvedConfig } from '../config.js';
 import {
@@ -30,6 +27,7 @@ import {
   isEmptyTransactionAnnotation,
   type TransactionAnnotationType,
 } from '../models/transaction-annotation.js';
+import { valueInReportingCurrency } from './value.js';
 import {
   type ConnectionOutput,
   type AccountOutput,
@@ -140,39 +138,6 @@ function resolveConnectionAccountIds(
   }
 
   return result;
-}
-
-async function valueInReportingCurrency(
-  marketData: MarketDataService,
-  asset: AssetType,
-  amount: string,
-  reportingCurrency: string,
-  asOfDate: string,
-  currencyDecimals: number | undefined,
-): Promise<string | null> {
-  const amountValue = new Decimal(amount);
-
-  if (asset.type === 'currency') {
-    if (asset.iso_code.toUpperCase() === reportingCurrency) {
-      return decStrRounded(amountValue, currencyDecimals);
-    }
-
-    const rate = await marketData.fxFromStore(asset.iso_code, reportingCurrency, asOfDate);
-    if (rate === null) return null;
-    return decStrRounded(amountValue.times(new Decimal(rate.rate)), currencyDecimals);
-  }
-
-  const price = await marketData.priceFromStore(asset, asOfDate);
-  if (price === null) return null;
-
-  const valueInQuote = amountValue.times(new Decimal(price.price));
-  if (price.quote_currency.toUpperCase() === reportingCurrency) {
-    return decStrRounded(valueInQuote, currencyDecimals);
-  }
-
-  const rate = await marketData.fxFromStore(price.quote_currency, reportingCurrency, asOfDate);
-  if (rate === null) return null;
-  return decStrRounded(valueInQuote.times(new Decimal(rate.rate)), currencyDecimals);
 }
 
 // ---------------------------------------------------------------------------
