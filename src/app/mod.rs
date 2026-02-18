@@ -1,4 +1,5 @@
 mod config;
+mod import;
 mod list;
 mod mutations;
 mod portfolio;
@@ -10,6 +11,7 @@ use crate::config::ResolvedConfig;
 use crate::sync::{AutoCommitter, GitAutoCommitter};
 
 pub use config::config_output;
+pub use import::import_schwab_transactions;
 pub use list::{
     list_accounts, list_all, list_balances, list_connections, list_price_sources, list_transactions,
 };

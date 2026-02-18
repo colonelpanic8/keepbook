@@ -18,6 +18,7 @@ import {
   setBalance,
   setTransactionAnnotation,
 } from '../app/mutations.js';
+import { importSchwabTransactions } from '../app/import.js';
 import { portfolioSnapshot, portfolioHistory, portfolioChangePoints } from '../app/portfolio.js';
 import {
   syncConnection,
@@ -257,6 +258,33 @@ set
       });
     },
   );
+
+// ---------------------------------------------------------------------------
+// import
+// ---------------------------------------------------------------------------
+
+const importCmd = program.command('import').description('Import data from exported files');
+
+const importSchwab = importCmd.command('schwab').description('Schwab import commands');
+
+importSchwab
+  .command('transactions <file>')
+  .description('Import transactions from a Schwab JSON export file')
+  .requiredOption('--account <id_or_name>', 'account ID or name')
+  .action(async (file: string, opts: { account: string }) => {
+    await runWithConfig(async (cfg) => {
+      const storage = new JsonFileStorage(cfg.config.data_dir);
+      const result = await importSchwabTransactions(storage, opts.account, file);
+      if (cfg.config.git.auto_commit) {
+        await tryAutoCommit(
+          cfg.config.data_dir,
+          `import schwab transactions (account ${result.account_id})`,
+          cfg.config.git.auto_push,
+        );
+      }
+      return result;
+    });
+  });
 
 // ---------------------------------------------------------------------------
 // list

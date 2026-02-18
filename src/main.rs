@@ -92,6 +92,10 @@ enum Command {
     #[command(subcommand)]
     Set(SetCommand),
 
+    /// Import data from exported files
+    #[command(subcommand)]
+    Import(ImportCommand),
+
     /// Sync data from connections
     #[command(subcommand)]
     Sync(SyncCommand),
@@ -198,6 +202,26 @@ enum SetCommand {
         /// Clear tags field
         #[arg(long)]
         clear_tags: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum ImportCommand {
+    /// Schwab import commands
+    #[command(subcommand)]
+    Schwab(SchwabImportCommand),
+}
+
+#[derive(Subcommand)]
+enum SchwabImportCommand {
+    /// Import transactions from a Schwab JSON export file
+    Transactions {
+        /// Account ID or name
+        #[arg(long)]
+        account: String,
+
+        /// Path to Schwab-exported JSON file
+        file: PathBuf,
     },
 }
 
@@ -533,6 +557,21 @@ async fn main() -> Result<()> {
                 .await?;
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
+        },
+
+        Some(Command::Import(import_cmd)) => match import_cmd {
+            ImportCommand::Schwab(schwab_cmd) => match schwab_cmd {
+                SchwabImportCommand::Transactions { account, file } => {
+                    let result = app::import_schwab_transactions(
+                        storage_arc.as_ref(),
+                        &config,
+                        &account,
+                        &file,
+                    )
+                    .await?;
+                    println!("{}", serde_json::to_string_pretty(&result)?);
+                }
+            },
         },
 
         Some(Command::Sync(sync_cmd)) => match sync_cmd {
