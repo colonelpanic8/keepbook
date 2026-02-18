@@ -29,8 +29,8 @@ pub use sync::{
 pub use types::{
     AccountOutput, AllOutput, AssetInfoOutput, BalanceOutput, ChangePointsOutput, ConnectionOutput,
     HistoryOutput, HistoryPoint, HistorySummary, PriceHistoryFailure, PriceHistoryOutput,
-    PriceHistoryScopeOutput, PriceHistoryStats, PriceSourceOutput, TransactionOutput,
-    TransactionAnnotationOutput,
+    PriceHistoryScopeOutput, PriceHistoryStats, PriceSourceOutput, TransactionAnnotationOutput,
+    TransactionOutput,
 };
 
 fn maybe_auto_commit(config: &ResolvedConfig, action: &str) {

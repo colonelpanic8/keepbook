@@ -108,4 +108,3 @@ mod tests {
         assert_eq!(ann.note, None);
     }
 }
-

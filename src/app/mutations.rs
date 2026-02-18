@@ -364,7 +364,10 @@ pub async fn set_transaction_annotation(
     }
 
     let mut patch_json = serde_json::Map::new();
-    patch_json.insert("timestamp".to_string(), serde_json::json!(patch.timestamp.to_rfc3339()));
+    patch_json.insert(
+        "timestamp".to_string(),
+        serde_json::json!(patch.timestamp.to_rfc3339()),
+    );
     if let Some(v) = patch.description {
         patch_json.insert(
             "description".to_string(),
@@ -429,7 +432,10 @@ pub async fn set_transaction_annotation(
         "annotation": annotation_json
     });
 
-    maybe_auto_commit(config, &format!("set transaction annotation {account_id} {transaction_id}"));
+    maybe_auto_commit(
+        config,
+        &format!("set transaction annotation {account_id} {transaction_id}"),
+    );
 
     Ok(result)
 }

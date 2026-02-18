@@ -99,8 +99,9 @@ async fn seed_storage(storage: &dyn Storage, seed: &Seed) -> Result<()> {
         let mut account_ids = Vec::new();
         for s in &c.account_ids {
             account_ids.push(
-                Id::from_string_checked(s)
-                    .with_context(|| format!("Invalid account id in connection '{}': {}", c.id, s))?,
+                Id::from_string_checked(s).with_context(|| {
+                    format!("Invalid account id in connection '{}': {}", c.id, s)
+                })?,
             );
         }
         state.account_ids = account_ids;
@@ -144,7 +145,9 @@ async fn seed_storage(storage: &dyn Storage, seed: &Seed) -> Result<()> {
             balances.push(AssetBalance::new(asset, b.amount.clone()));
         }
         let snapshot = BalanceSnapshot::new(timestamp, balances);
-        storage.append_balance_snapshot(&account_id, &snapshot).await?;
+        storage
+            .append_balance_snapshot(&account_id, &snapshot)
+            .await?;
     }
 
     Ok(())
@@ -202,7 +205,11 @@ fn run_rust_cli(config_path: &Path, args: &[String]) -> Result<serde_json::Value
 }
 
 fn run_ts_cli(config_path: &Path, args: &[String]) -> Result<serde_json::Value> {
-    let entry = repo_root().join("ts").join("dist").join("cli").join("main.js");
+    let entry = repo_root()
+        .join("ts")
+        .join("dist")
+        .join("cli")
+        .join("main.js");
     if !entry.exists() {
         anyhow::bail!("Missing TS CLI entrypoint: {}", entry.display());
     }

@@ -31,7 +31,10 @@ fn group_int_digits(int_part: &str) -> String {
 
 fn pad_fraction_to_dp(s: &str, dp: u32) -> String {
     if dp == 0 {
-        return s.split_once('.').map(|(i, _)| i.to_string()).unwrap_or_else(|| s.to_string());
+        return s
+            .split_once('.')
+            .map(|(i, _)| i.to_string())
+            .unwrap_or_else(|| s.to_string());
     }
 
     let (int_part, frac_part) = match s.split_once('.') {

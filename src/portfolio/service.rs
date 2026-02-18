@@ -289,7 +289,8 @@ impl PortfolioService {
                 price_timestamp: valuation.price_timestamp,
                 fx_rate: valuation.fx_rate.clone(),
                 fx_date: valuation.fx_date,
-                value_in_base: asset_value.map(|v| format_base_currency_value(v, currency_decimals)),
+                value_in_base: asset_value
+                    .map(|v| format_base_currency_value(v, currency_decimals)),
                 holdings: holdings_detail,
             });
         }

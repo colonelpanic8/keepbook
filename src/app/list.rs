@@ -11,8 +11,8 @@ use crate::models::{Asset, Id, TransactionAnnotation};
 use crate::storage::Storage;
 
 use super::{
-    AccountOutput, AllOutput, BalanceOutput, ConnectionOutput, PriceSourceOutput, TransactionOutput,
-    TransactionAnnotationOutput,
+    AccountOutput, AllOutput, BalanceOutput, ConnectionOutput, PriceSourceOutput,
+    TransactionAnnotationOutput, TransactionOutput,
 };
 use crate::format::format_base_currency_value;
 
@@ -121,7 +121,10 @@ async fn value_in_reporting_currency(
 
             let fx_rate = Decimal::from_str(&rate.rate)
                 .with_context(|| format!("Invalid FX rate value: {}", rate.rate))?;
-            Ok(Some(format_base_currency_value(amount * fx_rate, currency_decimals)))
+            Ok(Some(format_base_currency_value(
+                amount * fx_rate,
+                currency_decimals,
+            )))
         }
         Asset::Equity { .. } | Asset::Crypto { .. } => {
             let Some(price) = market_data.price_from_store(asset, as_of_date).await? else {
@@ -235,7 +238,9 @@ pub async fn list_transactions(storage: &dyn Storage) -> Result<Vec<TransactionO
 
     for account in accounts {
         let transactions = storage.get_transactions(&account.id).await?;
-        let patches = storage.get_transaction_annotation_patches(&account.id).await?;
+        let patches = storage
+            .get_transaction_annotation_patches(&account.id)
+            .await?;
 
         // Materialize last-write-wins annotation state per transaction id.
         let mut annotations_by_tx: HashMap<Id, TransactionAnnotation> = HashMap::new();
@@ -290,7 +295,9 @@ pub async fn list_all(storage: &dyn Storage, config: &ResolvedConfig) -> Result<
 mod tests {
     use super::*;
     use crate::clock::{Clock, FixedClock};
-    use crate::models::{Account, Asset, FixedIdGenerator, Transaction, TransactionAnnotationPatch};
+    use crate::models::{
+        Account, Asset, FixedIdGenerator, Transaction, TransactionAnnotationPatch,
+    };
     use crate::storage::MemoryStorage;
     use chrono::{TimeZone, Utc};
 
@@ -300,7 +307,12 @@ mod tests {
         let clock = FixedClock::new(Utc.with_ymd_and_hms(2026, 2, 5, 12, 0, 0).unwrap());
 
         let account_id = Id::from_string("acct-1");
-        let account = Account::new_with(account_id.clone(), clock.now(), "Checking", Id::from_string("conn-1"));
+        let account = Account::new_with(
+            account_id.clone(),
+            clock.now(),
+            "Checking",
+            Id::from_string("conn-1"),
+        );
         storage.save_account(&account).await?;
 
         let ids = FixedIdGenerator::new([Id::from_string("tx-1")]);
@@ -322,7 +334,10 @@ mod tests {
         let out = list_transactions(&storage).await?;
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].id, "tx-1");
-        assert_eq!(out[0].annotation.as_ref().unwrap().category.as_deref(), Some("food"));
+        assert_eq!(
+            out[0].annotation.as_ref().unwrap().category.as_deref(),
+            Some("food")
+        );
         assert_eq!(
             out[0].annotation.as_ref().unwrap().tags.clone().unwrap(),
             vec!["coffee".to_string()]

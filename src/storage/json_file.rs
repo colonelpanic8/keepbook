@@ -150,7 +150,9 @@ impl JsonFileStorage {
     }
 
     fn transaction_annotations_file(&self, account_id: &Id) -> Result<PathBuf> {
-        Ok(self.account_dir(account_id)?.join("transaction_annotations.jsonl"))
+        Ok(self
+            .account_dir(account_id)?
+            .join("transaction_annotations.jsonl"))
     }
 
     /// Sanitize a name for use as a symlink filename.
