@@ -374,16 +374,17 @@ export async function setTransactionAnnotation(
   const patch: TransactionAnnotationPatchType = {
     transaction_id: transactionId,
     timestamp: now,
+    ...(clearDescription ? { description: null } : description !== undefined ? { description } : {}),
+    ...(clearNote ? { note: null } : note !== undefined ? { note } : {}),
+    ...(clearCategory ? { category: null } : category !== undefined ? { category } : {}),
+    ...(clearTags
+      ? { tags: null }
+      : tagsEmpty
+        ? { tags: [] }
+        : tags.length > 0
+          ? { tags: [...tags] }
+          : {}),
   };
-  if (clearDescription) patch.description = null;
-  else if (description !== undefined) patch.description = description;
-  if (clearNote) patch.note = null;
-  else if (note !== undefined) patch.note = note;
-  if (clearCategory) patch.category = null;
-  else if (category !== undefined) patch.category = category;
-  if (clearTags) patch.tags = null;
-  else if (tagsEmpty) patch.tags = [];
-  else if (tags.length > 0) patch.tags = [...tags];
 
   await storage.appendTransactionAnnotationPatches(accountId, [patch]);
 
