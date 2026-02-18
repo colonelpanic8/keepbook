@@ -296,6 +296,25 @@ impl ChaseSynchronizer {
         }
     }
 
+    fn should_auto_capture_login() -> bool {
+        // Default to auto-capture so login can be fully hands-off (aside from 2FA).
+        // Set KEEPBOOK_CHASE_AUTO_CAPTURE=0 to force the legacy "press Enter" prompt.
+        match std::env::var("KEEPBOOK_CHASE_AUTO_CAPTURE") {
+            Ok(v) => !(v == "0" || v.eq_ignore_ascii_case("false") || v.eq_ignore_ascii_case("no")),
+            Err(_) => true,
+        }
+    }
+
+    fn login_timeout() -> Duration {
+        // Default to a generous timeout; Chase can require multiple steps.
+        let secs = std::env::var("KEEPBOOK_CHASE_LOGIN_TIMEOUT_SECS")
+            .ok()
+            .and_then(|s| s.trim().parse::<u64>().ok())
+            .filter(|n| *n > 0)
+            .unwrap_or(600);
+        Duration::from_secs(secs)
+    }
+
     fn env_credential(key: &str) -> Option<String> {
         std::env::var(key)
             .ok()
@@ -653,7 +672,7 @@ impl InteractiveAuth for ChaseSynchronizer {
         page.goto("https://secure.chase.com/web/auth/dashboard")
             .await?;
 
-        let auto_capture = std::env::var("KEEPBOOK_CHASE_AUTO_CAPTURE").is_ok();
+        let auto_capture = Self::should_auto_capture_login();
 
         if Self::should_autofill_login() {
             match self.get_login_credentials().await {
@@ -683,8 +702,12 @@ impl InteractiveAuth for ChaseSynchronizer {
         }
 
         if auto_capture {
-            eprintln!("Chase: waiting for login to complete...");
-            ensure_logged_in_with_timeout(&page, Duration::from_secs(180)).await?;
+            let timeout = Self::login_timeout();
+            eprintln!(
+                "Chase: waiting for login to complete (timeout={}s; set KEEPBOOK_CHASE_LOGIN_TIMEOUT_SECS or KEEPBOOK_CHASE_AUTO_CAPTURE=0 for manual)...",
+                timeout.as_secs()
+            );
+            ensure_logged_in_with_timeout(&page, timeout).await?;
         } else {
             eprintln!("\n========================================");
             eprintln!("Complete Chase login in the browser.");
@@ -700,6 +723,13 @@ impl InteractiveAuth for ChaseSynchronizer {
                 .ok();
             ensure_logged_in_with_timeout(&page, Duration::from_secs(30)).await?;
         }
+
+        // Always land on the secure dashboard before we try to validate API access; otherwise
+        // browser-context fetches may be blocked by page origin/CORS even if the user is logged in.
+        page.goto("https://secure.chase.com/web/auth/dashboard")
+            .await
+            .ok();
+        ensure_logged_in_with_timeout(&page, Duration::from_secs(30)).await?;
 
         eprintln!("Capturing cookies...");
         let session = wait_for_valid_api_session(&page).await?;
@@ -1290,9 +1320,13 @@ async fn session_from_page(page: &chromiumoxide::Page) -> Result<SessionData> {
 async fn wait_for_valid_api_session(page: &chromiumoxide::Page) -> Result<SessionData> {
     // Login redirects and anti-bot checks can complete after the dashboard first appears.
     // Ensure the captured cookie jar can authenticate an API call before persisting it.
-    let deadline = std::time::Instant::now() + Duration::from_secs(90);
+    let deadline = std::time::Instant::now() + Duration::from_secs(180);
     loop {
         let session = session_from_page(page).await?;
+        // Force a secure origin for browser-context API fetches.
+        page.goto("https://secure.chase.com/web/auth/dashboard")
+            .await
+            .ok();
         match browser_test_auth(page).await {
             Ok(()) => return Ok(session),
             Err(err) => {
