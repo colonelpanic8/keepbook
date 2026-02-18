@@ -1,8 +1,8 @@
-//! Chase synchronizer with browser-based download.
+//! Chase synchronizer using the Chase internal API.
 //!
-//! This synchronizer opens a real browser so the user can complete
-//! login + 2FA and download QFX files. It captures session cookies
-//! for reuse but does not yet parse QFX into transactions.
+//! This synchronizer uses session cookies captured from a browser session
+//! to make direct API calls for accounts, balances, and transactions.
+//! Login still uses browser automation so the user can complete 2FA.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -10,54 +10,249 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use chromiumoxide::browser::{Browser, BrowserConfig};
-use chromiumoxide::cdp::browser_protocol::browser::{
-    SetDownloadBehaviorBehavior, SetDownloadBehaviorParams,
-};
 use chromiumoxide::cdp::browser_protocol::network::CookieParam;
-use chrono::Utc;
+use chrono::{NaiveDate, Utc};
 use futures::StreamExt;
+use secrecy::ExposeSecret;
 
-use crate::credentials::{SessionCache, SessionData};
-use crate::models::{Connection, ConnectionStatus, LastSync, SyncStatus};
+use crate::credentials::{CredentialStore, SessionCache, SessionData, StoredCookie};
+use crate::models::{
+    Account, Asset, AssetBalance, Connection, ConnectionStatus, Id, LastSync, SyncStatus,
+    Transaction, TransactionStatus,
+};
 use crate::storage::Storage;
-use crate::sync::{AuthStatus, InteractiveAuth, SyncResult, Synchronizer};
+use crate::sync::chase::api::{
+    ActivityAccount, AppDataResponse, CardDetailResponse, ChaseActivity, ChaseClient,
+    MortgageDetailResponse, TransactionsResponse,
+};
+use crate::sync::{AuthStatus, InteractiveAuth, SyncResult, SyncedAssetBalance, Synchronizer};
 
-const CHASE_LOGIN_URL: &str = "https://www.chase.com";
-const DOWNLOAD_TIMEOUT_SECS: u64 = 600;
-const DOWNLOAD_IDLE_SECS: u64 = 30;
-
-/// Chase synchronizer using browser automation for QFX downloads.
+/// Chase synchronizer using API-based data fetching.
 pub struct ChaseSynchronizer {
-    connection_id: crate::models::Id,
+    connection_id: Id,
     session_cache: SessionCache,
-    download_root: PathBuf,
+    profile_root: PathBuf,
+    credential_store: Option<Box<dyn CredentialStore>>,
 }
 
-impl ChaseSynchronizer {
-    /// Create a new Chase synchronizer for a connection using a default download directory.
-    pub async fn from_connection<S: Storage + ?Sized>(
-        connection: &Connection,
-        _storage: &S,
-    ) -> Result<Self> {
-        let download_root = default_download_root()?;
+struct BrowserApiClient {
+    _browser: Browser,
+    handler_task: tokio::task::JoinHandle<()>,
+    page: chromiumoxide::Page,
+}
+
+impl Drop for BrowserApiClient {
+    fn drop(&mut self) {
+        self.handler_task.abort();
+    }
+}
+
+impl BrowserApiClient {
+    async fn connect(profile_dir: &Path, session: &SessionData) -> Result<Self> {
+        let (browser, mut handler) = launch_browser(profile_dir, false).await?;
+        let handler_task = tokio::spawn(async move { while (handler.next().await).is_some() {} });
+        let page = browser.new_page("about:blank").await?;
+
+        page.goto("https://secure.chase.com/web/auth/dashboard")
+            .await
+            .ok();
+        apply_cookies(&page, session).await.ok();
+        page.goto("https://secure.chase.com/web/auth/dashboard")
+            .await
+            .ok();
+        ensure_logged_in_with_timeout(&page, Duration::from_secs(30)).await?;
+
         Ok(Self {
-            connection_id: connection.id().clone(),
-            session_cache: SessionCache::new()?,
-            download_root,
+            _browser: browser,
+            handler_task,
+            page,
         })
     }
 
-    /// Create a new Chase synchronizer with downloads rooted in `base_dir`.
-    pub async fn from_connection_with_download_dir<S: Storage + ?Sized>(
+    async fn capture_session(&self) -> Result<SessionData> {
+        session_from_page(&self.page).await
+    }
+
+    async fn post_json(&self, path: &str, body: &str) -> Result<serde_json::Value> {
+        browser_fetch_json(&self.page, "POST", path, Some(body)).await
+    }
+
+    async fn get_json(&self, path: &str) -> Result<serde_json::Value> {
+        browser_fetch_json(&self.page, "GET", path, None).await
+    }
+
+    async fn test_auth(&self) -> Result<()> {
+        let value = self
+            .post_json(
+                "/svc/rl/accounts/secure/v1/dashboard/data/list",
+                "context=GWM_OVD_NEW_PBM",
+            )
+            .await?;
+        let resp: AppDataResponse =
+            serde_json::from_value(value).context("Failed to parse Chase dashboard response")?;
+        if resp.code != "SUCCESS" {
+            anyhow::bail!(
+                "Chase auth test failed in browser context: code={}",
+                resp.code
+            );
+        }
+        Ok(())
+    }
+
+    async fn get_accounts(&self) -> Result<Vec<ActivityAccount>> {
+        let value = self
+            .post_json(
+                "/svc/rl/accounts/secure/v1/dashboard/data/list",
+                "context=GWM_OVD_NEW_PBM",
+            )
+            .await?;
+        let resp: AppDataResponse =
+            serde_json::from_value(value).context("Failed to parse Chase dashboard response")?;
+        for cached in &resp.cache {
+            if cached.url.contains("activity/options/list") {
+                if let Some(accounts) = cached.response.get("accounts") {
+                    let accounts: Vec<ActivityAccount> =
+                        serde_json::from_value(accounts.clone())
+                            .context("Failed to parse accounts from dashboard cache")?;
+                    return Ok(accounts);
+                }
+            }
+        }
+        anyhow::bail!("Could not find accounts in Chase dashboard response");
+    }
+
+    async fn get_card_detail(&self, account_id: i64) -> Result<CardDetailResponse> {
+        let value = self
+            .post_json(
+                "/svc/rr/accounts/secure/v2/account/detail/card/list",
+                &format!("accountId={account_id}"),
+            )
+            .await?;
+        serde_json::from_value(value).context("Failed to parse Chase card detail")
+    }
+
+    async fn get_mortgage_detail(&self, account_id: i64) -> Result<MortgageDetailResponse> {
+        let value = self
+            .post_json(
+                "/svc/rr/accounts/secure/v2/account/detail/mortgage/list",
+                &format!("accountId={account_id}"),
+            )
+            .await?;
+        serde_json::from_value(value).context("Failed to parse Chase mortgage detail")
+    }
+
+    async fn get_card_transactions(
+        &self,
+        account_id: i64,
+        record_count: u32,
+        pagination_key: Option<&str>,
+    ) -> Result<TransactionsResponse> {
+        let mut path = format!(
+            "/svc/rr/accounts/secure/gateway/credit-card/transactions/inquiry-maintenance/etu-transactions/v4/accounts/transactions?digital-account-identifier={account_id}&provide-available-statement-indicator=true&record-count={record_count}&sort-order-code=D&sort-key-code=T"
+        );
+
+        if let Some(key) = pagination_key {
+            path.push_str(&format!("&next-page-key={}", urlencoding::encode(key)));
+        }
+
+        let value = self.get_json(&path).await?;
+        serde_json::from_value(value).context("Failed to parse Chase transactions response")
+    }
+
+    async fn get_all_card_transactions(&self, account_id: i64) -> Result<Vec<ChaseActivity>> {
+        let mut all_activities = Vec::new();
+        let mut pagination_key: Option<String> = None;
+        let page_size = 100;
+
+        loop {
+            let resp = self
+                .get_card_transactions(account_id, page_size, pagination_key.as_deref())
+                .await?;
+
+            all_activities.extend(resp.activities);
+
+            if !resp.more_records_indicator {
+                break;
+            }
+
+            match resp.pagination_contextual_text {
+                Some(ref key) if !key.is_empty() => {
+                    pagination_key = Some(key.clone());
+                }
+                _ => break,
+            }
+
+            if all_activities.len() > 5000 {
+                eprintln!(
+                    "Chase(browser): stopping pagination at {} transactions (safety limit)",
+                    all_activities.len()
+                );
+                break;
+            }
+        }
+
+        Ok(all_activities)
+    }
+}
+
+enum ChaseBackend {
+    Direct(ChaseClient),
+    Browser(BrowserApiClient),
+}
+
+impl ChaseBackend {
+    async fn get_accounts(&self) -> Result<Vec<ActivityAccount>> {
+        match self {
+            Self::Direct(client) => client.get_accounts().await,
+            Self::Browser(client) => client.get_accounts().await,
+        }
+    }
+
+    async fn get_card_detail(&self, account_id: i64) -> Result<CardDetailResponse> {
+        match self {
+            Self::Direct(client) => client.get_card_detail(account_id).await,
+            Self::Browser(client) => client.get_card_detail(account_id).await,
+        }
+    }
+
+    async fn get_mortgage_detail(&self, account_id: i64) -> Result<MortgageDetailResponse> {
+        match self {
+            Self::Direct(client) => client.get_mortgage_detail(account_id).await,
+            Self::Browser(client) => client.get_mortgage_detail(account_id).await,
+        }
+    }
+
+    async fn get_all_card_transactions(&self, account_id: i64) -> Result<Vec<ChaseActivity>> {
+        match self {
+            Self::Direct(client) => client.get_all_card_transactions(account_id).await,
+            Self::Browser(client) => client.get_all_card_transactions(account_id).await,
+        }
+    }
+}
+
+impl ChaseSynchronizer {
+    /// Create a new Chase synchronizer for a connection.
+    pub async fn from_connection<S: Storage + ?Sized>(
         connection: &Connection,
-        _storage: &S,
-        base_dir: &Path,
+        storage: &S,
     ) -> Result<Self> {
+        let profile_root = default_profile_root()?;
+        let credential_store = storage.get_credential_store(connection.id())?;
         Ok(Self {
             connection_id: connection.id().clone(),
             session_cache: SessionCache::new()?,
-            download_root: base_dir.join("downloads").join("chase"),
+            profile_root,
+            credential_store,
         })
+    }
+
+    /// Create a new Chase synchronizer with a custom download dir (back-compat; ignored).
+    pub async fn from_connection_with_download_dir<S: Storage + ?Sized>(
+        connection: &Connection,
+        storage: &S,
+        _base_dir: &Path,
+    ) -> Result<Self> {
+        Self::from_connection(connection, storage).await
     }
 
     /// Create a synchronizer using an explicit session cache (useful for tests).
@@ -65,11 +260,12 @@ impl ChaseSynchronizer {
         connection: &Connection,
         session_cache: SessionCache,
     ) -> Result<Self> {
-        let download_root = default_download_root()?;
+        let profile_root = default_profile_root()?;
         Ok(Self {
             connection_id: connection.id().clone(),
             session_cache,
-            download_root,
+            profile_root,
+            credential_store: None,
         })
     }
 
@@ -81,86 +277,231 @@ impl ChaseSynchronizer {
         self.session_cache.get(&self.session_key())
     }
 
-    fn ensure_download_dir(&self) -> Result<PathBuf> {
-        let dir = self.download_root.join(self.connection_id.to_string());
-        std::fs::create_dir_all(&dir)
-            .with_context(|| format!("Failed to create download dir: {}", dir.display()))?;
-        Ok(dir)
-    }
-
     fn ensure_profile_dir(&self) -> Result<PathBuf> {
-        let dir = self
-            .download_root
-            .join("profiles")
-            .join(self.connection_id.to_string());
+        let dir = self.profile_root.join(self.connection_id.to_string());
         std::fs::create_dir_all(&dir)
             .with_context(|| format!("Failed to create profile dir: {}", dir.display()))?;
         Ok(dir)
     }
 
-    async fn sync_internal(&self, connection: &mut Connection) -> Result<SyncResult> {
-        let download_dir = self.ensure_download_dir()?;
+    fn should_autofill_login() -> bool {
+        match std::env::var("KEEPBOOK_CHASE_AUTOFILL") {
+            Ok(v) => !(v == "0" || v.eq_ignore_ascii_case("false") || v.eq_ignore_ascii_case("no")),
+            Err(_) => true,
+        }
+    }
 
-        let profile_dir = self.ensure_profile_dir()?;
-        let (browser, mut handler) = launch_browser(&profile_dir).await?;
-        let handler_task = tokio::spawn(async move { while (handler.next().await).is_some() {} });
+    fn env_credential(key: &str) -> Option<String> {
+        std::env::var(key)
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    }
 
-        let page = browser.new_page("about:blank").await?;
-
-        setup_download_handling(&page, &download_dir).await?;
-
-        // Navigate first so we can set cookies on a valid URL.
-        page.goto(CHASE_LOGIN_URL).await?;
-
-        // Apply cached cookies if present (best-effort).
-        if let Some(session) = self.get_session()? {
-            if !session.cookies.is_empty() {
-                apply_cookies(&page, &session).await.ok();
-                // Reload to apply cookies.
-                page.goto(CHASE_LOGIN_URL).await.ok();
-            }
+    async fn get_login_credentials(&self) -> Result<Option<(String, String)>> {
+        // Highest priority: explicit environment variables (no disk needed).
+        //
+        // Note: values may be visible to local process inspection tools; prefer pass-backed
+        // credential store where possible.
+        let env_user = Self::env_credential("KEEPBOOK_CHASE_USERNAME");
+        let env_pass = Self::env_credential("KEEPBOOK_CHASE_PASSWORD");
+        if let (Some(u), Some(p)) = (env_user, env_pass) {
+            return Ok(Some((u, p)));
         }
 
-        println!("\n========================================");
-        println!("Chase download instructions:");
-        println!("1. Log in (complete 2FA as needed)");
-        println!("2. Navigate to an account");
-        println!("3. Click 'Download account activity'");
-        println!("4. Choose a date range and QFX format");
-        println!("5. Click Download");
-        println!("========================================\n");
-        println!("Waiting for downloads in: {}", download_dir.display());
-        println!(
-            "Will stop after {} seconds of inactivity.",
-            DOWNLOAD_IDLE_SECS
-        );
+        let Some(store) = &self.credential_store else {
+            return Ok(None);
+        };
 
-        let downloads = watch_for_downloads(
-            &download_dir,
-            Duration::from_secs(DOWNLOAD_TIMEOUT_SECS),
-            Duration::from_secs(DOWNLOAD_IDLE_SECS),
-        )
-        .await?;
+        let username = store
+            .get("username")
+            .await?
+            .map(|s| s.expose_secret().to_string());
+        let password = store
+            .get("password")
+            .await?
+            .map(|s| s.expose_secret().to_string());
 
-        if downloads.is_empty() {
-            anyhow::bail!(
-                "No downloads detected. Try again and make sure the QFX download completes."
-            );
+        match (username, password) {
+            (Some(u), Some(p)) if !u.trim().is_empty() && !p.is_empty() => Ok(Some((u, p))),
+            _ => Ok(None),
+        }
+    }
+
+    async fn sync_internal(
+        &self,
+        connection: &mut Connection,
+        storage: &dyn Storage,
+    ) -> Result<SyncResult> {
+        let session = self
+            .get_session()?
+            .context("No Chase session found. Run `keepbook auth chase login` first.")?;
+        if session.cookies.is_empty() && session.cookie_jar.is_empty() {
+            anyhow::bail!("Chase session has no cookies. Run `keepbook auth chase login` again.");
         }
 
-        // Refresh session cookies for reuse.
-        if let Ok(cookies) = page.get_cookies().await {
-            let mut cookie_map = HashMap::new();
-            for cookie in cookies {
-                cookie_map.insert(cookie.name.clone(), cookie.value.clone());
+        let mut backend = {
+            let direct = ChaseClient::new(session.clone())?;
+            match direct.test_auth().await {
+                Ok(()) => ChaseBackend::Direct(direct),
+                Err(err) => {
+                    eprintln!(
+                        "Chase: direct API auth failed ({err:#}); trying browser API fallback"
+                    );
+                    let profile_dir = self.ensure_profile_dir()?;
+                    let browser = BrowserApiClient::connect(&profile_dir, &session)
+                        .await
+                        .context("Failed to initialize browser API fallback")?;
+                    browser.test_auth().await.context(
+                        "Chase session is expired or invalid. Run `keepbook auth chase login`.",
+                    )?;
+                    ChaseBackend::Browser(browser)
+                }
             }
-            let session = SessionData {
-                token: None,
-                cookies: cookie_map,
-                captured_at: Some(Utc::now().timestamp()),
-                data: HashMap::new(),
+        };
+
+        // Load existing accounts to preserve created_at.
+        let existing_accounts = storage.list_accounts().await?;
+        let existing_by_id: HashMap<String, Account> = existing_accounts
+            .into_iter()
+            .filter(|a| a.connection_id == *connection.id())
+            .map(|a| (a.id.to_string(), a))
+            .collect();
+
+        // Fetch accounts from Chase.
+        let chase_accounts = backend.get_accounts().await?;
+        eprintln!("Chase: found {} accounts", chase_accounts.len());
+
+        let mut accounts = Vec::new();
+        let mut balances: Vec<(Id, Vec<SyncedAssetBalance>)> = Vec::new();
+        let mut transactions: Vec<(Id, Vec<Transaction>)> = Vec::new();
+
+        for acct in &chase_accounts {
+            let account_id = Id::from_external(&format!("chase:{}:{}", connection.id(), acct.id));
+
+            let created_at = existing_by_id
+                .get(&account_id.to_string())
+                .map(|a| a.created_at)
+                .unwrap_or_else(Utc::now);
+
+            let name = if !acct.nickname.is_empty() {
+                format!("{} ({})", acct.nickname, acct.mask)
+            } else {
+                format!("Chase ({})", acct.mask)
             };
-            let _ = self.session_cache.set(&self.session_key(), &session);
+
+            let is_mortgage = acct.category_type.to_lowercase().contains("mortgage")
+                || acct.account_type.to_lowercase().contains("mortgage");
+            let is_credit_card = acct.category_type.to_lowercase().contains("card")
+                || acct.account_type.to_lowercase().contains("card")
+                || acct.account_type.to_lowercase().contains("credit");
+
+            let mut tags = vec!["chase".to_string()];
+            if is_credit_card {
+                tags.push("credit_card".to_string());
+            } else if is_mortgage {
+                tags.push("mortgage".to_string());
+            } else {
+                tags.push(acct.account_type.to_lowercase());
+            }
+
+            let mut account = Account::new_with(
+                account_id.clone(),
+                created_at,
+                name,
+                connection.id().clone(),
+            );
+            account.tags = tags;
+            account.synchronizer_data = serde_json::json!({
+                "chase_account_id": acct.id,
+                "mask": acct.mask,
+                "category_type": acct.category_type,
+                "account_type": acct.account_type,
+            });
+
+            // Fetch balance.
+            let mut account_balances: Vec<SyncedAssetBalance> = Vec::new();
+
+            if is_mortgage {
+                match backend.get_mortgage_detail(acct.id).await {
+                    Ok(detail) => {
+                        if let Some(ref d) = detail.detail {
+                            if let Some(bal) = d.balance {
+                                // Mortgages are liabilities; negate so the balance is negative.
+                                account_balances.push(SyncedAssetBalance::new(AssetBalance::new(
+                                    Asset::currency("USD"),
+                                    (-bal).to_string(),
+                                )));
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "Chase: failed to get mortgage detail for {} ({}): {e:#}",
+                            acct.mask, acct.id
+                        );
+                    }
+                }
+            } else {
+                match backend.get_card_detail(acct.id).await {
+                    Ok(detail) => {
+                        if let Some(ref card) = detail.detail {
+                            if let Some(bal) = card.current_balance {
+                                // Credit card balances are amounts owed; negate.
+                                account_balances.push(SyncedAssetBalance::new(AssetBalance::new(
+                                    Asset::currency("USD"),
+                                    (-bal).to_string(),
+                                )));
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "Chase: failed to get card detail for {} ({}): {e:#}",
+                            acct.mask, acct.id
+                        );
+                    }
+                }
+            }
+
+            // Fetch transactions for credit card accounts.
+            let mut acct_txns: Vec<Transaction> = Vec::new();
+            if is_credit_card {
+                match backend.get_all_card_transactions(acct.id).await {
+                    Ok(activities) => {
+                        eprintln!(
+                            "Chase: fetched {} transactions for {} ({})",
+                            activities.len(),
+                            acct.mask,
+                            acct.id
+                        );
+                        for activity in &activities {
+                            if let Some(txn) =
+                                chase_activity_to_transaction(activity, connection.id(), acct.id)
+                            {
+                                acct_txns.push(txn);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "Chase: failed to get transactions for {} ({}): {e:#}",
+                            acct.mask, acct.id
+                        );
+                    }
+                }
+            }
+
+            accounts.push(account);
+            balances.push((account_id.clone(), account_balances));
+            transactions.push((account_id, acct_txns));
+        }
+
+        // If we had to use browser fallback, refresh cached session cookies from the browser.
+        if let ChaseBackend::Browser(browser) = &mut backend {
+            if let Ok(session) = browser.capture_session().await {
+                let _ = self.session_cache.set(&self.session_key(), &session);
+            }
         }
 
         // Update connection state.
@@ -170,35 +511,44 @@ impl ChaseSynchronizer {
             error: None,
         });
         connection.state.status = ConnectionStatus::Active;
+        connection.state.account_ids = accounts.iter().map(|a| a.id.clone()).collect();
 
-        // Record downloads for later parsing.
-        let download_list: Vec<String> =
-            downloads.iter().map(|p| p.display().to_string()).collect();
+        let imported_transactions: u64 = transactions.iter().map(|(_, v)| v.len() as u64).sum();
         let mut data = connection
             .state
             .synchronizer_data
             .as_object()
             .cloned()
             .unwrap_or_default();
+
+        // Clean up old browser-based fields.
+        data.remove("download_dir");
+        data.remove("downloads");
+        data.remove("downloaded_count");
+
         data.insert(
-            "download_dir".to_string(),
-            serde_json::Value::String(download_dir.display().to_string()),
-        );
-        data.insert("downloads".to_string(), serde_json::json!(download_list));
-        data.insert(
-            "downloaded_at".to_string(),
+            "imported_at".to_string(),
             serde_json::Value::String(Utc::now().to_rfc3339()),
+        );
+        data.insert(
+            "imported_accounts".to_string(),
+            serde_json::Value::Number((accounts.len() as u64).into()),
+        );
+        data.insert(
+            "imported_transactions".to_string(),
+            serde_json::Value::Number(imported_transactions.into()),
+        );
+        data.insert(
+            "method".to_string(),
+            serde_json::Value::String("api".to_string()),
         );
         connection.state.synchronizer_data = serde_json::Value::Object(data);
 
-        drop(browser);
-        handler_task.abort();
-
         Ok(SyncResult {
             connection: connection.clone(),
-            accounts: Vec::new(),
-            balances: Vec::new(),
-            transactions: Vec::new(),
+            accounts,
+            balances,
+            transactions,
         })
     }
 }
@@ -209,12 +559,8 @@ impl Synchronizer for ChaseSynchronizer {
         "chase"
     }
 
-    async fn sync(
-        &self,
-        connection: &mut Connection,
-        _storage: &dyn Storage,
-    ) -> Result<SyncResult> {
-        self.sync_internal(connection).await
+    async fn sync(&self, connection: &mut Connection, storage: &dyn Storage) -> Result<SyncResult> {
+        self.sync_internal(connection, storage).await
     }
 
     fn interactive(&mut self) -> Option<&mut dyn InteractiveAuth> {
@@ -227,31 +573,37 @@ impl ChaseSynchronizer {
     pub async fn sync_with_storage<S: Storage>(
         &self,
         connection: &mut Connection,
-        _storage: &S,
+        storage: &S,
     ) -> Result<SyncResult> {
-        self.sync_internal(connection).await
+        self.sync_internal(connection, storage).await
     }
 }
 
 #[async_trait::async_trait]
 impl InteractiveAuth for ChaseSynchronizer {
+    fn auth_required_for_sync(&self) -> bool {
+        true
+    }
+
     async fn check_auth(&self) -> Result<AuthStatus> {
         match self.get_session()? {
             None => Ok(AuthStatus::Missing),
             Some(session) => {
-                if session.cookies.is_empty() {
+                if session.cookies.is_empty() && session.cookie_jar.is_empty() {
                     return Ok(AuthStatus::Missing);
                 }
 
                 if let Some(captured_at) = session.captured_at {
                     let age_secs = Utc::now().timestamp() - captured_at;
-                    if age_secs > 24 * 60 * 60 {
+                    if age_secs > 7 * 24 * 60 * 60 {
                         return Ok(AuthStatus::Expired {
                             reason: format!("Session is {} hours old", age_secs / 3600),
                         });
                     }
                 }
 
+                // Cookie presence + freshness gate. Full validity is checked during sync,
+                // where we can transparently fall back to browser-context API requests.
                 Ok(AuthStatus::Valid)
             }
         }
@@ -259,41 +611,73 @@ impl InteractiveAuth for ChaseSynchronizer {
 
     async fn login(&mut self) -> Result<()> {
         let profile_dir = self.ensure_profile_dir()?;
-        let (browser, mut handler) = launch_browser(&profile_dir).await?;
+        cleanup_profile_lock_artifacts(&profile_dir);
+        kill_profile_browser_processes(&profile_dir);
+        let (browser, mut handler) = launch_browser(&profile_dir, true).await?;
         let handler_task = tokio::spawn(async move { while (handler.next().await).is_some() {} });
 
         let page = browser.new_page("about:blank").await?;
 
-        page.goto(CHASE_LOGIN_URL).await?;
+        // Go directly to a page that will show the login iframe when unauthenticated.
+        page.goto("https://secure.chase.com/web/auth/dashboard")
+            .await?;
 
-        println!("\n========================================");
-        println!("Complete Chase login in the browser.");
-        println!("When finished, return here and press Enter.");
-        println!("========================================\n");
+        let auto_capture = std::env::var("KEEPBOOK_CHASE_AUTO_CAPTURE").is_ok();
 
-        let mut input = String::new();
-        let _ = std::io::stdin().read_line(&mut input);
-
-        println!("Capturing cookies...");
-        let cookies = page.get_cookies().await?;
-
-        let mut cookie_map = HashMap::new();
-        for cookie in cookies {
-            cookie_map.insert(cookie.name.clone(), cookie.value.clone());
+        if Self::should_autofill_login() {
+            match self.get_login_credentials().await {
+                Ok(Some((username, password))) => {
+                    eprintln!(
+                        "Chase: attempting autofill (set KEEPBOOK_CHASE_AUTOFILL=0 to disable)..."
+                    );
+                    if let Err(err) = autofill_login_iframe(&page, &username, &password).await {
+                        eprintln!("Chase: autofill failed (continuing with manual login): {err:#}");
+                    }
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    eprintln!(
+                        "Chase: could not load credentials (continuing with manual login): {err:#}"
+                    );
+                }
+            }
         }
 
-        let session = SessionData {
-            token: None,
-            cookies: cookie_map,
-            captured_at: Some(Utc::now().timestamp()),
-            data: HashMap::new(),
-        };
+        // Optional: let the user enter an SMS code in the terminal so we can fill it into the
+        // browser. This is best-effort and may not work for all Chase flows.
+        if std::env::var("KEEPBOOK_CHASE_SMS_CODE").is_ok() {
+            if let Err(err) = maybe_prompt_and_fill_sms_code(&page).await {
+                eprintln!("Chase: SMS-code assist failed (continuing with manual login): {err:#}");
+            }
+        }
+
+        if auto_capture {
+            eprintln!("Chase: waiting for login to complete...");
+            ensure_logged_in_with_timeout(&page, Duration::from_secs(180)).await?;
+        } else {
+            eprintln!("\n========================================");
+            eprintln!("Complete Chase login in the browser.");
+            eprintln!("When finished, return here and press Enter.");
+            eprintln!("========================================\n");
+
+            let mut input = String::new();
+            let _ = std::io::stdin().read_line(&mut input);
+
+            // Navigate to dashboard to ensure cookies are set for secure.chase.com.
+            page.goto("https://secure.chase.com/web/auth/dashboard")
+                .await
+                .ok();
+            ensure_logged_in_with_timeout(&page, Duration::from_secs(30)).await?;
+        }
+
+        eprintln!("Capturing cookies...");
+        let session = wait_for_valid_api_session(&page).await?;
 
         self.session_cache.set(&self.session_key(), &session)?;
 
-        println!(
+        eprintln!(
             "Session saved successfully ({} cookies).",
-            session.cookies.len()
+            session.cookie_jar.len().max(session.cookies.len())
         );
 
         drop(browser);
@@ -303,57 +687,497 @@ impl InteractiveAuth for ChaseSynchronizer {
     }
 }
 
-fn default_download_root() -> Result<PathBuf> {
-    let base = dirs::data_dir().context("Could not find data directory")?;
-    let dir = base.join("keepbook").join("downloads").join("chase");
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+fn chase_activity_to_transaction(
+    activity: &ChaseActivity,
+    connection_id: &Id,
+    chase_account_id: i64,
+) -> Option<Transaction> {
+    let stable_id = activity.stable_id();
+    let tx_id = Id::from_external(&format!(
+        "chase:{}:{}:{}",
+        connection_id, chase_account_id, stable_id
+    ));
+
+    let date_str = if activity.is_pending() {
+        &activity.transaction_date
+    } else {
+        activity
+            .transaction_post_date
+            .as_deref()
+            .unwrap_or(&activity.transaction_date)
+    };
+
+    let timestamp = NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
+        .ok()
+        .and_then(|d| d.and_hms_opt(12, 0, 0))
+        .map(|dt| dt.and_utc())?;
+
+    let status = if activity.is_pending() {
+        TransactionStatus::Pending
+    } else {
+        TransactionStatus::Posted
+    };
+
+    let amount = activity.signed_amount();
+
+    Some(Transaction {
+        id: tx_id,
+        timestamp,
+        amount: amount.to_string(),
+        asset: Asset::currency(activity.currency_code.as_deref().unwrap_or("USD")),
+        description: activity.description(),
+        status,
+        synchronizer_data: serde_json::json!({
+            "chase_account_id": chase_account_id,
+            "stable_id": stable_id,
+            "transaction_status": activity.transaction_status_code,
+            "credit_debit_code": activity.credit_debit_code,
+            "transaction_date": activity.transaction_date,
+            "post_date": activity.transaction_post_date,
+        }),
+    })
+}
+
+fn default_profile_root() -> Result<PathBuf> {
+    let base = dirs::cache_dir().context("Could not find cache directory")?;
+    let dir = base.join("keepbook").join("chase").join("profiles");
     std::fs::create_dir_all(&dir)
-        .with_context(|| format!("Failed to create download root: {}", dir.display()))?;
+        .with_context(|| format!("Failed to create profile root: {}", dir.display()))?;
     Ok(dir)
 }
 
-async fn launch_browser(profile_dir: &Path) -> Result<(Browser, chromiumoxide::handler::Handler)> {
-    let chrome_path = find_chrome().context(
-        "Chrome/Chromium not found. Please install Chrome or Chromium to use Chase sync.",
-    )?;
+async fn ensure_logged_in_with_timeout(
+    page: &chromiumoxide::Page,
+    timeout: Duration,
+) -> Result<()> {
+    let check_js = r#"(function() {
+      const url = String(window.location && window.location.href || '');
+      const txt = (document.body && document.body.innerText || '').toLowerCase();
+      const hasSignIn = txt.includes('sign in') || txt.includes('signin') || txt.includes('sign on') || txt.includes('enroll');
+      const hasLogout = txt.includes('sign out') || txt.includes('log out') || txt.includes('logout');
+      const isSecure = url.includes('secure.chase.com') || url.includes('/web/auth/');
+      const loginIframe = document.querySelector('iframe[name=\"logonbox\"], iframe#logonbox');
+      const hasLoginIframe = !!loginIframe;
+      let iframeSnippet = '';
+      if (loginIframe) {
+        try {
+          const doc = loginIframe.contentDocument || (loginIframe.contentWindow && loginIframe.contentWindow.document);
+          if (doc && doc.body) {
+            iframeSnippet = String(doc.body.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 160);
+          }
+        } catch (_) {}
+      }
+      const isLogonUrl = /\/logon\/|#\/logon\//i.test(url);
+      return { url, hasSignIn, hasLogout, isSecure, hasLoginIframe, isLogonUrl, iframeSnippet };
+    })()"#;
 
-    let config = BrowserConfig::builder()
-        .chrome_executable(chrome_path)
-        .with_head()
-        .viewport(None)
-        .user_data_dir(profile_dir)
-        .arg("--disable-blink-features=AutomationControlled")
-        .arg("--disable-infobars")
-        .arg("--no-first-run")
-        .arg("--no-default-browser-check")
-        .build()
-        .map_err(|e| anyhow::anyhow!("Failed to configure browser: {e}"))?;
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        let v: serde_json::Value = page.evaluate(check_js).await?.into_value()?;
+        let url = v
+            .get("url")
+            .and_then(|x| x.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let has_sign_in = v.get("hasSignIn").and_then(|x| x.as_bool()).unwrap_or(true);
+        let has_logout = v
+            .get("hasLogout")
+            .and_then(|x| x.as_bool())
+            .unwrap_or(false);
+        let is_secure = v.get("isSecure").and_then(|x| x.as_bool()).unwrap_or(false);
+        let has_login_iframe = v
+            .get("hasLoginIframe")
+            .and_then(|x| x.as_bool())
+            .unwrap_or(true);
+        let is_logon_url = v
+            .get("isLogonUrl")
+            .and_then(|x| x.as_bool())
+            .unwrap_or(false);
+        let iframe_snippet = v
+            .get("iframeSnippet")
+            .and_then(|x| x.as_str())
+            .unwrap_or_default()
+            .to_string();
 
-    let (browser, handler) = Browser::launch(config)
-        .await
-        .context("Failed to launch browser")?;
+        if ((is_secure && !has_sign_in) || has_logout) && !has_login_iframe && !is_logon_url {
+            return Ok(());
+        }
 
-    Ok((browser, handler))
+        if std::time::Instant::now() > deadline {
+            anyhow::bail!(
+                "Chase session does not appear to be logged in (url={url}, has_sign_in={has_sign_in}, has_logout={has_logout}, has_login_iframe={has_login_iframe}, is_logon_url={is_logon_url}, iframe_snippet={iframe_snippet}). Run `keepbook auth chase login` again."
+            );
+        }
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
 }
 
-async fn setup_download_handling(page: &chromiumoxide::Page, download_dir: &Path) -> Result<()> {
-    std::fs::create_dir_all(download_dir)?;
+async fn autofill_login_iframe(
+    page: &chromiumoxide::Page,
+    username: &str,
+    password: &str,
+) -> Result<()> {
+    let creds = serde_json::json!({ "username": username, "password": password });
 
-    let download_params = SetDownloadBehaviorParams::builder()
-        .behavior(SetDownloadBehaviorBehavior::Allow)
-        .download_path(download_dir.display().to_string())
-        .build()
-        .map_err(|e| anyhow::anyhow!("Failed to build download params: {e}"))?;
+    let js: String = format!(
+        r#"(function(creds) {{
+  function fire(el, type) {{
+    try {{ el.dispatchEvent(new Event(type, {{ bubbles: true }})); }} catch (_) {{}}
+  }}
+  function fireMouse(win, el, type) {{
+    try {{
+      el.dispatchEvent(new win.MouseEvent(type, {{ bubbles: true, cancelable: true, view: win }}));
+      return true;
+    }} catch (_) {{}}
+    return false;
+  }}
+  const iframeNames = Array.from(document.querySelectorAll('iframe')).map(f => (f.getAttribute('name') || f.id || '').toString()).filter(Boolean).slice(0, 10);
+  const iframe = document.querySelector('iframe[name="logonbox"], iframe#logonbox');
+  if (!iframe) return {{ ok: false, error: "login iframe not found", iframeNames }};
+  const doc = iframe.contentDocument || (iframe.contentWindow && iframe.contentWindow.document);
+  if (!doc) return {{ ok: false, error: "iframe document not accessible", iframeNames }};
+  const win = doc.defaultView || iframe.contentWindow || window;
 
-    page.execute(download_params).await?;
+  const user = doc.querySelector('#userId-input-field-input') || doc.querySelector('input[name="username"]');
+  const pass = doc.querySelector('#password-input-field-input') || doc.querySelector('input[name="password"][type="password"]');
+  const btn = doc.querySelector('#signin-button') || doc.querySelector('button[type="submit"]');
+  if (!user || !pass || !btn) {{
+    return {{
+      ok: false,
+      error: "missing login controls",
+      iframeNames,
+      have: {{
+        user: !!user,
+        pass: !!pass,
+        btn: !!btn
+      }}
+    }};
+  }}
+
+  try {{ user.focus(); }} catch (_) {{}}
+  user.value = String(creds.username || "");
+  fire(user, "input"); fire(user, "change");
+
+  try {{ pass.focus(); }} catch (_) {{}}
+  pass.value = String(creds.password || "");
+  fire(pass, "input"); fire(pass, "change");
+
+  // Submit. Chase can be picky about event types/context; try multiple strategies.
+  let submittedBy = null;
+  const form = btn.form || pass.closest('form') || user.closest('form');
+  if (form && typeof form.requestSubmit === 'function') {{
+    try {{ form.requestSubmit(btn); submittedBy = 'requestSubmit'; }} catch (_) {{}}
+  }}
+  if (!submittedBy && form && typeof form.submit === 'function') {{
+    try {{ form.submit(); submittedBy = 'form.submit'; }} catch (_) {{}}
+  }}
+  if (!submittedBy) {{
+    try {{ btn.focus(); }} catch (_) {{}}
+    try {{ btn.click(); submittedBy = 'btn.click'; }} catch (_) {{}}
+  }}
+  if (!submittedBy) {{
+    // Dispatch in the iframe's window context.
+    if (fireMouse(win, btn, 'mousedown') || fireMouse(win, btn, 'pointerdown')) {{}}
+    if (fireMouse(win, btn, 'mouseup') || fireMouse(win, btn, 'pointerup')) {{}}
+    if (fireMouse(win, btn, 'click')) submittedBy = 'dispatch(click)';
+  }}
+  if (!submittedBy) {{
+    // Last resort: press Enter in password field.
+    try {{
+      pass.focus();
+      pass.dispatchEvent(new win.KeyboardEvent('keydown', {{ key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }}));
+      pass.dispatchEvent(new win.KeyboardEvent('keyup', {{ key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }}));
+      submittedBy = 'enter';
+    }} catch (_) {{}}
+  }}
+
+  return {{ ok: true, submittedBy, btnDisabled: !!btn.disabled }};
+}})({})"#,
+        creds.to_string()
+    );
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        let v: serde_json::Value = page.evaluate(js.clone()).await?.into_value()?;
+        let ok = v.get("ok").and_then(|x| x.as_bool()).unwrap_or(false);
+        if ok {
+            if let Some(by) = v.get("submittedBy").and_then(|x| x.as_str()) {
+                eprintln!("Chase: submitted login ({by})");
+            }
+            return Ok(());
+        }
+
+        let err = v
+            .get("error")
+            .and_then(|x| x.as_str())
+            .unwrap_or("unknown error");
+
+        // Chase loads the login iframe lazily and sometimes after redirects.
+        // Retry briefly before giving up.
+        let retryable = matches!(
+            err,
+            "login iframe not found" | "iframe document not accessible" | "missing login controls"
+        );
+        if retryable && std::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(250)).await;
+            continue;
+        }
+
+        let iframe_names = v
+            .get("iframeNames")
+            .and_then(|x| x.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str())
+                    .take(10)
+                    .collect::<Vec<_>>()
+                    .join(",")
+            })
+            .unwrap_or_default();
+        anyhow::bail!("Chase autofill JS failed: {err} (iframes={iframe_names})");
+    }
+}
+
+async fn maybe_prompt_and_fill_sms_code(page: &chromiumoxide::Page) -> Result<()> {
+    // If a verification-code input is visible, prompt the user for the code and fill it.
+    // Set KEEPBOOK_CHASE_SMS_CODE=1 to enable this behavior.
+    let present_js = r#"(function() {
+  function norm(s){ return String(s||'').toLowerCase(); }
+  function isVisible(el){
+    if (!el || !el.getBoundingClientRect) return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 20 && r.height > 10;
+  }
+  function labelFor(doc, el){
+    const aria = el.getAttribute('aria-label') || '';
+    const ph = el.getAttribute('placeholder') || '';
+    if (aria || ph) return aria || ph;
+    if (el.id) {
+      const lab = doc.querySelector('label[for=\"' + el.id.replace(/\"/g,'') + '\"]');
+      if (lab) return lab.textContent || '';
+    }
+    return (el.name || el.id || '');
+  }
+  function hasCodeInput(doc){
+    const inputs = Array.from(doc.querySelectorAll('input')).filter(isVisible);
+    for (const el of inputs) {
+      const meta = norm(labelFor(doc, el) + ' ' + (el.id||'') + ' ' + (el.name||''));
+      const isCode = meta.includes('code') || meta.includes('passcode') || meta.includes('otp') || meta.includes('verification');
+      if (!isCode) continue;
+      const t = (el.getAttribute('type') || '').toLowerCase();
+      if (t === 'hidden') continue;
+      return true;
+    }
+    return false;
+  }
+
+  if (hasCodeInput(document)) return { ok: true };
+  const iframes = Array.from(document.querySelectorAll('iframe'));
+  for (const fr of iframes) {
+    let doc = null;
+    try { doc = fr.contentDocument || (fr.contentWindow && fr.contentWindow.document); } catch (_) { doc = null; }
+    if (!doc) continue;
+    if (hasCodeInput(doc)) return { ok: true };
+  }
+  return { ok: false };
+})()"#;
+
+    // The code input often appears only after submit + redirects; poll briefly.
+    let deadline = std::time::Instant::now() + Duration::from_secs(120);
+    loop {
+        let v: serde_json::Value = page.evaluate(present_js).await?.into_value()?;
+        let ok = v.get("ok").and_then(|x| x.as_bool()).unwrap_or(false);
+        if ok {
+            break;
+        }
+        if std::time::Instant::now() >= deadline {
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+
+    eprintln!("\n========================================");
+    eprintln!("Chase: enter SMS verification code (or blank to skip):");
+    eprintln!("========================================\n");
+    let mut code = String::new();
+    let _ = std::io::stdin().read_line(&mut code);
+    let code = code.trim().to_string();
+    if code.is_empty() {
+        return Ok(());
+    }
+
+    fill_sms_code(page, &code).await?;
     Ok(())
+}
+
+async fn fill_sms_code(page: &chromiumoxide::Page, code: &str) -> Result<()> {
+    let code = serde_json::json!({ "code": code });
+    let js: String = format!(
+        r#"(function(payload) {{
+  function norm(s){{ return String(s||'').trim().toLowerCase(); }}
+  function isVisible(el){{
+    if (!el || !el.getBoundingClientRect) return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 20 && r.height > 10;
+  }}
+  function fire(el, type) {{
+    try {{ el.dispatchEvent(new Event(type, {{ bubbles: true }})); }} catch (_) {{}}
+  }}
+  function labelFor(doc, el){{
+    const aria = el.getAttribute('aria-label') || '';
+    const ph = el.getAttribute('placeholder') || '';
+    if (aria || ph) return aria || ph;
+    if (el.id) {{
+      const lab = doc.querySelector('label[for=\"' + el.id.replace(/\"/g,'') + '\"]');
+      if (lab) return lab.textContent || '';
+    }}
+    return (el.name || el.id || '');
+  }}
+  function score(doc, el) {{
+    const meta = norm(labelFor(doc, el) + ' ' + (el.id||'') + ' ' + (el.name||''));
+    let s = 0;
+    if (meta.includes('otp')) s += 6;
+    if (meta.includes('passcode')) s += 6;
+    if (meta.includes('verification')) s += 5;
+    if (meta.includes('code')) s += 3;
+    const t = norm(el.getAttribute('type') || '');
+    if (t === 'tel') s += 2;
+    return s;
+  }}
+  function findBest(doc) {{
+    const inputs = Array.from(doc.querySelectorAll('input')).filter(isVisible);
+    let best = null;
+    let bestScore = 0;
+    for (const el of inputs) {{
+      const meta = norm(labelFor(doc, el) + ' ' + (el.id||'') + ' ' + (el.name||''));
+      const isCode = meta.includes('code') || meta.includes('passcode') || meta.includes('otp') || meta.includes('verification');
+      if (!isCode) continue;
+      const t = norm(el.getAttribute('type') || '');
+      if (t === 'hidden') continue;
+      const s = score(doc, el);
+      if (s > bestScore) {{
+        bestScore = s;
+        best = el;
+      }}
+    }}
+    return best;
+  }}
+  function clickSubmit(doc) {{
+    const btns = Array.from(doc.querySelectorAll('button,input[type=\"submit\"],input[type=\"button\"],[role=\"button\"],[role=\"link\"]')).filter(isVisible);
+    const want = ['verify','continue','next','submit','confirm','done'];
+    for (const b of btns) {{
+      const txt = norm(b.textContent || b.value || b.getAttribute('aria-label') || '');
+      if (!txt) continue;
+      if (want.some(w => txt.includes(w))) {{
+        try {{ b.click(); return true; }} catch (_) {{}}
+        try {{ b.dispatchEvent(new MouseEvent('click', {{bubbles:true, cancelable:true, view:window}})); return true; }} catch (_) {{}}
+      }}
+    }}
+    return false;
+  }}
+  function tryFill(doc) {{
+    const el = findBest(doc);
+    if (!el) return false;
+    try {{ el.focus(); }} catch (_) {{}}
+    el.value = String(payload.code || '');
+    fire(el,'input'); fire(el,'change');
+    clickSubmit(doc);
+    return true;
+  }}
+
+  if (tryFill(document)) return {{ ok: true }};
+  const iframes = Array.from(document.querySelectorAll('iframe'));
+  for (const fr of iframes) {{
+    let doc = null;
+    try {{ doc = fr.contentDocument || (fr.contentWindow && fr.contentWindow.document); }} catch (_) {{ doc = null; }}
+    if (!doc) continue;
+    if (tryFill(doc)) return {{ ok: true }};
+  }}
+  return {{ ok: false, error: 'no code input found' }};
+}})({})"#,
+        code.to_string()
+    );
+
+    let v: serde_json::Value = page.evaluate(js).await?.into_value()?;
+    if v.get("ok").and_then(|x| x.as_bool()).unwrap_or(false) {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "Could not find a verification-code input (you may need to complete 2FA in the browser)."
+    );
+}
+
+async fn session_from_page(page: &chromiumoxide::Page) -> Result<SessionData> {
+    let cookies = page.get_cookies().await?;
+
+    let mut cookie_map = HashMap::new();
+    let mut cookie_jar = Vec::new();
+    for cookie in cookies {
+        cookie_map.insert(cookie.name.clone(), cookie.value.clone());
+        cookie_jar.push(StoredCookie {
+            name: cookie.name,
+            value: cookie.value,
+            domain: cookie.domain,
+            path: cookie.path,
+            secure: cookie.secure,
+            http_only: cookie.http_only,
+            same_site: cookie.same_site.map(|s| format!("{s:?}")),
+        });
+    }
+
+    Ok(SessionData {
+        token: None,
+        cookies: cookie_map,
+        cookie_jar,
+        captured_at: Some(Utc::now().timestamp()),
+        data: HashMap::new(),
+    })
+}
+
+async fn wait_for_valid_api_session(page: &chromiumoxide::Page) -> Result<SessionData> {
+    // Login redirects and anti-bot checks can complete after the dashboard first appears.
+    // Ensure the captured cookie jar can authenticate an API call before persisting it.
+    let deadline = std::time::Instant::now() + Duration::from_secs(90);
+    loop {
+        let session = session_from_page(page).await?;
+        match browser_test_auth(page).await {
+            Ok(()) => return Ok(session),
+            Err(err) => {
+                if std::time::Instant::now() >= deadline {
+                    anyhow::bail!(
+                        "Chase login completed in browser, but API session is not ready: {err}"
+                    );
+                }
+            }
+        }
+
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
 }
 
 async fn apply_cookies(page: &chromiumoxide::Page, session: &SessionData) -> Result<()> {
     let mut cookies = Vec::new();
-    for (name, value) in &session.cookies {
-        let mut cookie = CookieParam::new(name.clone(), value.clone());
-        cookie.url = Some(CHASE_LOGIN_URL.to_string());
-        cookies.push(cookie);
+
+    if !session.cookie_jar.is_empty() {
+        for c in &session.cookie_jar {
+            let mut cookie = CookieParam::new(c.name.clone(), c.value.clone());
+            cookie.domain = Some(c.domain.clone());
+            cookie.path = Some(c.path.clone());
+            cookie.secure = Some(c.secure);
+            cookie.http_only = Some(c.http_only);
+            cookies.push(cookie);
+        }
+    } else {
+        for (name, value) in &session.cookies {
+            let mut cookie = CookieParam::new(name.clone(), value.clone());
+            cookie.url = Some("https://www.chase.com".to_string());
+            cookies.push(cookie);
+        }
     }
 
     if !cookies.is_empty() {
@@ -363,59 +1187,121 @@ async fn apply_cookies(page: &chromiumoxide::Page, session: &SessionData) -> Res
     Ok(())
 }
 
-async fn watch_for_downloads(
-    download_dir: &Path,
-    timeout: Duration,
-    idle: Duration,
-) -> Result<Vec<PathBuf>> {
-    use std::collections::HashSet;
+async fn browser_fetch_json(
+    page: &chromiumoxide::Page,
+    method: &str,
+    path: &str,
+    body: Option<&str>,
+) -> Result<serde_json::Value> {
+    let req = serde_json::json!({
+        "method": method,
+        "path": path,
+        "body": body.unwrap_or(""),
+    });
 
-    let initial: HashSet<PathBuf> = std::fs::read_dir(download_dir)?
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .collect();
+    let js = format!(
+        r#"(async function(req) {{
+  try {{
+    const reqId = (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function')
+      ? globalThis.crypto.randomUUID()
+      : String(Date.now()) + '-' + String(Math.random()).slice(2);
+    const opts = {{
+      method: req.method,
+      credentials: 'include',
+      headers: {{
+        'accept': 'application/json, text/plain, */*',
+        'x-jpmc-csrf-token': 'NONE',
+        'x-jpmc-channel': 'id=C30',
+        'x-jpmc-client-request-id': reqId,
+        'x-requested-with': 'XMLHttpRequest',
+        'referer': 'https://secure.chase.com/web/auth/dashboard',
+        'origin': 'https://secure.chase.com'
+      }}
+    }};
+    if (String(req.method || '').toUpperCase() === 'POST') {{
+      opts.headers['content-type'] = 'application/x-www-form-urlencoded; charset=UTF-8';
+      opts.body = String(req.body || '');
+    }}
 
-    let mut found: HashSet<PathBuf> = HashSet::new();
-    let poll = Duration::from_millis(500);
-    let start = std::time::Instant::now();
-    let mut last_new = None::<std::time::Instant>;
+    const res = await fetch(req.path, opts);
+    const text = await res.text();
+    return {{ ok: res.ok, status: res.status, text }};
+  }} catch (e) {{
+    return {{ ok: false, status: 0, text: String((e && e.message) || e || 'fetch failed') }};
+  }}
+}})({})"#,
+        req
+    );
 
-    loop {
-        tokio::time::sleep(poll).await;
+    let v: serde_json::Value = page.evaluate(js).await?.into_value()?;
+    let ok = v.get("ok").and_then(|x| x.as_bool()).unwrap_or(false);
+    let status = v.get("status").and_then(|x| x.as_i64()).unwrap_or(0);
+    let text = v
+        .get("text")
+        .and_then(|x| x.as_str())
+        .unwrap_or_default()
+        .to_string();
 
-        let current: Vec<PathBuf> = std::fs::read_dir(download_dir)?
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .collect();
-
-        for file in current {
-            if initial.contains(&file) || found.contains(&file) {
-                continue;
-            }
-
-            let filename = file.file_name().unwrap_or_default().to_string_lossy();
-            if filename.ends_with(".crdownload") {
-                continue;
-            }
-
-            found.insert(file);
-            last_new = Some(std::time::Instant::now());
-        }
-
-        if start.elapsed() > timeout {
-            break;
-        }
-
-        if !found.is_empty() {
-            if let Some(last) = last_new {
-                if last.elapsed() >= idle {
-                    break;
-                }
-            }
-        }
+    if !ok {
+        anyhow::bail!(
+            "Chase browser API request failed (method={method}, path={path}, status={status}): {}",
+            text.chars().take(500).collect::<String>()
+        );
     }
 
-    Ok(found.into_iter().collect())
+    serde_json::from_str(&text).with_context(|| {
+        format!(
+            "Failed to parse Chase browser API JSON (path={path}): {}",
+            text.chars().take(200).collect::<String>()
+        )
+    })
+}
+
+async fn browser_test_auth(page: &chromiumoxide::Page) -> Result<()> {
+    let value = browser_fetch_json(
+        page,
+        "POST",
+        "/svc/rl/accounts/secure/v1/dashboard/data/list",
+        Some("context=GWM_OVD_NEW_PBM"),
+    )
+    .await?;
+    let resp: AppDataResponse =
+        serde_json::from_value(value).context("Failed to parse Chase browser auth response")?;
+    if resp.code != "SUCCESS" {
+        anyhow::bail!("Chase browser auth test failed: code={}", resp.code);
+    }
+    Ok(())
+}
+
+async fn launch_browser(
+    profile_dir: &Path,
+    show_browser: bool,
+) -> Result<(Browser, chromiumoxide::handler::Handler)> {
+    let chrome_path = find_chrome().context(
+        "Chrome/Chromium not found. Please install Chrome or Chromium to use Chase sync.",
+    )?;
+
+    let mut builder = BrowserConfig::builder();
+    builder = builder
+        .chrome_executable(chrome_path)
+        .viewport(None)
+        .user_data_dir(profile_dir)
+        .arg("--disable-blink-features=AutomationControlled")
+        .arg("--disable-infobars")
+        .arg("--no-first-run")
+        .arg("--no-default-browser-check");
+    if show_browser {
+        builder = builder.with_head();
+    }
+    let config = builder
+        .build()
+        .map_err(|e| anyhow::anyhow!("Failed to configure browser: {e}"))?;
+
+    let (browser, handler) = Browser::launch(config)
+        .await
+        .context("Failed to launch browser")?;
+
+    Ok((browser, handler))
 }
 
 /// Find Chrome/Chromium executable.
@@ -459,4 +1345,38 @@ fn find_chrome() -> Option<String> {
         }
     }
     None
+}
+
+fn cleanup_profile_lock_artifacts(profile_dir: &Path) {
+    for name in ["SingletonLock", "SingletonSocket"] {
+        let path = profile_dir.join(name);
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+fn kill_profile_browser_processes(profile_dir: &Path) {
+    let needle = format!("user-data-dir={}", profile_dir.display());
+    let output = match std::process::Command::new("pgrep")
+        .arg("-f")
+        .arg(&needle)
+        .output()
+    {
+        Ok(o) => o,
+        Err(_) => return,
+    };
+
+    if !output.status.success() {
+        return;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in stdout.lines() {
+        let pid = line.trim();
+        if pid.is_empty() {
+            continue;
+        }
+        let _ = std::process::Command::new("kill").arg(pid).status();
+    }
+
+    std::thread::sleep(Duration::from_millis(250));
 }

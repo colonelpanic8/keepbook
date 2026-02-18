@@ -39,18 +39,12 @@ impl SynchronizerFactory for DefaultSynchronizerFactory {
     ) -> Result<Box<dyn Synchronizer>> {
         match connection.config.synchronizer.as_str() {
             "chase" => {
-                if let Some(data_dir) = &self.data_dir {
-                    Ok(Box::new(
-                        ChaseSynchronizer::from_connection_with_download_dir(
-                            connection, storage, data_dir,
-                        )
-                        .await?,
-                    ))
-                } else {
-                    Ok(Box::new(
-                        ChaseSynchronizer::from_connection(connection, storage).await?,
-                    ))
-                }
+                // Chase uses ephemeral cache directories for browser profiles/downloads.
+                // Do not root these in the keepbook data dir (which may be a git repo).
+                let _ = &self.data_dir;
+                Ok(Box::new(
+                    ChaseSynchronizer::from_connection(connection, storage).await?,
+                ))
             }
             "schwab" => Ok(Box::new(
                 SchwabSynchronizer::from_connection(connection, storage).await?,
