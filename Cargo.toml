@@ -92,6 +92,7 @@ toml = "0.8"
 
 # Time handling
 chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.10"
 
 # UUIDs
 uuid = { version = "1", features = ["v4", "v5", "serde"] }

@@ -72,6 +72,55 @@ pub struct TransactionAnnotationOutput {
     pub tags: Option<Vec<String>>,
 }
 
+/// Scope output for spending report.
+#[derive(Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SpendingScopeOutput {
+    Portfolio,
+    Connection { id: String, name: String },
+    Account { id: String, name: String },
+}
+
+#[derive(Serialize)]
+pub struct SpendingBreakdownEntryOutput {
+    pub key: String,
+    pub total: String,
+    pub transaction_count: usize,
+}
+
+#[derive(Serialize)]
+pub struct SpendingPeriodOutput {
+    pub start_date: String,
+    pub end_date: String,
+    pub total: String,
+    pub transaction_count: usize,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub breakdown: Vec<SpendingBreakdownEntryOutput>,
+}
+
+#[derive(Serialize)]
+pub struct SpendingOutput {
+    pub scope: SpendingScopeOutput,
+    pub currency: String,
+    pub tz: String,
+    pub start_date: String,
+    pub end_date: String,
+    pub period: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub week_start: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bucket_days: Option<u32>,
+    pub direction: String,
+    pub status: String,
+    pub group_by: String,
+    pub total: String,
+    pub transaction_count: usize,
+    pub periods: Vec<SpendingPeriodOutput>,
+    pub skipped_transaction_count: usize,
+    pub missing_price_transaction_count: usize,
+    pub missing_fx_transaction_count: usize,
+}
+
 /// Combined output for list all
 #[derive(Serialize)]
 pub struct AllOutput {

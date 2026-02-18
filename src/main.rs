@@ -111,6 +111,65 @@ enum Command {
     /// Portfolio commands
     #[command(subcommand)]
     Portfolio(PortfolioCommand),
+
+    /// Spending reports based on transaction logs
+    Spending {
+        /// Period granularity: daily, weekly, monthly, quarterly, yearly, range, custom
+        #[arg(long, default_value = "monthly")]
+        period: String,
+
+        /// Start date (YYYY-MM-DD, default: earliest matching transaction)
+        #[arg(long)]
+        start: Option<String>,
+
+        /// End date (YYYY-MM-DD, default: today in the selected timezone)
+        #[arg(long)]
+        end: Option<String>,
+
+        /// Reporting currency (default: from config)
+        #[arg(long)]
+        currency: Option<String>,
+
+        /// Timezone for bucketing and date filtering (IANA name, default: local)
+        #[arg(long)]
+        tz: Option<String>,
+
+        /// Week start day for weekly periods: sunday or monday (default: sunday)
+        #[arg(long)]
+        week_start: Option<String>,
+
+        /// Custom bucket size (period=custom only). Must be a positive multiple of 1d (e.g. "14d").
+        #[arg(long, value_name = "DURATION", value_parser = parse_duration_arg)]
+        bucket: Option<std::time::Duration>,
+
+        /// Filter to a single account by ID or name (mutually exclusive with --connection)
+        #[arg(long)]
+        account: Option<String>,
+
+        /// Filter to a single connection by ID or name (mutually exclusive with --account)
+        #[arg(long)]
+        connection: Option<String>,
+
+        /// Transaction status filter: posted, posted+pending, all (default: posted)
+        #[arg(long, default_value = "posted")]
+        status: String,
+
+        /// Direction: outflow, inflow, net (default: outflow)
+        #[arg(long, default_value = "outflow")]
+        direction: String,
+
+        /// Grouping: none, category, merchant, account, tag (default: none)
+        #[arg(long, default_value = "none")]
+        group_by: String,
+
+        /// Limit breakdown rows per period (when grouping)
+        #[arg(long)]
+        top: Option<usize>,
+
+        /// Look back this many days for cached close prices / FX rates (default: 7)
+        #[arg(long, default_value_t = 7)]
+        lookback_days: u32,
+    },
 }
 
 #[derive(Subcommand)]
@@ -768,6 +827,46 @@ async fn main() -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&output)?);
             }
         },
+
+        Some(Command::Spending {
+            period,
+            start,
+            end,
+            currency,
+            tz,
+            week_start,
+            bucket,
+            account,
+            connection,
+            status,
+            direction,
+            group_by,
+            top,
+            lookback_days,
+        }) => {
+            let output = app::spending_report(
+                storage_arc.as_ref(),
+                &config,
+                app::SpendingReportOptions {
+                    currency,
+                    start,
+                    end,
+                    period,
+                    tz,
+                    week_start,
+                    bucket,
+                    account,
+                    connection,
+                    status,
+                    direction,
+                    group_by,
+                    top,
+                    lookback_days,
+                },
+            )
+            .await?;
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        }
 
         None => {
             Cli::command().print_help()?;

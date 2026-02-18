@@ -20,6 +20,7 @@ import {
 } from '../app/mutations.js';
 import { importSchwabTransactions } from '../app/import.js';
 import { portfolioSnapshot, portfolioHistory, portfolioChangePoints } from '../app/portfolio.js';
+import { spendingReport } from '../app/spending.js';
 import {
   syncConnection,
   syncConnectionIfStale,
@@ -98,6 +99,73 @@ program
       return configOutput(cfg.configPath, cfg.config);
     });
   });
+
+// ---------------------------------------------------------------------------
+// spending
+// ---------------------------------------------------------------------------
+
+program
+  .command('spending')
+  .description('Spending report based on transaction logs')
+  .option(
+    '--period <period>',
+    'period: daily, weekly, monthly, quarterly, yearly, range, custom',
+    'monthly',
+  )
+  .option('--start <date>', 'start date (YYYY-MM-DD)')
+  .option('--end <date>', 'end date (YYYY-MM-DD)')
+  .option('--currency <code>', 'reporting currency (default: from config)')
+  .option('--tz <iana>', 'timezone for bucketing/filtering (IANA name, default: local)')
+  .option('--week-start <day>', 'week start: sunday or monday (default: sunday)')
+  .option('--bucket <dur>', 'bucket size for period=custom (e.g. 14d)')
+  .option('--account <id_or_name>', 'filter to a single account')
+  .option('--connection <id_or_name>', 'filter to a single connection')
+  .option('--status <status>', 'status: posted, posted+pending, all', 'posted')
+  .option('--direction <dir>', 'direction: outflow, inflow, net', 'outflow')
+  .option('--group-by <mode>', 'grouping: none, category, merchant, account, tag', 'none')
+  .option('--top <n>', 'limit breakdown rows per period', (v: string) => Number.parseInt(v, 10))
+  .option('--lookback-days <n>', 'lookback days for cached close prices / FX (default: 7)', (v: string) =>
+    Number.parseInt(v, 10),
+  )
+  .action(
+    async (opts: {
+      period: string;
+      start?: string;
+      end?: string;
+      currency?: string;
+      tz?: string;
+      weekStart?: string;
+      bucket?: string;
+      account?: string;
+      connection?: string;
+      status?: string;
+      direction?: string;
+      groupBy?: string;
+      top?: number;
+      lookbackDays?: number;
+    }) => {
+      await runWithConfig(async (cfg) => {
+        const storage = new JsonFileStorage(cfg.config.data_dir);
+        const marketDataStore = new JsonlMarketDataStore(cfg.config.data_dir);
+        return spendingReport(storage, marketDataStore, cfg.config, {
+          period: opts.period,
+          start: opts.start,
+          end: opts.end,
+          currency: opts.currency,
+          tz: opts.tz,
+          week_start: opts.weekStart,
+          bucket: opts.bucket,
+          account: opts.account,
+          connection: opts.connection,
+          status: opts.status,
+          direction: opts.direction,
+          group_by: opts.groupBy,
+          top: opts.top,
+          lookback_days: opts.lookbackDays,
+        });
+      });
+    },
+  );
 
 // ---------------------------------------------------------------------------
 // add

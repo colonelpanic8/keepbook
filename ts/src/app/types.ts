@@ -68,6 +68,49 @@ export interface TransactionAnnotationOutput {
 }
 
 // ---------------------------------------------------------------------------
+// Spending
+// ---------------------------------------------------------------------------
+
+export type SpendingScopeOutput =
+  | { type: 'portfolio' }
+  | { type: 'connection'; id: string; name: string }
+  | { type: 'account'; id: string; name: string };
+
+export interface SpendingBreakdownEntryOutput {
+  key: string;
+  total: string;
+  transaction_count: number;
+}
+
+export interface SpendingPeriodOutput {
+  start_date: string;
+  end_date: string;
+  total: string;
+  transaction_count: number;
+  breakdown?: SpendingBreakdownEntryOutput[];
+}
+
+export interface SpendingOutput {
+  scope: SpendingScopeOutput;
+  currency: string;
+  tz: string;
+  start_date: string;
+  end_date: string;
+  period: string;
+  week_start?: string;
+  bucket_days?: number;
+  direction: string;
+  status: string;
+  group_by: string;
+  total: string;
+  transaction_count: number;
+  periods: SpendingPeriodOutput[];
+  skipped_transaction_count: number;
+  missing_price_transaction_count: number;
+  missing_fx_transaction_count: number;
+}
+
+// ---------------------------------------------------------------------------
 // Price Source
 // ---------------------------------------------------------------------------
 
