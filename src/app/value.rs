@@ -116,22 +116,3 @@ pub async fn value_in_reporting_currency_detailed(
     }
 }
 
-pub async fn value_in_reporting_currency(
-    market_data: &MarketDataService,
-    asset: &Asset,
-    amount: &str,
-    reporting_currency: &str,
-    as_of_date: NaiveDate,
-    currency_decimals: Option<u32>,
-) -> Result<Option<String>> {
-    Ok(value_in_reporting_currency_detailed(
-        market_data,
-        asset,
-        amount,
-        reporting_currency,
-        as_of_date,
-        currency_decimals,
-    )
-    .await?
-    .value)
-}
