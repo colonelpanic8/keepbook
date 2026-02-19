@@ -267,7 +267,7 @@ impl ksni::Tray for KeepbookTray {
     }
 
     fn menu(&self) -> Vec<MenuItem<Self>> {
-        let mut history_menu: Vec<MenuItem<Self>> = if self.state.history_lines.is_empty() {
+        let history_menu: Vec<MenuItem<Self>> = if self.state.history_lines.is_empty() {
             vec![StandardItem {
                 label: "No portfolio history available".to_string(),
                 enabled: false,
@@ -289,7 +289,7 @@ impl ksni::Tray for KeepbookTray {
                 .collect()
         };
 
-        let mut spending_menu: Vec<MenuItem<Self>> = if self.state.spending_lines.is_empty() {
+        let spending_menu: Vec<MenuItem<Self>> = if self.state.spending_lines.is_empty() {
             vec![StandardItem {
                 label: "No spending metrics available".to_string(),
                 enabled: false,
@@ -311,28 +311,7 @@ impl ksni::Tray for KeepbookTray {
                 .collect()
         };
 
-        if history_menu.is_empty() {
-            history_menu.push(
-                StandardItem {
-                    label: "No portfolio history available".to_string(),
-                    enabled: false,
-                    ..Default::default()
-                }
-                .into(),
-            );
-        }
-        if spending_menu.is_empty() {
-            spending_menu.push(
-                StandardItem {
-                    label: "No spending metrics available".to_string(),
-                    enabled: false,
-                    ..Default::default()
-                }
-                .into(),
-            );
-        }
-
-        vec![
+        let mut items = vec![
             StandardItem {
                 label: "keepbook sync daemon".to_string(),
                 enabled: false,
@@ -372,13 +351,16 @@ impl ksni::Tray for KeepbookTray {
                 ..Default::default()
             }
             .into(),
-            SubMenu {
+            StandardItem {
                 label: "Recent Spending".to_string(),
-                icon_name: "view-statistics".to_string(),
-                submenu: spending_menu,
+                enabled: false,
                 ..Default::default()
             }
             .into(),
+        ];
+
+        items.extend(spending_menu);
+        items.extend([
             MenuItem::Separator,
             StandardItem {
                 label: "Sync Now".to_string(),
@@ -398,7 +380,9 @@ impl ksni::Tray for KeepbookTray {
                 ..Default::default()
             }
             .into(),
-        ]
+        ]);
+
+        items
     }
 }
 
