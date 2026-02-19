@@ -23,8 +23,13 @@ use crate::models::{
     Account, Asset, AssetBalance, Connection, ConnectionStatus, Id, LastSync, SyncStatus,
 };
 use crate::storage::Storage;
-use crate::sync::schwab::{Position, SchwabClient};
-use crate::sync::{AuthStatus, InteractiveAuth, SyncResult, SyncedAssetBalance, Synchronizer};
+use crate::sync::schwab::{
+    parse_brokerage_transactions_rows, Position, SchwabClient, TransactionHistoryTimeFrame,
+};
+use crate::sync::{
+    AuthStatus, InteractiveAuth, SyncOptions, SyncResult, SyncedAssetBalance, Synchronizer,
+    TransactionSyncMode,
+};
 
 const SCHWAB_LOGIN_URL: &str = "https://client.schwab.com/Login/SignOn/CustomerCenterLogin.aspx";
 const SCHWAB_API_DOMAIN: &str = "ausgateway.schwab.com";
@@ -117,6 +122,7 @@ impl SchwabSynchronizer {
         &self,
         connection: &mut Connection,
         storage: &S,
+        options: &SyncOptions,
     ) -> Result<SyncResult> {
         // Load session
         let session = self
@@ -136,6 +142,33 @@ impl SchwabSynchronizer {
 
         let accounts_resp = client.get_accounts().await?;
         let positions_resp = client.get_positions().await?;
+        let history_accounts = match client.get_transaction_history_brokerage_accounts().await {
+            Ok(v) => v,
+            Err(err) => {
+                eprintln!(
+                    "Schwab: transaction-history account metadata unavailable, falling back to /Account ids: {err:#}"
+                );
+                Vec::new()
+            }
+        };
+        let mut history_account_ids_by_name: HashMap<String, String> = HashMap::new();
+        let mut lone_history_account_id: Option<String> = None;
+        for acct in &history_accounts {
+            let id = acct.id.trim();
+            if id.is_empty() {
+                continue;
+            }
+            let key = acct.nick_name.trim().to_ascii_lowercase();
+            if !key.is_empty() {
+                history_account_ids_by_name.insert(key, id.to_string());
+            }
+        }
+        if history_accounts.len() == 1 {
+            let only_id = history_accounts[0].id.trim();
+            if !only_id.is_empty() {
+                lone_history_account_id = Some(only_id.to_string());
+            }
+        }
 
         // Collect all positions into a flat list
         let all_positions: Vec<Position> = positions_resp
@@ -147,6 +180,7 @@ impl SchwabSynchronizer {
         // Build sync result
         let mut accounts = Vec::new();
         let mut balances: Vec<(Id, Vec<SyncedAssetBalance>)> = Vec::new();
+        let mut transactions: Vec<(Id, Vec<crate::models::Transaction>)> = Vec::new();
 
         for schwab_account in accounts_resp.accounts {
             // Use Schwab's account_id to generate a stable, filesystem-safe ID
@@ -215,6 +249,48 @@ impl SchwabSynchronizer {
                         )));
                     }
                 }
+
+                let existing_txns = storage.get_transactions(&account_id).await?;
+                let time_frame = match options.transactions {
+                    TransactionSyncMode::Full => TransactionHistoryTimeFrame::All,
+                    TransactionSyncMode::Auto => {
+                        if existing_txns.is_empty() {
+                            TransactionHistoryTimeFrame::All
+                        } else {
+                            TransactionHistoryTimeFrame::Last6Months
+                        }
+                    }
+                };
+
+                let nickname = if schwab_account.nick_name.trim().is_empty() {
+                    schwab_account.default_name.clone()
+                } else {
+                    schwab_account.nick_name.clone()
+                };
+                let tx_account_id = history_account_ids_by_name
+                    .get(&nickname.trim().to_ascii_lowercase())
+                    .cloned()
+                    .or_else(|| lone_history_account_id.clone())
+                    .unwrap_or_else(|| schwab_account.account_id.clone());
+                let history_rows = client
+                    .get_brokerage_transactions(&tx_account_id, &nickname, time_frame)
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "Failed to fetch Schwab transactions for account {} (transaction-history id {})",
+                            schwab_account.account_id, tx_account_id
+                        )
+                    })?;
+                let parsed = parse_brokerage_transactions_rows(&account_id, &history_rows)
+                    .with_context(|| {
+                        format!(
+                            "Failed to parse Schwab transactions for account {}",
+                            schwab_account.account_id
+                        )
+                    })?;
+                if !parsed.transactions.is_empty() {
+                    transactions.push((account_id.clone(), parsed.transactions));
+                }
             } else if let Some(bal) = &schwab_account.balances {
                 // Non-brokerage accounts (bank/checking): store total balance as USD
                 account_balances.push(SyncedAssetBalance::new(AssetBalance::new(
@@ -240,7 +316,7 @@ impl SchwabSynchronizer {
             connection: connection.clone(),
             accounts,
             balances,
-            transactions: Vec::new(),
+            transactions,
         })
     }
 }
@@ -252,7 +328,17 @@ impl Synchronizer for SchwabSynchronizer {
     }
 
     async fn sync(&self, connection: &mut Connection, storage: &dyn Storage) -> Result<SyncResult> {
-        self.sync_internal(connection, storage).await
+        self.sync_internal(connection, storage, &SyncOptions::default())
+            .await
+    }
+
+    async fn sync_with_options(
+        &self,
+        connection: &mut Connection,
+        storage: &dyn Storage,
+        options: &SyncOptions,
+    ) -> Result<SyncResult> {
+        self.sync_internal(connection, storage, options).await
     }
 
     fn interactive(&mut self) -> Option<&mut dyn InteractiveAuth> {
@@ -267,7 +353,8 @@ impl SchwabSynchronizer {
         connection: &mut Connection,
         storage: &S,
     ) -> Result<SyncResult> {
-        self.sync_internal(connection, storage).await
+        self.sync_internal(connection, storage, &SyncOptions::default())
+            .await
     }
 }
 

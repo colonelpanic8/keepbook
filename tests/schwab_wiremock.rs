@@ -11,6 +11,21 @@ use tempfile::TempDir;
 use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+const SCHWAB_TXN_HISTORY_PATH: &str =
+    "/api/is.TransactionHistoryWeb/TransactionHistoryInterface/TransactionHistory/brokerage/transactions";
+
+async fn mount_empty_transactions_mock(server: &MockServer) {
+    Mock::given(method("POST"))
+        .and(path(SCHWAB_TXN_HISTORY_PATH))
+        .and(header("authorization", "Bearer test-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            r#"{"brokerageTransactions":[],"bookmark":null}"#,
+            "application/json",
+        ))
+        .mount(server)
+        .await;
+}
+
 #[tokio::test]
 async fn schwab_sync_uses_cached_session_and_base_url_override() -> Result<()> {
     let server = MockServer::start().await;
@@ -85,6 +100,7 @@ async fn schwab_sync_uses_cached_session_and_base_url_override() -> Result<()> {
         .respond_with(ResponseTemplate::new(200).set_body_raw(positions_body, "application/json"))
         .mount(&server)
         .await;
+    mount_empty_transactions_mock(&server).await;
 
     let data_dir = TempDir::new()?;
     let storage = JsonFileStorage::new(data_dir.path());
@@ -196,6 +212,7 @@ async fn schwab_preserves_created_at_for_existing_account() -> Result<()> {
         .respond_with(ResponseTemplate::new(200).set_body_raw(positions_body, "application/json"))
         .mount(&server)
         .await;
+    mount_empty_transactions_mock(&server).await;
 
     let data_dir = TempDir::new()?;
     let storage = JsonFileStorage::new(data_dir.path());
@@ -278,6 +295,7 @@ async fn schwab_account_ids_are_deterministic() -> Result<()> {
         .respond_with(ResponseTemplate::new(200).set_body_raw(positions_body, "application/json"))
         .mount(&server)
         .await;
+    mount_empty_transactions_mock(&server).await;
 
     let data_dir = TempDir::new()?;
     let storage = JsonFileStorage::new(data_dir.path());

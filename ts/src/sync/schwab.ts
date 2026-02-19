@@ -58,6 +58,94 @@ export type Position = {
   PercentDayChange: number;
 };
 
+export type TransactionHistoryTimeFrame = 'Last6Months' | 'All';
+
+export type TransactionHistoryBrokerageAccount = {
+  id: string;
+  nickName?: string;
+};
+
+type TransactionHistoryBookmark = {
+  fromKey: {
+    primarySortCode: string | null;
+    primarySortValue: string;
+  };
+  fromExecutionDate: string;
+  fromPublTimeStamp: string;
+  fromSecondarySortCode: string;
+  fromSecondarySortValue: string;
+  fromTertiarySortValue: string;
+};
+
+type BrokerageTransactionsRequest = {
+  accountNickname: string;
+  exportType: 'Csv';
+  includeOptionsInSearch: boolean;
+  isSpsLinkedUkAccount: boolean;
+  selectedAccountId: string;
+  selectedTransactionTypes: string[];
+  sortColumn: 'Date';
+  sortDirection: 'Descending';
+  symbol: string;
+  timeFrame: TransactionHistoryTimeFrame;
+  bookmark: TransactionHistoryBookmark | null;
+  shouldPaginate: boolean;
+};
+
+type BrokerageTransactionsResponse = {
+  brokerageTransactions?: BrokerageTransaction[];
+  bookmark?: TransactionHistoryBookmark | null;
+};
+
+type TransactionHistoryInitResponse = {
+  accountSelectorData?: {
+    brokerageAccountList?: {
+      brokerageAccounts?: TransactionHistoryBrokerageAccount[];
+    };
+  };
+};
+
+export type BrokerageTransaction = {
+  transactionDate: string;
+  action?: string;
+  symbol?: string;
+  description?: string;
+  shareQuantity?: string;
+  executionPrice?: string;
+  feesAndCommission?: string;
+  amount?: string;
+  sourceCode?: string;
+  effectiveDate?: string;
+  depositSequenceId?: string;
+  checkDate?: string;
+  itemIssueId?: string;
+  schwabOrderId?: string;
+};
+
+const TRANSACTION_HISTORY_MAX_PAGES = 20;
+const TRANSACTION_HISTORY_INIT_PATH =
+  '/api/is.TransactionHistoryWeb/TransactionHistoryInterface/TransactionHistory/init';
+const TRANSACTION_HISTORY_PATH =
+  '/api/is.TransactionHistoryWeb/TransactionHistoryInterface/TransactionHistory/brokerage/transactions';
+const TRANSACTION_TYPES = [
+  'Adjustments',
+  'AtmActivity',
+  'BillPay',
+  'CorporateActions',
+  'Checks',
+  'Deposits',
+  'DividendsAndCapitalGains',
+  'ElectronicTransfers',
+  'Fees',
+  'Interest',
+  'Misc',
+  'SecurityTransfers',
+  'Taxes',
+  'Trades',
+  'VisaDebitCard',
+  'Withdrawals',
+] as const;
+
 export class SchwabClient {
   static readonly API_BASE =
     'https://ausgateway.schwab.com/api/is.ClientSummaryExpWeb/V1/api';
@@ -71,9 +159,27 @@ export class SchwabClient {
     this.apiBase = (session.data?.[SchwabClient.API_BASE_KEY] ?? SchwabClient.API_BASE).toString();
   }
 
-  private async request<T>(path: string): Promise<T> {
+  private apiOrigin(): string {
     const base = this.apiBase.replace(/\/+$/g, '');
-    const url = `${base}${path}`;
+    const idx = base.indexOf('/api/');
+    return idx >= 0 ? base.slice(0, idx) : base;
+  }
+
+  private resolveUrl(path: string): string {
+    if (path.startsWith('http://') || path.startsWith('https://')) return path;
+    if (path.startsWith('/api/')) return `${this.apiOrigin()}${path}`;
+    const base = this.apiBase.replace(/\/+$/g, '');
+    return `${base}${path}`;
+  }
+
+  private async request<T>(
+    path: string,
+    init?: {
+      method?: 'GET' | 'POST';
+      body?: unknown;
+    },
+  ): Promise<T> {
+    const url = this.resolveUrl(path);
 
     const token = this.session.token ?? null;
     if (token === null || token === undefined || token === '') {
@@ -85,6 +191,8 @@ export class SchwabClient {
       'schwab-client-channel': 'IO',
       'schwab-client-correlid': uuidv4(),
       'schwab-env': 'PROD',
+      'schwab-environment': 'PROD',
+      'schwab-client-appid': 'AD00008376',
       'schwab-resource-version': '1',
       origin: 'https://client.schwab.com',
       referer: 'https://client.schwab.com/',
@@ -96,7 +204,15 @@ export class SchwabClient {
       headers.cookie = cookie;
     }
 
-    const resp = await fetch(url, { method: 'GET', headers });
+    const method = init?.method ?? 'GET';
+    const hasBody = init?.body !== undefined;
+    if (hasBody) headers['content-type'] = 'application/json';
+
+    const resp = await fetch(url, {
+      method,
+      headers,
+      body: hasBody ? JSON.stringify(init?.body) : undefined,
+    });
     const body = await resp.text();
     if (!resp.ok) {
       throw new Error(`API request failed (${resp.status}): ${body}`);
@@ -115,10 +231,52 @@ export class SchwabClient {
   }
 
   async getPositions(): Promise<PositionsResponse> {
-    // Schwab uses PascalCase keys; we keep that in types.
-    // The response root shape contains `SecurityGroupings`.
     const raw = await this.request<{ SecurityGroupings: SecurityGrouping[] }>('/AggregatedPositions');
     return { security_groupings: raw.SecurityGroupings ?? [] };
+  }
+
+  async getTransactionHistoryBrokerageAccounts(): Promise<TransactionHistoryBrokerageAccount[]> {
+    const raw = await this.request<TransactionHistoryInitResponse>(TRANSACTION_HISTORY_INIT_PATH);
+    return raw.accountSelectorData?.brokerageAccountList?.brokerageAccounts ?? [];
+  }
+
+  async getBrokerageTransactions(
+    accountId: string,
+    accountNickname: string,
+    timeFrame: TransactionHistoryTimeFrame,
+  ): Promise<BrokerageTransaction[]> {
+    const rows: BrokerageTransaction[] = [];
+    let bookmark: TransactionHistoryBookmark | null = null;
+
+    for (let page = 0; page < TRANSACTION_HISTORY_MAX_PAGES; page += 1) {
+      const req: BrokerageTransactionsRequest = {
+        accountNickname,
+        exportType: 'Csv',
+        includeOptionsInSearch: false,
+        isSpsLinkedUkAccount: false,
+        selectedAccountId: accountId,
+        selectedTransactionTypes: [...TRANSACTION_TYPES],
+        sortColumn: 'Date',
+        sortDirection: 'Descending',
+        symbol: '',
+        timeFrame,
+        bookmark,
+        shouldPaginate: true,
+      };
+
+      const resp = await this.request<BrokerageTransactionsResponse>(TRANSACTION_HISTORY_PATH, {
+        method: 'POST',
+        body: req,
+      });
+
+      rows.push(...(resp.brokerageTransactions ?? []));
+      bookmark = resp.bookmark ?? null;
+      if (bookmark === null) return rows;
+    }
+
+    throw new Error(
+      `Schwab transaction pagination exceeded ${String(TRANSACTION_HISTORY_MAX_PAGES)} pages`,
+    );
   }
 }
 
@@ -137,6 +295,19 @@ export function parseExportedSession(json: string): SessionData {
 export type SchwabTransactionsImportResult = {
   transactions: TransactionType[];
   skipped: number;
+};
+
+type ParsedTransactionRecord = {
+  dateRaw: string;
+  action: string | null;
+  symbol: string | null;
+  description: string | null;
+  quantity: string | null;
+  price: string | null;
+  feesComm: string | null;
+  amountRaw: string | null;
+  fingerprintExtras: Array<[string, string | null]>;
+  syncDataExtras: Record<string, unknown>;
 };
 
 function normalizeWs(s: string): string {
@@ -201,36 +372,24 @@ function getField(row: Record<string, unknown>, key: string): string | null {
   return JSON.stringify(v);
 }
 
-/**
- * Parse Schwab's "transaction history" JSON export into keepbook transactions.
- *
- * Notes:
- * - Only rows with a parseable `Amount` field are imported; others are skipped.
- * - Schwab exports often do not include a stable transaction id; IDs are generated deterministically
- *   from a fingerprint of the row contents plus a per-fingerprint occurrence counter.
- */
-export function parseSchwabExportedTransactionsJson(
-  accountId: Id,
-  json: string,
-): SchwabTransactionsImportResult {
-  const parsed = JSON.parse(json) as unknown;
-  if (!Array.isArray(parsed)) {
-    throw new Error('Expected Schwab export to be a JSON array');
-  }
+function valueOrNull(v: string | null | undefined): string | null {
+  if (v === null || v === undefined) return null;
+  const trimmed = v.trim();
+  return trimmed === '' ? null : trimmed;
+}
 
+function parseTransactionRecords(
+  accountId: Id,
+  records: ParsedTransactionRecord[],
+  source: string,
+  idPrefix: string,
+): SchwabTransactionsImportResult {
   const transactions: TransactionType[] = [];
   let skipped = 0;
   const seenCounts = new Map<string, number>();
 
-  for (const row of parsed) {
-    if (row === null || typeof row !== 'object' || Array.isArray(row)) {
-      skipped += 1;
-      continue;
-    }
-    const obj = row as Record<string, unknown>;
-
-    const dateRaw = getField(obj, 'Date') ?? '';
-    const dates = extractMmddyyyyDates(dateRaw);
+  for (const record of records) {
+    const dates = extractMmddyyyyDates(record.dateRaw);
     const primary = dates[0] ?? null;
     if (primary === null) {
       skipped += 1;
@@ -238,62 +397,62 @@ export function parseSchwabExportedTransactionsJson(
     }
     const asOf = dates[1] ?? null;
 
-    const action = getField(obj, 'Action');
-    const symbol = getField(obj, 'Symbol');
-    const description = getField(obj, 'Description');
-    const quantity = getField(obj, 'Quantity');
-    const price = getField(obj, 'Price');
-    const feesComm = getField(obj, 'Fees & Comm');
-    const amountRaw = getField(obj, 'Amount');
-
-    const amountNorm = amountRaw !== null ? normalizeAmount(amountRaw) : null;
+    const amountNorm = record.amountRaw !== null ? normalizeAmount(record.amountRaw) : null;
     if (amountNorm === null) {
       skipped += 1;
       continue;
     }
 
     const parts: string[] = [];
-    if (action !== null && normalizeWs(action) !== '') parts.push(normalizeWs(action));
-    if (symbol !== null && normalizeWs(symbol) !== '') parts.push(normalizeWs(symbol));
-    if (description !== null && normalizeWs(description) !== '') parts.push(normalizeWs(description));
+    if (record.action !== null && normalizeWs(record.action) !== '') parts.push(normalizeWs(record.action));
+    if (record.symbol !== null && normalizeWs(record.symbol) !== '') parts.push(normalizeWs(record.symbol));
+    if (record.description !== null && normalizeWs(record.description) !== '') {
+      parts.push(normalizeWs(record.description));
+    }
     const desc = parts.length === 0 ? 'Schwab transaction' : parts.join(' ');
 
     const dateIso = isoDate(primary);
     const asOfIso = asOf !== null ? isoDate(asOf) : null;
 
-    const fingerprint = [
+    const fingerprintParts = [
       `date=${dateIso}`,
       `asof=${asOfIso ?? ''}`,
-      `action=${action ? normalizeWs(action) : ''}`,
-      `symbol=${symbol ? normalizeWs(symbol) : ''}`,
-      `desc=${description ? normalizeWs(description) : ''}`,
-      `qty=${quantity ? normalizeWs(quantity) : ''}`,
-      `price=${price ? normalizeWs(price) : ''}`,
-      `fees=${feesComm ? normalizeWs(feesComm) : ''}`,
+      `action=${record.action ? normalizeWs(record.action) : ''}`,
+      `symbol=${record.symbol ? normalizeWs(record.symbol) : ''}`,
+      `desc=${record.description ? normalizeWs(record.description) : ''}`,
+      `qty=${record.quantity ? normalizeWs(record.quantity) : ''}`,
+      `price=${record.price ? normalizeWs(record.price) : ''}`,
+      `fees=${record.feesComm ? normalizeWs(record.feesComm) : ''}`,
       `amount=${amountNorm}`,
-    ].join('|');
+    ];
 
+    for (const [k, v] of record.fingerprintExtras) {
+      fingerprintParts.push(`${k}=${v ? normalizeWs(v) : ''}`);
+    }
+
+    const fingerprint = fingerprintParts.join('|');
     const next = (seenCounts.get(fingerprint) ?? 0) + 1;
     seenCounts.set(fingerprint, next);
 
-    const txId = Id.fromExternal(`schwab:export:${accountId.asStr()}:${fingerprint}:${next}`);
+    const txId = Id.fromExternal(`${idPrefix}:${accountId.asStr()}:${fingerprint}:${String(next)}`);
     const timestamp = new Date(Date.UTC(primary.y, primary.m - 1, primary.d, 0, 0, 0));
 
-    const syncData = {
-      source: 'schwab_export_json',
-      date_raw: dateRaw,
+    const syncData: Record<string, unknown> = {
+      source,
+      date_raw: record.dateRaw,
       date: dateIso,
       as_of_date: asOfIso,
-      action,
-      symbol,
-      description,
-      quantity,
-      price,
-      fees_comm: feesComm,
-      amount_raw: amountRaw,
+      action: record.action,
+      symbol: record.symbol,
+      description: record.description,
+      quantity: record.quantity,
+      price: record.price,
+      fees_comm: record.feesComm,
+      amount_raw: record.amountRaw,
       amount: amountNorm,
       fingerprint,
       occurrence: next,
+      ...record.syncDataExtras,
     };
 
     let tx = Transaction.new(amountNorm, Asset.currency('USD'), desc);
@@ -304,4 +463,103 @@ export function parseSchwabExportedTransactionsJson(
   }
 
   return { transactions, skipped };
+}
+
+/**
+ * Parse Schwab's "transaction history" JSON export into keepbook transactions.
+ */
+export function parseSchwabExportedTransactionsJson(
+  accountId: Id,
+  json: string,
+): SchwabTransactionsImportResult {
+  const parsed = JSON.parse(json) as unknown;
+  if (!Array.isArray(parsed)) {
+    throw new Error('Expected Schwab export to be a JSON array');
+  }
+
+  const records: ParsedTransactionRecord[] = [];
+  for (const row of parsed) {
+    if (row === null || typeof row !== 'object' || Array.isArray(row)) {
+      records.push({
+        dateRaw: '',
+        action: null,
+        symbol: null,
+        description: null,
+        quantity: null,
+        price: null,
+        feesComm: null,
+        amountRaw: null,
+        fingerprintExtras: [],
+        syncDataExtras: {},
+      });
+      continue;
+    }
+
+    const obj = row as Record<string, unknown>;
+    records.push({
+      dateRaw: getField(obj, 'Date') ?? '',
+      action: getField(obj, 'Action'),
+      symbol: getField(obj, 'Symbol'),
+      description: getField(obj, 'Description'),
+      quantity: getField(obj, 'Quantity'),
+      price: getField(obj, 'Price'),
+      feesComm: getField(obj, 'Fees & Comm'),
+      amountRaw: getField(obj, 'Amount'),
+      fingerprintExtras: [],
+      syncDataExtras: {},
+    });
+  }
+
+  return parseTransactionRecords(accountId, records, 'schwab_export_json', 'schwab:export');
+}
+
+/**
+ * Parse Schwab brokerage transaction-history API rows into keepbook transactions.
+ */
+export function parseSchwabBrokerageTransactions(
+  accountId: Id,
+  rows: BrokerageTransaction[],
+): SchwabTransactionsImportResult {
+  const records: ParsedTransactionRecord[] = rows.map((row) => {
+    const sourceCode = valueOrNull(row.sourceCode);
+    const effectiveDate = valueOrNull(row.effectiveDate);
+    const depositSequenceId = valueOrNull(row.depositSequenceId);
+    const checkDate = valueOrNull(row.checkDate);
+    const itemIssueId = valueOrNull(row.itemIssueId);
+    const schwabOrderId = valueOrNull(row.schwabOrderId);
+
+    return {
+      dateRaw: row.transactionDate,
+      action: valueOrNull(row.action),
+      symbol: valueOrNull(row.symbol),
+      description: valueOrNull(row.description),
+      quantity: valueOrNull(row.shareQuantity),
+      price: valueOrNull(row.executionPrice),
+      feesComm: valueOrNull(row.feesAndCommission),
+      amountRaw: valueOrNull(row.amount),
+      fingerprintExtras: [
+        ['source_code', sourceCode],
+        ['effective_date', effectiveDate],
+        ['deposit_sequence_id', depositSequenceId],
+        ['check_date', checkDate],
+        ['item_issue_id', itemIssueId],
+        ['schwab_order_id', schwabOrderId],
+      ],
+      syncDataExtras: {
+        source_code: sourceCode,
+        effective_date: effectiveDate,
+        deposit_sequence_id: depositSequenceId,
+        check_date: checkDate,
+        item_issue_id: itemIssueId,
+        schwab_order_id: schwabOrderId,
+      },
+    };
+  });
+
+  return parseTransactionRecords(
+    accountId,
+    records,
+    'schwab_transaction_history_api',
+    'schwab:history',
+  );
 }

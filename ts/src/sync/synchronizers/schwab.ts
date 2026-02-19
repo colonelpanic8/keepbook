@@ -7,11 +7,28 @@ import type { ConnectionType } from '../../models/connection.js';
 import { AssetId } from '../../market-data/asset-id.js';
 import type { PricePoint } from '../../market-data/models.js';
 import { SessionCache, type SessionData } from '../../credentials/session.js';
-import { SchwabClient, type Position, type SchwabAccount } from '../schwab.js';
-import type { SyncResult, SyncedAssetBalance, Synchronizer } from '../mod.js';
+import {
+  parseSchwabBrokerageTransactions,
+  SchwabClient,
+  type Position,
+  type TransactionHistoryTimeFrame,
+} from '../schwab.js';
+import {
+  DefaultSyncOptions,
+  type SyncOptions,
+  type SyncResult,
+  type SyncedAssetBalance,
+  type Synchronizer,
+  type TransactionSyncMode,
+} from '../mod.js';
 
 function todayUtc(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+function transactionTimeFrame(mode: TransactionSyncMode, existingCount: number): TransactionHistoryTimeFrame {
+  if (mode === 'full') return 'All';
+  return existingCount === 0 ? 'All' : 'Last6Months';
 }
 
 export class SchwabSynchronizer implements Synchronizer {
@@ -36,6 +53,14 @@ export class SchwabSynchronizer implements Synchronizer {
   }
 
   async sync(connection: ConnectionType, storage: Storage): Promise<SyncResult> {
+    return this.syncWithOptions(connection, storage, DefaultSyncOptions);
+  }
+
+  async syncWithOptions(
+    connection: ConnectionType,
+    storage: Storage,
+    options: SyncOptions,
+  ): Promise<SyncResult> {
     const session = this.getSession();
     if (session === null) {
       throw new Error('No session found. Run login first.');
@@ -52,13 +77,28 @@ export class SchwabSynchronizer implements Synchronizer {
     const client = new SchwabClient(session);
     const accountsResp = await client.getAccounts();
     const positionsResp = await client.getPositions();
+    const historyAccounts = await client
+      .getTransactionHistoryBrokerageAccounts()
+      .catch((_err) => [] as Array<{ id: string; nickName?: string }>);
     const allPositions: Position[] = positionsResp.security_groupings.flatMap((g) => g.Positions ?? []);
+    const historyAccountIdsByName = new Map<string, string>();
+    for (const acct of historyAccounts) {
+      const id = acct.id.trim();
+      if (id === '') continue;
+      const key = (acct.nickName ?? '').trim().toLowerCase();
+      if (key !== '') historyAccountIdsByName.set(key, id);
+    }
+    const loneHistoryAccountId =
+      historyAccounts.length === 1 && historyAccounts[0].id.trim() !== ''
+        ? historyAccounts[0].id.trim()
+        : null;
 
     const now = new Date();
     const asOfDate = todayUtc();
 
     const accounts: AccountType[] = [];
     const balances: Array<[Id, SyncedAssetBalance[]]> = [];
+    const transactions: Array<[Id, ReturnType<typeof parseSchwabBrokerageTransactions>['transactions']]> = [];
 
     for (const schwabAccount of accountsResp.accounts) {
       const accountId = Id.fromExternal(schwabAccount.AccountId);
@@ -99,6 +139,18 @@ export class SchwabSynchronizer implements Synchronizer {
             asset_balance: AssetBalance.new(Asset.currency('USD'), cash.toString()),
           });
         }
+
+        const existingTxns = await storage.getTransactions(accountId);
+        const timeFrame = transactionTimeFrame(options.transactions, existingTxns.length);
+        const txAccountId =
+          historyAccountIdsByName.get(name.trim().toLowerCase()) ??
+          loneHistoryAccountId ??
+          schwabAccount.AccountId;
+        const historyRows = await client.getBrokerageTransactions(txAccountId, name, timeFrame);
+        const parsed = parseSchwabBrokerageTransactions(accountId, historyRows);
+        if (parsed.transactions.length > 0) {
+          transactions.push([accountId, parsed.transactions]);
+        }
       } else {
         const bal = schwabAccount.Balances?.Balance;
         if (bal !== undefined) {
@@ -130,8 +182,7 @@ export class SchwabSynchronizer implements Synchronizer {
       connection: updatedConnection,
       accounts,
       balances,
-      transactions: [],
+      transactions,
     };
   }
 }
-

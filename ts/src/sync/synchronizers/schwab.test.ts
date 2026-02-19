@@ -22,9 +22,11 @@ describe('SchwabSynchronizer (TypeScript)', () => {
   let server: http.Server;
   let baseUrl: string;
   let tmpDir: string;
+  let txRequestBodies: unknown[];
 
   beforeEach(async () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'keepbook-schwab-test-'));
+    txRequestBodies = [];
 
     const started = await startServer((req, res) => {
       const url = req.url ?? '';
@@ -117,6 +119,79 @@ describe('SchwabSynchronizer (TypeScript)', () => {
         return;
       }
 
+      if (
+        req.method === 'POST' &&
+        url === '/api/is.TransactionHistoryWeb/TransactionHistoryInterface/TransactionHistory/brokerage/transactions'
+      ) {
+        const chunks: Buffer[] = [];
+        req.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+        req.on('end', () => {
+          const parsed = JSON.parse(Buffer.concat(chunks).toString() || '{}') as {
+            bookmark?: unknown;
+          };
+          txRequestBodies.push(parsed);
+
+          if ((parsed.bookmark ?? null) === null) {
+            res.end(
+              JSON.stringify({
+                bookmark: {
+                  fromKey: { primarySortCode: null, primarySortValue: '' },
+                  fromExecutionDate: '2022-12-21T00:00:00',
+                  fromPublTimeStamp: '2022-12-21 13:27:00.423163',
+                  fromSecondarySortCode: '4',
+                  fromSecondarySortValue: 'FG',
+                  fromTertiarySortValue: '0.00000',
+                },
+                brokerageTransactions: [
+                  {
+                    transactionDate: '02/10/2026',
+                    action: 'Buy',
+                    symbol: 'AAPL',
+                    description: 'APPLE INC',
+                    shareQuantity: '2',
+                    executionPrice: '$100.25',
+                    feesAndCommission: '',
+                    amount: '-$200.50',
+                    sourceCode: '',
+                    effectiveDate: '02/10/2026',
+                    depositSequenceId: '0',
+                    checkDate: '02/11/2026',
+                    itemIssueId: 'row-1',
+                    schwabOrderId: 'order-1',
+                  },
+                ],
+              }),
+            );
+            return;
+          }
+
+          res.end(
+            JSON.stringify({
+              bookmark: null,
+              brokerageTransactions: [
+                {
+                  transactionDate: '01/13/2026 as of 12/31/2025',
+                  action: 'Cash In Lieu',
+                  symbol: 'FG',
+                  description: 'F&G ANNUITIES & LIFE INC',
+                  shareQuantity: '',
+                  executionPrice: '',
+                  feesAndCommission: '',
+                  amount: '$9.05',
+                  sourceCode: 'CIL',
+                  effectiveDate: '12/31/2025',
+                  depositSequenceId: '1',
+                  checkDate: '01/13/2026',
+                  itemIssueId: 'row-2',
+                  schwabOrderId: '0',
+                },
+              ],
+            }),
+          );
+        });
+        return;
+      }
+
       res.statusCode = 404;
       res.end(JSON.stringify({ error: 'not found' }));
     });
@@ -160,6 +235,19 @@ describe('SchwabSynchronizer (TypeScript)', () => {
     const checkingBalances = result.balances.find(([id]) => id.equals(checking!.id))?.[1] ?? [];
     expect(checkingBalances).toHaveLength(1);
     expect((checkingBalances[0].asset_balance.asset as { type: string }).type).toBe('currency');
+
+    // Brokerage transactions are fetched via paginated history endpoint.
+    expect(result.transactions).toHaveLength(1);
+    const [txAccountId, txns] = result.transactions[0];
+    expect(txAccountId.equals(brokerage!.id)).toBe(true);
+    expect(txns).toHaveLength(2);
+    expect(txns[0].amount).toBe('-200.50');
+    expect(txns[1].amount).toBe('9.05');
+
+    expect(txRequestBodies).toHaveLength(2);
+    expect((txRequestBodies[0] as { timeFrame?: string }).timeFrame).toBe('All');
+    expect((txRequestBodies[0] as { bookmark?: unknown }).bookmark).toBeNull();
+    expect((txRequestBodies[1] as { bookmark?: unknown }).bookmark).not.toBeNull();
   });
 
   it('fails fast when session is missing', async () => {
@@ -171,4 +259,3 @@ describe('SchwabSynchronizer (TypeScript)', () => {
     await expect(syncer.sync(conn, storage)).rejects.toThrow(/No session found/);
   });
 });
-
