@@ -510,18 +510,43 @@ fn local_now_plus(duration: Duration) -> DateTime<Local> {
     }
 }
 
-fn format_tray_currency(value: &str, display: &keepbook::config::DisplayConfig) -> String {
+fn default_currency_symbol(currency: &str) -> Option<&'static str> {
+    match currency.to_ascii_uppercase().as_str() {
+        "USD" => Some("$"),
+        "EUR" => Some("€"),
+        "GBP" => Some("£"),
+        "JPY" => Some("¥"),
+        _ => None,
+    }
+}
+
+fn format_tray_currency(
+    value: &str,
+    currency: &str,
+    display: &keepbook::config::DisplayConfig,
+) -> String {
     // The tray is a UI surface: default to sane currency rounding even when the
     // global config doesn't set `display.currency_decimals`.
     let dp = display.currency_decimals.or(Some(2));
+    let symbol = display
+        .currency_symbol
+        .as_deref()
+        .or_else(|| default_currency_symbol(currency));
     match Decimal::from_str(value) {
-        Ok(d) => format_base_currency_display(
-            d,
-            dp,
-            display.currency_grouping,
-            display.currency_symbol.as_deref(),
-            display.currency_fixed_decimals,
-        ),
+        Ok(d) => {
+            let formatted = format_base_currency_display(
+                d,
+                dp,
+                display.currency_grouping,
+                symbol,
+                display.currency_fixed_decimals,
+            );
+            if symbol.is_some() {
+                formatted
+            } else {
+                format!("{formatted} {currency}")
+            }
+        }
         Err(_) => value.to_string(),
     }
 }
@@ -590,15 +615,16 @@ impl Daemon {
 
         match app::spending_report(self.storage.as_ref(), &self.config, opts).await {
             Ok(report) => {
-                let value = format_tray_currency(&report.total, &self.config.display);
+                let value =
+                    format_tray_currency(&report.total, &report.currency, &self.config.display);
                 let tx_label = if report.transaction_count == 1 {
                     "txn"
                 } else {
                     "txns"
                 };
                 format!(
-                    "Last {days}d: {} {} ({} {})",
-                    value, report.currency, report.transaction_count, tx_label
+                    "Last {days}d: {} ({} {})",
+                    value, report.transaction_count, tx_label
                 )
             }
             Err(err) => {
@@ -639,8 +665,12 @@ impl Daemon {
                     .rev()
                     .take(self.history_points)
                     .map(|point| {
-                        let value = format_tray_currency(&point.total_value, &self.config.display);
-                        format!("{}: {} {}", point.date, value, history.currency)
+                        let value = format_tray_currency(
+                            &point.total_value,
+                            &history.currency,
+                            &self.config.display,
+                        );
+                        format!("{}: {}", point.date, value)
                     })
                     .collect();
 
@@ -898,5 +928,19 @@ mod tests {
         assert_eq!(counts.skipped_manual, 1);
         assert_eq!(counts.skipped_not_stale, 1);
         assert_eq!(counts.failed, 1);
+    }
+
+    #[test]
+    fn format_tray_currency_uses_usd_symbol_by_default() {
+        let display = keepbook::config::DisplayConfig::default();
+        let formatted = format_tray_currency("1234.5", "USD", &display);
+        assert_eq!(formatted, "$1234.5");
+    }
+
+    #[test]
+    fn format_tray_currency_appends_unknown_currency_code() {
+        let display = keepbook::config::DisplayConfig::default();
+        let formatted = format_tray_currency("1234.5", "CHF", &display);
+        assert_eq!(formatted, "1234.5 CHF");
     }
 }
