@@ -8,7 +8,7 @@ use crate::market_data::{MarketDataServiceBuilder, PriceSourceRegistry};
 use crate::models::{Id, TransactionAnnotation};
 use crate::storage::Storage;
 
-use super::value::value_in_reporting_currency;
+use super::value::value_in_reporting_currency_best_effort;
 use super::{
     AccountOutput, AllOutput, BalanceOutput, ConnectionOutput, PriceSourceOutput,
     TransactionAnnotationOutput, TransactionOutput,
@@ -134,7 +134,7 @@ pub async fn list_balances(
         for account_id in &account_ids {
             if let Some(snapshot) = storage.get_latest_balance_snapshot(account_id).await? {
                 for balance in snapshot.balances {
-                    let value_in_reporting_currency = value_in_reporting_currency(
+                    let value_in_reporting_currency = value_in_reporting_currency_best_effort(
                         &market_data,
                         &balance.asset,
                         &balance.amount,

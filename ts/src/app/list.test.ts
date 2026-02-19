@@ -434,6 +434,38 @@ describe('listBalances', () => {
     expect(result[0].value_in_reporting_currency).toBe('250');
   });
 
+  it('uses same-day quote as fallback when close is missing', async () => {
+    const storage = new MemoryStorage();
+    const marketDataStore = new MemoryMarketDataStore();
+    const clock = makeClock('2024-06-01T12:00:00Z');
+    await createConnection(storage, 'conn-1');
+
+    const idGen = makeIdGen('acct-1');
+    const acct = Account.newWithGenerator(idGen, clock, 'Brokerage', Id.fromString('conn-1'));
+    await storage.saveAccount(acct);
+
+    const snapshot = BalanceSnapshot.new(new Date('2024-07-01T10:00:00Z'), [
+      AssetBalance.new(Asset.equity('AAPL'), '2.500'),
+    ]);
+    await storage.appendBalanceSnapshot(acct.id, snapshot);
+
+    await marketDataStore.put_prices([
+      {
+        asset_id: AssetId.fromAsset(Asset.equity('AAPL')),
+        as_of_date: '2024-07-01',
+        timestamp: new Date('2024-07-01T14:00:00Z'),
+        price: '101.00',
+        quote_currency: 'USD',
+        kind: 'quote',
+        source: 'test',
+      },
+    ]);
+
+    const result = await listBalances(storage, makeConfig(), marketDataStore);
+    expect(result).toHaveLength(1);
+    expect(result[0].value_in_reporting_currency).toBe('252.5');
+  });
+
   it('preserves raw timestamp precision and Rust key order for asset JSON', async () => {
     const dir = await makeTempDir('keepbook-list-balances-raw');
     const connectionId = 'conn-1';

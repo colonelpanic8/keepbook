@@ -10,13 +10,14 @@ export type ValueInReportingCurrencyResult = {
   missing: MissingMarketData | null;
 };
 
-export async function valueInReportingCurrencyDetailed(
+async function valueInReportingCurrencyDetailedWithOptions(
   marketData: MarketDataService,
   asset: AssetType,
   amount: string,
   reportingCurrency: string,
   asOfDate: string,
   currencyDecimals: number | undefined,
+  allowQuoteFallback: boolean,
 ): Promise<ValueInReportingCurrencyResult> {
   const amountValue = new Decimal(amount);
   const reporting = reportingCurrency.trim().toUpperCase();
@@ -35,7 +36,7 @@ export async function valueInReportingCurrencyDetailed(
     };
   }
 
-  const price = await marketData.priceFromStore(normalized, asOfDate);
+  const price = await marketData.valuationPriceFromStore(normalized, asOfDate, allowQuoteFallback);
   if (price === null) return { value: null, missing: 'price' };
 
   const valueInQuote = amountValue.times(new Decimal(price.price));
@@ -51,6 +52,44 @@ export async function valueInReportingCurrencyDetailed(
   };
 }
 
+export async function valueInReportingCurrencyDetailed(
+  marketData: MarketDataService,
+  asset: AssetType,
+  amount: string,
+  reportingCurrency: string,
+  asOfDate: string,
+  currencyDecimals: number | undefined,
+): Promise<ValueInReportingCurrencyResult> {
+  return valueInReportingCurrencyDetailedWithOptions(
+    marketData,
+    asset,
+    amount,
+    reportingCurrency,
+    asOfDate,
+    currencyDecimals,
+    false,
+  );
+}
+
+export async function valueInReportingCurrencyDetailedBestEffort(
+  marketData: MarketDataService,
+  asset: AssetType,
+  amount: string,
+  reportingCurrency: string,
+  asOfDate: string,
+  currencyDecimals: number | undefined,
+): Promise<ValueInReportingCurrencyResult> {
+  return valueInReportingCurrencyDetailedWithOptions(
+    marketData,
+    asset,
+    amount,
+    reportingCurrency,
+    asOfDate,
+    currencyDecimals,
+    true,
+  );
+}
+
 export async function valueInReportingCurrency(
   marketData: MarketDataService,
   asset: AssetType,
@@ -60,6 +99,25 @@ export async function valueInReportingCurrency(
   currencyDecimals: number | undefined,
 ): Promise<string | null> {
   const res = await valueInReportingCurrencyDetailed(
+    marketData,
+    asset,
+    amount,
+    reportingCurrency,
+    asOfDate,
+    currencyDecimals,
+  );
+  return res.value;
+}
+
+export async function valueInReportingCurrencyBestEffort(
+  marketData: MarketDataService,
+  asset: AssetType,
+  amount: string,
+  reportingCurrency: string,
+  asOfDate: string,
+  currencyDecimals: number | undefined,
+): Promise<string | null> {
+  const res = await valueInReportingCurrencyDetailedBestEffort(
     marketData,
     asset,
     amount,

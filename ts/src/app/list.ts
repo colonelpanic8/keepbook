@@ -27,7 +27,7 @@ import {
   isEmptyTransactionAnnotation,
   type TransactionAnnotationType,
 } from '../models/transaction-annotation.js';
-import { valueInReportingCurrency } from './value.js';
+import { valueInReportingCurrencyBestEffort } from './value.js';
 import {
   type ConnectionOutput,
   type AccountOutput,
@@ -200,7 +200,8 @@ export async function listAccounts(storage: Storage): Promise<AccountOutput[]> {
  *
  * `value_in_reporting_currency` mirrors Rust behavior:
  * - same-currency amounts are normalized and returned
- * - equities/crypto use cached close prices (and FX when needed)
+ * - equities/crypto use cached close prices and may fall back to same-day quotes
+ *   when close is missing (and FX when needed)
  * - missing price/FX data returns `null`
  */
 export async function listBalances(
@@ -228,7 +229,7 @@ export async function listBalances(
 
       const asOfDate = formatDateYMD(snapshot.timestamp);
       for (const balance of snapshot.balances) {
-        const valueInReportingCurrencyValue = await valueInReportingCurrency(
+        const valueInReportingCurrencyValue = await valueInReportingCurrencyBestEffort(
           marketData,
           balance.asset,
           balance.amount,

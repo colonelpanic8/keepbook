@@ -103,6 +103,31 @@ impl MarketDataService {
         Ok(None)
     }
 
+    /// Get a valuation price from store only, no external fetching.
+    ///
+    /// - First tries close prices with lookback (`price_from_store`)
+    /// - If none found and `allow_quote_fallback` is true, tries same-day quote
+    pub async fn valuation_price_from_store(
+        &self,
+        asset: &Asset,
+        date: NaiveDate,
+        allow_quote_fallback: bool,
+    ) -> Result<Option<PricePoint>> {
+        if let Some(close) = self.price_from_store(asset, date).await? {
+            return Ok(Some(close));
+        }
+
+        if !allow_quote_fallback {
+            return Ok(None);
+        }
+
+        let asset = asset.normalized();
+        let asset_id = AssetId::from_asset(&asset);
+        self.store
+            .get_price(&asset_id, date, PriceKind::Quote)
+            .await
+    }
+
     pub async fn price_close(&self, asset: &Asset, date: NaiveDate) -> Result<PricePoint> {
         let asset = asset.normalized();
         let asset_id = AssetId::from_asset(&asset);

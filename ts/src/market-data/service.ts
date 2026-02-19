@@ -102,6 +102,31 @@ export class MarketDataService {
   }
 
   /**
+   * Get a valuation price from store only, no external fetching.
+   *
+   * - First tries close prices with lookback (`priceFromStore`)
+   * - If none found and `allowQuoteFallback` is true, tries same-day quote
+   */
+  async valuationPriceFromStore(
+    asset: AssetType,
+    date: string,
+    allowQuoteFallback: boolean,
+  ): Promise<PricePoint | null> {
+    const close = await this.priceFromStore(asset, date);
+    if (close !== null) {
+      return close;
+    }
+
+    if (!allowQuoteFallback) {
+      return null;
+    }
+
+    const normalized = Asset.normalized(asset);
+    const assetId = AssetId.fromAsset(normalized);
+    return this.store.get_price(assetId, date, 'quote');
+  }
+
+  /**
    * Get FX rate from store only, no external fetching.
    * Searches with lookback. Returns null if not found.
    */
