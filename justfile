@@ -21,3 +21,9 @@ history-daily-balance *args:
 # Portfolio history distilled to tab-separated date/balance rows.
 history-daily-balance-tsv *args:
     {{keepbook_cmd}} portfolio history --granularity daily {{args}} | jq -r '.points[] | "\(.date)\t\(.total_value)"'
+
+# Portfolio snapshot distilled to total and per-account base-currency totals.
+# Extra snapshot args can be passed through, e.g.:
+#   just snapshot-account-totals --date 2026-02-01
+snapshot-account-totals *args:
+    {{keepbook_cmd}} portfolio snapshot {{args}} --group-by account | jq '{currency, total_value_in_base_currency: .total_value, accounts_to_total_value_in_base_currency: ((.by_account // []) | map({key: "\(.connection_name)/\(.account_name)", value: (.value_in_base // null)}) | from_entries)}'
