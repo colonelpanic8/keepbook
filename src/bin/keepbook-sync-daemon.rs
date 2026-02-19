@@ -98,9 +98,9 @@ struct Cli {
     #[arg(long, value_name = "DURATION", value_parser = parse_duration_arg)]
     price_staleness: Option<Duration>,
 
-    /// Number of recent portfolio history points shown in tray menu.
-    #[arg(long, default_value_t = 8)]
-    history_points: usize,
+    /// Number of recent portfolio history points shown in tray menu (overrides `[tray].history_points`).
+    #[arg(long, value_name = "COUNT")]
+    history_points: Option<usize>,
 
     /// Skip the immediate startup sync cycle.
     #[arg(long)]
@@ -567,6 +567,7 @@ struct Daemon {
     sync_prices: bool,
     sync_symlinks: bool,
     history_points: usize,
+    spending_windows_days: Vec<u32>,
 }
 
 impl Daemon {
@@ -623,9 +624,15 @@ impl Daemon {
     }
 
     async fn refresh_spending_lines(&self, state: &mut KeepbookTrayState) {
-        let mut lines = Vec::with_capacity(3);
-        for days in [7_u32, 30, 90] {
-            lines.push(self.spending_line_for_days(days).await);
+        let mut lines = Vec::with_capacity(self.spending_windows_days.len().max(1));
+        for days in &self.spending_windows_days {
+            if *days == 0 {
+                continue;
+            }
+            lines.push(self.spending_line_for_days(*days).await);
+        }
+        if lines.is_empty() {
+            lines.push("No spending windows configured".to_string());
         }
         state.spending_lines = lines;
     }
@@ -854,6 +861,8 @@ async fn main() -> Result<()> {
 
     let storage_impl = JsonFileStorage::new(&config.data_dir);
     let storage: Arc<dyn Storage> = Arc::new(storage_impl.clone());
+    let history_points = cli.history_points.unwrap_or(config.tray.history_points);
+    let spending_windows_days = config.tray.spending_windows_days.clone();
 
     let daemon = Daemon {
         storage,
@@ -864,7 +873,8 @@ async fn main() -> Result<()> {
         sync_on_start: !cli.no_sync_on_start,
         sync_prices: !cli.no_sync_prices,
         sync_symlinks: !cli.no_sync_symlinks,
-        history_points: cli.history_points,
+        history_points,
+        spending_windows_days,
     };
 
     daemon.run().await

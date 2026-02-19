@@ -1078,7 +1078,7 @@ mod tests {
     use super::*;
     use crate::app::*;
     use crate::clock::{Clock, FixedClock};
-    use crate::config::{DisplayConfig, GitConfig, RefreshConfig, ResolvedConfig};
+    use crate::config::{DisplayConfig, GitConfig, RefreshConfig, ResolvedConfig, TrayConfig};
     use crate::models::FixedIdGenerator;
     use crate::models::{Account, AssetBalance, BalanceSnapshot, Connection, ConnectionConfig};
     use crate::storage::JsonFileStorage;
@@ -1145,6 +1145,7 @@ mod tests {
             reporting_currency: "USD".to_string(),
             display: DisplayConfig::default(),
             refresh: RefreshConfig::default(),
+            tray: TrayConfig::default(),
             git: GitConfig::default(),
         };
 
@@ -1317,6 +1318,7 @@ mod tests {
             reporting_currency: "USD".to_string(),
             display: DisplayConfig::default(),
             refresh: RefreshConfig::default(),
+            tray: TrayConfig::default(),
             git: GitConfig::default(),
         };
 
@@ -1339,6 +1341,7 @@ mod tests {
             reporting_currency: "USD".to_string(),
             display: DisplayConfig::default(),
             refresh: RefreshConfig::default(),
+            tray: TrayConfig::default(),
             git: GitConfig::default(),
         };
 
@@ -1386,6 +1389,7 @@ mod tests {
             reporting_currency: "USD".to_string(),
             display: DisplayConfig::default(),
             refresh: RefreshConfig::default(),
+            tray: TrayConfig::default(),
             git: GitConfig::default(),
         };
 
@@ -1417,6 +1421,7 @@ mod tests {
             reporting_currency: "USD".to_string(),
             display: DisplayConfig::default(),
             refresh: RefreshConfig::default(),
+            tray: TrayConfig::default(),
             git: GitConfig::default(),
         };
 

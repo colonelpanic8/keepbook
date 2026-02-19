@@ -734,6 +734,7 @@ mod tests {
             reporting_currency: "USD".to_string(),
             display: crate::config::DisplayConfig::default(),
             refresh: crate::config::RefreshConfig::default(),
+            tray: crate::config::TrayConfig::default(),
             git: crate::config::GitConfig::default(),
         };
 
@@ -832,6 +833,7 @@ mod tests {
             reporting_currency: "USD".to_string(),
             display: crate::config::DisplayConfig::default(),
             refresh: crate::config::RefreshConfig::default(),
+            tray: crate::config::TrayConfig::default(),
             git: crate::config::GitConfig::default(),
         };
 

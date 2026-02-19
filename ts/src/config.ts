@@ -52,6 +52,13 @@ export interface DisplayConfig {
   currency_fixed_decimals?: boolean;
 }
 
+export interface TrayConfig {
+  /** Number of recent portfolio history points shown in tray menu. */
+  history_points: number;
+  /** Spending lookback windows (days) shown in tray menu. */
+  spending_windows_days: number[];
+}
+
 export interface Config {
   /** Optional path to the data directory. */
   data_dir?: string;
@@ -61,6 +68,8 @@ export interface Config {
   display: DisplayConfig;
   /** Refresh / staleness settings. */
   refresh: RefreshConfig;
+  /** Tray UI settings. */
+  tray: TrayConfig;
   /** Git integration settings. */
   git: GitConfig;
 }
@@ -74,6 +83,8 @@ export interface ResolvedConfig {
   display: DisplayConfig;
   /** Refresh / staleness settings. */
   refresh: RefreshConfig;
+  /** Tray UI settings. */
+  tray: TrayConfig;
   /** Git integration settings. */
   git: GitConfig;
 }
@@ -96,11 +107,17 @@ export const DEFAULT_GIT_CONFIG: GitConfig = {
   merge_master_before_command: false,
 };
 
+export const DEFAULT_TRAY_CONFIG: TrayConfig = {
+  history_points: 8,
+  spending_windows_days: [7, 30, 90],
+};
+
 export const DEFAULT_CONFIG: Config = {
   data_dir: undefined,
   reporting_currency: 'USD',
   display: {},
   refresh: { ...DEFAULT_REFRESH_CONFIG },
+  tray: { ...DEFAULT_TRAY_CONFIG, spending_windows_days: [...DEFAULT_TRAY_CONFIG.spending_windows_days] },
   git: { ...DEFAULT_GIT_CONFIG },
 };
 
@@ -121,6 +138,7 @@ export function parseConfig(tomlStr: string): Config {
     tomlStr.trim().length === 0 ? {} : (toml.parse(tomlStr) as Record<string, unknown>);
 
   const refreshRaw = (raw.refresh ?? {}) as Record<string, unknown>;
+  const trayRaw = (raw.tray ?? {}) as Record<string, unknown>;
   const gitRaw = (raw.git ?? {}) as Record<string, unknown>;
   const displayRaw = (raw.display ?? {}) as Record<string, unknown>;
 
@@ -146,6 +164,24 @@ export function parseConfig(tomlStr: string): Config {
         : DEFAULT_GIT_CONFIG.merge_master_before_command,
   };
 
+  const tray: TrayConfig = {
+    history_points:
+      typeof trayRaw.history_points === 'number' &&
+      Number.isInteger(trayRaw.history_points) &&
+      trayRaw.history_points >= 0
+        ? trayRaw.history_points
+        : DEFAULT_TRAY_CONFIG.history_points,
+    spending_windows_days: [...DEFAULT_TRAY_CONFIG.spending_windows_days],
+  };
+  if (Array.isArray(trayRaw.spending_windows_days)) {
+    tray.spending_windows_days = trayRaw.spending_windows_days
+      .filter(
+        (v): v is number =>
+          typeof v === 'number' && Number.isInteger(v) && Number.isFinite(v) && v >= 0,
+      )
+      .map((v) => v);
+  }
+
   const config: Config = {
     reporting_currency:
       typeof raw.reporting_currency === 'string'
@@ -153,6 +189,7 @@ export function parseConfig(tomlStr: string): Config {
         : DEFAULT_CONFIG.reporting_currency,
     display: {},
     refresh,
+    tray,
     git,
   };
 

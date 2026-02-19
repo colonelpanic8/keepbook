@@ -48,6 +48,26 @@ impl Default for DisplayConfig {
     }
 }
 
+/// Tray UI configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TrayConfig {
+    /// Number of recent portfolio history points shown in tray menu.
+    pub history_points: usize,
+
+    /// Spending lookback windows (days) shown in tray menu.
+    pub spending_windows_days: Vec<u32>,
+}
+
+impl Default for TrayConfig {
+    fn default() -> Self {
+        Self {
+            history_points: 8,
+            spending_windows_days: vec![7, 30, 90],
+        }
+    }
+}
+
 /// Default balance staleness (14 days).
 fn default_balance_staleness() -> std::time::Duration {
     std::time::Duration::from_secs(14 * 24 * 60 * 60)
@@ -130,6 +150,10 @@ pub struct Config {
     #[serde(default)]
     pub refresh: RefreshConfig,
 
+    /// Tray UI settings.
+    #[serde(default)]
+    pub tray: TrayConfig,
+
     /// Git-related settings.
     #[serde(default)]
     pub git: GitConfig,
@@ -142,6 +166,7 @@ impl Default for Config {
             reporting_currency: default_reporting_currency(),
             display: DisplayConfig::default(),
             refresh: RefreshConfig::default(),
+            tray: TrayConfig::default(),
             git: GitConfig::default(),
         }
     }
@@ -196,6 +221,9 @@ pub struct ResolvedConfig {
     /// Refresh/staleness settings.
     pub refresh: RefreshConfig,
 
+    /// Tray UI settings.
+    pub tray: TrayConfig,
+
     /// Git-related settings.
     pub git: GitConfig,
 }
@@ -241,6 +269,7 @@ impl ResolvedConfig {
             reporting_currency: config.reporting_currency,
             display: config.display,
             refresh: config.refresh,
+            tray: config.tray,
             git: config.git,
         })
     }
@@ -272,6 +301,7 @@ impl ResolvedConfig {
                 reporting_currency: default_reporting_currency(),
                 display: DisplayConfig::default(),
                 refresh: RefreshConfig::default(),
+                tray: TrayConfig::default(),
                 git: GitConfig::default(),
             })
         }
@@ -441,6 +471,23 @@ mod tests {
     }
 
     #[test]
+    fn test_load_tray_config() -> Result<()> {
+        let dir = TempDir::new()?;
+        let config_path = dir.path().join("keepbook.toml");
+
+        let mut file = std::fs::File::create(&config_path)?;
+        writeln!(file, "[tray]")?;
+        writeln!(file, "history_points = 5")?;
+        writeln!(file, "spending_windows_days = [3, 14, 60]")?;
+
+        let config = Config::load(&config_path)?;
+        assert_eq!(config.tray.history_points, 5);
+        assert_eq!(config.tray.spending_windows_days, vec![3, 14, 60]);
+
+        Ok(())
+    }
+
+    #[test]
     fn test_default_refresh_config() {
         let config = Config::default();
         assert_eq!(
@@ -459,6 +506,13 @@ mod tests {
         assert!(!config.git.auto_commit);
         assert!(!config.git.auto_push);
         assert!(!config.git.merge_master_before_command);
+    }
+
+    #[test]
+    fn test_default_tray_config() {
+        let config = Config::default();
+        assert_eq!(config.tray.history_points, 8);
+        assert_eq!(config.tray.spending_windows_days, vec![7, 30, 90]);
     }
 
     #[test]

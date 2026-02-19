@@ -18,6 +18,7 @@ import {
   DEFAULT_CONFIG,
   DEFAULT_GIT_CONFIG,
   DEFAULT_REFRESH_CONFIG,
+  DEFAULT_TRAY_CONFIG,
 } from '../config.js';
 
 // ---------------------------------------------------------------------------
@@ -77,6 +78,7 @@ export async function loadConfig(
       reporting_currency: parsed.reporting_currency,
       display: parsed.display,
       refresh: parsed.refresh,
+      tray: parsed.tray,
       git: parsed.git,
     };
 
@@ -92,6 +94,7 @@ export async function loadConfig(
     reporting_currency: DEFAULT_CONFIG.reporting_currency,
     display: DEFAULT_CONFIG.display,
     refresh: { ...DEFAULT_REFRESH_CONFIG },
+    tray: { ...DEFAULT_TRAY_CONFIG, spending_windows_days: [...DEFAULT_TRAY_CONFIG.spending_windows_days] },
     git: { ...DEFAULT_GIT_CONFIG },
   };
 

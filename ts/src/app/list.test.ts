@@ -45,6 +45,7 @@ function makeConfig(overrides?: Partial<ResolvedConfig>): ResolvedConfig {
       balance_staleness: 14 * 86400000,
       price_staleness: 24 * 60 * 60 * 1000,
     },
+    tray: { history_points: 8, spending_windows_days: [7, 30, 90] },
     git: { auto_commit: false, auto_push: false, merge_master_before_command: false },
     ...overrides,
   };

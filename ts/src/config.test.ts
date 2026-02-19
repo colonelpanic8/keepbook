@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_REFRESH_CONFIG,
   DEFAULT_GIT_CONFIG,
+  DEFAULT_TRAY_CONFIG,
   DEFAULT_CONFIG,
   parseConfig,
   resolveDataDir,
@@ -52,6 +53,10 @@ describe('default constants', () => {
     it('has default git config', () => {
       expect(DEFAULT_CONFIG.git).toEqual(DEFAULT_GIT_CONFIG);
     });
+
+    it('has default tray config', () => {
+      expect(DEFAULT_CONFIG.tray).toEqual(DEFAULT_TRAY_CONFIG);
+    });
   });
 });
 
@@ -65,6 +70,7 @@ describe('parseConfig', () => {
     expect(config.git.auto_commit).toBe(false);
     expect(config.git.auto_push).toBe(false);
     expect(config.git.merge_master_before_command).toBe(false);
+    expect(config.tray).toEqual(DEFAULT_TRAY_CONFIG);
   });
 
   it('parses display currency formatting options', () => {
@@ -87,7 +93,19 @@ currency_decimals = 2
     expect(config.data_dir).toBe('./my-data');
     expect(config.reporting_currency).toBe('USD');
     expect(config.refresh).toEqual(DEFAULT_REFRESH_CONFIG);
+    expect(config.tray).toEqual(DEFAULT_TRAY_CONFIG);
     expect(config.git).toEqual(DEFAULT_GIT_CONFIG);
+  });
+
+  it('parses tray config', () => {
+    const toml = `
+[tray]
+history_points = 5
+spending_windows_days = [3, 14, 60]
+`;
+    const config = parseConfig(toml);
+    expect(config.tray.history_points).toBe(5);
+    expect(config.tray.spending_windows_days).toEqual([3, 14, 60]);
   });
 
   it('parses reporting_currency', () => {

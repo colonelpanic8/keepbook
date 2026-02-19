@@ -94,6 +94,12 @@ reporting_currency = "USD"
 balance_staleness = "14d"
 price_staleness = "24h"
 
+[tray]
+# Number of most-recent portfolio history rows shown in tray menu.
+history_points = 8
+# Spending lookback windows (in days) shown as "Last Nd" rows.
+spending_windows_days = [7, 30, 90]
+
 [git]
 auto_commit = false
 auto_push = false
