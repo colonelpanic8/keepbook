@@ -2,7 +2,9 @@ use std::path::Path;
 
 use anyhow::Result;
 use keepbook::app::remove_connection;
-use keepbook::config::{DisplayConfig, GitConfig, RefreshConfig, ResolvedConfig, TrayConfig};
+use keepbook::config::{
+    DisplayConfig, GitConfig, RefreshConfig, ResolvedConfig, SpendingConfig, TrayConfig,
+};
 use keepbook::models::{Account, Connection, ConnectionConfig};
 use keepbook::storage::{JsonFileStorage, Storage};
 use tempfile::TempDir;
@@ -14,6 +16,7 @@ fn resolved_config(data_dir: &Path) -> ResolvedConfig {
         display: DisplayConfig::default(),
         refresh: RefreshConfig::default(),
         tray: TrayConfig::default(),
+        spending: SpendingConfig::default(),
         git: GitConfig::default(),
     }
 }

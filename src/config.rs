@@ -68,6 +68,28 @@ impl Default for TrayConfig {
     }
 }
 
+/// Spending report configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SpendingConfig {
+    /// Ignore matching account IDs or names in default portfolio spending reports.
+    pub ignore_accounts: Vec<String>,
+    /// Ignore matching connection IDs or names in default portfolio spending reports.
+    pub ignore_connections: Vec<String>,
+    /// Ignore accounts containing any matching account tag in default portfolio spending reports.
+    pub ignore_tags: Vec<String>,
+}
+
+impl Default for SpendingConfig {
+    fn default() -> Self {
+        Self {
+            ignore_accounts: vec![],
+            ignore_connections: vec![],
+            ignore_tags: vec![],
+        }
+    }
+}
+
 /// Default balance staleness (14 days).
 fn default_balance_staleness() -> std::time::Duration {
     std::time::Duration::from_secs(14 * 24 * 60 * 60)
@@ -154,6 +176,10 @@ pub struct Config {
     #[serde(default)]
     pub tray: TrayConfig,
 
+    /// Spending report settings.
+    #[serde(default)]
+    pub spending: SpendingConfig,
+
     /// Git-related settings.
     #[serde(default)]
     pub git: GitConfig,
@@ -167,6 +193,7 @@ impl Default for Config {
             display: DisplayConfig::default(),
             refresh: RefreshConfig::default(),
             tray: TrayConfig::default(),
+            spending: SpendingConfig::default(),
             git: GitConfig::default(),
         }
     }
@@ -224,6 +251,9 @@ pub struct ResolvedConfig {
     /// Tray UI settings.
     pub tray: TrayConfig,
 
+    /// Spending report settings.
+    pub spending: SpendingConfig,
+
     /// Git-related settings.
     pub git: GitConfig,
 }
@@ -270,6 +300,7 @@ impl ResolvedConfig {
             display: config.display,
             refresh: config.refresh,
             tray: config.tray,
+            spending: config.spending,
             git: config.git,
         })
     }
@@ -302,6 +333,7 @@ impl ResolvedConfig {
                 display: DisplayConfig::default(),
                 refresh: RefreshConfig::default(),
                 tray: TrayConfig::default(),
+                spending: SpendingConfig::default(),
                 git: GitConfig::default(),
             })
         }
@@ -513,6 +545,33 @@ mod tests {
         let config = Config::default();
         assert_eq!(config.tray.history_points, 8);
         assert_eq!(config.tray.spending_windows_days, vec![7, 30, 90]);
+    }
+
+    #[test]
+    fn test_default_spending_config() {
+        let config = Config::default();
+        assert!(config.spending.ignore_accounts.is_empty());
+        assert!(config.spending.ignore_connections.is_empty());
+        assert!(config.spending.ignore_tags.is_empty());
+    }
+
+    #[test]
+    fn test_load_spending_config() -> Result<()> {
+        let dir = TempDir::new()?;
+        let config_path = dir.path().join("keepbook.toml");
+
+        let mut file = std::fs::File::create(&config_path)?;
+        writeln!(file, "[spending]")?;
+        writeln!(file, "ignore_accounts = [\"Individual\", \"acct-1\"]")?;
+        writeln!(file, "ignore_connections = [\"Schwab\"]")?;
+        writeln!(file, "ignore_tags = [\"brokerage\"]")?;
+
+        let config = Config::load(&config_path)?;
+        assert_eq!(config.spending.ignore_accounts.len(), 2);
+        assert_eq!(config.spending.ignore_connections, vec!["Schwab"]);
+        assert_eq!(config.spending.ignore_tags, vec!["brokerage"]);
+
+        Ok(())
     }
 
     #[test]

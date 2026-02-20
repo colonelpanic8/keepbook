@@ -100,6 +100,14 @@ history_points = 8
 # Spending lookback windows (in days) shown as "Last Nd" rows.
 spending_windows_days = [7, 30, 90]
 
+[spending]
+# Ignore matching account IDs or names in default portfolio spending reports.
+# ignore_accounts = ["Individual", "acct-123"]
+# Ignore matching connection IDs or names in default portfolio spending reports.
+# ignore_connections = ["Schwab", "conn-123"]
+# Ignore accounts containing any matching account tag in default portfolio spending reports.
+# ignore_tags = ["brokerage"]
+
 [git]
 auto_commit = false
 auto_push = false

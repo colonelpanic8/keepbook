@@ -202,6 +202,7 @@ describe('configOutput', () => {
       reporting_currency: 'USD',
       display: {},
       refresh: { ...DEFAULT_REFRESH_CONFIG },
+      spending: { ignore_accounts: [], ignore_connections: [], ignore_tags: [] },
       git: { auto_commit: false, auto_push: false, merge_master_before_command: false },
     });
 
@@ -222,6 +223,7 @@ describe('configOutput', () => {
       reporting_currency: 'EUR',
       display: {},
       refresh: { ...DEFAULT_REFRESH_CONFIG },
+      spending: { ignore_accounts: [], ignore_connections: [], ignore_tags: [] },
       git: { auto_commit: true, auto_push: true, merge_master_before_command: true },
     });
 
@@ -242,6 +244,7 @@ describe('configOutput', () => {
       reporting_currency: 'GBP',
       display: {},
       refresh: { balance_staleness: 1, price_staleness: 2 },
+      spending: { ignore_accounts: [], ignore_connections: [], ignore_tags: [] },
       git: { auto_commit: false, auto_push: false, merge_master_before_command: false },
     }) as Record<string, unknown>;
 

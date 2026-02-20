@@ -59,6 +59,15 @@ export interface TrayConfig {
   spending_windows_days: number[];
 }
 
+export interface SpendingConfig {
+  /** Ignore matching account IDs or names in default portfolio spending reports. */
+  ignore_accounts: string[];
+  /** Ignore matching connection IDs or names in default portfolio spending reports. */
+  ignore_connections: string[];
+  /** Ignore accounts containing any matching account tag in default portfolio spending reports. */
+  ignore_tags: string[];
+}
+
 export interface Config {
   /** Optional path to the data directory. */
   data_dir?: string;
@@ -70,6 +79,8 @@ export interface Config {
   refresh: RefreshConfig;
   /** Tray UI settings. */
   tray: TrayConfig;
+  /** Spending report settings. */
+  spending: SpendingConfig;
   /** Git integration settings. */
   git: GitConfig;
 }
@@ -85,6 +96,8 @@ export interface ResolvedConfig {
   refresh: RefreshConfig;
   /** Tray UI settings. */
   tray: TrayConfig;
+  /** Spending report settings. */
+  spending: SpendingConfig;
   /** Git integration settings. */
   git: GitConfig;
 }
@@ -112,12 +125,23 @@ export const DEFAULT_TRAY_CONFIG: TrayConfig = {
   spending_windows_days: [7, 30, 90],
 };
 
+export const DEFAULT_SPENDING_CONFIG: SpendingConfig = {
+  ignore_accounts: [],
+  ignore_connections: [],
+  ignore_tags: [],
+};
+
 export const DEFAULT_CONFIG: Config = {
   data_dir: undefined,
   reporting_currency: 'USD',
   display: {},
   refresh: { ...DEFAULT_REFRESH_CONFIG },
   tray: { ...DEFAULT_TRAY_CONFIG, spending_windows_days: [...DEFAULT_TRAY_CONFIG.spending_windows_days] },
+  spending: {
+    ignore_accounts: [...DEFAULT_SPENDING_CONFIG.ignore_accounts],
+    ignore_connections: [...DEFAULT_SPENDING_CONFIG.ignore_connections],
+    ignore_tags: [...DEFAULT_SPENDING_CONFIG.ignore_tags],
+  },
   git: { ...DEFAULT_GIT_CONFIG },
 };
 
@@ -139,6 +163,7 @@ export function parseConfig(tomlStr: string): Config {
 
   const refreshRaw = (raw.refresh ?? {}) as Record<string, unknown>;
   const trayRaw = (raw.tray ?? {}) as Record<string, unknown>;
+  const spendingRaw = (raw.spending ?? {}) as Record<string, unknown>;
   const gitRaw = (raw.git ?? {}) as Record<string, unknown>;
   const displayRaw = (raw.display ?? {}) as Record<string, unknown>;
 
@@ -182,6 +207,20 @@ export function parseConfig(tomlStr: string): Config {
       .map((v) => v);
   }
 
+  const parseStringArray = (value: unknown): string[] => {
+    if (!Array.isArray(value)) return [];
+    return value
+      .filter((item): item is string => typeof item === 'string')
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
+  };
+
+  const spending: SpendingConfig = {
+    ignore_accounts: parseStringArray(spendingRaw.ignore_accounts),
+    ignore_connections: parseStringArray(spendingRaw.ignore_connections),
+    ignore_tags: parseStringArray(spendingRaw.ignore_tags),
+  };
+
   const config: Config = {
     reporting_currency:
       typeof raw.reporting_currency === 'string'
@@ -190,6 +229,7 @@ export function parseConfig(tomlStr: string): Config {
     display: {},
     refresh,
     tray,
+    spending,
     git,
   };
 

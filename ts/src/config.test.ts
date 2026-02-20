@@ -3,6 +3,7 @@ import {
   DEFAULT_REFRESH_CONFIG,
   DEFAULT_GIT_CONFIG,
   DEFAULT_TRAY_CONFIG,
+  DEFAULT_SPENDING_CONFIG,
   DEFAULT_CONFIG,
   parseConfig,
   resolveDataDir,
@@ -57,6 +58,10 @@ describe('default constants', () => {
     it('has default tray config', () => {
       expect(DEFAULT_CONFIG.tray).toEqual(DEFAULT_TRAY_CONFIG);
     });
+
+    it('has default spending config', () => {
+      expect(DEFAULT_CONFIG.spending).toEqual(DEFAULT_SPENDING_CONFIG);
+    });
   });
 });
 
@@ -71,6 +76,7 @@ describe('parseConfig', () => {
     expect(config.git.auto_push).toBe(false);
     expect(config.git.merge_master_before_command).toBe(false);
     expect(config.tray).toEqual(DEFAULT_TRAY_CONFIG);
+    expect(config.spending).toEqual(DEFAULT_SPENDING_CONFIG);
   });
 
   it('parses display currency formatting options', () => {
@@ -94,6 +100,7 @@ currency_decimals = 2
     expect(config.reporting_currency).toBe('USD');
     expect(config.refresh).toEqual(DEFAULT_REFRESH_CONFIG);
     expect(config.tray).toEqual(DEFAULT_TRAY_CONFIG);
+    expect(config.spending).toEqual(DEFAULT_SPENDING_CONFIG);
     expect(config.git).toEqual(DEFAULT_GIT_CONFIG);
   });
 
@@ -106,6 +113,19 @@ spending_windows_days = [3, 14, 60]
     const config = parseConfig(toml);
     expect(config.tray.history_points).toBe(5);
     expect(config.tray.spending_windows_days).toEqual([3, 14, 60]);
+  });
+
+  it('parses spending ignore config', () => {
+    const toml = `
+[spending]
+ignore_accounts = ["Individual", "acct-1"]
+ignore_connections = ["Schwab"]
+ignore_tags = ["brokerage"]
+`;
+    const config = parseConfig(toml);
+    expect(config.spending.ignore_accounts).toEqual(['Individual', 'acct-1']);
+    expect(config.spending.ignore_connections).toEqual(['Schwab']);
+    expect(config.spending.ignore_tags).toEqual(['brokerage']);
   });
 
   it('parses reporting_currency', () => {

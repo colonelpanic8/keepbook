@@ -21,6 +21,7 @@ function makeConfig(overrides?: Partial<ResolvedConfig>): ResolvedConfig {
       price_staleness: 86400000,
     },
     tray: { history_points: 8, spending_windows_days: [7, 30, 90] },
+    spending: { ignore_accounts: [], ignore_connections: [], ignore_tags: [] },
     git: { auto_commit: false, auto_push: false, merge_master_before_command: false },
     ...overrides,
   };
@@ -111,5 +112,53 @@ describe('spendingReport', () => {
 
     expect(out.total).toBe('112');
     expect(out.transaction_count).toBe(2);
+  });
+
+  it('ignores accounts by configured spending ignore tags for portfolio scope', async () => {
+    const storage = new MemoryStorage();
+    const cfg = makeConfig({
+      spending: { ignore_accounts: [], ignore_connections: [], ignore_tags: ['brokerage'] },
+    });
+
+    const connId = Id.fromString('conn-1');
+    const cardAcct = Account.newWith(Id.fromString('acct-card'), new Date('2026-01-01T00:00:00Z'), 'Card', connId);
+    const brokerageAcct = {
+      ...Account.newWith(
+        Id.fromString('acct-brokerage'),
+        new Date('2026-01-01T00:00:00Z'),
+        'Individual',
+        connId,
+      ),
+      tags: ['brokerage'],
+    };
+    await storage.saveAccount(cardAcct);
+    await storage.saveAccount(brokerageAcct);
+
+    const clock = new FixedClock(new Date('2026-02-05T12:00:00Z'));
+    const ids = new FixedIdGenerator([Id.fromString('tx-card'), Id.fromString('tx-brokerage')]);
+    const txCard = Transaction.newWithGenerator(ids, clock, '-10', Asset.currency('USD'), 'Card spend');
+    const txBrokerage = Transaction.newWithGenerator(
+      ids,
+      clock,
+      '-2000',
+      Asset.currency('USD'),
+      'Brokerage transfer',
+    );
+    await storage.appendTransactions(cardAcct.id, [txCard]);
+    await storage.appendTransactions(brokerageAcct.id, [txBrokerage]);
+
+    const out = await spendingReport(storage, new NullMarketDataStore(), cfg, {
+      period: 'monthly',
+      start: '2026-02-01',
+      end: '2026-02-28',
+      tz: 'UTC',
+      status: 'posted',
+      direction: 'outflow',
+      group_by: 'none',
+      lookback_days: 7,
+    });
+
+    expect(out.total).toBe('10');
+    expect(out.transaction_count).toBe(1);
   });
 });

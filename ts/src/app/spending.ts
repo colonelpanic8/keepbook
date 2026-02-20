@@ -5,6 +5,7 @@ import { Decimal } from '../decimal.js';
 import { parseDuration } from '../duration.js';
 import type { TransactionType, TransactionStatus } from '../models/transaction.js';
 import { Asset, type AssetType } from '../models/asset.js';
+import type { AccountType } from '../models/account.js';
 import type { ResolvedConfig } from '../config.js';
 import { findAccount, findConnection } from '../storage/lookup.js';
 import {
@@ -170,6 +171,62 @@ function parseWeekStart(s: string | undefined): WeekStart {
   if (v === 'sunday' || v === 'sun') return 'sunday';
   if (v === 'monday' || v === 'mon') return 'monday';
   throw new Error(`Invalid week_start '${s}'. Valid values: sunday, monday`);
+}
+
+function normalizeRule(value: string): string | null {
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed.toLowerCase() : null;
+}
+
+async function ignoredAccountIdsForPortfolioSpending(
+  storage: Storage,
+  config: ResolvedConfig,
+  accounts: AccountType[],
+): Promise<Set<string>> {
+  const ignoreAccounts = new Set(
+    config.spending.ignore_accounts.map((v) => normalizeRule(v)).filter((v): v is string => v !== null),
+  );
+  const ignoreConnectionsRaw = new Set(
+    config.spending.ignore_connections.map((v) => normalizeRule(v)).filter((v): v is string => v !== null),
+  );
+  const ignoreTags = new Set(
+    config.spending.ignore_tags.map((v) => normalizeRule(v)).filter((v): v is string => v !== null),
+  );
+
+  if (ignoreAccounts.size === 0 && ignoreConnectionsRaw.size === 0 && ignoreTags.size === 0) {
+    return new Set();
+  }
+
+  const ignoreConnections = new Set(ignoreConnectionsRaw);
+  const connections = await storage.listConnections();
+  for (const connection of connections) {
+    const connectionId = connection.state.id.asStr().toLowerCase();
+    const connectionName = connection.config.name.toLowerCase();
+    if (ignoreConnectionsRaw.has(connectionId) || ignoreConnectionsRaw.has(connectionName)) {
+      ignoreConnections.add(connectionId);
+    }
+  }
+
+  const ignoredAccountIds = new Set<string>();
+  for (const account of accounts) {
+    const accountId = account.id.asStr().toLowerCase();
+    const accountName = account.name.toLowerCase();
+    const connectionId = account.connection_id.asStr().toLowerCase();
+    const hasIgnoredTag = account.tags
+      .map((tag) => normalizeRule(tag))
+      .filter((tag): tag is string => tag !== null)
+      .some((tag) => ignoreTags.has(tag));
+    if (
+      ignoreAccounts.has(accountId) ||
+      ignoreAccounts.has(accountName) ||
+      ignoreConnections.has(connectionId) ||
+      hasIgnoredTag
+    ) {
+      ignoredAccountIds.add(account.id.asStr());
+    }
+  }
+
+  return ignoredAccountIds;
 }
 
 function includeStatus(status: TransactionStatus, filter: StatusFilter): boolean {
@@ -343,7 +400,8 @@ export async function spendingReport(
     accountIds = accounts.filter((a) => a.connection_id.equals(conn.state.id)).map((a) => a.id.asStr());
   } else {
     const accounts = await storage.listAccounts();
-    accountIds = accounts.map((a) => a.id.asStr());
+    const ignoredIds = await ignoredAccountIdsForPortfolioSpending(storage, config, accounts);
+    accountIds = accounts.filter((a) => !ignoredIds.has(a.id.asStr())).map((a) => a.id.asStr());
   }
 
   const marketData = new MarketDataService(marketDataStore).withQuoteStaleness(

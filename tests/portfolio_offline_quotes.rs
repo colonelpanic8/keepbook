@@ -1,7 +1,9 @@
 use anyhow::Result;
 use chrono::Utc;
 use keepbook::app::portfolio_snapshot;
-use keepbook::config::{DisplayConfig, GitConfig, RefreshConfig, ResolvedConfig, TrayConfig};
+use keepbook::config::{
+    DisplayConfig, GitConfig, RefreshConfig, ResolvedConfig, SpendingConfig, TrayConfig,
+};
 use keepbook::market_data::{
     AssetId, JsonlMarketDataStore, MarketDataStore, PriceKind, PricePoint,
 };
@@ -30,6 +32,7 @@ async fn portfolio_snapshot_offline_uses_cached_quote() -> Result<()> {
         display: DisplayConfig::default(),
         refresh: RefreshConfig::default(),
         tray: TrayConfig::default(),
+        spending: SpendingConfig::default(),
         git: GitConfig::default(),
     };
 

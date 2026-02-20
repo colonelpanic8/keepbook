@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -9,7 +9,7 @@ use rust_decimal::Decimal;
 
 use crate::config::ResolvedConfig;
 use crate::market_data::{MarketDataServiceBuilder, MarketDataStore};
-use crate::models::{Asset, Id, TransactionAnnotation, TransactionStatus};
+use crate::models::{Account, Asset, Id, TransactionAnnotation, TransactionStatus};
 use crate::storage::{find_account, find_connection, Storage};
 
 use super::types::{
@@ -343,6 +343,80 @@ fn market_data_store_for_prod(data_dir: &std::path::Path) -> Arc<dyn MarketDataS
     Arc::new(crate::market_data::JsonlMarketDataStore::new(data_dir))
 }
 
+fn normalized_rule(s: &str) -> Option<String> {
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_lowercase())
+    }
+}
+
+async fn ignored_account_ids_for_portfolio_spending(
+    storage: &dyn Storage,
+    config: &ResolvedConfig,
+    accounts: &[Account],
+) -> Result<HashSet<Id>> {
+    let ignore_accounts: HashSet<String> = config
+        .spending
+        .ignore_accounts
+        .iter()
+        .filter_map(|s| normalized_rule(s))
+        .collect();
+    let ignore_connections_raw: HashSet<String> = config
+        .spending
+        .ignore_connections
+        .iter()
+        .filter_map(|s| normalized_rule(s))
+        .collect();
+    let ignore_tags: HashSet<String> = config
+        .spending
+        .ignore_tags
+        .iter()
+        .filter_map(|s| normalized_rule(s))
+        .collect();
+
+    if ignore_accounts.is_empty() && ignore_connections_raw.is_empty() && ignore_tags.is_empty() {
+        return Ok(HashSet::new());
+    }
+
+    let connections = storage.list_connections().await?;
+    let mut ignore_connections: HashSet<String> = HashSet::new();
+    for value in &ignore_connections_raw {
+        ignore_connections.insert(value.clone());
+    }
+    for conn in connections {
+        let conn_id = conn.id().to_string().to_lowercase();
+        let conn_name = conn.config.name.to_lowercase();
+        if ignore_connections_raw.contains(&conn_id) || ignore_connections_raw.contains(&conn_name)
+        {
+            ignore_connections.insert(conn_id);
+        }
+    }
+
+    let mut ignored = HashSet::new();
+    for account in accounts {
+        let account_id = account.id.to_string().to_lowercase();
+        let account_name = account.name.to_lowercase();
+        let connection_id = account.connection_id.to_string().to_lowercase();
+        let has_ignored_tag = account
+            .tags
+            .iter()
+            .filter_map(|tag| normalized_rule(tag))
+            .any(|tag| ignore_tags.contains(&tag));
+
+        if ignore_accounts.contains(&account_id)
+            || ignore_accounts.contains(&account_name)
+            || ignore_connections.contains(&connection_id)
+            || has_ignored_tag
+        {
+            ignored.insert(account.id.clone());
+        }
+    }
+
+    Ok(ignored)
+}
+
 pub async fn spending_report(
     storage: &dyn Storage,
     config: &ResolvedConfig,
@@ -412,7 +486,13 @@ async fn spending_report_with_store(
             )
         } else {
             let accounts = storage.list_accounts().await?;
-            let ids: Vec<Id> = accounts.into_iter().map(|a| a.id).collect();
+            let ignored =
+                ignored_account_ids_for_portfolio_spending(storage, config, &accounts).await?;
+            let ids: Vec<Id> = accounts
+                .into_iter()
+                .filter(|a| !ignored.contains(&a.id))
+                .map(|a| a.id)
+                .collect();
             (SpendingScopeOutput::Portfolio, ids)
         };
 
@@ -735,6 +815,7 @@ mod tests {
             display: crate::config::DisplayConfig::default(),
             refresh: crate::config::RefreshConfig::default(),
             tray: crate::config::TrayConfig::default(),
+            spending: crate::config::SpendingConfig::default(),
             git: crate::config::GitConfig::default(),
         };
 
@@ -834,6 +915,7 @@ mod tests {
             display: crate::config::DisplayConfig::default(),
             refresh: crate::config::RefreshConfig::default(),
             tray: crate::config::TrayConfig::default(),
+            spending: crate::config::SpendingConfig::default(),
             git: crate::config::GitConfig::default(),
         };
 
@@ -864,6 +946,92 @@ mod tests {
 
         assert_eq!(out.total, "112");
         assert_eq!(out.transaction_count, 2);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn spending_report_ignores_accounts_by_configured_tags() -> Result<()> {
+        let storage = MemoryStorage::new();
+        let conn_id = Id::from_string("conn-1");
+
+        let acct_card_id = Id::from_string("acct-card");
+        let card = Account::new_with(acct_card_id.clone(), Utc::now(), "Card", conn_id.clone());
+        storage.save_account(&card).await?;
+
+        let acct_brokerage_id = Id::from_string("acct-brokerage");
+        let mut brokerage = Account::new_with(
+            acct_brokerage_id.clone(),
+            Utc::now(),
+            "Individual",
+            conn_id.clone(),
+        );
+        brokerage.tags = vec!["brokerage".to_string()];
+        storage.save_account(&brokerage).await?;
+
+        let ids = FixedIdGenerator::new([Id::from_string("tx-card"), Id::from_string("tx-brokerage")]);
+        let clock = FixedClock::new(Utc.with_ymd_and_hms(2026, 2, 5, 12, 0, 0).unwrap());
+        let tx_card = Transaction::new_with_generator(
+            &ids,
+            &clock,
+            "-10",
+            Asset::currency("USD"),
+            "Card spend",
+        )
+        .with_timestamp(clock.now());
+        let tx_brokerage = Transaction::new_with_generator(
+            &ids,
+            &clock,
+            "-2000",
+            Asset::currency("USD"),
+            "Brokerage transfer",
+        )
+        .with_timestamp(clock.now());
+        storage.append_transactions(&acct_card_id, &[tx_card]).await?;
+        storage
+            .append_transactions(&acct_brokerage_id, &[tx_brokerage])
+            .await?;
+
+        let cfg = ResolvedConfig {
+            data_dir: std::path::PathBuf::from("/tmp"),
+            reporting_currency: "USD".to_string(),
+            display: crate::config::DisplayConfig::default(),
+            refresh: crate::config::RefreshConfig::default(),
+            tray: crate::config::TrayConfig::default(),
+            spending: crate::config::SpendingConfig {
+                ignore_accounts: vec![],
+                ignore_connections: vec![],
+                ignore_tags: vec!["brokerage".to_string()],
+            },
+            git: crate::config::GitConfig::default(),
+        };
+
+        let out = spending_report_with_store(
+            &storage,
+            &cfg,
+            SpendingReportOptions {
+                currency: None,
+                start: Some("2026-02-01".to_string()),
+                end: Some("2026-02-28".to_string()),
+                period: "monthly".to_string(),
+                tz: Some("UTC".to_string()),
+                week_start: None,
+                bucket: None,
+                account: None,
+                connection: None,
+                status: "posted".to_string(),
+                direction: "outflow".to_string(),
+                group_by: "none".to_string(),
+                top: None,
+                lookback_days: 7,
+                include_noncurrency: false,
+                include_empty: false,
+            },
+            Arc::new(MemoryMarketDataStore::default()),
+        )
+        .await?;
+
+        assert_eq!(out.total, "10");
+        assert_eq!(out.transaction_count, 1);
         Ok(())
     }
 }

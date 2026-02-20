@@ -1078,7 +1078,9 @@ mod tests {
     use super::*;
     use crate::app::*;
     use crate::clock::{Clock, FixedClock};
-    use crate::config::{DisplayConfig, GitConfig, RefreshConfig, ResolvedConfig, TrayConfig};
+    use crate::config::{
+        DisplayConfig, GitConfig, RefreshConfig, ResolvedConfig, SpendingConfig, TrayConfig,
+    };
     use crate::models::FixedIdGenerator;
     use crate::models::{Account, AssetBalance, BalanceSnapshot, Connection, ConnectionConfig};
     use crate::storage::JsonFileStorage;
@@ -1146,6 +1148,7 @@ mod tests {
             display: DisplayConfig::default(),
             refresh: RefreshConfig::default(),
             tray: TrayConfig::default(),
+            spending: SpendingConfig::default(),
             git: GitConfig::default(),
         };
 
@@ -1319,6 +1322,7 @@ mod tests {
             display: DisplayConfig::default(),
             refresh: RefreshConfig::default(),
             tray: TrayConfig::default(),
+            spending: SpendingConfig::default(),
             git: GitConfig::default(),
         };
 
@@ -1342,6 +1346,7 @@ mod tests {
             display: DisplayConfig::default(),
             refresh: RefreshConfig::default(),
             tray: TrayConfig::default(),
+            spending: SpendingConfig::default(),
             git: GitConfig::default(),
         };
 
@@ -1390,6 +1395,7 @@ mod tests {
             display: DisplayConfig::default(),
             refresh: RefreshConfig::default(),
             tray: TrayConfig::default(),
+            spending: SpendingConfig::default(),
             git: GitConfig::default(),
         };
 
@@ -1422,6 +1428,7 @@ mod tests {
             display: DisplayConfig::default(),
             refresh: RefreshConfig::default(),
             tray: TrayConfig::default(),
+            spending: SpendingConfig::default(),
             git: GitConfig::default(),
         };
 

@@ -18,6 +18,7 @@ import {
   DEFAULT_CONFIG,
   DEFAULT_GIT_CONFIG,
   DEFAULT_REFRESH_CONFIG,
+  DEFAULT_SPENDING_CONFIG,
   DEFAULT_TRAY_CONFIG,
 } from '../config.js';
 
@@ -79,6 +80,7 @@ export async function loadConfig(
       display: parsed.display,
       refresh: parsed.refresh,
       tray: parsed.tray,
+      spending: parsed.spending,
       git: parsed.git,
     };
 
@@ -95,6 +97,11 @@ export async function loadConfig(
     display: DEFAULT_CONFIG.display,
     refresh: { ...DEFAULT_REFRESH_CONFIG },
     tray: { ...DEFAULT_TRAY_CONFIG, spending_windows_days: [...DEFAULT_TRAY_CONFIG.spending_windows_days] },
+    spending: {
+      ignore_accounts: [...DEFAULT_SPENDING_CONFIG.ignore_accounts],
+      ignore_connections: [...DEFAULT_SPENDING_CONFIG.ignore_connections],
+      ignore_tags: [...DEFAULT_SPENDING_CONFIG.ignore_tags],
+    },
     git: { ...DEFAULT_GIT_CONFIG },
   };
 
