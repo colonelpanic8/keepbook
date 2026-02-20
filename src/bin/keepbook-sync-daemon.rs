@@ -289,7 +289,7 @@ impl ksni::Tray for KeepbookTray {
                 .collect()
         };
 
-        let spending_menu: Vec<MenuItem<Self>> = if self.state.spending_lines.is_empty() {
+        let spending_items: Vec<MenuItem<Self>> = if self.state.spending_lines.is_empty() {
             vec![StandardItem {
                 label: "No spending metrics available".to_string(),
                 enabled: false,
@@ -359,7 +359,8 @@ impl ksni::Tray for KeepbookTray {
             .into(),
         ];
 
-        items.extend(spending_menu);
+        // Keep spending metrics as top-level rows (not nested in a submenu).
+        items.extend(spending_items);
         items.extend([
             MenuItem::Separator,
             StandardItem {
@@ -883,6 +884,7 @@ async fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ksni::Tray;
 
     #[test]
     fn compute_next_delay_without_jitter_is_constant() {
@@ -936,5 +938,33 @@ mod tests {
         let display = keepbook::config::DisplayConfig::default();
         let formatted = format_tray_currency("1234.5", "CHF", &display);
         assert_eq!(formatted, "1234.5 CHF");
+    }
+
+    #[test]
+    fn recent_spending_is_not_rendered_as_submenu() {
+        let (cmd_tx, _cmd_rx) = mpsc::unbounded_channel();
+        let mut state = KeepbookTrayState::default();
+        state.spending_lines = vec!["Last 7d: $42 (3 txns)".to_string()];
+        let tray = KeepbookTray::new(state, cmd_tx);
+
+        let menu = tray.menu();
+        assert!(
+            menu.iter().any(|item| {
+                matches!(
+                    item,
+                    MenuItem::Standard(StandardItem { label, .. }) if label == "Recent Spending"
+                )
+            }),
+            "expected top-level standard item with label 'Recent Spending'"
+        );
+        assert!(
+            !menu.iter().any(|item| {
+                matches!(
+                    item,
+                    MenuItem::SubMenu(SubMenu { label, .. }) if label == "Recent Spending"
+                )
+            }),
+            "did not expect 'Recent Spending' to be rendered as a submenu"
+        );
     }
 }
