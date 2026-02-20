@@ -20,6 +20,13 @@ use tokio::sync::mpsc::{self, UnboundedSender};
 use tracing::{info, warn};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
+const CLI_VERSION: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    " (git commit ",
+    env!("GIT_COMMIT_HASH"),
+    ")"
+);
+
 // --- Embedded icon PNGs (compiled into the binary) ---
 const ICON_32_PNG: &[u8] = include_bytes!("../../assets/keepbook-icon-32.png");
 const ICON_48_PNG: &[u8] = include_bytes!("../../assets/keepbook-icon-48.png");
@@ -76,6 +83,7 @@ fn parse_duration_arg(s: &str) -> Result<Duration, String> {
 
 #[derive(Parser, Debug)]
 #[command(name = "keepbook-sync-daemon")]
+#[command(version = CLI_VERSION)]
 #[command(about = "Long-running keepbook sync daemon with tray controls")]
 struct Cli {
     /// Path to keepbook config file.

@@ -9,6 +9,13 @@ use keepbook::storage::{JsonFileStorage, Storage};
 use keepbook::sync::TransactionSyncMode;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
+const CLI_VERSION: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    " (git commit ",
+    env!("GIT_COMMIT_HASH"),
+    ")"
+);
+
 fn parse_duration_arg(s: &str) -> Result<std::time::Duration, String> {
     keepbook::duration::parse_duration(s).map_err(|e| e.to_string())
 }
@@ -50,6 +57,7 @@ enum PriceSyncScopeCommand {
 
 #[derive(Parser)]
 #[command(name = "keepbook")]
+#[command(version = CLI_VERSION)]
 #[command(about = "Personal finance manager")]
 struct Cli {
     /// Path to config file
