@@ -13,6 +13,7 @@ use chromiumoxide::browser::{Browser, BrowserConfig};
 use chromiumoxide::cdp::browser_protocol::network::CookieParam;
 use chrono::{NaiveDate, Utc};
 use futures::StreamExt;
+use serde_json::{Map, Value};
 use secrecy::ExposeSecret;
 
 use crate::credentials::{CredentialStore, SessionCache, SessionData, StoredCookie};
@@ -784,6 +785,159 @@ fn chase_activity_to_transaction(
     };
 
     let amount = activity.signed_amount();
+    let mut synchronizer_data = Map::new();
+    synchronizer_data.insert(
+        "chase_account_id".to_string(),
+        Value::Number(chase_account_id.into()),
+    );
+    synchronizer_data.insert("stable_id".to_string(), Value::String(stable_id));
+    synchronizer_data.insert(
+        "transaction_status".to_string(),
+        Value::String(activity.transaction_status_code.clone()),
+    );
+    synchronizer_data.insert(
+        "credit_debit_code".to_string(),
+        Value::String(activity.credit_debit_code.clone()),
+    );
+    synchronizer_data.insert(
+        "transaction_date".to_string(),
+        Value::String(activity.transaction_date.clone()),
+    );
+    synchronizer_data.insert(
+        "post_date".to_string(),
+        activity
+            .transaction_post_date
+            .clone()
+            .map(Value::String)
+            .unwrap_or(Value::Null),
+    );
+    if let Some(v) = &activity.sor_transaction_identifier {
+        if !v.trim().is_empty() {
+            synchronizer_data.insert(
+                "sor_transaction_identifier".to_string(),
+                Value::String(v.clone()),
+            );
+        }
+    }
+    if let Some(v) = &activity.derived_unique_transaction_identifier {
+        if !v.trim().is_empty() {
+            synchronizer_data.insert(
+                "derived_unique_transaction_identifier".to_string(),
+                Value::String(v.clone()),
+            );
+        }
+    }
+    if let Some(v) = &activity.transaction_reference_number {
+        if !v.trim().is_empty() {
+            synchronizer_data.insert(
+                "transaction_reference_number".to_string(),
+                Value::String(v.clone()),
+            );
+        }
+    }
+    if let Some(v) = &activity.etu_standard_transaction_type_name {
+        if !v.trim().is_empty() {
+            synchronizer_data.insert(
+                "etu_standard_transaction_type_name".to_string(),
+                Value::String(v.clone()),
+            );
+        }
+    }
+    if let Some(v) = &activity.etu_standard_transaction_type_group_name {
+        if !v.trim().is_empty() {
+            synchronizer_data.insert(
+                "etu_standard_transaction_type_group_name".to_string(),
+                Value::String(v.clone()),
+            );
+        }
+    }
+    if let Some(v) = &activity.etu_standard_expense_category_code {
+        if !v.trim().is_empty() {
+            synchronizer_data.insert(
+                "etu_standard_expense_category_code".to_string(),
+                Value::String(v.clone()),
+            );
+        }
+    }
+    if let Some(v) = &activity.last4_card_number {
+        if !v.trim().is_empty() {
+            synchronizer_data.insert("last4_card_number".to_string(), Value::String(v.clone()));
+        }
+    }
+    if let Some(v) = activity.digital_account_identifier {
+        synchronizer_data.insert(
+            "digital_account_identifier".to_string(),
+            Value::Number(v.into()),
+        );
+    }
+    if let Some(details) = &activity.merchant_details {
+        if let Some(raw) = &details.raw_merchant_details {
+            if let Some(v) = &raw.merchant_dba_name {
+                if !v.trim().is_empty() {
+                    synchronizer_data.insert("merchant_dba_name".to_string(), Value::String(v.clone()));
+                }
+            }
+            if let Some(v) = &raw.merchant_city_name {
+                if !v.trim().is_empty() {
+                    synchronizer_data.insert("merchant_city_name".to_string(), Value::String(v.clone()));
+                }
+            }
+            if let Some(v) = &raw.merchant_state_code {
+                if !v.trim().is_empty() {
+                    synchronizer_data.insert(
+                        "merchant_state_code".to_string(),
+                        Value::String(v.clone()),
+                    );
+                }
+            }
+            if let Some(v) = &raw.merchant_category_code {
+                if !v.trim().is_empty() {
+                    synchronizer_data.insert(
+                        "merchant_category_code".to_string(),
+                        Value::String(v.clone()),
+                    );
+                }
+            }
+            if let Some(v) = &raw.merchant_category_name {
+                if !v.trim().is_empty() {
+                    synchronizer_data.insert(
+                        "merchant_category_name".to_string(),
+                        Value::String(v.clone()),
+                    );
+                }
+            }
+        }
+
+        let enriched_merchant_names: Vec<Value> = details
+            .enriched_merchants
+            .iter()
+            .filter_map(|m| {
+                m.merchant_name
+                    .as_ref()
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| Value::String(s.to_string()))
+            })
+            .collect();
+        if !enriched_merchant_names.is_empty() {
+            synchronizer_data.insert(
+                "enriched_merchant_names".to_string(),
+                Value::Array(enriched_merchant_names),
+            );
+        }
+
+        let enriched_merchant_role_type_codes: Vec<Value> = details
+            .enriched_merchants
+            .iter()
+            .filter_map(|m| m.merchant_role_type_code.map(|v| Value::Number(v.into())))
+            .collect();
+        if !enriched_merchant_role_type_codes.is_empty() {
+            synchronizer_data.insert(
+                "enriched_merchant_role_type_codes".to_string(),
+                Value::Array(enriched_merchant_role_type_codes),
+            );
+        }
+    }
 
     Some(Transaction {
         id: tx_id,
@@ -792,14 +946,7 @@ fn chase_activity_to_transaction(
         asset: Asset::currency(activity.currency_code.as_deref().unwrap_or("USD")),
         description: activity.description(),
         status,
-        synchronizer_data: serde_json::json!({
-            "chase_account_id": chase_account_id,
-            "stable_id": stable_id,
-            "transaction_status": activity.transaction_status_code,
-            "credit_debit_code": activity.credit_debit_code,
-            "transaction_date": activity.transaction_date,
-            "post_date": activity.transaction_post_date,
-        }),
+        synchronizer_data: Value::Object(synchronizer_data),
     })
 }
 
@@ -821,6 +968,86 @@ fn chase_overlap_stop_threshold() -> usize {
         .and_then(|s| s.trim().parse::<usize>().ok())
         .filter(|n| *n > 0)
         .unwrap_or(200)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sync::chase::api::{
+        ChaseActivity, EnrichedMerchant, MerchantDetails, RawMerchantDetails,
+    };
+
+    #[test]
+    fn chase_activity_to_transaction_persists_extended_metadata() {
+        let activity = ChaseActivity {
+            transaction_status_code: "Posted".to_string(),
+            transaction_amount: 12.34,
+            transaction_date: "2026-02-15".to_string(),
+            transaction_post_date: Some("2026-02-16".to_string()),
+            sor_transaction_identifier: Some("sor-123".to_string()),
+            derived_unique_transaction_identifier: Some("derived-456".to_string()),
+            transaction_reference_number: Some("ref-789".to_string()),
+            credit_debit_code: "D".to_string(),
+            etu_standard_transaction_type_name: Some("Card Purchase".to_string()),
+            etu_standard_transaction_type_group_name: Some("Purchases".to_string()),
+            etu_standard_expense_category_code: Some("FOOD_AND_DRINK".to_string()),
+            currency_code: Some("USD".to_string()),
+            merchant_details: Some(MerchantDetails {
+                raw_merchant_details: Some(RawMerchantDetails {
+                    merchant_dba_name: Some("Coffee Shop".to_string()),
+                    merchant_city_name: Some("San Francisco".to_string()),
+                    merchant_state_code: Some("CA".to_string()),
+                    merchant_category_code: Some("5814".to_string()),
+                    merchant_category_name: Some("Fast Food".to_string()),
+                }),
+                enriched_merchants: vec![EnrichedMerchant {
+                    merchant_name: Some("Blue Bottle Coffee".to_string()),
+                    merchant_role_type_code: Some(101),
+                }],
+            }),
+            last4_card_number: Some("1234".to_string()),
+            digital_account_identifier: Some(987654321),
+        };
+
+        let tx = chase_activity_to_transaction(&activity, &Id::from_string("conn-1"), 123)
+            .expect("expected transaction to parse");
+        let data = tx
+            .synchronizer_data
+            .as_object()
+            .expect("expected synchronizer_data object");
+
+        assert_eq!(
+            data.get("etu_standard_expense_category_code")
+                .and_then(|v| v.as_str()),
+            Some("FOOD_AND_DRINK")
+        );
+        assert_eq!(
+            data.get("merchant_category_code").and_then(|v| v.as_str()),
+            Some("5814")
+        );
+        assert_eq!(
+            data.get("merchant_category_name").and_then(|v| v.as_str()),
+            Some("Fast Food")
+        );
+        assert_eq!(
+            data.get("merchant_dba_name").and_then(|v| v.as_str()),
+            Some("Coffee Shop")
+        );
+        assert_eq!(
+            data.get("enriched_merchant_names"),
+            Some(&Value::Array(vec![Value::String(
+                "Blue Bottle Coffee".to_string()
+            )]))
+        );
+        assert_eq!(
+            data.get("enriched_merchant_role_type_codes"),
+            Some(&Value::Array(vec![Value::Number(101.into())]))
+        );
+        assert_eq!(
+            data.get("digital_account_identifier").and_then(|v| v.as_i64()),
+            Some(987654321)
+        );
+    }
 }
 
 async fn get_card_transactions_auto(
