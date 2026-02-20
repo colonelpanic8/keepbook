@@ -5,7 +5,7 @@ import { Account, type AccountConfig } from '../models/account.js';
 import { Asset } from '../models/asset.js';
 import { BalanceSnapshot, AssetBalance } from '../models/balance.js';
 import { Connection, ConnectionState, type ConnectionConfig } from '../models/connection.js';
-import { Transaction } from '../models/transaction.js';
+import { Transaction, withId, withSynchronizerData } from '../models/transaction.js';
 import { FixedIdGenerator } from '../models/id-generator.js';
 import { FixedClock } from '../clock.js';
 
@@ -31,6 +31,23 @@ function makeTransaction(idStr: string, amount: string, description: string) {
   const ids = new FixedIdGenerator([Id.fromString(idStr)]);
   const clock = new FixedClock(new Date('2024-06-15T12:00:00Z'));
   return Transaction.newWithGenerator(ids, clock, amount, Asset.currency('USD'), description);
+}
+
+function makeChaseAliasTransaction(
+  id: string,
+  stableId: string,
+  opts: { sorId?: string; derivedId?: string } = {},
+) {
+  const base = makeTransaction(`seed-${id}`, '-10.00', 'Test');
+  const syncData: Record<string, unknown> = {
+    chase_account_id: 123,
+    stable_id: stableId,
+  };
+  if (opts.sorId !== undefined) syncData.sor_transaction_identifier = opts.sorId;
+  if (opts.derivedId !== undefined) {
+    syncData.derived_unique_transaction_identifier = opts.derivedId;
+  }
+  return withSynchronizerData(withId(base, Id.fromString(id)), syncData);
 }
 
 // ---------------------------------------------------------------------------
@@ -435,6 +452,22 @@ describe('MemoryStorage', () => {
       expect(all).toHaveLength(1);
       expect(all[0].amount).toBe('75.00');
       expect(all[0].description).toBe('Updated version');
+    });
+
+    it('getTransactions deduplicates chase alias ids (stable/derived/sor)', async () => {
+      const acctId = Id.new();
+      const old = makeChaseAliasTransaction('tx-old', 'derived-1');
+      const newer = makeChaseAliasTransaction('tx-new', 'sor-1');
+      const newest = makeChaseAliasTransaction('tx-new', 'sor-1', {
+        sorId: 'sor-1',
+        derivedId: 'derived-1',
+      });
+
+      await storage.appendTransactions(acctId, [old, newer, newest]);
+
+      const all = await storage.getTransactions(acctId);
+      expect(all).toHaveLength(1);
+      expect(all[0].id.asStr()).toBe('tx-new');
     });
 
     it('getTransactionsRaw preserves all including duplicates', async () => {

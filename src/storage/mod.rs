@@ -12,6 +12,7 @@ use crate::models::{
     TransactionAnnotationPatch,
 };
 use anyhow::Result;
+use std::collections::{HashMap, HashSet};
 
 /// Storage trait for persisting financial data.
 #[async_trait::async_trait]
@@ -87,5 +88,159 @@ pub trait SymlinkStorage: Send + Sync {
 impl SymlinkStorage for JsonFileStorage {
     async fn rebuild_all_symlinks(&self) -> Result<(usize, usize, Vec<String>)> {
         JsonFileStorage::rebuild_all_symlinks(self).await
+    }
+}
+
+fn non_empty_sync_string(
+    obj: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> Option<String> {
+    obj.get(key)
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn transaction_dedupe_keys(txn: &Transaction) -> Vec<String> {
+    let mut keys = vec![format!("id:{}", txn.id)];
+
+    // Chase sometimes surfaces the same transaction under different stable id sources
+    // (e.g. derived_unique_transaction_identifier vs sor_transaction_identifier).
+    // Treat these as aliases so we don't double-count existing append-only history.
+    if let serde_json::Value::Object(obj) = &txn.synchronizer_data {
+        if obj.contains_key("chase_account_id") {
+            for field in [
+                "stable_id",
+                "sor_transaction_identifier",
+                "derived_unique_transaction_identifier",
+                "transaction_reference_number",
+            ] {
+                if let Some(value) = non_empty_sync_string(obj, field) {
+                    keys.push(format!("chase:{field}:{value}"));
+                    keys.push(format!("chase:alias:{value}"));
+                }
+            }
+        }
+    }
+
+    keys.sort();
+    keys.dedup();
+    keys
+}
+
+pub(crate) fn dedupe_transactions_last_write_wins(txns: Vec<Transaction>) -> Vec<Transaction> {
+    let mut key_to_index: HashMap<String, usize> = HashMap::new();
+    let mut index_to_keys: HashMap<usize, HashSet<String>> = HashMap::new();
+    let mut deduped: Vec<Option<Transaction>> = Vec::new();
+
+    for txn in txns {
+        let keys = transaction_dedupe_keys(&txn);
+        let mut matched: HashSet<usize> = HashSet::new();
+
+        for key in &keys {
+            if let Some(idx) = key_to_index.get(key).copied() {
+                if deduped.get(idx).and_then(|t| t.as_ref()).is_some() {
+                    matched.insert(idx);
+                }
+            }
+        }
+
+        let target_idx = if matched.is_empty() {
+            let idx = deduped.len();
+            deduped.push(Some(txn));
+            idx
+        } else {
+            let idx = *matched
+                .iter()
+                .min()
+                .expect("matched is non-empty when branch is taken");
+            deduped[idx] = Some(txn);
+            idx
+        };
+
+        for idx in matched {
+            if idx == target_idx {
+                continue;
+            }
+            deduped[idx] = None;
+            if let Some(keys_for_idx) = index_to_keys.remove(&idx) {
+                let target_keys = index_to_keys.entry(target_idx).or_default();
+                for key in keys_for_idx {
+                    key_to_index.insert(key.clone(), target_idx);
+                    target_keys.insert(key);
+                }
+            }
+        }
+
+        let target_keys = index_to_keys.entry(target_idx).or_default();
+        for key in keys {
+            key_to_index.insert(key.clone(), target_idx);
+            target_keys.insert(key);
+        }
+    }
+
+    deduped.into_iter().flatten().collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::dedupe_transactions_last_write_wins;
+    use crate::models::{Asset, Id, Transaction, TransactionStatus};
+    use chrono::TimeZone;
+
+    fn chase_tx(
+        id: &str,
+        stable_id: &str,
+        sor_id: Option<&str>,
+        derived_id: Option<&str>,
+    ) -> Transaction {
+        let mut obj = serde_json::Map::new();
+        obj.insert(
+            "chase_account_id".to_string(),
+            serde_json::Value::Number(123.into()),
+        );
+        obj.insert(
+            "stable_id".to_string(),
+            serde_json::Value::String(stable_id.to_string()),
+        );
+        if let Some(v) = sor_id {
+            obj.insert(
+                "sor_transaction_identifier".to_string(),
+                serde_json::Value::String(v.to_string()),
+            );
+        }
+        if let Some(v) = derived_id {
+            obj.insert(
+                "derived_unique_transaction_identifier".to_string(),
+                serde_json::Value::String(v.to_string()),
+            );
+        }
+
+        Transaction {
+            id: Id::from_string(id),
+            timestamp: chrono::Utc.with_ymd_and_hms(2026, 2, 20, 12, 0, 0).unwrap(),
+            amount: "-10".to_string(),
+            asset: Asset::currency("USD"),
+            description: "Test".to_string(),
+            status: TransactionStatus::Posted,
+            synchronizer_data: serde_json::Value::Object(obj),
+        }
+    }
+
+    #[test]
+    fn dedupe_transactions_collapses_chase_alias_ids() {
+        let old = chase_tx("tx-old", "202602151536556260124#20260124", None, None);
+        let new_no_alias = chase_tx("tx-new", "466046216565116", None, None);
+        let new_with_alias = chase_tx(
+            "tx-new",
+            "466046216565116",
+            Some("466046216565116"),
+            Some("202602151536556260124#20260124"),
+        );
+
+        let out = dedupe_transactions_last_write_wins(vec![old, new_no_alias, new_with_alias]);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].id.as_str(), "tx-new");
     }
 }

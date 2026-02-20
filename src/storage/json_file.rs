@@ -6,7 +6,7 @@ use tokio::fs;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tracing::warn;
 
-use super::Storage;
+use super::{dedupe_transactions_last_write_wins, Storage};
 use crate::credentials::CredentialStore;
 use crate::models::{
     Account, AccountConfig, BalanceSnapshot, Connection, ConnectionConfig, ConnectionState, Id,
@@ -734,21 +734,7 @@ impl Storage for JsonFileStorage {
 
     async fn get_transactions(&self, account_id: &Id) -> Result<Vec<Transaction>> {
         let txns = self.get_transactions_raw(account_id).await?;
-
-        // Be resilient to duplicate transaction ids in append-only JSONL by returning
-        // the last version (last write wins).
-        let mut by_id: std::collections::HashMap<Id, usize> = std::collections::HashMap::new();
-        let mut deduped: Vec<Transaction> = Vec::new();
-        for txn in txns {
-            if let Some(idx) = by_id.get(&txn.id).copied() {
-                deduped[idx] = txn;
-            } else {
-                by_id.insert(txn.id.clone(), deduped.len());
-                deduped.push(txn);
-            }
-        }
-
-        Ok(deduped)
+        Ok(dedupe_transactions_last_write_wins(txns))
     }
 
     async fn get_transactions_raw(&self, account_id: &Id) -> Result<Vec<Transaction>> {

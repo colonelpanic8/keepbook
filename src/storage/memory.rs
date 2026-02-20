@@ -13,7 +13,7 @@ use crate::models::{
     Transaction, TransactionAnnotationPatch,
 };
 
-use super::Storage;
+use super::{dedupe_transactions_last_write_wins, Storage};
 
 /// In-memory storage for testing purposes.
 pub struct MemoryStorage {
@@ -215,20 +215,7 @@ impl Storage for MemoryStorage {
 
     async fn get_transactions(&self, account_id: &Id) -> Result<Vec<Transaction>> {
         let txns = self.get_transactions_raw(account_id).await?;
-
-        // Mirror JsonFileStorage behavior: last write wins for duplicate ids.
-        let mut by_id: std::collections::HashMap<Id, usize> = std::collections::HashMap::new();
-        let mut deduped: Vec<Transaction> = Vec::new();
-        for txn in txns {
-            if let Some(idx) = by_id.get(&txn.id).copied() {
-                deduped[idx] = txn;
-            } else {
-                by_id.insert(txn.id.clone(), deduped.len());
-                deduped.push(txn);
-            }
-        }
-
-        Ok(deduped)
+        Ok(dedupe_transactions_last_write_wins(txns))
     }
 
     async fn get_transactions_raw(&self, account_id: &Id) -> Result<Vec<Transaction>> {

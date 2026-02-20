@@ -4,6 +4,41 @@ use keepbook::models::{Asset, Connection, ConnectionConfig, Id, Transaction, Tra
 use keepbook::storage::{JsonFileStorage, MemoryStorage, Storage};
 use tempfile::TempDir;
 
+fn chase_tx_with_aliases(
+    id: &str,
+    stable_id: &str,
+    sor_id: Option<&str>,
+    derived_id: Option<&str>,
+) -> Transaction {
+    let mut obj = serde_json::Map::new();
+    obj.insert(
+        "chase_account_id".to_string(),
+        serde_json::Value::Number(123.into()),
+    );
+    obj.insert(
+        "stable_id".to_string(),
+        serde_json::Value::String(stable_id.to_string()),
+    );
+    if let Some(v) = sor_id {
+        obj.insert(
+            "sor_transaction_identifier".to_string(),
+            serde_json::Value::String(v.to_string()),
+        );
+    }
+    if let Some(v) = derived_id {
+        obj.insert(
+            "derived_unique_transaction_identifier".to_string(),
+            serde_json::Value::String(v.to_string()),
+        );
+    }
+
+    Transaction::new("-10", Asset::currency("USD"), "Test")
+        .with_id(Id::from_string(id))
+        .with_status(TransactionStatus::Posted)
+        .with_timestamp(chrono::Utc.with_ymd_and_hms(2026, 2, 20, 12, 0, 0).unwrap())
+        .with_synchronizer_data(serde_json::Value::Object(obj))
+}
+
 #[tokio::test]
 async fn json_storage_get_transactions_dedupes_by_id_last_wins() -> Result<()> {
     let dir = TempDir::new()?;
@@ -107,6 +142,68 @@ async fn memory_storage_get_transactions_dedupes_by_id_last_wins() -> Result<()>
     let loaded = storage.get_transactions(&account.id).await?;
     assert_eq!(loaded.len(), 1);
     assert_eq!(loaded[0].description, "New");
+    Ok(())
+}
+
+#[tokio::test]
+async fn json_storage_get_transactions_dedupes_chase_alias_ids() -> Result<()> {
+    let dir = TempDir::new()?;
+    let storage = JsonFileStorage::new(dir.path());
+
+    let connection = Connection::new(ConnectionConfig {
+        name: "Bank".to_string(),
+        synchronizer: "manual".to_string(),
+        credentials: None,
+        balance_staleness: None,
+    });
+    storage
+        .save_connection_config(connection.id(), &connection.config)
+        .await?;
+    storage.save_connection(&connection).await?;
+
+    let account = keepbook::models::Account::new("Checking", connection.id().clone());
+    storage.save_account(&account).await?;
+
+    let old = chase_tx_with_aliases("tx-old", "derived-1", None, None);
+    let newer = chase_tx_with_aliases("tx-new", "sor-1", None, None);
+    let newest = chase_tx_with_aliases("tx-new", "sor-1", Some("sor-1"), Some("derived-1"));
+
+    storage
+        .append_transactions(&account.id, &[old, newer, newest])
+        .await?;
+
+    let loaded = storage.get_transactions(&account.id).await?;
+    assert_eq!(loaded.len(), 1);
+    assert_eq!(loaded[0].id.as_str(), "tx-new");
+    Ok(())
+}
+
+#[tokio::test]
+async fn memory_storage_get_transactions_dedupes_chase_alias_ids() -> Result<()> {
+    let storage = MemoryStorage::new();
+
+    let connection = Connection::new(ConnectionConfig {
+        name: "Bank".to_string(),
+        synchronizer: "manual".to_string(),
+        credentials: None,
+        balance_staleness: None,
+    });
+    storage.save_connection(&connection).await?;
+
+    let account = keepbook::models::Account::new("Checking", connection.id().clone());
+    storage.save_account(&account).await?;
+
+    let old = chase_tx_with_aliases("tx-old", "derived-1", None, None);
+    let newer = chase_tx_with_aliases("tx-new", "sor-1", None, None);
+    let newest = chase_tx_with_aliases("tx-new", "sor-1", Some("sor-1"), Some("derived-1"));
+
+    storage
+        .append_transactions(&account.id, &[old, newer, newest])
+        .await?;
+
+    let loaded = storage.get_transactions(&account.id).await?;
+    assert_eq!(loaded.len(), 1);
+    assert_eq!(loaded[0].id.as_str(), "tx-new");
     Ok(())
 }
 

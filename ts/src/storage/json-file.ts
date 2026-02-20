@@ -28,6 +28,7 @@ import {
   type TransactionAnnotationPatchType,
   type TransactionAnnotationPatchJSON,
 } from '../models/transaction-annotation.js';
+import { dedupeTransactionsLastWriteWins } from './dedupe.js';
 import { type Storage, type CredentialStore } from './storage.js';
 import { parseCredentialConfigValue } from '../credentials/credential-config.js';
 import { PassCredentialStore } from '../credentials/pass.js';
@@ -550,23 +551,7 @@ export class JsonFileStorage implements Storage {
   async getTransactions(accountId: Id): Promise<TransactionType[]> {
     const raw = await this.getTransactionsRaw(accountId);
     if (raw.length === 0) return [];
-
-    // Deduplicate by id, last-write-wins (same as MemoryStorage and Rust impl)
-    const byId = new Map<string, { index: number; tx: TransactionType }>();
-    const deduped: TransactionType[] = [];
-
-    for (const tx of raw) {
-      const key = tx.id.asStr();
-      const existing = byId.get(key);
-      if (existing !== undefined) {
-        deduped[existing.index] = tx;
-      } else {
-        byId.set(key, { index: deduped.length, tx });
-        deduped.push(tx);
-      }
-    }
-
-    return deduped;
+    return dedupeTransactionsLastWriteWins(raw);
   }
 
   async getTransactionsRaw(accountId: Id): Promise<TransactionType[]> {

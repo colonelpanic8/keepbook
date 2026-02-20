@@ -8,6 +8,7 @@ import {
 } from '../models/connection.js';
 import { type TransactionType } from '../models/transaction.js';
 import { type TransactionAnnotationPatchType } from '../models/transaction-annotation.js';
+import { dedupeTransactionsLastWriteWins } from './dedupe.js';
 import { type Storage, type CredentialStore } from './storage.js';
 
 /**
@@ -170,12 +171,7 @@ export class MemoryStorage implements Storage {
     if (!raw || raw.length === 0) {
       return [];
     }
-    // Deduplicate by id, last-write-wins
-    const byId = new Map<string, TransactionType>();
-    for (const tx of raw) {
-      byId.set(tx.id.asStr(), tx);
-    }
-    return Array.from(byId.values());
+    return dedupeTransactionsLastWriteWins(raw);
   }
 
   async getTransactionsRaw(accountId: Id): Promise<TransactionType[]> {
