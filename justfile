@@ -4,6 +4,10 @@
 #   KEEPBOOK_CMD='keepbook' just history-daily-balance
 # Default uses cargo in this workspace and targets the keepbook binary.
 keepbook_cmd := env_var_or_default("KEEPBOOK_CMD", "cargo run --bin keepbook --")
+keepbook_tray_cmd := env_var_or_default(
+  "KEEPBOOK_TRAY_CMD",
+  "cargo run --features tray --bin keepbook-sync-daemon --",
+)
 
 # Run the development keepbook binary with arbitrary args.
 # Example:
@@ -11,6 +15,13 @@ keepbook_cmd := env_var_or_default("KEEPBOOK_CMD", "cargo run --bin keepbook --"
 #   just -- kb --help
 kb *args:
     {{keepbook_cmd}} {{args}}
+
+# Run the sync daemon with tray UI.
+# Example:
+#   just run-tray
+#   just run-tray -- --help
+run-tray *args:
+    {{keepbook_tray_cmd}} {{args}}
 
 # Portfolio history distilled to daily date/balance JSON objects.
 # Extra CLI args can be passed through, e.g.:
