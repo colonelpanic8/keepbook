@@ -1,8 +1,10 @@
 use std::collections::{HashMap, HashSet};
+use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use chrono::{Datelike, Duration, NaiveDate, Utc};
+use rust_decimal::Decimal;
 use tracing::warn;
 
 use crate::config::ResolvedConfig;
@@ -70,6 +72,27 @@ impl PriceHistoryInterval {
             Self::Monthly => "monthly",
             Self::Yearly => "yearly",
         }
+    }
+}
+
+fn compute_percentage_change_from_previous(
+    previous_total: Option<Decimal>,
+    current_total: Option<Decimal>,
+) -> Option<String> {
+    match (previous_total, current_total) {
+        (None, _) => None,
+        (Some(previous), Some(current)) => {
+            if previous == Decimal::ZERO {
+                Some("N/A".to_string())
+            } else {
+                Some(
+                    ((current - previous) / previous * Decimal::from(100))
+                        .round_dp(2)
+                        .to_string(),
+                )
+            }
+        }
+        (Some(_), None) => Some("N/A".to_string()),
     }
 }
 
@@ -845,9 +868,6 @@ pub async fn portfolio_history(
     granularity: String,
     include_prices: bool,
 ) -> Result<HistoryOutput> {
-    use rust_decimal::Decimal;
-    use std::str::FromStr;
-
     // Parse date range
     let start_date = start
         .as_ref()
@@ -926,6 +946,7 @@ pub async fn portfolio_history(
         .clone()
         .unwrap_or_else(|| config.reporting_currency.clone());
     let mut history_points = Vec::with_capacity(filtered.len());
+    let mut previous_total_value: Option<Decimal> = None;
 
     for change_point in &filtered {
         let as_of_date = change_point.timestamp.date_naive();
@@ -960,16 +981,23 @@ pub async fn portfolio_history(
             })
             .collect();
 
+        let current_total_value = Decimal::from_str(&snapshot.total_value).ok();
+        let percentage_change_from_previous =
+            compute_percentage_change_from_previous(previous_total_value, current_total_value);
+
         history_points.push(HistoryPoint {
             timestamp: change_point.timestamp.to_rfc3339(),
             date: as_of_date.to_string(),
             total_value: snapshot.total_value,
+            percentage_change_from_previous,
             change_triggers: if trigger_descriptions.is_empty() {
                 None
             } else {
                 Some(trigger_descriptions)
             },
         });
+
+        previous_total_value = current_total_value;
     }
 
     // Calculate summary if we have points
@@ -1137,6 +1165,29 @@ mod tests {
             kind: FxRateKind::Close,
             source: "test".to_string(),
         }
+    }
+
+    #[test]
+    fn compute_percentage_change_from_previous_handles_expected_cases() {
+        assert_eq!(
+            compute_percentage_change_from_previous(None, Some(Decimal::ONE)),
+            None
+        );
+        assert_eq!(
+            compute_percentage_change_from_previous(Some(Decimal::ZERO), Some(Decimal::ONE)),
+            Some("N/A".to_string())
+        );
+        assert_eq!(
+            compute_percentage_change_from_previous(
+                Some(Decimal::from_str("100").unwrap()),
+                Some(Decimal::from_str("125.5").unwrap())
+            ),
+            Some("25.50".to_string())
+        );
+        assert_eq!(
+            compute_percentage_change_from_previous(Some(Decimal::ONE), None),
+            Some("N/A".to_string())
+        );
     }
 
     #[tokio::test]

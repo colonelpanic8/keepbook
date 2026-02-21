@@ -544,6 +544,14 @@ fn format_tray_currency(
     }
 }
 
+fn format_history_change_for_tray(percentage_change: Option<&str>) -> String {
+    match percentage_change {
+        Some("N/A") | None => "N/A".to_string(),
+        Some(value) if value.starts_with('-') => format!("{value}%"),
+        Some(value) => format!("+{value}%"),
+    }
+}
+
 async fn apply_tray_state(
     tray_handle: &mut Option<ksni::Handle<KeepbookTray>>,
     state: &KeepbookTrayState,
@@ -670,7 +678,10 @@ impl Daemon {
                             &history.currency,
                             &self.config.display,
                         );
-                        format!("{}: {}", point.date, value)
+                        let percentage_change = format_history_change_for_tray(
+                            point.percentage_change_from_previous.as_deref(),
+                        );
+                        format!("{}: {} ({} vs prev)", point.date, value, percentage_change)
                     })
                     .collect();
 
@@ -946,6 +957,18 @@ mod tests {
         let display = keepbook::config::DisplayConfig::default();
         let formatted = format_tray_currency("1234.5", "CHF", &display);
         assert_eq!(formatted, "1234.5 CHF");
+    }
+
+    #[test]
+    fn format_history_change_for_tray_defaults_to_na() {
+        assert_eq!(format_history_change_for_tray(None), "N/A");
+        assert_eq!(format_history_change_for_tray(Some("N/A")), "N/A");
+    }
+
+    #[test]
+    fn format_history_change_for_tray_adds_sign_and_percent() {
+        assert_eq!(format_history_change_for_tray(Some("3.25")), "+3.25%");
+        assert_eq!(format_history_change_for_tray(Some("-1.50")), "-1.50%");
     }
 
     #[test]

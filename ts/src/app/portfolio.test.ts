@@ -744,6 +744,7 @@ describe('portfolioHistory', () => {
     expect(result.points[0].date).toBe('2024-06-14');
     expect(result.points[0].timestamp).toBe('2024-06-14T10:00:00+00:00');
     expect(result.points[0].total_value).toBe('100');
+    expect(result.points[0].percentage_change_from_previous).toBeNull();
     expect(result.summary).toBeUndefined();
 
     // summary absent from JSON
@@ -775,12 +776,41 @@ describe('portfolioHistory', () => {
     expect(result.points).toHaveLength(2);
     expect(result.points[0].total_value).toBe('100');
     expect(result.points[1].total_value).toBe('150');
+    expect(result.points[0].percentage_change_from_previous).toBeNull();
+    expect(result.points[1].percentage_change_from_previous).toBe('50.00');
 
     expect(result.summary).toBeDefined();
     expect(result.summary!.initial_value).toBe('100');
     expect(result.summary!.final_value).toBe('150');
     expect(result.summary!.absolute_change).toBe('50');
     expect(result.summary!.percentage_change).toBe('50.00');
+  });
+
+  it('percentage_change_from_previous compares to the previous available point', async () => {
+    const clock = makeClock('2024-06-20T12:00:00Z');
+    const { storage } = await setupStorageWithBalances(clock, [
+      {
+        timestamp: '2024-06-10T10:00:00Z',
+        balances: [{ asset: Asset.currency('USD'), amount: '100' }],
+      },
+      {
+        timestamp: '2024-06-12T10:00:00Z',
+        balances: [{ asset: Asset.currency('USD'), amount: '130' }],
+      },
+      {
+        timestamp: '2024-06-15T10:00:00Z',
+        balances: [{ asset: Asset.currency('USD'), amount: '117' }],
+      },
+    ]);
+    const store = new NullMarketDataStore();
+    const config = makeConfig();
+
+    const result = await portfolioHistory(storage, store, config, {}, clock);
+
+    expect(result.points).toHaveLength(3);
+    expect(result.points[0].percentage_change_from_previous).toBeNull();
+    expect(result.points[1].percentage_change_from_previous).toBe('30.00');
+    expect(result.points[2].percentage_change_from_previous).toBe('-10.00');
   });
 
   it('percentage_change keeps two decimal places when trailing zero is needed', async () => {
@@ -829,6 +859,7 @@ describe('portfolioHistory', () => {
     expect(result.summary!.final_value).toBe('100');
     expect(result.summary!.absolute_change).toBe('100');
     expect(result.summary!.percentage_change).toBe('N/A');
+    expect(result.points[1].percentage_change_from_previous).toBe('N/A');
   });
 
   // -------------------------------------------------------------------------
@@ -1015,6 +1046,7 @@ describe('portfolioHistory', () => {
       timestamp: '2024-06-14T10:00:00+00:00',
       date: '2024-06-14',
       total_value: '100',
+      percentage_change_from_previous: null,
       change_triggers: undefined,
     };
     const json = JSON.stringify(pointWithNoTriggers);

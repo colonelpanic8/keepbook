@@ -141,6 +141,7 @@ export interface HistoryPoint {
   timestamp: string;
   date: string;
   total_value: string;
+  percentage_change_from_previous: string | null;
   change_triggers?: string[];
 }
 

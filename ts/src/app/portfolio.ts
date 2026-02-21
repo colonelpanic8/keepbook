@@ -254,6 +254,7 @@ export async function portfolioHistory(
 
   // Calculate portfolio value at each change point
   const historyPoints: HistoryPoint[] = [];
+  let previousTotalValue: Decimal | undefined;
   for (const point of points) {
     const portfolioService = new PortfolioService(storage, marketDataService, effectiveClock);
 
@@ -266,9 +267,24 @@ export async function portfolioHistory(
     });
 
     const totalValue = snapshot.total_value;
+    const currentTotalValue = new Decimal(totalValue);
 
     // Format triggers
     const triggers = point.triggers.map(formatTrigger);
+
+    let percentageChangeFromPrevious: string | null = null;
+    if (previousTotalValue !== undefined) {
+      if (previousTotalValue.isZero()) {
+        percentageChangeFromPrevious = 'N/A';
+      } else {
+        percentageChangeFromPrevious = currentTotalValue
+          .minus(previousTotalValue)
+          .div(previousTotalValue)
+          .times(100)
+          .toDecimalPlaces(2)
+          .toFixed(2);
+      }
+    }
 
     const historyPoint: HistoryPoint = {
       timestamp:
@@ -277,10 +293,12 @@ export async function portfolioHistory(
           : formatRfc3339(point.timestamp),
       date: formatDateYMD(point.timestamp),
       total_value: totalValue,
+      percentage_change_from_previous: percentageChangeFromPrevious,
       change_triggers: triggers.length > 0 ? triggers : undefined,
     };
 
     historyPoints.push(historyPoint);
+    previousTotalValue = currentTotalValue;
   }
 
   // Calculate summary if 2+ points

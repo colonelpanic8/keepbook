@@ -516,10 +516,12 @@ describe('Integration: JSON compatibility checks', () => {
       timestamp: '2024-06-14T10:00:00+00:00',
       date: '2024-06-14',
       total_value: '100',
+      percentage_change_from_previous: null,
       change_triggers: undefined,
     };
     const json = JSON.stringify(point);
     expect(json).not.toContain('change_triggers');
+    expect(json).toContain('"percentage_change_from_previous":null');
   });
 
   // -------------------------------------------------------------------------
@@ -957,9 +959,11 @@ describe('Integration: full JSON round-trip verification', () => {
     expect(parsed.points[0].timestamp).toBe('2024-06-13T10:00:00+00:00');
     expect(parsed.points[0].date).toBe('2024-06-13');
     expect(parsed.points[0].total_value).toBe('100');
+    expect(parsed.points[0].percentage_change_from_previous).toBeNull();
     expect(parsed.points[1].timestamp).toBe('2024-06-14T10:00:00+00:00');
     expect(parsed.points[1].date).toBe('2024-06-14');
     expect(parsed.points[1].total_value).toBe('150');
+    expect(parsed.points[1].percentage_change_from_previous).toBe('50.00');
 
     // Summary
     expect(parsed.summary).toBeDefined();
