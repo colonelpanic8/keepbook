@@ -4,43 +4,68 @@
 
 * Overview
 
-Keepbook is a local-first personal finance toolkit.
+Keepbook is a local-first personal finance toolkit focused on data ownership.
 
-- Data is stored in plain JSON/TOML/JSONL files you own.
-- The core is a Rust library and CLI.
-- Sync adapters, market data sources, and portfolio valuation are pluggable.
+- Your data is stored in plain JSON/TOML/JSONL files.
+- The on-disk format is human-readable and easy to inspect/edit with normal tools.
+- The data directory is fully portable: copy it, back it up, version it, and keep it long-term without lock-in.
 
-* Current Status
+* Implementations
 
-This repository is no longer at the initial MVP design stage. Current implementation includes:
+Keepbook currently has two implementations in this repository:
 
-- Connection/account management via CLI.
-- JSON file storage with append-only balance snapshots and transactions.
-- Synchronizers for Chase, Schwab, Coinbase, and Plaid.
-- Price/FX source routing with configurable providers.
-- Portfolio snapshot/history/change-point valuation commands.
-- Optional git auto-commit and auto-push after data-changing operations.
+- Rust: =src/= (reference CLI and library).
+- TypeScript: =ts/= (port of the library/CLI surface).
 
-Not implemented yet:
+Project policy is to keep business logic and output shapes aligned between both implementations.
+Current TypeScript CLI gaps (as of this README update):
 
-- Annotation layer (categories/notes as first class stored overlays).
-- Budgeting/reporting UI workflows.
-- Stable public API for frontend integration (frontend work is experimental).
+- =sync prices= returns a not-implemented error.
+- =sync symlinks= is currently a stub response.
+- =market-data fetch= returns a not-implemented error.
+- Synchronizer support is partial relative to Rust.
 
 * CLI
 
-The main binary is =keepbook=. Commands emit JSON.
+The main Rust binary is =keepbook=. Commands emit JSON.
 
-Key command groups:
+Top-level commands:
 
 - =config=
-- =add connection|account=
-- =set balance=
-- =list connections|accounts|balances|transactions|price-sources|all=
-- =sync connection|all|prices|symlinks=
-- =auth schwab login= / =auth chase login=
+- =add=
+  - =connection=
+  - =account=
+- =remove=
+  - =connection=
+- =set=
+  - =balance=
+  - =transaction= (append-only transaction annotation patches)
+- =import=
+  - =schwab transactions=
+- =list=
+  - =connections=
+  - =accounts=
+  - =balances=
+  - =transactions=
+  - =price-sources=
+  - =all=
+- =sync=
+  - =connection=
+  - =all=
+  - =prices [all|connection|account]= (interactive selector when scope is omitted)
+  - =symlinks=
+- =auth=
+  - =schwab login=
+  - =chase login=
 - =market-data fetch=
 - =portfolio snapshot|history|change-points=
+- =spending=
+
+Global options:
+
+- =--config <path>=
+- =--git-merge-master=
+- =--skip-git-merge-master=
 
 Examples:
 
@@ -55,14 +80,24 @@ keepbook add account --connection <connection-id> "Checking"
 # Set a balance snapshot entry
 keepbook set balance --account <account-id> --asset USD --amount 1234.56
 
+# Add/clear transaction annotation fields
+keepbook set transaction \
+  --account <account-id> \
+  --transaction <transaction-id> \
+  --category "Dining" \
+  --note "Team lunch"
+
 # Sync transactions/balances from one source
 keepbook sync connection <connection-id-or-name>
 
-# Refresh latest prices only
+# Refresh latest prices for all accounts
 keepbook sync prices all
 
 # Portfolio valuation in EUR at a specific date
 keepbook portfolio snapshot --currency EUR --date 2026-02-01
+
+# Spending report
+keepbook spending --period monthly --group-by category
 #+END_SRC
 
 * Configuration
@@ -72,7 +107,9 @@ Default config path resolution:
 1. =./keepbook.toml= if present.
 2. =~/.local/share/keepbook/keepbook.toml= (XDG data dir fallback).
 
-Config fields (currently used):
+When no config file exists, defaults are used and the intended config directory becomes =data_dir=.
+
+Config fields:
 
 #+BEGIN_SRC toml
 # Optional; if relative, resolved against config directory
@@ -85,10 +122,10 @@ reporting_currency = "USD"
 # this many decimal places in CLI output.
 # currency_decimals = 2
 #
-# Optional; UI-oriented currency display formatting (does not change canonical JSON numeric fields):
-# currency_grouping = true          # enable thousands separators
-# currency_symbol = "$"             # prefix symbol
-# currency_fixed_decimals = true    # when currency_decimals is set, pad to exactly that many dp
+# Optional UI-oriented display fields (canonical JSON numeric values are unchanged):
+# currency_grouping = true
+# currency_symbol = "$"
+# currency_fixed_decimals = true
 
 [refresh]
 balance_staleness = "14d"
@@ -111,6 +148,7 @@ spending_windows_days = [7, 30, 90]
 [git]
 auto_commit = false
 auto_push = false
+merge_master_before_command = false
 #+END_SRC
 
 * Storage Layout
@@ -132,6 +170,7 @@ data/
       account_config.toml         # optional
       balances.jsonl              # append-only BalanceSnapshot rows
       transactions.jsonl          # append-only Transaction rows
+      transaction_annotations.jsonl
 
   # market data store (also under data_dir)
   assets/
@@ -152,7 +191,8 @@ data/
 Notes:
 
 - Balances are stored as full snapshots (all holdings for an account at one timestamp).
-- Transaction files are append-only; read-path logic provides a last-write-wins view by transaction id.
+- Transaction files are append-only; read path dedupes with last-write-wins by transaction id.
+- Transaction annotations are append-only patches stored separately from raw transactions.
 - Symlinks are rebuilt with =keepbook sync symlinks=.
 - =account_config.toml= supports per-account overrides such as
   =balance_staleness=, =balance_backfill=, and =exclude_from_portfolio=.
@@ -167,21 +207,43 @@ Implemented source types:
 - Crypto: =coingecko=, =cryptocompare=, =coincap=
 - FX: =frankfurter=
 
+* Development
+
+- Rust tests: =cargo test=
+- TypeScript tests: =cd ts && yarn test=
+- TypeScript package manager: use =yarn= in =ts/=
+
+Useful helper commands from =justfile=:
+
+- =just kb -- --help=
+- =just run-tray -- --help=
+
 * Architecture
 
-Main modules:
+Rust modules:
 
 - =src/storage= - storage trait + JSON file implementation.
 - =src/sync= - synchronizer traits, orchestration, auth flows.
 - =src/market_data= - store, source adapters, routers, service builder.
 - =src/portfolio= - valuation, history, and change-point logic.
-- =src/app.rs= - CLI command handlers.
+- =src/app/= - application command handlers/types.
+- =src/main.rs= - CLI entrypoint.
+- =src/bin/keepbook-sync-daemon.rs= - optional tray sync daemon.
+
+TypeScript modules:
+
+- =ts/src/app= - app-layer command handlers/types.
+- =ts/src/storage= - storage trait + JSON file implementation.
+- =ts/src/market-data= - market data store and services.
+- =ts/src/portfolio= - valuation/history/change points.
+- =ts/src/cli/main.ts= - CLI entrypoint.
 
 A lightweight FFI crate exists at =crates/keepbook-ffi= for embedding use cases.
 
 * Why "Keepbook"?
 
-Bookkeeping, but you keep the books.
+Keepbook is about keeping control of your own financial records.
+The point is durable ownership: plain files, readable forever, portable anywhere.
 
 * License
 
