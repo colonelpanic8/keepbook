@@ -1,0 +1,84 @@
+name: Frontend Build and Release APK
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "frontend-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-frontend-apk:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "yarn"
+          cache-dependency-path: frontend/yarn.lock
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-frontend-gradle-${{ hashFiles('frontend/android/**/*.gradle*', 'frontend/android/**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-frontend-gradle-
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: yarn install --frozen-lockfile
+
+      - name: Fix Hermes compiler permissions
+        working-directory: frontend
+        run: |
+          find node_modules -name "hermesc" -type f -exec chmod +x {} \;
+
+          OLD_PATH="node_modules/react-native/sdks/hermesc"
+          NEW_PATH="node_modules/hermes-compiler/hermesc"
+          if [ ! -d "$OLD_PATH" ] && [ -d "$NEW_PATH" ]; then
+            mkdir -p "$(dirname "$OLD_PATH")"
+            ln -s "$(realpath "$NEW_PATH")" "$OLD_PATH"
+          fi
+
+      - name: Build Android release APK
+        working-directory: frontend/android
+        run: ./gradlew :app:assembleRelease -PreactNativeArchitectures=arm64-v8a
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: keepbook-frontend-release-apk
+          path: frontend/android/app/build/outputs/apk/release/app-release.apk
+          retention-days: 14
+
+      - name: Create GitHub release with APK
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Frontend Release ${{ github.ref_name }}
+          files: frontend/android/app/build/outputs/apk/release/app-release.apk
+          generate_release_notes: true
