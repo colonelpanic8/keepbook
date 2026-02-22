@@ -9,6 +9,7 @@ import {
   addConnection,
   addAccount,
   removeConnection,
+  setAccountConfig,
   setBalance,
   setTransactionAnnotation,
 } from './mutations.js';
@@ -505,6 +506,110 @@ describe('setBalance', () => {
     )) as SetBalanceSuccessResult;
 
     expect(result.balance.timestamp).toBe('2024-07-01T10:30:00.123000000+00:00');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// setAccountConfig
+// ---------------------------------------------------------------------------
+
+describe('setAccountConfig', () => {
+  it('sets balance_backfill for an account id', async () => {
+    const storage = new MemoryStorage();
+    const clock = makeClock('2024-06-01T12:00:00Z');
+
+    await addConnection(storage, 'My Bank', makeIdGen('conn-1'), clock);
+    await addAccount(storage, 'conn-1', 'Checking', [], makeIdGen('acct-1'), clock);
+
+    const result = await setAccountConfig(storage, 'acct-1', { balance_backfill: 'carry_earliest' });
+    expect(result).toEqual({
+      success: true,
+      account: {
+        id: 'acct-1',
+        name: 'Checking',
+      },
+      config: {
+        balance_backfill: 'carry_earliest',
+      },
+    });
+
+    const stored = storage.getAccountConfig(Id.fromString('acct-1'));
+    expect(stored?.balance_backfill).toBe('carry_earliest');
+  });
+
+  it('clears balance_backfill', async () => {
+    const storage = new MemoryStorage();
+    const clock = makeClock('2024-06-01T12:00:00Z');
+
+    await addConnection(storage, 'My Bank', makeIdGen('conn-1'), clock);
+    await addAccount(storage, 'conn-1', 'Checking', [], makeIdGen('acct-1'), clock);
+    await setAccountConfig(storage, 'acct-1', { balance_backfill: 'zero' });
+
+    const result = await setAccountConfig(storage, 'Checking', { clear_balance_backfill: true });
+    expect(result).toEqual({
+      success: true,
+      account: {
+        id: 'acct-1',
+        name: 'Checking',
+      },
+      config: {
+        balance_backfill: null,
+      },
+    });
+
+    const stored = storage.getAccountConfig(Id.fromString('acct-1'));
+    expect(stored?.balance_backfill).toBeUndefined();
+  });
+
+  it('returns error when account not found', async () => {
+    const storage = new MemoryStorage();
+
+    const result = await setAccountConfig(storage, 'missing-account', {
+      balance_backfill: 'carry_earliest',
+    });
+    expect(result).toEqual({
+      success: false,
+      error: "Account not found: 'missing-account'",
+    });
+  });
+
+  it('returns error for conflicting flags', async () => {
+    const storage = new MemoryStorage();
+
+    const result = await setAccountConfig(storage, 'acct-1', {
+      balance_backfill: 'zero',
+      clear_balance_backfill: true,
+    });
+    expect(result).toEqual({
+      success: false,
+      error: 'Cannot use balance_backfill and clear_balance_backfill together',
+    });
+  });
+
+  it('returns error when no fields specified', async () => {
+    const storage = new MemoryStorage();
+
+    const result = await setAccountConfig(storage, 'acct-1', {});
+    expect(result).toEqual({
+      success: false,
+      error: 'No account config fields specified',
+    });
+  });
+
+  it('returns error for invalid backfill policy', async () => {
+    const storage = new MemoryStorage();
+    const clock = makeClock('2024-06-01T12:00:00Z');
+
+    await addConnection(storage, 'My Bank', makeIdGen('conn-1'), clock);
+    await addAccount(storage, 'conn-1', 'Checking', [], makeIdGen('acct-1'), clock);
+
+    const result = await setAccountConfig(storage, 'acct-1', {
+      balance_backfill: 'bad-policy',
+    });
+    expect(result).toEqual({
+      success: false,
+      error: "Invalid balance backfill policy: 'bad-policy'. Use: none, zero, carry_earliest",
+    });
   });
 });
 

@@ -6,10 +6,11 @@ use anyhow::{Context, Result};
 use crate::clock::{Clock, SystemClock};
 use crate::config::ResolvedConfig;
 use crate::models::{
-    Account, Asset, AssetBalance, BalanceSnapshot, Connection, ConnectionConfig, ConnectionState,
-    Id, IdGenerator, TransactionAnnotation, TransactionAnnotationPatch, UuidIdGenerator,
+    Account, AccountConfig, Asset, AssetBalance, BalanceBackfillPolicy, BalanceSnapshot,
+    Connection, ConnectionConfig, ConnectionState, Id, IdGenerator, TransactionAnnotation,
+    TransactionAnnotationPatch, UuidIdGenerator,
 };
-use crate::storage::Storage;
+use crate::storage::{find_account, Storage};
 
 use super::maybe_auto_commit;
 
@@ -258,6 +259,69 @@ pub async fn set_balance(
     });
 
     maybe_auto_commit(config, &format!("set balance {account_id} {asset_str}"));
+
+    Ok(result)
+}
+
+fn parse_balance_backfill_policy(value: &str) -> Result<BalanceBackfillPolicy> {
+    match value.trim().to_lowercase().as_str() {
+        "none" => Ok(BalanceBackfillPolicy::None),
+        "zero" => Ok(BalanceBackfillPolicy::Zero),
+        "carry_earliest" | "carry-earliest" => Ok(BalanceBackfillPolicy::CarryEarliest),
+        _ => anyhow::bail!(
+            "Invalid balance backfill policy: {value}. Use: none, zero, carry_earliest"
+        ),
+    }
+}
+
+pub async fn set_account_config(
+    storage: &dyn Storage,
+    config: &ResolvedConfig,
+    account_id_or_name: &str,
+    balance_backfill: Option<&str>,
+    clear_balance_backfill: bool,
+) -> Result<serde_json::Value> {
+    if clear_balance_backfill && balance_backfill.is_some() {
+        anyhow::bail!("Cannot use --balance-backfill and --clear-balance-backfill together");
+    }
+
+    if !clear_balance_backfill && balance_backfill.is_none() {
+        anyhow::bail!("No account config fields specified");
+    }
+
+    let account = find_account(storage, account_id_or_name)
+        .await?
+        .context(format!("Account not found: {account_id_or_name}"))?;
+
+    let mut account_config: AccountConfig =
+        storage.get_account_config(&account.id)?.unwrap_or_default();
+    if clear_balance_backfill {
+        account_config.balance_backfill = None;
+    } else if let Some(policy) = balance_backfill {
+        account_config.balance_backfill = Some(parse_balance_backfill_policy(policy)?);
+    }
+
+    storage
+        .save_account_config(&account.id, &account_config)
+        .await?;
+
+    let balance_backfill_json = match account_config.balance_backfill {
+        Some(policy) => serde_json::to_value(policy)?,
+        None => serde_json::Value::Null,
+    };
+
+    let result = serde_json::json!({
+        "success": true,
+        "account": {
+            "id": account.id.to_string(),
+            "name": account.name,
+        },
+        "config": {
+            "balance_backfill": balance_backfill_json
+        }
+    });
+
+    maybe_auto_commit(config, &format!("set account config {}", account.id));
 
     Ok(result)
 }

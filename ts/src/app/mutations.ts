@@ -22,6 +22,8 @@ import {
   type TransactionAnnotationPatchType,
   type TransactionAnnotationType,
 } from '../models/transaction-annotation.js';
+import { type BalanceBackfillPolicy } from '../models/account.js';
+import { findAccount } from '../storage/lookup.js';
 
 // ---------------------------------------------------------------------------
 // addConnection
@@ -281,6 +283,83 @@ export async function setBalance(
       asset,
       amount: decStr(amount),
       timestamp: formatRfc3339(snapshot.timestamp),
+    },
+  };
+}
+
+function parseBalanceBackfillPolicy(value: string): BalanceBackfillPolicy | null {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'none') return 'none';
+  if (normalized === 'zero') return 'zero';
+  if (normalized === 'carry_earliest' || normalized === 'carry-earliest') return 'carry_earliest';
+  return null;
+}
+
+export async function setAccountConfig(
+  storage: Storage,
+  accountIdOrName: string,
+  args: {
+    balance_backfill?: string;
+    clear_balance_backfill?: boolean;
+  },
+): Promise<object> {
+  const balanceBackfill = args.balance_backfill;
+  const clearBalanceBackfill = args.clear_balance_backfill ?? false;
+
+  if (balanceBackfill !== undefined && clearBalanceBackfill) {
+    return {
+      success: false,
+      error: 'Cannot use balance_backfill and clear_balance_backfill together',
+    };
+  }
+
+  if (balanceBackfill === undefined && !clearBalanceBackfill) {
+    return {
+      success: false,
+      error: 'No account config fields specified',
+    };
+  }
+
+  const account = await findAccount(storage, accountIdOrName);
+  if (account === null) {
+    return {
+      success: false,
+      error: `Account not found: '${accountIdOrName}'`,
+    };
+  }
+
+  const baseConfig = storage.getAccountConfig(account.id) ?? {};
+  let nextBalanceBackfill = baseConfig.balance_backfill;
+  if (clearBalanceBackfill) {
+    nextBalanceBackfill = undefined;
+  } else if (balanceBackfill !== undefined) {
+    const policy = parseBalanceBackfillPolicy(balanceBackfill);
+    if (policy === null) {
+      return {
+        success: false,
+        error: `Invalid balance backfill policy: '${balanceBackfill}'. Use: none, zero, carry_earliest`,
+      };
+    }
+    nextBalanceBackfill = policy;
+  }
+
+  const nextConfig = {
+    ...baseConfig,
+    ...(nextBalanceBackfill !== undefined
+      ? { balance_backfill: nextBalanceBackfill }
+      : { balance_backfill: undefined }),
+  };
+
+  await storage.saveAccountConfig(account.id, nextConfig);
+
+  return {
+    success: true,
+    account: {
+      id: account.id.asStr(),
+      name: account.name,
+    },
+    config: {
+      balance_backfill: nextConfig.balance_backfill ?? null,
     },
   };
 }

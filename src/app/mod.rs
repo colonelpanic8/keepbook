@@ -19,7 +19,7 @@ pub use list::{
 };
 pub use mutations::{
     add_account, add_account_with, add_connection, add_connection_with, parse_asset,
-    remove_connection, set_balance, set_transaction_annotation,
+    remove_connection, set_account_config, set_balance, set_transaction_annotation,
 };
 pub use portfolio::{
     fetch_historical_prices, portfolio_change_points, portfolio_history, portfolio_snapshot,

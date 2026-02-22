@@ -15,6 +15,7 @@ import {
   addConnection,
   addAccount,
   removeConnection,
+  setAccountConfig,
   setBalance,
   setTransactionAnnotation,
 } from '../app/mutations.js';
@@ -281,6 +282,36 @@ set
       return result;
     });
   });
+
+set
+  .command('account-config')
+  .description('Set account-level configuration values')
+  .requiredOption('--account <id_or_name>', 'account ID or name')
+  .option('--balance-backfill <policy>', 'balance backfill policy: none, zero, carry_earliest')
+  .option('--clear-balance-backfill', 'clear balance backfill policy override')
+  .action(
+    async (opts: {
+      account: string;
+      balanceBackfill?: string;
+      clearBalanceBackfill?: boolean;
+    }) => {
+      await runWithConfig(async (cfg) => {
+        const storage = new JsonFileStorage(cfg.config.data_dir);
+        const result = await setAccountConfig(storage, opts.account, {
+          balance_backfill: opts.balanceBackfill,
+          clear_balance_backfill: opts.clearBalanceBackfill,
+        });
+        if ((result as { success?: boolean }).success && cfg.config.git.auto_commit) {
+          await tryAutoCommit(
+            cfg.config.data_dir,
+            `set account config '${opts.account}'`,
+            cfg.config.git.auto_push,
+          );
+        }
+        return result;
+      });
+    },
+  );
 
 set
   .command('transaction')

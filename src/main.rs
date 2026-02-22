@@ -237,6 +237,21 @@ enum SetCommand {
         amount: String,
     },
 
+    /// Set account-level configuration values
+    AccountConfig {
+        /// Account ID or name
+        #[arg(long)]
+        account: String,
+
+        /// Balance backfill policy: none, zero, carry_earliest
+        #[arg(long, conflicts_with = "clear_balance_backfill")]
+        balance_backfill: Option<String>,
+
+        /// Clear balance backfill policy override
+        #[arg(long)]
+        clear_balance_backfill: bool,
+    },
+
     /// Set a transaction annotation (append-only patch)
     Transaction {
         /// Account ID
@@ -625,6 +640,21 @@ async fn main() -> Result<()> {
                 let result =
                     app::set_balance(storage_arc.as_ref(), &config, &account, &asset, &amount)
                         .await?;
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
+            SetCommand::AccountConfig {
+                account,
+                balance_backfill,
+                clear_balance_backfill,
+            } => {
+                let result = app::set_account_config(
+                    storage_arc.as_ref(),
+                    &config,
+                    &account,
+                    balance_backfill.as_deref(),
+                    clear_balance_backfill,
+                )
+                .await?;
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
             SetCommand::Transaction {
