@@ -279,15 +279,16 @@ describe('MarketDataService', () => {
       expect(result!.as_of_date).toBe('2024-01-12');
     });
 
-    it('returns null when price is outside lookback range', async () => {
-      // Store a price 10 days before (beyond default 7-day lookback)
+    it('returns older cached price by default (unbounded store lookup)', async () => {
+      // Store a price 10 days before the query date.
       const price = makePrice({ as_of_date: '2024-01-05' });
       await store.put_prices([price]);
 
       service = new MarketDataService(store);
       const result = await service.priceFromStore(AAPL, '2024-01-15');
 
-      expect(result).toBeNull();
+      expect(result).not.toBeNull();
+      expect(result!.as_of_date).toBe('2024-01-05');
     });
   });
 
@@ -709,30 +710,30 @@ describe('MarketDataService', () => {
       expect(result!.rate).toBe('0.9150');
     });
 
-    it('returns null when outside lookback range', async () => {
+    it('returns older cached FX rate by default (unbounded store lookup)', async () => {
       const rate = makeFxRate({ as_of_date: '2024-01-05' });
       await store.put_fx_rates([rate]);
 
       service = new MarketDataService(store);
       const result = await service.fxFromStore('USD', 'EUR', '2024-01-15');
 
-      expect(result).toBeNull();
+      expect(result).not.toBeNull();
+      expect(result!.as_of_date).toBe('2024-01-05');
     });
   });
 
   // -- withLookbackDays -----------------------------------------------------
 
   describe('withLookbackDays', () => {
-    it('custom lookback extends range', async () => {
+    it('bounds store lookup when explicitly configured', async () => {
       const price = makePrice({ as_of_date: '2024-01-05' });
       await store.put_prices([price]);
 
       service = new MarketDataService(store);
-      service.withLookbackDays(15);
+      service.withLookbackDays(7);
 
       const result = await service.priceFromStore(AAPL, '2024-01-15');
-      expect(result).not.toBeNull();
-      expect(result!.price).toBe('185.50');
+      expect(result).toBeNull();
     });
   });
 });

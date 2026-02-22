@@ -18,7 +18,11 @@ pub struct MarketDataService {
     equity_router: Option<Arc<EquityPriceRouter>>,
     crypto_router: Option<Arc<CryptoPriceRouter>>,
     fx_router: Option<Arc<FxRateRouter>>,
-    lookback_days: u32,
+    // When set, bounds store lookups to N days back from query date.
+    // When None, store lookups are unbounded and return the latest close <= query date.
+    store_lookback_days: Option<u32>,
+    // Bounds external fetch attempts when an exact close is unavailable.
+    fetch_lookback_days: u32,
     /// How old a quote can be before we fetch a new one. None means always fetch.
     quote_staleness: Option<std::time::Duration>,
     clock: Arc<dyn Clock>,
@@ -35,7 +39,8 @@ impl MarketDataService {
             equity_router: None,
             crypto_router: None,
             fx_router: None,
-            lookback_days: 7,
+            store_lookback_days: None,
+            fetch_lookback_days: 7,
             quote_staleness: None,
             clock: Arc::new(SystemClock),
         }
@@ -57,7 +62,8 @@ impl MarketDataService {
     }
 
     pub fn with_lookback_days(mut self, days: u32) -> Self {
-        self.lookback_days = days;
+        self.store_lookback_days = Some(days);
+        self.fetch_lookback_days = days;
         self
     }
 
@@ -72,7 +78,10 @@ impl MarketDataService {
     }
 
     /// Get price from store only, no external fetching.
-    /// Returns the most recent price by timestamp for the given date (with lookback).
+    /// Returns the latest close on or before `date`.
+    ///
+    /// If `store_lookback_days` is set, limits lookup to that range.
+    /// Otherwise (default), lookup is unbounded.
     pub async fn price_from_store(
         &self,
         asset: &Asset,
@@ -82,30 +91,34 @@ impl MarketDataService {
         let asset_id = AssetId::from_asset(&asset);
         debug!(asset_id = %asset_id, date = %date, "looking up price from store only");
 
-        for offset in 0..=self.lookback_days {
-            let target_date = date - Duration::days(offset as i64);
-            if let Some(price) = self
-                .store
-                .get_price(&asset_id, target_date, PriceKind::Close)
-                .await?
-            {
-                debug!(
-                    asset_id = %asset_id,
-                    date = %target_date,
-                    price = %price.price,
-                    source = %price.source,
-                    "price found in store"
-                );
-                return Ok(Some(price));
+        if let Some(days) = self.store_lookback_days {
+            for offset in 0..=days {
+                let target_date = date - Duration::days(offset as i64);
+                if let Some(price) = self
+                    .store
+                    .get_price(&asset_id, target_date, PriceKind::Close)
+                    .await?
+                {
+                    debug!(
+                        asset_id = %asset_id,
+                        date = %target_date,
+                        price = %price.price,
+                        source = %price.source,
+                        "price found in bounded store lookup"
+                    );
+                    return Ok(Some(price));
+                }
             }
+            return Ok(None);
         }
 
-        Ok(None)
+        let prices = self.store.get_all_prices(&asset_id).await?;
+        Ok(select_latest_price_on_or_before(prices, date))
     }
 
     /// Get a valuation price from store only, no external fetching.
     ///
-    /// - First tries close prices with lookback (`price_from_store`)
+    /// - First tries close prices via `price_from_store`
     /// - If none found and `allow_quote_fallback` is true, tries same-day quote
     pub async fn valuation_price_from_store(
         &self,
@@ -133,22 +146,18 @@ impl MarketDataService {
         let asset_id = AssetId::from_asset(&asset);
         debug!(asset_id = %asset_id, date = %date, "looking up close price");
 
-        for offset in 0..=self.lookback_days {
-            let target_date = date - Duration::days(offset as i64);
-            if let Some(price) = self
-                .store
-                .get_price(&asset_id, target_date, PriceKind::Close)
-                .await?
-            {
-                debug!(
-                    asset_id = %asset_id,
-                    date = %target_date,
-                    price = %price.price,
-                    "price found in cache"
-                );
-                return Ok(price);
-            }
+        if let Some(price) = self.price_from_store(&asset, date).await? {
+            debug!(
+                asset_id = %asset_id,
+                date = %price.as_of_date,
+                price = %price.price,
+                "price found in cache"
+            );
+            return Ok(price);
+        }
 
+        for offset in 0..=self.fetch_lookback_days {
+            let target_date = date - Duration::days(offset as i64);
             if let Some(price) = self
                 .fetch_price_from_sources(&asset, &asset_id, target_date)
                 .await?
@@ -184,7 +193,7 @@ impl MarketDataService {
 
         let had_cached = self.price_from_store(&asset, date).await?.is_some();
 
-        for offset in 0..=self.lookback_days {
+        for offset in 0..=self.fetch_lookback_days {
             let target_date = date - Duration::days(offset as i64);
             if let Some(price) = self
                 .fetch_price_from_sources(&asset, &asset_id, target_date)
@@ -310,23 +319,19 @@ impl MarketDataService {
             });
         }
 
-        for offset in 0..=self.lookback_days {
-            let target_date = date - Duration::days(offset as i64);
-            if let Some(rate) = self
-                .store
-                .get_fx_rate(&base, &quote, target_date, FxRateKind::Close)
-                .await?
-            {
-                debug!(
-                    base = %base,
-                    quote = %quote,
-                    date = %target_date,
-                    rate = %rate.rate,
-                    "FX rate found in cache"
-                );
-                return Ok(rate);
-            }
+        if let Some(rate) = self.fx_from_store(&base, &quote, date).await? {
+            debug!(
+                base = %base,
+                quote = %quote,
+                date = %rate.as_of_date,
+                rate = %rate.rate,
+                "FX rate found in cache"
+            );
+            return Ok(rate);
+        }
 
+        for offset in 0..=self.fetch_lookback_days {
+            let target_date = date - Duration::days(offset as i64);
             if let Some(rate) = self
                 .fetch_fx_from_sources(&base, &quote, target_date)
                 .await?
@@ -379,7 +384,7 @@ impl MarketDataService {
 
         let had_cached = self.fx_from_store(&base, &quote, date).await?.is_some();
 
-        for offset in 0..=self.lookback_days {
+        for offset in 0..=self.fetch_lookback_days {
             let target_date = date - Duration::days(offset as i64);
             if let Some(rate) = self
                 .fetch_fx_from_sources(&base, &quote, target_date)
@@ -395,7 +400,10 @@ impl MarketDataService {
     }
 
     /// Get FX rate from store only, no external fetching.
-    /// Returns the most recent close rate by date (with lookback).
+    /// Returns the latest close on or before `date`.
+    ///
+    /// If `store_lookback_days` is set, limits lookup to that range.
+    /// Otherwise (default), lookup is unbounded.
     pub async fn fx_from_store(
         &self,
         base: &str,
@@ -418,18 +426,22 @@ impl MarketDataService {
             }));
         }
 
-        for offset in 0..=self.lookback_days {
-            let target_date = date - Duration::days(offset as i64);
-            if let Some(rate) = self
-                .store
-                .get_fx_rate(&base, &quote, target_date, FxRateKind::Close)
-                .await?
-            {
-                return Ok(Some(rate));
+        if let Some(days) = self.store_lookback_days {
+            for offset in 0..=days {
+                let target_date = date - Duration::days(offset as i64);
+                if let Some(rate) = self
+                    .store
+                    .get_fx_rate(&base, &quote, target_date, FxRateKind::Close)
+                    .await?
+                {
+                    return Ok(Some(rate));
+                }
             }
+            return Ok(None);
         }
 
-        Ok(None)
+        let rates = self.store.get_all_fx_rates(&base, &quote).await?;
+        Ok(select_latest_fx_rate_on_or_before(rates, date))
     }
 
     pub async fn register_asset(&self, asset: &Asset) -> Result<()> {
@@ -542,6 +554,34 @@ impl MarketDataService {
     }
 }
 
+fn select_latest_price_on_or_before(
+    prices: Vec<PricePoint>,
+    date: NaiveDate,
+) -> Option<PricePoint> {
+    prices
+        .into_iter()
+        .filter(|p| p.kind == PriceKind::Close && p.as_of_date <= date)
+        .max_by(|a, b| {
+            a.as_of_date
+                .cmp(&b.as_of_date)
+                .then_with(|| a.timestamp.cmp(&b.timestamp))
+        })
+}
+
+fn select_latest_fx_rate_on_or_before(
+    rates: Vec<FxRatePoint>,
+    date: NaiveDate,
+) -> Option<FxRatePoint> {
+    rates
+        .into_iter()
+        .filter(|r| r.kind == FxRateKind::Close && r.as_of_date <= date)
+        .max_by(|a, b| {
+            a.as_of_date
+                .cmp(&b.as_of_date)
+                .then_with(|| a.timestamp.cmp(&b.timestamp))
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -592,6 +632,41 @@ mod tests {
             kind: PriceKind::Quote,
             price: px.to_string(),
             quote_currency: "USD".to_string(),
+            source: "fixed".to_string(),
+        }
+    }
+
+    fn make_close(
+        asset_id: &AssetId,
+        as_of_date: NaiveDate,
+        ts: chrono::DateTime<Utc>,
+        px: &str,
+    ) -> PricePoint {
+        PricePoint {
+            asset_id: asset_id.clone(),
+            as_of_date,
+            timestamp: ts,
+            kind: PriceKind::Close,
+            price: px.to_string(),
+            quote_currency: "USD".to_string(),
+            source: "fixed".to_string(),
+        }
+    }
+
+    fn make_fx_close(
+        base: &str,
+        quote: &str,
+        as_of_date: NaiveDate,
+        ts: chrono::DateTime<Utc>,
+        rate: &str,
+    ) -> FxRatePoint {
+        FxRatePoint {
+            base: base.to_string(),
+            quote: quote.to_string(),
+            as_of_date,
+            timestamp: ts,
+            rate: rate.to_string(),
+            kind: FxRateKind::Close,
             source: "fixed".to_string(),
         }
     }
@@ -694,6 +769,79 @@ mod tests {
         let (p, fetched) = svc.price_latest_force(&asset, today).await?;
         assert!(fetched);
         assert_eq!(p.price, "200");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn price_from_store_is_unbounded_by_default() -> Result<()> {
+        let store = Arc::new(MemoryMarketDataStore::default());
+        let svc = MarketDataService::new(store.clone(), None);
+        let asset = Asset::equity("AAPL");
+        let asset_id = AssetId::from_asset(&asset);
+        let query_date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+
+        store
+            .put_prices(std::slice::from_ref(&make_close(
+                &asset_id,
+                NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
+                Utc.with_ymd_and_hms(2024, 1, 1, 23, 59, 59).unwrap(),
+                "100",
+            )))
+            .await?;
+
+        let found = svc.price_from_store(&asset, query_date).await?;
+        assert!(found.is_some());
+        assert_eq!(
+            found.unwrap().as_of_date,
+            NaiveDate::from_ymd_opt(2024, 1, 1).unwrap()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn with_lookback_days_bounds_store_lookup() -> Result<()> {
+        let store = Arc::new(MemoryMarketDataStore::default());
+        let svc = MarketDataService::new(store.clone(), None).with_lookback_days(7);
+        let asset = Asset::equity("AAPL");
+        let asset_id = AssetId::from_asset(&asset);
+        let query_date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+
+        store
+            .put_prices(std::slice::from_ref(&make_close(
+                &asset_id,
+                NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
+                Utc.with_ymd_and_hms(2024, 1, 1, 23, 59, 59).unwrap(),
+                "100",
+            )))
+            .await?;
+
+        let found = svc.price_from_store(&asset, query_date).await?;
+        assert!(found.is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn fx_from_store_is_unbounded_by_default() -> Result<()> {
+        let store = Arc::new(MemoryMarketDataStore::default());
+        let svc = MarketDataService::new(store.clone(), None);
+        let query_date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+
+        store
+            .put_fx_rates(std::slice::from_ref(&make_fx_close(
+                "USD",
+                "EUR",
+                NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
+                Utc.with_ymd_and_hms(2024, 1, 1, 23, 59, 59).unwrap(),
+                "0.91",
+            )))
+            .await?;
+
+        let found = svc.fx_from_store("USD", "EUR", query_date).await?;
+        assert!(found.is_some());
+        assert_eq!(
+            found.unwrap().as_of_date,
+            NaiveDate::from_ymd_opt(2024, 1, 1).unwrap()
+        );
         Ok(())
     }
 }

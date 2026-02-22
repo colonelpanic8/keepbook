@@ -28,6 +28,34 @@ function subtractDays(dateStr: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+function selectLatestPriceOnOrBefore(prices: PricePoint[], date: string): PricePoint | null {
+  const candidates = prices.filter((p) => p.kind === 'close' && p.as_of_date <= date);
+  if (candidates.length === 0) {
+    return null;
+  }
+  candidates.sort((a, b) => {
+    if (a.as_of_date !== b.as_of_date) {
+      return a.as_of_date.localeCompare(b.as_of_date);
+    }
+    return a.timestamp.getTime() - b.timestamp.getTime();
+  });
+  return candidates[candidates.length - 1];
+}
+
+function selectLatestFxRateOnOrBefore(rates: FxRatePoint[], date: string): FxRatePoint | null {
+  const candidates = rates.filter((r) => r.kind === 'close' && r.as_of_date <= date);
+  if (candidates.length === 0) {
+    return null;
+  }
+  candidates.sort((a, b) => {
+    if (a.as_of_date !== b.as_of_date) {
+      return a.as_of_date.localeCompare(b.as_of_date);
+    }
+    return a.timestamp.getTime() - b.timestamp.getTime();
+  });
+  return candidates[candidates.length - 1];
+}
+
 // ---------------------------------------------------------------------------
 // MarketDataService
 // ---------------------------------------------------------------------------
@@ -35,7 +63,10 @@ function subtractDays(dateStr: string, days: number): string {
 export class MarketDataService {
   private readonly store: MarketDataStore;
   private readonly provider: MarketDataSource | null;
-  private lookbackDays_: number = 7;
+  // Null means unbounded store lookups (latest close <= query date).
+  private storeLookbackDays_: number | null = null;
+  // Bounds external fetch attempts when exact-date close is unavailable.
+  private fetchLookbackDays_: number = 7;
   private quoteStaleness_: number = 300_000; // 5 minutes in ms
   private clock_: Clock = new SystemClock();
   private equityRouter_: EquityPriceRouter | null = null;
@@ -65,7 +96,8 @@ export class MarketDataService {
   }
 
   withLookbackDays(days: number): this {
-    this.lookbackDays_ = days;
+    this.storeLookbackDays_ = days;
+    this.fetchLookbackDays_ = days;
     return this;
   }
 
@@ -83,28 +115,34 @@ export class MarketDataService {
 
   /**
    * Get price from store only, no external fetching.
-   * Searches with lookback, checking close prices on each day.
-   * Returns null if no price is found within lookback window.
+   * Returns the latest close on or before the query date.
+   *
+   * If `storeLookbackDays_` is set, lookup is bounded to that range.
+   * Otherwise (default), lookup is unbounded.
    */
   async priceFromStore(asset: AssetType, date: string): Promise<PricePoint | null> {
     const normalized = Asset.normalized(asset);
     const assetId = AssetId.fromAsset(normalized);
 
-    for (let offset = 0; offset <= this.lookbackDays_; offset++) {
-      const targetDate = subtractDays(date, offset);
-      const price = await this.store.get_price(assetId, targetDate, 'close');
-      if (price !== null) {
-        return price;
+    if (this.storeLookbackDays_ !== null) {
+      for (let offset = 0; offset <= this.storeLookbackDays_; offset++) {
+        const targetDate = subtractDays(date, offset);
+        const price = await this.store.get_price(assetId, targetDate, 'close');
+        if (price !== null) {
+          return price;
+        }
       }
+      return null;
     }
 
-    return null;
+    const all = await this.store.get_all_prices(assetId);
+    return selectLatestPriceOnOrBefore(all, date);
   }
 
   /**
    * Get a valuation price from store only, no external fetching.
    *
-   * - First tries close prices with lookback (`priceFromStore`)
+   * - First tries close prices via `priceFromStore`
    * - If none found and `allowQuoteFallback` is true, tries same-day quote
    */
   async valuationPriceFromStore(
@@ -128,21 +166,28 @@ export class MarketDataService {
 
   /**
    * Get FX rate from store only, no external fetching.
-   * Searches with lookback. Returns null if not found.
+   * Returns the latest close on or before the query date.
+   *
+   * If `storeLookbackDays_` is set, lookup is bounded to that range.
+   * Otherwise (default), lookup is unbounded.
    */
   async fxFromStore(base: string, quote: string, date: string): Promise<FxRatePoint | null> {
     const baseNorm = base.trim().toUpperCase();
     const quoteNorm = quote.trim().toUpperCase();
 
-    for (let offset = 0; offset <= this.lookbackDays_; offset++) {
-      const targetDate = subtractDays(date, offset);
-      const rate = await this.store.get_fx_rate(baseNorm, quoteNorm, targetDate, 'close');
-      if (rate !== null) {
-        return rate;
+    if (this.storeLookbackDays_ !== null) {
+      for (let offset = 0; offset <= this.storeLookbackDays_; offset++) {
+        const targetDate = subtractDays(date, offset);
+        const rate = await this.store.get_fx_rate(baseNorm, quoteNorm, targetDate, 'close');
+        if (rate !== null) {
+          return rate;
+        }
       }
+      return null;
     }
 
-    return null;
+    const all = await this.store.get_all_fx_rates(baseNorm, quoteNorm);
+    return selectLatestFxRateOnOrBefore(all, date);
   }
 
   // -- Price lookups with external fetching ---------------------------------
@@ -159,11 +204,14 @@ export class MarketDataService {
       return cached;
     }
 
-    // Try fetching from external sources
-    const fetched = await this.fetchClosePrice(asset, date);
-    if (fetched !== null) {
-      await this.storePrice(fetched);
-      return fetched;
+    // Try fetching from external sources with bounded lookback
+    for (let offset = 0; offset <= this.fetchLookbackDays_; offset++) {
+      const targetDate = subtractDays(date, offset);
+      const fetched = await this.fetchClosePrice(asset, targetDate);
+      if (fetched !== null) {
+        await this.storePrice(fetched);
+        return fetched;
+      }
     }
 
     const assetId = AssetId.fromAsset(Asset.normalized(asset));
@@ -175,11 +223,14 @@ export class MarketDataService {
    * indicates whether the price was freshly fetched from an external source.
    */
   async priceCloseForce(asset: AssetType, date: string): Promise<[PricePoint, boolean]> {
-    // Try fetching from external sources first
-    const fetched = await this.fetchClosePrice(asset, date);
-    if (fetched !== null) {
-      await this.storePrice(fetched);
-      return [fetched, true];
+    // Try fetching from external sources first, with bounded lookback.
+    for (let offset = 0; offset <= this.fetchLookbackDays_; offset++) {
+      const targetDate = subtractDays(date, offset);
+      const fetched = await this.fetchClosePrice(asset, targetDate);
+      if (fetched !== null) {
+        await this.storePrice(fetched);
+        return [fetched, true];
+      }
     }
 
     // Fall back to store
@@ -241,11 +292,14 @@ export class MarketDataService {
       return cached;
     }
 
-    // Try external sources
-    const fetched = await this.fetchFxRate(baseNorm, quoteNorm, date);
-    if (fetched !== null) {
-      await this.store.put_fx_rates([fetched]);
-      return fetched;
+    // Try external sources with bounded lookback
+    for (let offset = 0; offset <= this.fetchLookbackDays_; offset++) {
+      const targetDate = subtractDays(date, offset);
+      const fetched = await this.fetchFxRate(baseNorm, quoteNorm, targetDate);
+      if (fetched !== null) {
+        await this.store.put_fx_rates([fetched]);
+        return fetched;
+      }
     }
 
     throw new Error(`No close FX rate found for ${baseNorm}->${quoteNorm} on or before ${date}`);
@@ -264,11 +318,14 @@ export class MarketDataService {
       return [this.makeIdentityFxRate(baseNorm, quoteNorm, date), false];
     }
 
-    // Try external sources first
-    const fetched = await this.fetchFxRate(baseNorm, quoteNorm, date);
-    if (fetched !== null) {
-      await this.store.put_fx_rates([fetched]);
-      return [fetched, true];
+    // Try external sources first, with bounded lookback.
+    for (let offset = 0; offset <= this.fetchLookbackDays_; offset++) {
+      const targetDate = subtractDays(date, offset);
+      const fetched = await this.fetchFxRate(baseNorm, quoteNorm, targetDate);
+      if (fetched !== null) {
+        await this.store.put_fx_rates([fetched]);
+        return [fetched, true];
+      }
     }
 
     // Fall back to store
