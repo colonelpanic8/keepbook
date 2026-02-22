@@ -862,6 +862,138 @@ describe('portfolioHistory', () => {
     expect(result.points[1].percentage_change_from_previous).toBe('N/A');
   });
 
+  it('carries forward previous valuation when latest point has no in-lookback price', async () => {
+    const clock = makeClock('2024-02-10T12:00:00Z');
+    const storage = new MemoryStorage();
+    const connIdGen = makeIdGen('conn-1');
+    const conn = Connection.new({ name: 'Broker', synchronizer: 'manual' }, connIdGen, clock);
+    await storage.saveConnection(conn);
+
+    const acctIdGen = makeIdGen('acct-1');
+    const acct = Account.newWithGenerator(acctIdGen, clock, 'Trading', Id.fromString('conn-1'));
+    await storage.saveAccount(acct);
+
+    await storage.appendBalanceSnapshot(
+      acct.id,
+      BalanceSnapshot.new(new Date('2024-01-01T12:00:00Z'), [
+        AssetBalance.new(Asset.equity('AAPL'), '10'),
+      ]),
+    );
+    await storage.appendBalanceSnapshot(
+      acct.id,
+      BalanceSnapshot.new(new Date('2024-02-01T12:00:00Z'), [
+        AssetBalance.new(Asset.equity('AAPL'), '10'),
+      ]),
+    );
+
+    const store = new MemoryMarketDataStore();
+    const aaplAssetId = AssetId.fromAsset(Asset.equity('AAPL'));
+    await store.put_prices([
+      {
+        asset_id: aaplAssetId,
+        as_of_date: '2024-01-01',
+        timestamp: new Date('2024-01-01T23:59:59Z'),
+        price: '100',
+        quote_currency: 'USD',
+        kind: 'close',
+        source: 'test',
+      },
+    ]);
+
+    const config = makeConfig();
+    const result = await portfolioHistory(
+      storage,
+      store,
+      config,
+      { includePrices: false, granularity: 'none' },
+      clock,
+    );
+
+    expect(result.points).toHaveLength(2);
+    expect(result.points[0].total_value).toBe('1000');
+    expect(result.points[1].total_value).toBe('1000');
+    expect(result.points[1].percentage_change_from_previous).toBe('0.00');
+  });
+
+  it('can show a large jump when missing held-asset prices arrive late', async () => {
+    const clock = makeClock('2025-01-10T12:00:00Z');
+    const storage = new MemoryStorage();
+    const connIdGen = makeIdGen('conn-1');
+    const conn = Connection.new({ name: 'Broker', synchronizer: 'manual' }, connIdGen, clock);
+    await storage.saveConnection(conn);
+
+    const acctIdGen = makeIdGen('acct-1');
+    const acct = Account.newWithGenerator(acctIdGen, clock, 'Trading', Id.fromString('conn-1'));
+    await storage.saveAccount(acct);
+
+    await storage.appendBalanceSnapshot(
+      acct.id,
+      BalanceSnapshot.new(new Date('2024-01-01T12:00:00Z'), [
+        AssetBalance.new(Asset.crypto('BTC'), '10'),
+        AssetBalance.new(Asset.crypto('ETH'), '100'),
+        AssetBalance.new(Asset.crypto('ICP'), '1000'),
+        AssetBalance.new(Asset.crypto('POL'), '1000'),
+      ]),
+    );
+
+    const store = new MemoryMarketDataStore();
+    const putClose = async (asset: ReturnType<typeof Asset.crypto>, asOfDate: string, price: string) => {
+      await store.put_prices([
+        {
+          asset_id: AssetId.fromAsset(asset),
+          as_of_date: asOfDate,
+          timestamp: new Date(`${asOfDate}T23:59:59Z`),
+          price,
+          quote_currency: 'USD',
+          kind: 'close',
+          source: 'test',
+        },
+      ]);
+    };
+
+    // Only ICP has Sep/Oct/Nov prices. Other assets are priced only in late Dec.
+    await putClose(Asset.crypto('ICP'), '2024-09-22', '1');
+    await putClose(Asset.crypto('ICP'), '2024-10-27', '1.1');
+    await putClose(Asset.crypto('ICP'), '2024-11-24', '1.2');
+    await putClose(Asset.crypto('ICP'), '2024-12-31', '1.3');
+    await putClose(Asset.crypto('BTC'), '2024-12-31', '50000');
+    await putClose(Asset.crypto('ETH'), '2024-12-31', '3000');
+    await putClose(Asset.crypto('POL'), '2024-12-31', '2');
+
+    const config = makeConfig();
+    const result = await portfolioHistory(
+      storage,
+      store,
+      config,
+      {
+        start: '2024-09-01',
+        end: '2025-01-10',
+        granularity: 'monthly',
+        includePrices: true,
+      },
+      clock,
+    );
+
+    expect(result.points).toHaveLength(4);
+    expect(result.points[0].total_value).toBe('1000');
+    expect(Number(result.points[3].total_value)).toBeGreaterThan(800000);
+    expect(Number(result.points[3].percentage_change_from_previous)).toBeGreaterThan(10000);
+
+    const noPriceResult = await portfolioHistory(
+      storage,
+      store,
+      config,
+      {
+        start: '2024-09-01',
+        end: '2025-01-10',
+        granularity: 'monthly',
+        includePrices: false,
+      },
+      clock,
+    );
+    expect(noPriceResult.points).toHaveLength(0);
+  });
+
   // -------------------------------------------------------------------------
   // Date range filtering
   // -------------------------------------------------------------------------

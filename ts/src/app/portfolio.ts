@@ -9,6 +9,7 @@
 import type { Storage } from '../storage/storage.js';
 import type { MarketDataStore } from '../market-data/store.js';
 import { MarketDataService } from '../market-data/service.js';
+import { AssetId } from '../market-data/asset-id.js';
 import { PortfolioService } from '../portfolio/service.js';
 import type {
   PortfolioSnapshot,
@@ -26,6 +27,7 @@ import {
   formatRfc3339,
   formatRfc3339FromEpochNanos,
   decStr,
+  decStrRounded,
 } from './format.js';
 import type { ResolvedConfig } from '../config.js';
 import {
@@ -222,6 +224,40 @@ function formatTrigger(trigger: ChangeTrigger): string {
   }
 }
 
+function computeHistoryTotalValueWithCarryForward(
+  byAsset: AssetSummary[],
+  carryForwardUnitValues: Map<string, Decimal>,
+  currencyDecimals: number | undefined,
+): string | undefined {
+  try {
+    let totalValue = new Decimal(0);
+
+    for (const summary of byAsset) {
+      const assetId = AssetId.fromAsset(summary.asset).asStr();
+      const totalAmount = new Decimal(summary.total_amount);
+      let assetValue: Decimal;
+
+      if (summary.value_in_base !== undefined) {
+        assetValue = new Decimal(summary.value_in_base);
+        if (!totalAmount.isZero()) {
+          carryForwardUnitValues.set(assetId, assetValue.div(totalAmount));
+        }
+      } else if (totalAmount.isZero()) {
+        assetValue = new Decimal(0);
+      } else {
+        const unitValue = carryForwardUnitValues.get(assetId);
+        assetValue = unitValue !== undefined ? unitValue.times(totalAmount) : new Decimal(0);
+      }
+
+      totalValue = totalValue.plus(assetValue);
+    }
+
+    return decStrRounded(totalValue, currencyDecimals);
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Execute the portfolio history command.
  *
@@ -255,6 +291,7 @@ export async function portfolioHistory(
   // Calculate portfolio value at each change point
   const historyPoints: HistoryPoint[] = [];
   let previousTotalValue: Decimal | undefined;
+  const carryForwardUnitValues = new Map<string, Decimal>();
   for (const point of points) {
     const portfolioService = new PortfolioService(storage, marketDataService, effectiveClock);
 
@@ -266,7 +303,14 @@ export async function portfolioHistory(
       include_detail: false,
     });
 
-    const totalValue = snapshot.total_value;
+    const totalValue =
+      snapshot.by_asset !== undefined
+        ? computeHistoryTotalValueWithCarryForward(
+            snapshot.by_asset,
+            carryForwardUnitValues,
+            config.display.currency_decimals,
+          ) ?? snapshot.total_value
+        : snapshot.total_value;
     const currentTotalValue = new Decimal(totalValue);
 
     // Format triggers

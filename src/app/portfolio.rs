@@ -8,6 +8,7 @@ use rust_decimal::Decimal;
 use tracing::warn;
 
 use crate::config::ResolvedConfig;
+use crate::format::format_base_currency_value;
 use crate::market_data::{
     AssetId, FxRateKind, FxRatePoint, JsonlMarketDataStore, MarketDataService,
     MarketDataServiceBuilder, MarketDataStore, PriceKind, PricePoint,
@@ -94,6 +95,43 @@ fn compute_percentage_change_from_previous(
         }
         (Some(_), None) => Some("N/A".to_string()),
     }
+}
+
+fn compute_history_total_value_with_carry_forward(
+    by_asset: &[crate::portfolio::AssetSummary],
+    carry_forward_unit_values: &mut HashMap<String, Decimal>,
+) -> Option<Decimal> {
+    let mut total_value = Decimal::ZERO;
+
+    for asset_summary in by_asset {
+        let asset_id = AssetId::from_asset(&asset_summary.asset).to_string();
+        let total_amount = Decimal::from_str(&asset_summary.total_amount).ok()?;
+
+        let asset_value = match &asset_summary.value_in_base {
+            Some(value_str) => {
+                let value = Decimal::from_str(value_str).ok()?;
+                if total_amount != Decimal::ZERO {
+                    carry_forward_unit_values.insert(asset_id, value / total_amount);
+                }
+                value
+            }
+            None => {
+                if total_amount == Decimal::ZERO {
+                    Decimal::ZERO
+                } else {
+                    carry_forward_unit_values
+                        .get(&asset_id)
+                        .copied()
+                        .map(|unit_value| unit_value * total_amount)
+                        .unwrap_or(Decimal::ZERO)
+                }
+            }
+        };
+
+        total_value += asset_value;
+    }
+
+    Some(total_value)
 }
 
 struct AssetPriceCache {
@@ -947,6 +985,7 @@ pub async fn portfolio_history(
         .unwrap_or_else(|| config.reporting_currency.clone());
     let mut history_points = Vec::with_capacity(filtered.len());
     let mut previous_total_value: Option<Decimal> = None;
+    let mut carry_forward_unit_values: HashMap<String, Decimal> = HashMap::new();
 
     for change_point in &filtered {
         let as_of_date = change_point.timestamp.date_naive();
@@ -959,6 +998,17 @@ pub async fn portfolio_history(
         };
 
         let snapshot = service.calculate(&query).await?;
+        let history_total_value = snapshot
+            .by_asset
+            .as_ref()
+            .and_then(|assets| {
+                compute_history_total_value_with_carry_forward(
+                    assets,
+                    &mut carry_forward_unit_values,
+                )
+            })
+            .map(|value| format_base_currency_value(value, config.display.currency_decimals))
+            .unwrap_or_else(|| snapshot.total_value.clone());
 
         // Format trigger descriptions
         let trigger_descriptions: Vec<String> = change_point
@@ -981,14 +1031,14 @@ pub async fn portfolio_history(
             })
             .collect();
 
-        let current_total_value = Decimal::from_str(&snapshot.total_value).ok();
+        let current_total_value = Decimal::from_str(&history_total_value).ok();
         let percentage_change_from_previous =
             compute_percentage_change_from_previous(previous_total_value, current_total_value);
 
         history_points.push(HistoryPoint {
             timestamp: change_point.timestamp.to_rfc3339(),
             date: as_of_date.to_string(),
-            total_value: snapshot.total_value,
+            total_value: history_total_value,
             percentage_change_from_previous,
             change_triggers: if trigger_descriptions.is_empty() {
                 None
@@ -1188,6 +1238,189 @@ mod tests {
             compute_percentage_change_from_previous(Some(Decimal::ONE), None),
             Some("N/A".to_string())
         );
+    }
+
+    #[tokio::test]
+    async fn portfolio_history_carries_forward_previous_valuation_when_price_missing(
+    ) -> anyhow::Result<()> {
+        let dir = TempDir::new()?;
+        let config = ResolvedConfig {
+            data_dir: dir.path().to_path_buf(),
+            reporting_currency: "USD".to_string(),
+            display: DisplayConfig::default(),
+            refresh: RefreshConfig::default(),
+            tray: TrayConfig::default(),
+            spending: SpendingConfig::default(),
+            git: GitConfig::default(),
+        };
+
+        let storage = Arc::new(MemoryStorage::new());
+        let connection = Connection::new(connection_config("Test Broker"));
+        storage.save_connection(&connection).await?;
+
+        let account = Account::new("Trading", connection.id().clone());
+        storage.save_account(&account).await?;
+
+        let asset = Asset::equity("AAPL");
+        storage
+            .append_balance_snapshot(
+                &account.id,
+                &BalanceSnapshot::new(
+                    Utc.with_ymd_and_hms(2024, 1, 1, 12, 0, 0).unwrap(),
+                    vec![AssetBalance::new(asset.clone(), "10")],
+                ),
+            )
+            .await?;
+        storage
+            .append_balance_snapshot(
+                &account.id,
+                &BalanceSnapshot::new(
+                    Utc.with_ymd_and_hms(2024, 2, 1, 12, 0, 0).unwrap(),
+                    vec![AssetBalance::new(asset.clone(), "10")],
+                ),
+            )
+            .await?;
+
+        // Only seed one early close price. By 2024-02-01 this is outside the default 7-day lookback.
+        let store = JsonlMarketDataStore::new(&config.data_dir);
+        store
+            .put_prices(&[PricePoint {
+                asset_id: AssetId::from_asset(&asset),
+                as_of_date: NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
+                timestamp: Utc.with_ymd_and_hms(2024, 1, 1, 23, 59, 59).unwrap(),
+                price: "100".to_string(),
+                quote_currency: "USD".to_string(),
+                kind: PriceKind::Close,
+                source: "test".to_string(),
+            }])
+            .await?;
+
+        let output = portfolio_history(
+            storage,
+            &config,
+            None,
+            None,
+            None,
+            "none".to_string(),
+            false,
+        )
+        .await?;
+
+        assert_eq!(output.points.len(), 2);
+        assert_eq!(output.points[0].total_value, "1000");
+        assert_eq!(output.points[1].total_value, "1000");
+        assert_eq!(
+            output.points[1].percentage_change_from_previous.as_deref(),
+            Some("0")
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn portfolio_history_can_jump_when_missing_asset_prices_arrive_late() -> anyhow::Result<()>
+    {
+        let dir = TempDir::new()?;
+        let config = ResolvedConfig {
+            data_dir: dir.path().to_path_buf(),
+            reporting_currency: "USD".to_string(),
+            display: DisplayConfig::default(),
+            refresh: RefreshConfig::default(),
+            tray: TrayConfig::default(),
+            spending: SpendingConfig::default(),
+            git: GitConfig::default(),
+        };
+
+        let storage = Arc::new(MemoryStorage::new());
+        let connection = Connection::new(connection_config("Test Broker"));
+        storage.save_connection(&connection).await?;
+
+        let account = Account::new("Trading", connection.id().clone());
+        storage.save_account(&account).await?;
+
+        // Hold several crypto assets from the start of the year.
+        storage
+            .append_balance_snapshot(
+                &account.id,
+                &BalanceSnapshot::new(
+                    Utc.with_ymd_and_hms(2024, 1, 1, 12, 0, 0).unwrap(),
+                    vec![
+                        AssetBalance::new(Asset::crypto("BTC"), "10"),
+                        AssetBalance::new(Asset::crypto("ETH"), "100"),
+                        AssetBalance::new(Asset::crypto("ICP"), "1000"),
+                        AssetBalance::new(Asset::crypto("POL"), "1000"),
+                    ],
+                ),
+            )
+            .await?;
+
+        let store = JsonlMarketDataStore::new(&config.data_dir);
+        let close = |asset: Asset, date: (i32, u32, u32), price: &str| PricePoint {
+            asset_id: AssetId::from_asset(&asset),
+            as_of_date: NaiveDate::from_ymd_opt(date.0, date.1, date.2).unwrap(),
+            timestamp: Utc
+                .with_ymd_and_hms(date.0, date.1, date.2, 23, 59, 59)
+                .unwrap(),
+            price: price.to_string(),
+            quote_currency: "USD".to_string(),
+            kind: PriceKind::Close,
+            source: "test".to_string(),
+        };
+
+        // Only ICP has prices for Sep/Oct/Nov. Other assets are priced only in late Dec.
+        store
+            .put_prices(&[
+                close(Asset::crypto("ICP"), (2024, 9, 22), "1"),
+                close(Asset::crypto("ICP"), (2024, 10, 27), "1.1"),
+                close(Asset::crypto("ICP"), (2024, 11, 24), "1.2"),
+                close(Asset::crypto("ICP"), (2024, 12, 31), "1.3"),
+                close(Asset::crypto("BTC"), (2024, 12, 31), "50000"),
+                close(Asset::crypto("ETH"), (2024, 12, 31), "3000"),
+                close(Asset::crypto("POL"), (2024, 12, 31), "2"),
+            ])
+            .await?;
+
+        let output = portfolio_history(
+            storage.clone(),
+            &config,
+            None,
+            Some("2024-09-01".to_string()),
+            Some("2025-01-10".to_string()),
+            "monthly".to_string(),
+            true,
+        )
+        .await?;
+
+        assert_eq!(output.points.len(), 4);
+        assert_eq!(output.points[0].total_value, "1000");
+        let last_total = Decimal::from_str(&output.points[3].total_value)?;
+        assert!(last_total > Decimal::from_str("800000")?);
+
+        let last_change = Decimal::from_str(
+            output.points[3]
+                .percentage_change_from_previous
+                .as_deref()
+                .expect("last point should have previous change"),
+        )?;
+        assert!(
+            last_change > Decimal::from_str("10000")?,
+            "expected very large percentage change when late prices arrive"
+        );
+
+        // Without price triggers, there are no balance changes in this window.
+        let no_price_output = portfolio_history(
+            storage,
+            &config,
+            None,
+            Some("2024-09-01".to_string()),
+            Some("2025-01-10".to_string()),
+            "monthly".to_string(),
+            false,
+        )
+        .await?;
+        assert!(no_price_output.points.is_empty());
+
+        Ok(())
     }
 
     #[tokio::test]
@@ -1499,6 +1732,86 @@ mod tests {
 
         let snapshots = storage.get_balance_snapshots(&account.id).await?;
         assert!(snapshots.is_empty());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn set_account_config_updates_balance_backfill() -> anyhow::Result<()> {
+        let dir = TempDir::new()?;
+        let storage = JsonFileStorage::new(dir.path());
+        let config = ResolvedConfig {
+            data_dir: dir.path().to_path_buf(),
+            reporting_currency: "USD".to_string(),
+            display: DisplayConfig::default(),
+            refresh: RefreshConfig::default(),
+            tray: TrayConfig::default(),
+            spending: SpendingConfig::default(),
+            git: GitConfig::default(),
+        };
+
+        let account = Account::new("Checking", Id::new());
+        storage.save_account(&account).await?;
+
+        let out = set_account_config(
+            &storage,
+            &config,
+            account.id.as_str(),
+            Some("carry_earliest"),
+            false,
+        )
+        .await?;
+        assert_eq!(out["success"], serde_json::Value::Bool(true));
+        assert_eq!(
+            out["config"]["balance_backfill"],
+            serde_json::Value::String("carry_earliest".to_string())
+        );
+
+        let stored = storage
+            .get_account_config(&account.id)?
+            .expect("account config should exist");
+        assert_eq!(
+            stored.balance_backfill,
+            Some(crate::models::BalanceBackfillPolicy::CarryEarliest)
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn set_account_config_clears_balance_backfill() -> anyhow::Result<()> {
+        let dir = TempDir::new()?;
+        let storage = JsonFileStorage::new(dir.path());
+        let config = ResolvedConfig {
+            data_dir: dir.path().to_path_buf(),
+            reporting_currency: "USD".to_string(),
+            display: DisplayConfig::default(),
+            refresh: RefreshConfig::default(),
+            tray: TrayConfig::default(),
+            spending: SpendingConfig::default(),
+            git: GitConfig::default(),
+        };
+
+        let account = Account::new("Checking", Id::new());
+        storage.save_account(&account).await?;
+        storage
+            .save_account_config(
+                &account.id,
+                &crate::models::AccountConfig {
+                    balance_backfill: Some(crate::models::BalanceBackfillPolicy::Zero),
+                    ..Default::default()
+                },
+            )
+            .await?;
+
+        let out = set_account_config(&storage, &config, "Checking", None, true).await?;
+        assert_eq!(out["success"], serde_json::Value::Bool(true));
+        assert_eq!(out["config"]["balance_backfill"], serde_json::Value::Null);
+
+        let stored = storage
+            .get_account_config(&account.id)?
+            .expect("account config should exist");
+        assert_eq!(stored.balance_backfill, None);
 
         Ok(())
     }
