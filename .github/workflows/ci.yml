@@ -12,6 +12,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: ts/yarn.lock
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Mirror edit guard
+        env:
+          COMPARE_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: ./scripts/check-mirror-edits.sh --base "$COMPARE_BASE"
 
       - uses: cachix/install-nix-action@v27
         with:
@@ -32,6 +48,18 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
+
+      - name: Install TypeScript dependencies
+        working-directory: ts
+        run: yarn install --frozen-lockfile
+
+      - name: Build TypeScript
+        working-directory: ts
+        run: yarn build
+
+      - name: Test TypeScript
+        working-directory: ts
+        run: yarn test
 
       - name: Check formatting
         run: nix develop --command cargo fmt --check
