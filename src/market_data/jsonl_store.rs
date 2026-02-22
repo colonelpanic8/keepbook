@@ -98,6 +98,62 @@ impl JsonlMarketDataStore {
         Ok(())
     }
 
+    async fn write_jsonl<T: serde::Serialize>(&self, path: &Path, items: &[T]) -> Result<()> {
+        self.ensure_dir(path).await?;
+
+        let mut content = String::new();
+        for item in items {
+            let line = serde_json::to_string(item).context("Failed to serialize item")?;
+            content.push_str(&line);
+            content.push('\n');
+        }
+
+        fs::write(path, content)
+            .await
+            .context("Failed to write JSONL file")?;
+        Ok(())
+    }
+
+    fn price_kind_rank(kind: PriceKind) -> u8 {
+        match kind {
+            PriceKind::Close => 0,
+            PriceKind::AdjClose => 1,
+            PriceKind::Quote => 2,
+        }
+    }
+
+    fn fx_kind_rank(kind: FxRateKind) -> u8 {
+        match kind {
+            FxRateKind::Close => 0,
+        }
+    }
+
+    fn sort_prices(items: &mut [PricePoint]) {
+        items.sort_by(|a, b| {
+            a.timestamp
+                .cmp(&b.timestamp)
+                .then_with(|| a.as_of_date.cmp(&b.as_of_date))
+                .then_with(|| Self::price_kind_rank(a.kind).cmp(&Self::price_kind_rank(b.kind)))
+                .then_with(|| a.quote_currency.cmp(&b.quote_currency))
+                .then_with(|| a.source.cmp(&b.source))
+                .then_with(|| a.price.cmp(&b.price))
+                .then_with(|| a.asset_id.as_str().cmp(b.asset_id.as_str()))
+        });
+    }
+
+    fn sort_fx_rates(items: &mut [FxRatePoint]) {
+        items.sort_by(|a, b| {
+            a.timestamp
+                .cmp(&b.timestamp)
+                .then_with(|| a.as_of_date.cmp(&b.as_of_date))
+                .then_with(|| Self::fx_kind_rank(a.kind).cmp(&Self::fx_kind_rank(b.kind)))
+                .then_with(|| a.base.cmp(&b.base))
+                .then_with(|| a.quote.cmp(&b.quote))
+                .then_with(|| a.source.cmp(&b.source))
+                .then_with(|| a.rate.cmp(&b.rate))
+        });
+    }
+
     fn select_latest_price(
         &self,
         mut prices: Vec<PricePoint>,
@@ -174,7 +230,10 @@ impl MarketDataStore for JsonlMarketDataStore {
             let date =
                 NaiveDate::from_ymd_opt(year, 1, 1).context("Invalid price date for storage")?;
             let path = self.price_file(&AssetId::from(asset_id), date);
-            self.append_jsonl(&path, &items).await?;
+            let mut all_items = self.read_jsonl::<PricePoint>(&path).await?;
+            all_items.extend(items);
+            Self::sort_prices(&mut all_items);
+            self.write_jsonl(&path, &all_items).await?;
         }
 
         Ok(())
@@ -238,7 +297,10 @@ impl MarketDataStore for JsonlMarketDataStore {
             let date =
                 NaiveDate::from_ymd_opt(year, 1, 1).context("Invalid FX date for storage")?;
             let path = self.fx_file(&base, &quote, date);
-            self.append_jsonl(&path, &items).await?;
+            let mut all_items = self.read_jsonl::<FxRatePoint>(&path).await?;
+            all_items.extend(items);
+            Self::sort_fx_rates(&mut all_items);
+            self.write_jsonl(&path, &all_items).await?;
         }
 
         Ok(())
@@ -267,4 +329,122 @@ fn sanitize_code(value: &str) -> String {
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
         .collect::<String>()
         .to_uppercase()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::Asset;
+    use chrono::{TimeZone, Utc};
+    use uuid::Uuid;
+
+    fn make_price(as_of_date: &str, timestamp: chrono::DateTime<Utc>, price: &str) -> PricePoint {
+        let asset = Asset::equity("AAPL");
+        PricePoint {
+            asset_id: AssetId::from_asset(&asset),
+            as_of_date: NaiveDate::parse_from_str(as_of_date, "%Y-%m-%d").unwrap(),
+            timestamp,
+            price: price.to_string(),
+            quote_currency: "USD".to_string(),
+            kind: PriceKind::Close,
+            source: "test".to_string(),
+        }
+    }
+
+    fn make_fx(as_of_date: &str, timestamp: chrono::DateTime<Utc>, rate: &str) -> FxRatePoint {
+        FxRatePoint {
+            base: "USD".to_string(),
+            quote: "EUR".to_string(),
+            as_of_date: NaiveDate::parse_from_str(as_of_date, "%Y-%m-%d").unwrap(),
+            timestamp,
+            rate: rate.to_string(),
+            kind: FxRateKind::Close,
+            source: "test".to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn put_prices_rewrites_year_file_in_chronological_order() -> Result<()> {
+        let base_path = std::env::temp_dir().join(format!("keepbook-md-{}", Uuid::new_v4()));
+        fs::create_dir_all(&base_path).await?;
+        let store = JsonlMarketDataStore::new(&base_path);
+
+        let newer = make_price(
+            "2024-12-31",
+            Utc.with_ymd_and_hms(2024, 12, 31, 21, 0, 0).unwrap(),
+            "250.00",
+        );
+        let older = make_price(
+            "2024-01-15",
+            Utc.with_ymd_and_hms(2024, 1, 15, 21, 0, 0).unwrap(),
+            "180.00",
+        );
+
+        store.put_prices(&[newer]).await?;
+        store.put_prices(&[older]).await?;
+
+        let path = store.price_file(
+            &AssetId::from_asset(&Asset::equity("AAPL")),
+            NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
+        );
+        let lines = fs::read_to_string(&path).await?;
+        let parsed: Vec<PricePoint> = lines
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(
+            parsed[0].as_of_date,
+            NaiveDate::from_ymd_opt(2024, 1, 15).unwrap()
+        );
+        assert_eq!(
+            parsed[1].as_of_date,
+            NaiveDate::from_ymd_opt(2024, 12, 31).unwrap()
+        );
+
+        let _ = fs::remove_dir_all(&base_path).await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn put_fx_rates_rewrites_year_file_in_chronological_order() -> Result<()> {
+        let base_path = std::env::temp_dir().join(format!("keepbook-md-{}", Uuid::new_v4()));
+        fs::create_dir_all(&base_path).await?;
+        let store = JsonlMarketDataStore::new(&base_path);
+
+        let newer = make_fx(
+            "2024-12-31",
+            Utc.with_ymd_and_hms(2024, 12, 31, 18, 0, 0).unwrap(),
+            "0.9900",
+        );
+        let older = make_fx(
+            "2024-01-15",
+            Utc.with_ymd_and_hms(2024, 1, 15, 18, 0, 0).unwrap(),
+            "0.9100",
+        );
+
+        store.put_fx_rates(&[newer]).await?;
+        store.put_fx_rates(&[older]).await?;
+
+        let path = store.fx_file("USD", "EUR", NaiveDate::from_ymd_opt(2024, 1, 1).unwrap());
+        let lines = fs::read_to_string(&path).await?;
+        let parsed: Vec<FxRatePoint> = lines
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(
+            parsed[0].as_of_date,
+            NaiveDate::from_ymd_opt(2024, 1, 15).unwrap()
+        );
+        assert_eq!(
+            parsed[1].as_of_date,
+            NaiveDate::from_ymd_opt(2024, 12, 31).unwrap()
+        );
+
+        let _ = fs::remove_dir_all(&base_path).await;
+        Ok(())
+    }
 }

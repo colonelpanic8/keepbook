@@ -15,7 +15,7 @@
  *       index.jsonl      one AssetRegistryEntry per line
  */
 
-import { mkdir, readdir, readFile, appendFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, appendFile, writeFile } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { AssetId } from './asset-id.js';
 import type { MarketDataStore } from './store.js';
@@ -102,6 +102,45 @@ async function appendJsonl<TJson, T>(
 
   const lines = items.map((item) => JSON.stringify(serialize(item)) + '\n').join('');
   await appendFile(path, lines);
+}
+
+/**
+ * Overwrite a JSONL file with items in the provided order.
+ */
+async function writeJsonl<TJson, T>(
+  path: string,
+  items: T[],
+  serialize: (item: T) => TJson,
+): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  const body = items.map((item) => JSON.stringify(serialize(item))).join('\n');
+  await writeFile(path, body === '' ? '' : `${body}\n`, 'utf-8');
+}
+
+function comparePricePoints(a: PricePoint, b: PricePoint): number {
+  const timeDelta = a.timestamp.getTime() - b.timestamp.getTime();
+  if (timeDelta !== 0) return timeDelta;
+  return (
+    a.as_of_date.localeCompare(b.as_of_date) ||
+    a.kind.localeCompare(b.kind) ||
+    a.quote_currency.localeCompare(b.quote_currency) ||
+    a.source.localeCompare(b.source) ||
+    a.price.localeCompare(b.price) ||
+    a.asset_id.asStr().localeCompare(b.asset_id.asStr())
+  );
+}
+
+function compareFxRatePoints(a: FxRatePoint, b: FxRatePoint): number {
+  const timeDelta = a.timestamp.getTime() - b.timestamp.getTime();
+  if (timeDelta !== 0) return timeDelta;
+  return (
+    a.as_of_date.localeCompare(b.as_of_date) ||
+    a.kind.localeCompare(b.kind) ||
+    a.base.localeCompare(b.base) ||
+    a.quote.localeCompare(b.quote) ||
+    a.source.localeCompare(b.source) ||
+    a.rate.localeCompare(b.rate)
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -195,7 +234,9 @@ export class JsonlMarketDataStore implements MarketDataStore {
       const assetId = AssetId.fromString(assetIdStr);
       const date = `${yearStr}-01-01`;
       const path = this.priceFile(assetId, date);
-      await appendJsonl<PricePointJSON, PricePoint>(path, items, pricePointToJSON);
+      const existing = await readJsonl<PricePointJSON, PricePoint>(path, pricePointFromJSON);
+      const all = [...existing, ...items].sort(comparePricePoints);
+      await writeJsonl<PricePointJSON, PricePoint>(path, all, pricePointToJSON);
     }
   }
 
@@ -260,7 +301,9 @@ export class JsonlMarketDataStore implements MarketDataStore {
       const [base, quote, yearStr] = key.split('|');
       const date = `${yearStr}-01-01`;
       const path = this.fxFile(base, quote, date);
-      await appendJsonl<FxRatePointJSON, FxRatePoint>(path, items, fxRatePointToJSON);
+      const existing = await readJsonl<FxRatePointJSON, FxRatePoint>(path, fxRatePointFromJSON);
+      const all = [...existing, ...items].sort(compareFxRatePoints);
+      await writeJsonl<FxRatePointJSON, FxRatePoint>(path, all, fxRatePointToJSON);
     }
   }
 

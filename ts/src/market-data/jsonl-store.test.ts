@@ -225,6 +225,35 @@ describe('JsonlMarketDataStore', () => {
       const parsed = JSON.parse(content.trim());
       expect(parsed.asset_id).toBe(assetId.asStr());
     });
+
+    it('put_prices rewrites year file in chronological order when backfilling', async () => {
+      const assetId = AssetId.fromAsset(Asset.equity('AAPL'));
+      const newer = makePricePoint({
+        asset_id: assetId,
+        as_of_date: '2024-12-31',
+        timestamp: new Date('2024-12-31T21:00:00Z'),
+        price: '250.00',
+      });
+      const older = makePricePoint({
+        asset_id: assetId,
+        as_of_date: '2024-01-15',
+        timestamp: new Date('2024-01-15T21:00:00Z'),
+        price: '180.00',
+      });
+
+      await store.put_prices([newer]);
+      await store.put_prices([older]);
+
+      const filePath = join(tmpDir, 'prices', assetId.asStr(), '2024.jsonl');
+      const lines = (await readFile(filePath, 'utf-8'))
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line !== '');
+      expect(lines).toHaveLength(2);
+      const parsed = lines.map((line) => JSON.parse(line));
+      expect(parsed[0].as_of_date).toBe('2024-01-15');
+      expect(parsed[1].as_of_date).toBe('2024-12-31');
+    });
   });
 
   // -- FX rates -------------------------------------------------------------
@@ -302,6 +331,32 @@ describe('JsonlMarketDataStore', () => {
       const filePath = join(tmpDir, 'fx', 'USD-EUR', '2024.jsonl');
       const content = await readFile(filePath, 'utf-8');
       expect(content.trim()).not.toBe('');
+    });
+
+    it('put_fx_rates rewrites year file in chronological order when backfilling', async () => {
+      const newer = makeFxRatePoint({
+        as_of_date: '2024-12-31',
+        timestamp: new Date('2024-12-31T18:00:00Z'),
+        rate: '0.9900',
+      });
+      const older = makeFxRatePoint({
+        as_of_date: '2024-01-15',
+        timestamp: new Date('2024-01-15T18:00:00Z'),
+        rate: '0.9100',
+      });
+
+      await store.put_fx_rates([newer]);
+      await store.put_fx_rates([older]);
+
+      const filePath = join(tmpDir, 'fx', 'USD-EUR', '2024.jsonl');
+      const lines = (await readFile(filePath, 'utf-8'))
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line !== '');
+      expect(lines).toHaveLength(2);
+      const parsed = lines.map((line) => JSON.parse(line));
+      expect(parsed[0].as_of_date).toBe('2024-01-15');
+      expect(parsed[1].as_of_date).toBe('2024-12-31');
     });
   });
 
