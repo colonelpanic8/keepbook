@@ -34,9 +34,9 @@ history-daily-balance-tsv *args:
     {{keepbook_cmd}} portfolio history --granularity daily {{args}} | jq -r '.points[] | "\(.date)\t\(.total_value)"'
 
 # Portfolio totals for each month over the last N months.
-# Uses month-end snapshots (today for current month), then imputes missing per-account
-# values by carrying the most recent prior non-zero value forward; if none exists,
-# uses the next non-zero value backward.
+# Uses `portfolio history --granularity monthly` as the source of truth, then
+# fills month slots from the nearest available historical point (prefer prior,
+# otherwise next) so output always has exactly N rows.
 # Example:
 #   just history-monthly-totals
 #   just history-monthly-totals 24
@@ -51,8 +51,18 @@ history-monthly-totals months='12':
       exit 1
     fi
 
-    tmp="$(mktemp)"
-    trap 'rm -f "$tmp"' EXIT
+    month_dates="$(mktemp)"
+    trap 'rm -f "$month_dates"' EXIT
+
+    today="$(date +%F)"
+    start="$(date -d "$(date +%Y-%m-01) -$((months - 1)) month" +%F)"
+    history_points="$(
+      {{keepbook_cmd}} portfolio history \
+        --granularity monthly \
+        --start "$start" \
+        --end "$today" \
+      | jq -c '.points'
+    )"
 
     for i in $(seq $((months - 1)) -1 0); do
       if [ "$i" -eq 0 ]; then
@@ -60,55 +70,193 @@ history-monthly-totals months='12':
       else
         date="$(date -d "$(date +%Y-%m-01) -$i month +1 month -1 day" +%F)"
       fi
-
-      snapshot="$({{keepbook_cmd}} portfolio snapshot --offline --date "$date" --group-by account)"
-      printf '%s\n' "$snapshot" \
-        | jq -c --arg date "$date" '{date: $date, by_account: (.by_account // [])}' \
-        >> "$tmp"
+      printf '%s\n' "$date" >> "$month_dates"
     done
 
-    jq -s '
+    jq -n \
+      --argjson history_points "$history_points" \
+      --rawfile month_dates "$month_dates" '
       def decstr:
         tostring
         | if test("\\.") then sub("0+$"; "") | sub("\\.$"; "") else . end;
 
-      def value_for($row; $id):
-        ($row.by_account | map(select(.account_id == $id) | .value_in_base) | .[0] // null);
+      def fmt_balance:
+        tostring as $s
+        | (if ($s | startswith("-")) then "-" else "" end) as $sign
+        | ($s | ltrimstr("-")) as $abs
+        | ($abs | split(".")) as $parts
+        | ($parts[0] | gsub("(?<=[0-9])(?=(?:[0-9]{3})+$)"; ",")) as $int
+        | ($parts[1] // "") as $frac
+        | if $frac == "" then "\($sign)\($int)" else "\($sign)\($int).\($frac)" end;
 
-      def nonzero($v):
-        (try ($v | tonumber) catch null) as $n | ($n != null and $n != 0);
+      def fmt2:
+        tostring as $s
+        | if $s == "N/A" then $s
+          elif ($s | contains(".")) then
+            ($s | split(".")) as $parts
+            | ($parts[0]) as $int
+            | ($parts[1] // "") as $frac
+            | if ($frac | length) == 0 then "\($int).00"
+              elif ($frac | length) == 1 then "\($int).\($frac)0"
+              else "\($int).\($frac[0:2])"
+              end
+          else
+            "\($s).00"
+          end;
 
-      def fill_nonzero($vals):
-        [range(0; ($vals | length)) as $i
-          | ($vals[$i]) as $cur
-          | if nonzero($cur) then $cur
-            else
-              (([range(0; $i) | $vals[.] | select(nonzero(.))] | last)
-               // ([range($i + 1; ($vals | length)) | $vals[.] | select(nonzero(.))] | first)
-               // $cur)
-            end
-        ];
+      def row_for_date($rows; $d):
+        (([$rows[] | select(.date <= $d)] | last)
+          // ([$rows[] | select(.date >= $d)] | first));
 
-      . as $rows
-      | ($rows | map(.date)) as $dates
-      | ($rows | map(.by_account[]?.account_id) | unique) as $ids
-      | ($ids
-         | map({
-             key: .,
-             value: fill_nonzero([$rows[] as $row | value_for($row; .)])
-           })
-         | from_entries) as $filled
-      | [range(0; ($dates | length)) as $i
+      ($month_dates | split("\n") | map(select(length > 0))) as $dates
+      | ($history_points // []) as $rows
+      | [ $dates[] as $d
+          | (row_for_date($rows; $d)) as $row
           | {
-              date: $dates[$i],
-              balance: ((([$ids[] as $id | (($filled[$id][$i] | tonumber?) // 0)] | add) * 100 | round / 100) | decstr),
-              missing_account_count: ([$ids[] as $id
-                | if value_for($rows[$i]; $id) == null then 1 else 0 end] | add)
+              date: $d,
+              balance: (($row.total_value // "0") | tostring)
+            }
+        ] as $filled
+      | [range(0; ($filled | length)) as $i
+          | ($filled[$i]) as $row
+          | $row.balance as $cur
+          | (if $i > 0 then $filled[$i - 1].balance else null end) as $prev
+          | ((($cur | tonumber?) // 0) | decstr) as $raw_balance
+          | {
+              date: $row.date,
+              balance: ($raw_balance | fmt_balance),
+              formatted_balance: ($raw_balance | fmt_balance),
+              raw_balance: $raw_balance,
+              percentage_change_from_previous:
+                (if $prev == null then
+                   null
+                 elif ((($prev | tonumber?) // 0) == 0) then
+                   "N/A"
+                 else
+                   ((((($cur | tonumber?) // 0) - (($prev | tonumber?) // 0))
+                     / (($prev | tonumber?) // 0)
+                     * 100
+                     * 100
+                    | round) / 100 | fmt2)
+                 end)
             }
         ]
-    ' "$tmp"
+    '
 
 alias monthly-totals := history-monthly-totals
+
+# Portfolio totals for each quarter over the last N quarters.
+# Uses monthly portfolio history and resolves each quarter date to the nearest
+# available point (prefer prior, otherwise next).
+# Example:
+#   just history-quarterly-totals
+#   just history-quarterly-totals 12
+history-quarterly-totals quarters='8':
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    quarters="{{quarters}}"
+    if ! [[ "$quarters" =~ ^[0-9]+$ ]] || [ "$quarters" -le 0 ]; then
+      echo "quarters must be a positive integer (got: $quarters)" >&2
+      exit 1
+    fi
+
+    quarter_dates="$(mktemp)"
+    trap 'rm -f "$quarter_dates"' EXIT
+
+    today="$(date +%F)"
+    current_month="$(date +%m)"
+    current_quarter_start_month=$(( ((10#$current_month - 1) / 3) * 3 + 1 ))
+    current_quarter_start="$(date +%Y)-$(printf '%02d' "$current_quarter_start_month")-01"
+    start="$(date -d "$current_quarter_start -$(((quarters - 1) * 3)) month" +%F)"
+    history_points="$(
+      {{keepbook_cmd}} portfolio history \
+        --granularity monthly \
+        --start "$start" \
+        --end "$today" \
+      | jq -c '.points'
+    )"
+
+    for i in $(seq $((quarters - 1)) -1 0); do
+      if [ "$i" -eq 0 ]; then
+        date="$today"
+      else
+        date="$(date -d "$current_quarter_start -$((i * 3)) month +3 month -1 day" +%F)"
+      fi
+      printf '%s\n' "$date" >> "$quarter_dates"
+    done
+
+    jq -n \
+      --argjson history_points "$history_points" \
+      --rawfile quarter_dates "$quarter_dates" '
+      def decstr:
+        tostring
+        | if test("\\.") then sub("0+$"; "") | sub("\\.$"; "") else . end;
+
+      def fmt_balance:
+        tostring as $s
+        | (if ($s | startswith("-")) then "-" else "" end) as $sign
+        | ($s | ltrimstr("-")) as $abs
+        | ($abs | split(".")) as $parts
+        | ($parts[0] | gsub("(?<=[0-9])(?=(?:[0-9]{3})+$)"; ",")) as $int
+        | ($parts[1] // "") as $frac
+        | if $frac == "" then "\($sign)\($int)" else "\($sign)\($int).\($frac)" end;
+
+      def fmt2:
+        tostring as $s
+        | if $s == "N/A" then $s
+          elif ($s | contains(".")) then
+            ($s | split(".")) as $parts
+            | ($parts[0]) as $int
+            | ($parts[1] // "") as $frac
+            | if ($frac | length) == 0 then "\($int).00"
+              elif ($frac | length) == 1 then "\($int).\($frac)0"
+              else "\($int).\($frac[0:2])"
+              end
+          else
+            "\($s).00"
+          end;
+
+      def row_for_date($rows; $d):
+        (([$rows[] | select(.date <= $d)] | last)
+          // ([$rows[] | select(.date >= $d)] | first));
+
+      ($quarter_dates | split("\n") | map(select(length > 0))) as $dates
+      | ($history_points // []) as $rows
+      | [ $dates[] as $d
+          | (row_for_date($rows; $d)) as $row
+          | {
+              date: $d,
+              balance: (($row.total_value // "0") | tostring)
+            }
+        ] as $filled
+      | [range(0; ($filled | length)) as $i
+          | ($filled[$i]) as $row
+          | $row.balance as $cur
+          | (if $i > 0 then $filled[$i - 1].balance else null end) as $prev
+          | ((($cur | tonumber?) // 0) | decstr) as $raw_balance
+          | {
+              date: $row.date,
+              balance: ($raw_balance | fmt_balance),
+              formatted_balance: ($raw_balance | fmt_balance),
+              raw_balance: $raw_balance,
+              percentage_change_from_previous:
+                (if $prev == null then
+                   null
+                 elif ((($prev | tonumber?) // 0) == 0) then
+                   "N/A"
+                 else
+                   ((((($cur | tonumber?) // 0) - (($prev | tonumber?) // 0))
+                     / (($prev | tonumber?) // 0)
+                     * 100
+                     * 100
+                    | round) / 100 | fmt2)
+                 end)
+            }
+        ]
+    '
+
+alias quarterly-totals := history-quarterly-totals
 
 # Portfolio snapshot distilled to total and per-account base-currency totals.
 # Extra snapshot args can be passed through, e.g.:
