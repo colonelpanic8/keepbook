@@ -968,7 +968,8 @@ mod tests {
         brokerage.tags = vec!["brokerage".to_string()];
         storage.save_account(&brokerage).await?;
 
-        let ids = FixedIdGenerator::new([Id::from_string("tx-card"), Id::from_string("tx-brokerage")]);
+        let ids =
+            FixedIdGenerator::new([Id::from_string("tx-card"), Id::from_string("tx-brokerage")]);
         let clock = FixedClock::new(Utc.with_ymd_and_hms(2026, 2, 5, 12, 0, 0).unwrap());
         let tx_card = Transaction::new_with_generator(
             &ids,
@@ -986,7 +987,9 @@ mod tests {
             "Brokerage transfer",
         )
         .with_timestamp(clock.now());
-        storage.append_transactions(&acct_card_id, &[tx_card]).await?;
+        storage
+            .append_transactions(&acct_card_id, &[tx_card])
+            .await?;
         storage
             .append_transactions(&acct_brokerage_id, &[tx_brokerage])
             .await?;

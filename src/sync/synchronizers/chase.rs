@@ -13,8 +13,8 @@ use chromiumoxide::browser::{Browser, BrowserConfig};
 use chromiumoxide::cdp::browser_protocol::network::CookieParam;
 use chrono::{NaiveDate, Utc};
 use futures::StreamExt;
-use serde_json::{Map, Value};
 use secrecy::ExposeSecret;
+use serde_json::{Map, Value};
 
 use crate::credentials::{CredentialStore, SessionCache, SessionData, StoredCookie};
 use crate::models::{
@@ -874,20 +874,20 @@ fn chase_activity_to_transaction(
         if let Some(raw) = &details.raw_merchant_details {
             if let Some(v) = &raw.merchant_dba_name {
                 if !v.trim().is_empty() {
-                    synchronizer_data.insert("merchant_dba_name".to_string(), Value::String(v.clone()));
+                    synchronizer_data
+                        .insert("merchant_dba_name".to_string(), Value::String(v.clone()));
                 }
             }
             if let Some(v) = &raw.merchant_city_name {
                 if !v.trim().is_empty() {
-                    synchronizer_data.insert("merchant_city_name".to_string(), Value::String(v.clone()));
+                    synchronizer_data
+                        .insert("merchant_city_name".to_string(), Value::String(v.clone()));
                 }
             }
             if let Some(v) = &raw.merchant_state_code {
                 if !v.trim().is_empty() {
-                    synchronizer_data.insert(
-                        "merchant_state_code".to_string(),
-                        Value::String(v.clone()),
-                    );
+                    synchronizer_data
+                        .insert("merchant_state_code".to_string(), Value::String(v.clone()));
                 }
             }
             if let Some(v) = &raw.merchant_category_code {
@@ -1044,7 +1044,8 @@ mod tests {
             Some(&Value::Array(vec![Value::Number(101.into())]))
         );
         assert_eq!(
-            data.get("digital_account_identifier").and_then(|v| v.as_i64()),
+            data.get("digital_account_identifier")
+                .and_then(|v| v.as_i64()),
             Some(987654321)
         );
     }

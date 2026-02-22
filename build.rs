@@ -48,7 +48,8 @@ fn get_git_dir() -> Result<PathBuf, String> {
     if git_dir.is_absolute() {
         Ok(git_dir)
     } else {
-        let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").map_err(|e| e.to_string())?);
+        let manifest_dir =
+            PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").map_err(|e| e.to_string())?);
         Ok(manifest_dir.join(git_dir))
     }
 }
