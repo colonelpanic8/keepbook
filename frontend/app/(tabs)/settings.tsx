@@ -3,11 +3,10 @@ import { Button, Platform, ScrollView, StyleSheet, TextInput } from 'react-nativ
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 
-import EditScreenInfo from '@/components/EditScreenInfo';
 import { Text, View } from '@/components/Themed';
 import KeepbookNative from '@/modules/keepbook-native';
 
-export default function TabTwoScreen() {
+export default function SettingsScreen() {
   const [gitHost, setGitHost] = useState('github.com');
   const [gitRepo, setGitRepo] = useState('colonelpanic8/keepbook-data');
   const [gitBranch, setGitBranch] = useState('main');
@@ -248,8 +247,6 @@ export default function TabTwoScreen() {
           {status}
         </Text>
       ) : null}
-
-      <EditScreenInfo path="app/(tabs)/two.tsx" />
     </ScrollView>
   );
 }
