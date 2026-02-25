@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 
 import { Id } from '../models/id.js';
 import {
+  parseSchwabBankingTransactions,
   parseExportedSession,
   parseSchwabBrokerageTransactions,
   parseSchwabExportedTransactionsJson,
@@ -89,6 +90,40 @@ describe('schwab transaction history api parsing', () => {
     expect(first.transactions[1].amount).toBe('9.05');
 
     const second = parseSchwabBrokerageTransactions(accountId, rows);
+    expect(first.transactions[0].id.asStr()).toBe(second.transactions[0].id.asStr());
+    expect(first.transactions[1].id.asStr()).toBe(second.transactions[1].id.asStr());
+  });
+
+  it('parses banking rows and generates deterministic ids', () => {
+    const rows = [
+      {
+        postingDate: '02/18/2026',
+        description: 'BALLAST-CZB-6708 WEB PMTS',
+        type: 'ACH',
+        withdrawalAmount: '$1,850.00',
+        depositAmount: '',
+        runningBalance: '$9,923.96',
+        checkSequenceNumber: '0',
+      },
+      {
+        postingDate: '02/14/2026',
+        description: 'PAYROLL',
+        type: 'DIRECT DEPOSIT',
+        withdrawalAmount: '',
+        depositAmount: '$4,000.00',
+        runningBalance: '$11,773.96',
+        checkSequenceNumber: '0',
+      },
+    ];
+
+    const accountId = Id.fromString('acct-2');
+    const first = parseSchwabBankingTransactions(accountId, rows);
+    expect(first.skipped).toBe(0);
+    expect(first.transactions).toHaveLength(2);
+    expect(first.transactions[0].amount).toBe('-1850.00');
+    expect(first.transactions[1].amount).toBe('4000.00');
+
+    const second = parseSchwabBankingTransactions(accountId, rows);
     expect(first.transactions[0].id.asStr()).toBe(second.transactions[0].id.asStr());
     expect(first.transactions[1].id.asStr()).toBe(second.transactions[1].id.asStr());
   });

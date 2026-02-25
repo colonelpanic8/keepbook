@@ -97,6 +97,29 @@ type BrokerageTransactionsResponse = {
   bookmark?: TransactionHistoryBookmark | null;
 };
 
+type BankingTransactionsRequest = {
+  accountNickname: string;
+  exportType: 'Csv';
+  filterCategory: 'ALL';
+  isAccountChecking: boolean;
+  selectedAccountId: string;
+  sendAvailableBalance: boolean;
+  sortColumn: 'Date';
+  sortDirection: 'Descending';
+  timeFrame: TransactionHistoryTimeFrame;
+  shouldPaginate: boolean;
+  pageNumber: string;
+};
+
+type BankingTransactionsResponse = {
+  postedTransactions?: BankingTransaction[];
+  pendingTransactions?: BankingTransaction[];
+  pagingInformation?: {
+    number: number;
+    moreRecords: boolean;
+  } | null;
+};
+
 type TransactionHistoryInitResponse = {
   accountSelectorData?: {
     brokerageAccountList?: {
@@ -122,11 +145,25 @@ export type BrokerageTransaction = {
   schwabOrderId?: string;
 };
 
+export type BankingTransaction = {
+  postingDate: string;
+  description?: string;
+  type?: string;
+  withdrawalAmount?: string;
+  depositAmount?: string;
+  runningBalance?: string;
+  checkSequenceNumber?: string;
+  checkNumber?: string;
+  depositCheckId?: string;
+};
+
 const TRANSACTION_HISTORY_MAX_PAGES = 20;
 const TRANSACTION_HISTORY_INIT_PATH =
   '/api/is.TransactionHistoryWeb/TransactionHistoryInterface/TransactionHistory/init';
 const TRANSACTION_HISTORY_PATH =
   '/api/is.TransactionHistoryWeb/TransactionHistoryInterface/TransactionHistory/brokerage/transactions';
+const BANKING_TRANSACTION_HISTORY_PATH =
+  '/api/is.TransactionHistoryWeb/TransactionHistoryInterface/TransactionHistory/banking/non-pledged-asset-line/transactions';
 const TRANSACTION_TYPES = [
   'Adjustments',
   'AtmActivity',
@@ -276,6 +313,45 @@ export class SchwabClient {
 
     throw new Error(
       `Schwab transaction pagination exceeded ${String(TRANSACTION_HISTORY_MAX_PAGES)} pages`,
+    );
+  }
+
+  async getBankingTransactions(
+    accountId: string,
+    accountNickname: string,
+    timeFrame: TransactionHistoryTimeFrame,
+  ): Promise<BankingTransaction[]> {
+    const rows: BankingTransaction[] = [];
+    let pageNumber = 0;
+
+    for (let page = 0; page < TRANSACTION_HISTORY_MAX_PAGES; page += 1) {
+      const req: BankingTransactionsRequest = {
+        accountNickname,
+        exportType: 'Csv',
+        filterCategory: 'ALL',
+        isAccountChecking: true,
+        selectedAccountId: accountId,
+        sendAvailableBalance: false,
+        sortColumn: 'Date',
+        sortDirection: 'Descending',
+        timeFrame,
+        shouldPaginate: true,
+        pageNumber: String(pageNumber),
+      };
+
+      const resp = await this.request<BankingTransactionsResponse>(BANKING_TRANSACTION_HISTORY_PATH, {
+        method: 'POST',
+        body: req,
+      });
+
+      rows.push(...(resp.postedTransactions ?? []));
+      const paging = resp.pagingInformation ?? null;
+      if (paging === null || !paging.moreRecords) return rows;
+      pageNumber = (Number.isFinite(paging.number) ? paging.number : pageNumber) + 1;
+    }
+
+    throw new Error(
+      `Schwab banking transaction pagination exceeded ${String(TRANSACTION_HISTORY_MAX_PAGES)} pages`,
     );
   }
 }
@@ -561,5 +637,69 @@ export function parseSchwabBrokerageTransactions(
     records,
     'schwab_transaction_history_api',
     'schwab:history',
+  );
+}
+
+/**
+ * Parse Schwab non-pledged banking transaction-history API rows into keepbook transactions.
+ */
+export function parseSchwabBankingTransactions(
+  accountId: Id,
+  rows: BankingTransaction[],
+): SchwabTransactionsImportResult {
+  const records: ParsedTransactionRecord[] = rows.map((row) => {
+    const typeLabel = valueOrNull(row.type);
+    const description = valueOrNull(row.description);
+    const withdrawalAmountRaw = valueOrNull(row.withdrawalAmount);
+    const depositAmountRaw = valueOrNull(row.depositAmount);
+    const runningBalance = valueOrNull(row.runningBalance);
+    const checkSequenceNumber = valueOrNull(row.checkSequenceNumber);
+    const checkNumber = valueOrNull(row.checkNumber);
+    const depositCheckId = valueOrNull(row.depositCheckId);
+
+    const withdrawalNorm = withdrawalAmountRaw ? normalizeAmount(withdrawalAmountRaw) : null;
+    const depositNorm = depositAmountRaw ? normalizeAmount(depositAmountRaw) : null;
+    const amountRaw =
+      withdrawalNorm !== null
+        ? withdrawalNorm.startsWith('-')
+          ? withdrawalNorm
+          : `-${withdrawalNorm}`
+        : depositNorm;
+
+    return {
+      dateRaw: row.postingDate,
+      action: typeLabel,
+      symbol: null,
+      description,
+      quantity: null,
+      price: null,
+      feesComm: null,
+      amountRaw,
+      fingerprintExtras: [
+        ['type', typeLabel],
+        ['withdrawal_amount_raw', withdrawalAmountRaw],
+        ['deposit_amount_raw', depositAmountRaw],
+        ['running_balance', runningBalance],
+        ['check_sequence_number', checkSequenceNumber],
+        ['check_number', checkNumber],
+        ['deposit_check_id', depositCheckId],
+      ],
+      syncDataExtras: {
+        type: typeLabel,
+        withdrawal_amount_raw: withdrawalAmountRaw,
+        deposit_amount_raw: depositAmountRaw,
+        running_balance: runningBalance,
+        check_sequence_number: checkSequenceNumber,
+        check_number: checkNumber,
+        deposit_check_id: depositCheckId,
+      },
+    };
+  });
+
+  return parseTransactionRecords(
+    accountId,
+    records,
+    'schwab_banking_transaction_history_api',
+    'schwab:banking-history',
   );
 }

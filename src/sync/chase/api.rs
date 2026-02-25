@@ -14,6 +14,26 @@ use crate::credentials::SessionData;
 
 pub(crate) const DEFAULT_CARD_TXN_PAGE_SIZE: u32 = 100;
 pub(crate) const DEFAULT_MAX_CARD_TRANSACTIONS: usize = 100_000;
+/// Default lookback period for transaction history (in days).
+pub(crate) const DEFAULT_TRANSACTION_LOOKBACK_DAYS: i64 = 730; // ~2 years
+
+/// Build the date-range query parameters for the transactions endpoint.
+///
+/// Default lookback is ~2 years. Override with `KEEPBOOK_CHASE_LOOKBACK_DAYS`.
+pub(crate) fn transaction_date_range_params() -> String {
+    let lookback = std::env::var("KEEPBOOK_CHASE_LOOKBACK_DAYS")
+        .ok()
+        .and_then(|s| s.trim().parse::<i64>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(DEFAULT_TRANSACTION_LOOKBACK_DAYS);
+    let today = chrono::Utc::now().date_naive();
+    let start = today - chrono::Duration::days(lookback);
+    format!(
+        "&account-activity-start-date={}&account-activity-end-date={}&request-type-code=T",
+        start.format("%Y-%m-%d"),
+        today.format("%Y-%m-%d"),
+    )
+}
 
 pub(crate) fn max_card_transactions() -> usize {
     // Safety valve for pagination bugs, and a knob for users with very large histories.
@@ -400,10 +420,14 @@ impl ChaseClient {
             .client
             .get(&url)
             .header("accept", "application/json, text/plain, */*")
+            .header("accept-language", "en-US,en;q=0.9")
             .header("x-jpmc-csrf-token", "NONE")
             .header("x-jpmc-channel", "id=C30")
             .header("x-jpmc-client-request-id", uuid::Uuid::new_v4().to_string())
             .header("referer", "https://secure.chase.com/web/auth/dashboard")
+            .header("sec-fetch-dest", "empty")
+            .header("sec-fetch-mode", "cors")
+            .header("sec-fetch-site", "same-origin")
             .header("cookie", self.cookie_header())
             .send()
             .await
@@ -439,6 +463,7 @@ impl ChaseClient {
             .client
             .post(&url)
             .header("accept", "application/json, text/plain, */*")
+            .header("accept-language", "en-US,en;q=0.9")
             .header(
                 "content-type",
                 "application/x-www-form-urlencoded; charset=UTF-8",
@@ -448,6 +473,9 @@ impl ChaseClient {
             .header("x-jpmc-client-request-id", uuid::Uuid::new_v4().to_string())
             .header("referer", "https://secure.chase.com/web/auth/dashboard")
             .header("origin", "https://secure.chase.com")
+            .header("sec-fetch-dest", "empty")
+            .header("sec-fetch-mode", "cors")
+            .header("sec-fetch-site", "same-origin")
             .header("cookie", self.cookie_header());
 
         req = req.body(body.unwrap_or("").to_string());
@@ -550,9 +578,12 @@ impl ChaseClient {
         let mut path = format!(
             "/svc/rr/accounts/secure/gateway/credit-card/transactions/inquiry-maintenance/etu-transactions/v4/accounts/transactions?digital-account-identifier={account_id}&provide-available-statement-indicator=true&record-count={record_count}&sort-order-code=D&sort-key-code=T"
         );
+        path.push_str(&transaction_date_range_params());
 
         if let Some(key) = pagination_key {
-            path.push_str(&format!("&next-page-key={}", urlencoding::encode(&key)));
+            // Chase expects the pagination key verbatim (e.g. `#P_...`).
+            // URL-encoding the `#` to `%23` causes a 403.
+            path.push_str(&format!("&next-page-key={key}"));
         }
 
         self.get(&path).await

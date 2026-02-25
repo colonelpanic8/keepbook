@@ -24,7 +24,8 @@ use crate::models::{
 };
 use crate::storage::Storage;
 use crate::sync::schwab::{
-    parse_brokerage_transactions_rows, Position, SchwabClient, TransactionHistoryTimeFrame,
+    parse_banking_transactions_rows, parse_brokerage_transactions_rows, Position, SchwabClient,
+    TransactionHistoryTimeFrame,
 };
 use crate::sync::{
     AuthStatus, InteractiveAuth, SyncOptions, SyncResult, SyncedAssetBalance, Synchronizer,
@@ -42,6 +43,21 @@ pub struct SchwabSynchronizer {
 }
 
 impl SchwabSynchronizer {
+    fn banking_selected_account_id(
+        account_number_display_full: &str,
+        fallback_account_id: &str,
+    ) -> String {
+        let digits: String = account_number_display_full
+            .chars()
+            .filter(|c| c.is_ascii_digit())
+            .collect();
+        if digits.is_empty() {
+            fallback_account_id.to_string()
+        } else {
+            digits
+        }
+    }
+
     /// Create a new Schwab synchronizer for a connection.
     pub async fn from_connection<S: Storage + ?Sized>(
         connection: &Connection,
@@ -192,13 +208,15 @@ impl SchwabSynchronizer {
                 .map(|a| a.created_at)
                 .unwrap_or_else(Utc::now);
 
+            let account_name = if schwab_account.nick_name.is_empty() {
+                schwab_account.default_name.clone()
+            } else {
+                schwab_account.nick_name.clone()
+            };
+
             let account = Account {
                 id: account_id.clone(),
-                name: if schwab_account.nick_name.is_empty() {
-                    schwab_account.default_name.clone()
-                } else {
-                    schwab_account.nick_name.clone()
-                },
+                name: account_name.clone(),
                 connection_id: connection.id().clone(),
                 tags: vec![
                     "schwab".to_string(),
@@ -249,31 +267,35 @@ impl SchwabSynchronizer {
                         )));
                     }
                 }
+            } else if let Some(bal) = &schwab_account.balances {
+                // Non-brokerage accounts (bank/checking): store total balance as USD
+                account_balances.push(SyncedAssetBalance::new(AssetBalance::new(
+                    Asset::currency("USD"),
+                    bal.balance.to_string(),
+                )));
+            }
 
-                let existing_txns = storage.get_transactions(&account_id).await?;
-                let time_frame = match options.transactions {
-                    TransactionSyncMode::Full => TransactionHistoryTimeFrame::All,
-                    TransactionSyncMode::Auto => {
-                        if existing_txns.is_empty() {
-                            TransactionHistoryTimeFrame::All
-                        } else {
-                            TransactionHistoryTimeFrame::Last6Months
-                        }
+            let existing_txns = storage.get_transactions(&account_id).await?;
+            let time_frame = match options.transactions {
+                TransactionSyncMode::Full => TransactionHistoryTimeFrame::All,
+                TransactionSyncMode::Auto => {
+                    if existing_txns.is_empty() {
+                        TransactionHistoryTimeFrame::All
+                    } else {
+                        TransactionHistoryTimeFrame::Last6Months
                     }
-                };
+                }
+            };
 
-                let nickname = if schwab_account.nick_name.trim().is_empty() {
-                    schwab_account.default_name.clone()
-                } else {
-                    schwab_account.nick_name.clone()
-                };
+            if schwab_account.is_brokerage {
                 let tx_account_id = history_account_ids_by_name
-                    .get(&nickname.trim().to_ascii_lowercase())
+                    .get(&account_name.trim().to_ascii_lowercase())
                     .cloned()
                     .or_else(|| lone_history_account_id.clone())
                     .unwrap_or_else(|| schwab_account.account_id.clone());
+
                 let history_rows = client
-                    .get_brokerage_transactions(&tx_account_id, &nickname, time_frame)
+                    .get_brokerage_transactions(&tx_account_id, &account_name, time_frame)
                     .await
                     .with_context(|| {
                         format!(
@@ -281,22 +303,82 @@ impl SchwabSynchronizer {
                             schwab_account.account_id, tx_account_id
                         )
                     })?;
-                let parsed = parse_brokerage_transactions_rows(&account_id, &history_rows)
-                    .with_context(|| {
-                        format!(
-                            "Failed to parse Schwab transactions for account {}",
-                            schwab_account.account_id
-                        )
-                    })?;
-                if !parsed.transactions.is_empty() {
-                    transactions.push((account_id.clone(), parsed.transactions));
+
+                if !history_rows.is_empty() {
+                    let parsed = parse_brokerage_transactions_rows(&account_id, &history_rows)
+                        .with_context(|| {
+                            format!(
+                                "Failed to parse Schwab transactions for account {}",
+                                schwab_account.account_id
+                            )
+                        })?;
+                    if !parsed.transactions.is_empty() {
+                        transactions.push((account_id.clone(), parsed.transactions));
+                    }
                 }
-            } else if let Some(bal) = &schwab_account.balances {
-                // Non-brokerage accounts (bank/checking): store total balance as USD
-                account_balances.push(SyncedAssetBalance::new(AssetBalance::new(
-                    Asset::currency("USD"),
-                    bal.balance.to_string(),
-                )));
+            } else {
+                let bank_tx_account_id = Self::banking_selected_account_id(
+                    &schwab_account.account_number_display_full,
+                    &schwab_account.account_id,
+                );
+                let bank_nickname = if schwab_account.default_name.trim().is_empty() {
+                    account_name.as_str()
+                } else {
+                    schwab_account.default_name.trim()
+                };
+
+                let history_rows = match client
+                    .get_banking_transactions(&bank_tx_account_id, bank_nickname, time_frame)
+                    .await
+                {
+                    Ok(rows) => rows,
+                    Err(err) if time_frame == TransactionHistoryTimeFrame::All => {
+                        eprintln!(
+                            "Schwab: banking transaction-history does not support timeFrame=All for account {} (banking id {}), retrying Last6Months: {err:#}",
+                            schwab_account.account_id, bank_tx_account_id
+                        );
+                        match client
+                            .get_banking_transactions(
+                                &bank_tx_account_id,
+                                bank_nickname,
+                                TransactionHistoryTimeFrame::Last6Months,
+                            )
+                            .await
+                        {
+                            Ok(rows) => rows,
+                            Err(retry_err) => {
+                                eprintln!(
+                                    "Schwab: transaction-history fetch unavailable for non-brokerage account {} (banking id {}): {retry_err:#}",
+                                    schwab_account.account_id, bank_tx_account_id
+                                );
+                                Vec::new()
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        eprintln!(
+                            "Schwab: transaction-history fetch unavailable for non-brokerage account {} (banking id {}): {err:#}",
+                            schwab_account.account_id, bank_tx_account_id
+                        );
+                        Vec::new()
+                    }
+                };
+
+                if !history_rows.is_empty() {
+                    match parse_banking_transactions_rows(&account_id, &history_rows) {
+                        Ok(parsed) => {
+                            if !parsed.transactions.is_empty() {
+                                transactions.push((account_id.clone(), parsed.transactions));
+                            }
+                        }
+                        Err(err) => {
+                            eprintln!(
+                                "Schwab: failed to parse banking transaction-history rows for account {}: {err:#}",
+                                schwab_account.account_id
+                            );
+                        }
+                    }
+                }
             }
 
             accounts.push(account);

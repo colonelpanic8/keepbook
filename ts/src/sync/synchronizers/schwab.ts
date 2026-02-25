@@ -8,8 +8,11 @@ import { AssetId } from '../../market-data/asset-id.js';
 import type { PricePoint } from '../../market-data/models.js';
 import { SessionCache, type SessionData } from '../../credentials/session.js';
 import {
+  parseSchwabBankingTransactions,
   parseSchwabBrokerageTransactions,
+  type BankingTransaction,
   SchwabClient,
+  type BrokerageTransaction,
   type Position,
   type TransactionHistoryTimeFrame,
 } from '../schwab.js';
@@ -29,6 +32,11 @@ function todayUtc(): string {
 function transactionTimeFrame(mode: TransactionSyncMode, existingCount: number): TransactionHistoryTimeFrame {
   if (mode === 'full') return 'All';
   return existingCount === 0 ? 'All' : 'Last6Months';
+}
+
+function bankingSelectedAccountId(accountNumberDisplayFull: string, fallbackAccountId: string): string {
+  const digits = accountNumberDisplayFull.replace(/\D/g, '');
+  return digits === '' ? fallbackAccountId : digits;
 }
 
 export class SchwabSynchronizer implements Synchronizer {
@@ -139,24 +147,88 @@ export class SchwabSynchronizer implements Synchronizer {
             asset_balance: AssetBalance.new(Asset.currency('USD'), cash.toString()),
           });
         }
-
-        const existingTxns = await storage.getTransactions(accountId);
-        const timeFrame = transactionTimeFrame(options.transactions, existingTxns.length);
-        const txAccountId =
-          historyAccountIdsByName.get(name.trim().toLowerCase()) ??
-          loneHistoryAccountId ??
-          schwabAccount.AccountId;
-        const historyRows = await client.getBrokerageTransactions(txAccountId, name, timeFrame);
-        const parsed = parseSchwabBrokerageTransactions(accountId, historyRows);
-        if (parsed.transactions.length > 0) {
-          transactions.push([accountId, parsed.transactions]);
-        }
       } else {
         const bal = schwabAccount.Balances?.Balance;
         if (bal !== undefined) {
           accountBalances.push({
             asset_balance: AssetBalance.new(Asset.currency('USD'), bal.toString()),
           });
+        }
+      }
+
+      const existingTxns = await storage.getTransactions(accountId);
+      const timeFrame = transactionTimeFrame(options.transactions, existingTxns.length);
+      if (schwabAccount.IsBrokerage) {
+        const txAccountId =
+          historyAccountIdsByName.get(name.trim().toLowerCase()) ??
+          loneHistoryAccountId ??
+          schwabAccount.AccountId;
+
+        let historyRows: BrokerageTransaction[] = [];
+        try {
+          historyRows = await client.getBrokerageTransactions(txAccountId, name, timeFrame);
+        } catch (err) {
+          throw new Error(
+            `Failed to fetch Schwab transactions for account ${schwabAccount.AccountId} (transaction-history id ${txAccountId}): ${String(err)}`,
+          );
+        }
+
+        if (historyRows.length > 0) {
+          try {
+            const parsed = parseSchwabBrokerageTransactions(accountId, historyRows);
+            if (parsed.transactions.length > 0) {
+              transactions.push([accountId, parsed.transactions]);
+            }
+          } catch (err) {
+            throw new Error(
+              `Failed to parse Schwab transactions for account ${schwabAccount.AccountId}: ${String(err)}`,
+            );
+          }
+        }
+      } else {
+        const bankTxAccountId = bankingSelectedAccountId(
+          schwabAccount.AccountNumberDisplayFull,
+          schwabAccount.AccountId,
+        );
+        const bankNickname = schwabAccount.DefaultName.trim() === '' ? name : schwabAccount.DefaultName;
+
+        let historyRows: BankingTransaction[] = [];
+        try {
+          historyRows = await client.getBankingTransactions(bankTxAccountId, bankNickname, timeFrame);
+        } catch (err) {
+          if (timeFrame === 'All') {
+            console.warn(
+              `Schwab: banking transaction-history does not support timeFrame=All for account ${schwabAccount.AccountId} (banking id ${bankTxAccountId}), retrying Last6Months: ${String(err)}`,
+            );
+            try {
+              historyRows = await client.getBankingTransactions(
+                bankTxAccountId,
+                bankNickname,
+                'Last6Months',
+              );
+            } catch (retryErr) {
+              console.warn(
+                `Schwab: transaction-history fetch unavailable for non-brokerage account ${schwabAccount.AccountId} (banking id ${bankTxAccountId}): ${String(retryErr)}`,
+              );
+            }
+          } else {
+            console.warn(
+              `Schwab: transaction-history fetch unavailable for non-brokerage account ${schwabAccount.AccountId} (banking id ${bankTxAccountId}): ${String(err)}`,
+            );
+          }
+        }
+
+        if (historyRows.length > 0) {
+          try {
+            const parsed = parseSchwabBankingTransactions(accountId, historyRows);
+            if (parsed.transactions.length > 0) {
+              transactions.push([accountId, parsed.transactions]);
+            }
+          } catch (err) {
+            console.warn(
+              `Schwab: failed to parse banking transaction-history rows for account ${schwabAccount.AccountId}: ${String(err)}`,
+            );
+          }
         }
       }
 

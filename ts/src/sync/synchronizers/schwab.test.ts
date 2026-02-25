@@ -22,11 +22,13 @@ describe('SchwabSynchronizer (TypeScript)', () => {
   let server: http.Server;
   let baseUrl: string;
   let tmpDir: string;
-  let txRequestBodies: unknown[];
+  let brokerageTxRequestBodies: unknown[];
+  let bankingTxRequestBodies: unknown[];
 
   beforeEach(async () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'keepbook-schwab-test-'));
-    txRequestBodies = [];
+    brokerageTxRequestBodies = [];
+    bankingTxRequestBodies = [];
 
     const started = await startServer((req, res) => {
       const url = req.url ?? '';
@@ -62,7 +64,7 @@ describe('SchwabSynchronizer (TypeScript)', () => {
               {
                 AccountId: 'acct-2',
                 AccountNumberDisplay: '...9999',
-                AccountNumberDisplayFull: '0000...9999',
+                AccountNumberDisplayFull: '4400-33623420',
                 DefaultName: 'Checking',
                 NickName: 'My Checking',
                 AccountType: 'Bank',
@@ -128,10 +130,11 @@ describe('SchwabSynchronizer (TypeScript)', () => {
         req.on('end', () => {
           const parsed = JSON.parse(Buffer.concat(chunks).toString() || '{}') as {
             bookmark?: unknown;
+            selectedAccountId?: string;
           };
-          txRequestBodies.push(parsed);
+          brokerageTxRequestBodies.push(parsed);
 
-          if ((parsed.bookmark ?? null) === null) {
+          if (parsed.selectedAccountId === 'acct-1' && (parsed.bookmark ?? null) === null) {
             res.end(
               JSON.stringify({
                 bookmark: {
@@ -165,27 +168,115 @@ describe('SchwabSynchronizer (TypeScript)', () => {
             return;
           }
 
+          if (parsed.selectedAccountId === 'acct-1') {
+            res.end(
+              JSON.stringify({
+                bookmark: null,
+                brokerageTransactions: [
+                  {
+                    transactionDate: '01/13/2026 as of 12/31/2025',
+                    action: 'Cash In Lieu',
+                    symbol: 'FG',
+                    description: 'F&G ANNUITIES & LIFE INC',
+                    shareQuantity: '',
+                    executionPrice: '',
+                    feesAndCommission: '',
+                    amount: '$9.05',
+                    sourceCode: 'CIL',
+                    effectiveDate: '12/31/2025',
+                    depositSequenceId: '1',
+                    checkDate: '01/13/2026',
+                    itemIssueId: 'row-2',
+                    schwabOrderId: '0',
+                  },
+                ],
+              }),
+            );
+            return;
+          }
+
+          if (parsed.selectedAccountId === 'acct-2') {
+            res.end(
+              JSON.stringify({
+                bookmark: null,
+                brokerageTransactions: [
+                  {
+                    transactionDate: '02/05/2026',
+                    action: 'Bill Pay',
+                    symbol: '',
+                    description: 'RENT PAYMENT',
+                    shareQuantity: '',
+                    executionPrice: '',
+                    feesAndCommission: '',
+                    amount: '-$3000.00',
+                    sourceCode: 'BillPay',
+                    effectiveDate: '02/05/2026',
+                    depositSequenceId: '1',
+                    checkDate: '02/05/2026',
+                    itemIssueId: 'row-checking-1',
+                    schwabOrderId: '0',
+                  },
+                ],
+              }),
+            );
+            return;
+          }
+
           res.end(
             JSON.stringify({
               bookmark: null,
-              brokerageTransactions: [
-                {
-                  transactionDate: '01/13/2026 as of 12/31/2025',
-                  action: 'Cash In Lieu',
-                  symbol: 'FG',
-                  description: 'F&G ANNUITIES & LIFE INC',
-                  shareQuantity: '',
-                  executionPrice: '',
-                  feesAndCommission: '',
-                  amount: '$9.05',
-                  sourceCode: 'CIL',
-                  effectiveDate: '12/31/2025',
-                  depositSequenceId: '1',
-                  checkDate: '01/13/2026',
-                  itemIssueId: 'row-2',
-                  schwabOrderId: '0',
+              brokerageTransactions: [],
+            }),
+          );
+        });
+        return;
+      }
+
+      if (
+        req.method === 'POST' &&
+        url === '/api/is.TransactionHistoryWeb/TransactionHistoryInterface/TransactionHistory/banking/non-pledged-asset-line/transactions'
+      ) {
+        const chunks: Buffer[] = [];
+        req.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+        req.on('end', () => {
+          const parsed = JSON.parse(Buffer.concat(chunks).toString() || '{}') as {
+            selectedAccountId?: string;
+            pageNumber?: string;
+          };
+          bankingTxRequestBodies.push(parsed);
+
+          if (parsed.selectedAccountId === '440033623420') {
+            res.end(
+              JSON.stringify({
+                postedTransactions: [
+                  {
+                    postingDate: '02/05/2026',
+                    description: 'RENT PAYMENT',
+                    type: 'ACH',
+                    withdrawalAmount: '$3,000.00',
+                    depositAmount: '',
+                    runningBalance: '$50.50',
+                    checkSequenceNumber: '0',
+                  },
+                ],
+                pendingTransactions: [],
+                pagingInformation: {
+                  number: Number(parsed.pageNumber ?? '0'),
+                  moreRecords: false,
                 },
-              ],
+              }),
+            );
+            return;
+          }
+
+          res.end(
+            JSON.stringify({
+              postedTransactions: [],
+              pendingTransactions: [],
+              pagingInformation: {
+                number: Number(parsed.pageNumber ?? '0'),
+                moreRecords: false,
+              },
             }),
           );
         });
@@ -236,18 +327,30 @@ describe('SchwabSynchronizer (TypeScript)', () => {
     expect(checkingBalances).toHaveLength(1);
     expect((checkingBalances[0].asset_balance.asset as { type: string }).type).toBe('currency');
 
-    // Brokerage transactions are fetched via paginated history endpoint.
-    expect(result.transactions).toHaveLength(1);
-    const [txAccountId, txns] = result.transactions[0];
-    expect(txAccountId.equals(brokerage!.id)).toBe(true);
-    expect(txns).toHaveLength(2);
-    expect(txns[0].amount).toBe('-200.50');
-    expect(txns[1].amount).toBe('9.05');
+    // Transactions are fetched for brokerage and checking.
+    expect(result.transactions).toHaveLength(2);
+    const brokerageTxns = result.transactions.find(([id]) => id.equals(brokerage!.id))?.[1] ?? [];
+    const checkingTxns = result.transactions.find(([id]) => id.equals(checking!.id))?.[1] ?? [];
+    expect(brokerageTxns).toHaveLength(2);
+    expect(brokerageTxns[0].amount).toBe('-200.50');
+    expect(brokerageTxns[1].amount).toBe('9.05');
+    expect(checkingTxns).toHaveLength(1);
+    expect(checkingTxns[0].description).toContain('RENT PAYMENT');
+    expect(checkingTxns[0].amount).toBe('-3000.00');
 
-    expect(txRequestBodies).toHaveLength(2);
-    expect((txRequestBodies[0] as { timeFrame?: string }).timeFrame).toBe('All');
-    expect((txRequestBodies[0] as { bookmark?: unknown }).bookmark).toBeNull();
-    expect((txRequestBodies[1] as { bookmark?: unknown }).bookmark).not.toBeNull();
+    expect(brokerageTxRequestBodies).toHaveLength(2);
+    expect((brokerageTxRequestBodies[0] as { timeFrame?: string }).timeFrame).toBe('All');
+    expect((brokerageTxRequestBodies[0] as { selectedAccountId?: string }).selectedAccountId).toBe('acct-1');
+    expect((brokerageTxRequestBodies[0] as { bookmark?: unknown }).bookmark).toBeNull();
+    expect((brokerageTxRequestBodies[1] as { selectedAccountId?: string }).selectedAccountId).toBe('acct-1');
+    expect((brokerageTxRequestBodies[1] as { bookmark?: unknown }).bookmark).not.toBeNull();
+
+    expect(bankingTxRequestBodies).toHaveLength(1);
+    expect((bankingTxRequestBodies[0] as { timeFrame?: string }).timeFrame).toBe('All');
+    expect((bankingTxRequestBodies[0] as { selectedAccountId?: string }).selectedAccountId).toBe(
+      '440033623420',
+    );
+    expect((bankingTxRequestBodies[0] as { pageNumber?: string }).pageNumber).toBe('0');
   });
 
   it('fails fast when session is missing', async () => {

@@ -133,6 +133,8 @@ const TRANSACTION_HISTORY_INIT_PATH: &str =
     "/api/is.TransactionHistoryWeb/TransactionHistoryInterface/TransactionHistory/init";
 const TRANSACTION_HISTORY_PATH: &str =
     "/api/is.TransactionHistoryWeb/TransactionHistoryInterface/TransactionHistory/brokerage/transactions";
+const BANKING_TRANSACTION_HISTORY_PATH: &str =
+    "/api/is.TransactionHistoryWeb/TransactionHistoryInterface/TransactionHistory/banking/non-pledged-asset-line/transactions";
 const TRANSACTION_TYPES: &[&str] = &[
     "Adjustments",
     "AtmActivity",
@@ -225,6 +227,59 @@ pub struct BrokerageTransactionRow {
     pub item_issue_id: Option<String>,
     #[serde(default)]
     pub schwab_order_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BankingTransactionsRequest {
+    account_nickname: String,
+    export_type: &'static str,
+    filter_category: &'static str,
+    is_account_checking: bool,
+    selected_account_id: String,
+    send_available_balance: bool,
+    sort_column: &'static str,
+    sort_direction: &'static str,
+    time_frame: &'static str,
+    should_paginate: bool,
+    page_number: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BankingTransactionsResponse {
+    #[serde(default)]
+    pub posted_transactions: Vec<BankingTransactionRow>,
+    pub paging_information: Option<BankingPagingInformation>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BankingPagingInformation {
+    pub number: usize,
+    pub more_records: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BankingTransactionRow {
+    pub posting_date: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(rename = "type", default)]
+    pub type_label: Option<String>,
+    #[serde(default)]
+    pub withdrawal_amount: Option<String>,
+    #[serde(default)]
+    pub deposit_amount: Option<String>,
+    #[serde(default)]
+    pub running_balance: Option<String>,
+    #[serde(default)]
+    pub check_sequence_number: Option<String>,
+    #[serde(default)]
+    pub check_number: Option<String>,
+    #[serde(default)]
+    pub deposit_check_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -418,6 +473,54 @@ impl SchwabClient {
 
         anyhow::bail!(
             "Schwab transaction pagination exceeded {TRANSACTION_HISTORY_MAX_PAGES} pages"
+        )
+    }
+
+    /// Get all non-pledged banking transactions for an account using page-number pagination.
+    pub async fn get_banking_transactions(
+        &self,
+        account_id: &str,
+        account_nickname: &str,
+        time_frame: TransactionHistoryTimeFrame,
+    ) -> Result<Vec<BankingTransactionRow>> {
+        let mut rows: Vec<BankingTransactionRow> = Vec::new();
+        let mut page_number = 0usize;
+
+        for _ in 0..TRANSACTION_HISTORY_MAX_PAGES {
+            let req = BankingTransactionsRequest {
+                account_nickname: account_nickname.to_string(),
+                export_type: "Csv",
+                filter_category: "ALL",
+                is_account_checking: true,
+                selected_account_id: account_id.to_string(),
+                send_available_balance: false,
+                sort_column: "Date",
+                sort_direction: "Descending",
+                time_frame: time_frame.as_api_value(),
+                should_paginate: true,
+                page_number: page_number.to_string(),
+            };
+
+            let page: BankingTransactionsResponse = self
+                .request_with_body(BANKING_TRANSACTION_HISTORY_PATH, &req)
+                .await?;
+            rows.extend(page.posted_transactions);
+
+            let more_records = page
+                .paging_information
+                .map(|p| {
+                    page_number = p.number.saturating_add(1);
+                    p.more_records
+                })
+                .unwrap_or(false);
+
+            if !more_records {
+                return Ok(rows);
+            }
+        }
+
+        anyhow::bail!(
+            "Schwab banking transaction pagination exceeded {TRANSACTION_HISTORY_MAX_PAGES} pages"
         )
     }
 }
@@ -853,6 +956,150 @@ pub fn parse_brokerage_transactions_rows(
     })
 }
 
+/// Parse Schwab non-pledged banking transaction-history API rows into keepbook transactions.
+pub fn parse_banking_transactions_rows(
+    account_id: &Id,
+    rows: &[BankingTransactionRow],
+) -> Result<SchwabTransactionsImportResult> {
+    let mut skipped = 0usize;
+    let mut txns: Vec<Transaction> = Vec::new();
+    let mut seen_counts: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+
+    for row in rows {
+        let date_raw = row.posting_date.trim().to_string();
+        let dates = extract_mmddyyyy_dates(&date_raw);
+        let Some(primary_date) = dates.first().copied() else {
+            skipped += 1;
+            continue;
+        };
+
+        let description = nonempty_opt(&row.description);
+        let type_label = nonempty_opt(&row.type_label);
+        let withdrawal_amount_raw = nonempty_opt(&row.withdrawal_amount);
+        let deposit_amount_raw = nonempty_opt(&row.deposit_amount);
+        let running_balance = nonempty_opt(&row.running_balance);
+        let check_sequence_number = nonempty_opt(&row.check_sequence_number);
+        let check_number = nonempty_opt(&row.check_number);
+        let deposit_check_id = nonempty_opt(&row.deposit_check_id);
+
+        let amount_norm =
+            if let Some(withdrawal) = withdrawal_amount_raw.as_deref().and_then(normalize_amount) {
+                if withdrawal.starts_with('-') {
+                    Some(withdrawal)
+                } else {
+                    Some(format!("-{withdrawal}"))
+                }
+            } else {
+                deposit_amount_raw.as_deref().and_then(normalize_amount)
+            };
+        let Some(amount_norm) = amount_norm else {
+            skipped += 1;
+            continue;
+        };
+
+        let mut parts: Vec<String> = Vec::new();
+        if let Some(t) = type_label
+            .as_deref()
+            .map(normalize_ws)
+            .filter(|s| !s.is_empty())
+        {
+            parts.push(t);
+        }
+        if let Some(d) = description
+            .as_deref()
+            .map(normalize_ws)
+            .filter(|s| !s.is_empty())
+        {
+            parts.push(d);
+        }
+        let desc = if parts.is_empty() {
+            "Schwab transaction".to_string()
+        } else {
+            parts.join(" ")
+        };
+
+        let date_iso = primary_date.format("%Y-%m-%d").to_string();
+
+        let fingerprint = format!(
+            "date={date_iso}|type={}|desc={}|withdrawal={}|deposit={}|amount={}|running_balance={}|check_sequence_number={}|check_number={}|deposit_check_id={}",
+            type_label.as_deref().map(normalize_ws).unwrap_or_default(),
+            description.as_deref().map(normalize_ws).unwrap_or_default(),
+            withdrawal_amount_raw
+                .as_deref()
+                .map(normalize_ws)
+                .unwrap_or_default(),
+            deposit_amount_raw
+                .as_deref()
+                .map(normalize_ws)
+                .unwrap_or_default(),
+            amount_norm,
+            running_balance
+                .as_deref()
+                .map(normalize_ws)
+                .unwrap_or_default(),
+            check_sequence_number
+                .as_deref()
+                .map(normalize_ws)
+                .unwrap_or_default(),
+            check_number.as_deref().map(normalize_ws).unwrap_or_default(),
+            deposit_check_id
+                .as_deref()
+                .map(normalize_ws)
+                .unwrap_or_default(),
+        );
+        let count = seen_counts.entry(fingerprint.clone()).or_insert(0);
+        *count += 1;
+        let occurrence = *count;
+
+        let tx_id = Id::from_external(&format!(
+            "schwab:banking-history:{account}:{fingerprint}:{occurrence}",
+            account = account_id.as_str()
+        ));
+
+        let timestamp = Utc
+            .with_ymd_and_hms(
+                primary_date.year(),
+                primary_date.month(),
+                primary_date.day(),
+                0,
+                0,
+                0,
+            )
+            .single()
+            .context("Failed to build transaction timestamp")?;
+
+        let sync_data = serde_json::json!({
+            "source": "schwab_banking_transaction_history_api",
+            "date_raw": date_raw,
+            "date": date_iso,
+            "type": type_label,
+            "description": description,
+            "withdrawal_amount_raw": withdrawal_amount_raw,
+            "deposit_amount_raw": deposit_amount_raw,
+            "amount": amount_norm,
+            "running_balance": running_balance,
+            "check_sequence_number": check_sequence_number,
+            "check_number": check_number,
+            "deposit_check_id": deposit_check_id,
+            "fingerprint": fingerprint,
+            "occurrence": occurrence,
+        });
+
+        txns.push(
+            Transaction::new(amount_norm, Asset::currency("USD"), desc)
+                .with_timestamp(timestamp)
+                .with_status(TransactionStatus::Posted)
+                .with_id(tx_id)
+                .with_synchronizer_data(sync_data),
+        );
+    }
+
+    Ok(SchwabTransactionsImportResult {
+        transactions: txns,
+        skipped,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -951,6 +1198,45 @@ mod tests {
         assert_eq!(first.transactions[1].id, second.transactions[1].id);
     }
 
+    #[test]
+    fn parse_banking_transactions_rows_parses_and_generates_deterministic_ids() {
+        let rows = vec![
+            BankingTransactionRow {
+                posting_date: "02/18/2026".to_string(),
+                description: Some("BALLAST-CZB-6708 WEB PMTS".to_string()),
+                type_label: Some("ACH".to_string()),
+                withdrawal_amount: Some("$1,850.00".to_string()),
+                deposit_amount: Some(String::new()),
+                running_balance: Some("$9,923.96".to_string()),
+                check_sequence_number: Some("0".to_string()),
+                check_number: None,
+                deposit_check_id: None,
+            },
+            BankingTransactionRow {
+                posting_date: "02/14/2026".to_string(),
+                description: Some("PAYROLL".to_string()),
+                type_label: Some("DIRECT DEPOSIT".to_string()),
+                withdrawal_amount: Some(String::new()),
+                deposit_amount: Some("$4,000.00".to_string()),
+                running_balance: Some("$11,773.96".to_string()),
+                check_sequence_number: Some("0".to_string()),
+                check_number: None,
+                deposit_check_id: None,
+            },
+        ];
+
+        let account_id = Id::from_string("acct-2");
+        let first = parse_banking_transactions_rows(&account_id, &rows).expect("parse");
+        assert_eq!(first.skipped, 0);
+        assert_eq!(first.transactions.len(), 2);
+        assert_eq!(first.transactions[0].amount, "-1850.00");
+        assert_eq!(first.transactions[1].amount, "4000.00");
+
+        let second = parse_banking_transactions_rows(&account_id, &rows).expect("parse");
+        assert_eq!(first.transactions[0].id, second.transactions[0].id);
+        assert_eq!(first.transactions[1].id, second.transactions[1].id);
+    }
+
     #[tokio::test]
     async fn get_brokerage_transactions_paginates_with_bookmark() -> Result<()> {
         let server = MockServer::start().await;
@@ -1040,6 +1326,89 @@ mod tests {
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].action.as_deref(), Some("Buy"));
         assert_eq!(rows[1].action.as_deref(), Some("Cash In Lieu"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn get_banking_transactions_paginates_with_page_number() -> Result<()> {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path(
+                "/api/is.TransactionHistoryWeb/TransactionHistoryInterface/TransactionHistory/banking/non-pledged-asset-line/transactions",
+            ))
+            .and(body_partial_json(json!({
+                "timeFrame": "Last6Months",
+                "pageNumber": "0",
+                "selectedAccountId": "440033623420",
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "postedTransactions": [
+                    {
+                        "postingDate": "02/18/2026",
+                        "description": "BALLAST-CZB-6708 WEB PMTS",
+                        "type": "ACH",
+                        "withdrawalAmount": "$1,850.00",
+                        "depositAmount": "",
+                        "runningBalance": "$9,923.96",
+                        "checkSequenceNumber": "0"
+                    }
+                ],
+                "pendingTransactions": [],
+                "pagingInformation": {
+                    "number": 0,
+                    "moreRecords": true
+                }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path(
+                "/api/is.TransactionHistoryWeb/TransactionHistoryInterface/TransactionHistory/banking/non-pledged-asset-line/transactions",
+            ))
+            .and(body_partial_json(json!({
+                "pageNumber": "1",
+                "selectedAccountId": "440033623420",
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "postedTransactions": [
+                    {
+                        "postingDate": "02/14/2026",
+                        "description": "PAYROLL",
+                        "type": "DIRECT DEPOSIT",
+                        "withdrawalAmount": "",
+                        "depositAmount": "$4,000.00",
+                        "runningBalance": "$11,773.96",
+                        "checkSequenceNumber": "0"
+                    }
+                ],
+                "pendingTransactions": [],
+                "pagingInformation": {
+                    "number": 1,
+                    "moreRecords": false
+                }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let mut session = SessionData::new().with_token("test-token");
+        session.data.insert("api_base".to_string(), server.uri());
+
+        let client = SchwabClient::new(session)?;
+        let rows = client
+            .get_banking_transactions(
+                "440033623420",
+                "Checking",
+                TransactionHistoryTimeFrame::Last6Months,
+            )
+            .await?;
+
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].type_label.as_deref(), Some("ACH"));
+        assert_eq!(rows[1].type_label.as_deref(), Some("DIRECT DEPOSIT"));
         Ok(())
     }
 }

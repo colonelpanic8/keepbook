@@ -154,9 +154,10 @@ impl BrowserApiClient {
         let mut path = format!(
             "/svc/rr/accounts/secure/gateway/credit-card/transactions/inquiry-maintenance/etu-transactions/v4/accounts/transactions?digital-account-identifier={account_id}&provide-available-statement-indicator=true&record-count={record_count}&sort-order-code=D&sort-key-code=T"
         );
+        path.push_str(&crate::sync::chase::api::transaction_date_range_params());
 
         if let Some(key) = pagination_key {
-            path.push_str(&format!("&next-page-key={}", urlencoding::encode(&key)));
+            path.push_str(&format!("&next-page-key={key}"));
         }
 
         let value = self.get_json(&path).await?;
@@ -653,9 +654,19 @@ impl InteractiveAuth for ChaseSynchronizer {
                     }
                 }
 
-                // Cookie presence + freshness gate. Full validity is checked during sync,
-                // where we can transparently fall back to browser-context API requests.
-                Ok(AuthStatus::Valid)
+                // Probe the Chase API to verify the session is actually valid.
+                // Sessions can be revoked server-side before the 7-day age limit.
+                match ChaseClient::new(session) {
+                    Ok(client) => match client.test_auth().await {
+                        Ok(()) => Ok(AuthStatus::Valid),
+                        Err(err) => Ok(AuthStatus::Expired {
+                            reason: format!("Session rejected by Chase API: {err:#}"),
+                        }),
+                    },
+                    Err(err) => Ok(AuthStatus::Expired {
+                        reason: format!("Failed to build Chase client: {err:#}"),
+                    }),
+                }
             }
         }
     }
@@ -947,7 +958,9 @@ fn chase_activity_to_transaction(
         description: activity.description(),
         status,
         synchronizer_data: Value::Object(synchronizer_data),
+        standardized_metadata: None,
     })
+    .map(Transaction::backfill_standardized_metadata)
 }
 
 fn chase_activity_to_transaction_id(
