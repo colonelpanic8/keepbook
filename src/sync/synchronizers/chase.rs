@@ -954,7 +954,7 @@ fn chase_activity_to_transaction(
         id: tx_id,
         timestamp,
         amount: amount.to_string(),
-        asset: Asset::currency(activity.currency_code.as_deref().unwrap_or("USD")),
+        asset: Asset::currency(activity.currency_code.as_deref().unwrap_or("USD")).normalized(),
         description: activity.description(),
         status,
         synchronizer_data: Value::Object(synchronizer_data),

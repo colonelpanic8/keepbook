@@ -110,6 +110,16 @@ describe('Transaction', () => {
       });
     });
 
+    it('withSynchronizerData falls back to expense category code when merchant category is missing', () => {
+      const modified = withSynchronizerData(baseTx, {
+        etu_standard_expense_category_code: 'FOOD_AND_DRINK',
+      });
+
+      expect(modified.standardized_metadata).toEqual({
+        merchant_category_label: 'Food And Drink',
+      });
+    });
+
     it('withStandardizedMetadata sets explicit metadata', () => {
       const modified = withStandardizedMetadata(baseTx, {
         merchant_name: 'Test Merchant',

@@ -143,6 +143,29 @@ fn first_non_empty_str(values: &serde_json::Value, key: &str) -> Option<String> 
         .map(|s| s.to_string())
 }
 
+fn normalize_category_label(raw: &str) -> Option<String> {
+    let normalized = raw.trim().replace(['_', '-'], " ");
+    if normalized.is_empty() {
+        return None;
+    }
+    let words: Vec<String> = normalized
+        .split_whitespace()
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                Some(first) => format!("{}{}", first.to_uppercase(), chars.as_str().to_lowercase()),
+                None => String::new(),
+            }
+        })
+        .filter(|word| !word.is_empty())
+        .collect();
+    if words.is_empty() {
+        None
+    } else {
+        Some(words.join(" "))
+    }
+}
+
 fn normalize_transaction_kind(raw: &str) -> Option<String> {
     let value = raw.trim().to_lowercase();
     if value.is_empty() {
@@ -186,7 +209,10 @@ pub fn derive_standardized_metadata_from_synchronizer_data(
         .or_else(|| non_empty_str(value, "merchant_dba_name"))
         .or_else(|| non_empty_str(value, "merchant_name"));
     let merchant_category_code = non_empty_str(value, "merchant_category_code");
-    let merchant_category_label = non_empty_str(value, "merchant_category_name");
+    let merchant_category_label = non_empty_str(value, "merchant_category_name").or_else(|| {
+        non_empty_str(value, "etu_standard_expense_category_code")
+            .and_then(|v| normalize_category_label(&v))
+    });
     let transaction_kind = non_empty_str(value, "etu_standard_transaction_type_group_name")
         .or_else(|| non_empty_str(value, "etu_standard_transaction_type_name"))
         .and_then(|v| normalize_transaction_kind(&v));
@@ -268,5 +294,20 @@ mod tests {
         assert_eq!(md.merchant_name.as_deref(), Some("Coffee Shop"));
         assert_eq!(md.merchant_category_code.as_deref(), Some("5814"));
         assert_eq!(md.transaction_kind, None);
+    }
+
+    #[test]
+    fn with_synchronizer_data_uses_expense_category_code_when_label_missing() {
+        let tx = Transaction::new("-10", Asset::currency("USD"), "Coffee").with_synchronizer_data(
+            serde_json::json!({
+                "etu_standard_expense_category_code": "FOOD_AND_DRINK",
+            }),
+        );
+
+        let md = tx.standardized_metadata.expect("expected metadata");
+        assert_eq!(
+            md.merchant_category_label.as_deref(),
+            Some("Food And Drink")
+        );
     }
 }

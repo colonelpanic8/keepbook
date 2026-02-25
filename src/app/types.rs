@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::models::Asset;
+use crate::models::{Asset, TransactionStandardizedMetadata};
 
 /// JSON output for connections
 #[derive(Serialize)]
@@ -58,6 +58,8 @@ pub struct TransactionOutput {
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub annotation: Option<TransactionAnnotationOutput>,
+    #[serde(skip_serializing)]
+    pub standardized_metadata: Option<TransactionStandardizedMetadata>,
 }
 
 /// Materialized transaction annotation state.

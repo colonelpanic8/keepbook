@@ -90,6 +90,20 @@ function firstNonEmptyArrayString(value: unknown): string | undefined {
   return undefined;
 }
 
+function normalizeCategoryLabel(raw: string | undefined): string | undefined {
+  if (raw === undefined) return undefined;
+  const normalized = raw.trim().replace(/[_-]+/g, ' ');
+  if (normalized === '') return undefined;
+  const words = normalized
+    .split(/\s+/)
+    .map((word) => {
+      if (word.length === 0) return '';
+      return `${word[0]!.toUpperCase()}${word.slice(1).toLowerCase()}`;
+    })
+    .filter((word) => word.length > 0);
+  return words.length > 0 ? words.join(' ') : undefined;
+}
+
 function normalizeTransactionKind(raw: string | undefined): string | undefined {
   if (raw === undefined) return undefined;
   const value = raw.trim().toLowerCase();
@@ -124,7 +138,9 @@ function deriveStandardizedMetadata(
     nonEmpty(synchronizerData.merchant_dba_name) ??
     nonEmpty(synchronizerData.merchant_name);
   const merchant_category_code = nonEmpty(synchronizerData.merchant_category_code);
-  const merchant_category_label = nonEmpty(synchronizerData.merchant_category_name);
+  const merchant_category_label =
+    nonEmpty(synchronizerData.merchant_category_name) ??
+    normalizeCategoryLabel(nonEmpty(synchronizerData.etu_standard_expense_category_code));
   const transaction_kind = normalizeTransactionKind(
     nonEmpty(synchronizerData.etu_standard_transaction_type_group_name) ??
       nonEmpty(synchronizerData.etu_standard_transaction_type_name),

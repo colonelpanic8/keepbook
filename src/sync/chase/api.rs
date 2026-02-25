@@ -334,10 +334,13 @@ impl ChaseActivity {
 
     /// Get the signed amount (negative for debits).
     pub fn signed_amount(&self) -> f64 {
+        // Chase can send either signed or absolute transaction_amount values.
+        // Normalize by code so credits are always positive and debits negative.
+        let magnitude = self.transaction_amount.abs();
         if self.credit_debit_code == "C" {
-            self.transaction_amount
+            magnitude
         } else {
-            -self.transaction_amount
+            -magnitude
         }
     }
 
@@ -642,6 +645,24 @@ mod tests {
             last4_card_number: None,
             digital_account_identifier: None,
         }
+    }
+
+    #[test]
+    fn signed_amount_normalizes_by_credit_debit_code() {
+        let mut a = activity("a1");
+        a.transaction_amount = -12.34;
+        a.credit_debit_code = "C".to_string();
+        assert!((a.signed_amount() - 12.34).abs() < 1e-9);
+
+        a.credit_debit_code = "D".to_string();
+        assert!((a.signed_amount() + 12.34).abs() < 1e-9);
+
+        a.transaction_amount = 12.34;
+        a.credit_debit_code = "C".to_string();
+        assert!((a.signed_amount() - 12.34).abs() < 1e-9);
+
+        a.credit_debit_code = "D".to_string();
+        assert!((a.signed_amount() + 12.34).abs() < 1e-9);
     }
 
     fn resp(acts: Vec<ChaseActivity>, more: bool, key: Option<&str>) -> TransactionsResponse {
