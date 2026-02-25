@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use crate::config::ResolvedConfig;
 use crate::market_data::MarketDataServiceBuilder;
 use crate::models::{Connection, Id};
-use crate::storage::{Storage, SymlinkStorage};
+use crate::storage::{CompactionStorage, Storage, SymlinkStorage};
 use crate::sync::{
     AuthPrompter, DefaultSynchronizerFactory, GitAutoCommitter, SyncContext, SyncOptions,
     SyncOutcome, SyncService, TransactionSyncMode,
@@ -451,6 +451,15 @@ pub async fn sync_symlinks(
     maybe_auto_commit(config, "sync symlinks");
 
     Ok(result)
+}
+
+pub async fn sync_recompact(
+    storage: &dyn CompactionStorage,
+    config: &ResolvedConfig,
+) -> Result<serde_json::Value> {
+    let stats = storage.recompact_all_jsonl().await?;
+    maybe_auto_commit(config, "sync recompact");
+    Ok(serde_json::to_value(stats)?)
 }
 
 pub async fn schwab_login(

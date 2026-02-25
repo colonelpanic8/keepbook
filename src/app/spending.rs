@@ -12,6 +12,7 @@ use crate::market_data::{MarketDataServiceBuilder, MarketDataStore};
 use crate::models::{Account, Asset, Id, TransactionAnnotation, TransactionStatus};
 use crate::storage::{find_account, find_connection, Storage};
 
+use super::ignore_rules::{TransactionIgnoreInput, TransactionIgnoreMatcher};
 use super::types::{
     SpendingBreakdownEntryOutput, SpendingOutput, SpendingPeriodOutput, SpendingScopeOutput,
 };
@@ -514,13 +515,39 @@ async fn spending_report_with_store(
         asset: Asset,
         amount: String,
         raw_description: String,
+        metadata_category: Option<String>,
         annotation: Option<TransactionAnnotation>,
     }
 
     let mut rows: Vec<Row> = Vec::new();
     let mut min_date: Option<NaiveDate> = None;
+    let ignore_matcher = TransactionIgnoreMatcher::from_config(&config.ignore)?;
+    let accounts_by_id: HashMap<Id, Account> = storage
+        .list_accounts()
+        .await?
+        .into_iter()
+        .map(|a| (a.id.clone(), a))
+        .collect();
+    let connections_by_id: HashMap<Id, crate::models::Connection> = storage
+        .list_connections()
+        .await?
+        .into_iter()
+        .map(|c| (c.id().clone(), c))
+        .collect();
 
     for account_id in &account_ids {
+        let Some(account) = accounts_by_id.get(account_id) else {
+            continue;
+        };
+        let connection = connections_by_id.get(&account.connection_id);
+        let connection_id = account.connection_id.to_string();
+        let connection_name = connection
+            .map(|c| c.config.name.as_str())
+            .unwrap_or_default();
+        let synchronizer = connection
+            .map(|c| c.config.synchronizer.as_str())
+            .unwrap_or_default();
+
         let transactions = storage.get_transactions(account_id).await?;
         let patches = storage
             .get_transaction_annotation_patches(account_id)
@@ -537,7 +564,20 @@ async fn spending_report_with_store(
         }
 
         for tx in transactions {
+            let status = format!("{:?}", tx.status).to_lowercase();
             if !include_status(tx.status, status_filter) {
+                continue;
+            }
+            if ignore_matcher.is_match(&TransactionIgnoreInput {
+                account_id: account.id.as_str(),
+                account_name: &account.name,
+                connection_id: &connection_id,
+                connection_name,
+                synchronizer,
+                description: &tx.description,
+                status: &status,
+                amount: &tx.amount,
+            }) {
                 continue;
             }
 
@@ -558,6 +598,10 @@ async fn spending_report_with_store(
                 asset,
                 amount: tx.amount,
                 raw_description: tx.description,
+                metadata_category: tx
+                    .standardized_metadata
+                    .as_ref()
+                    .and_then(|m| m.merchant_category_label.clone()),
                 annotation: annotations_by_tx.get(&tx.id).cloned(),
             });
         }
@@ -646,6 +690,7 @@ async fn spending_report_with_store(
                     .annotation
                     .as_ref()
                     .and_then(|a| a.category.clone())
+                    .or_else(|| row.metadata_category.clone())
                     .unwrap_or_else(|| "uncategorized".to_string())],
                 GroupBy::Merchant => vec![row
                     .annotation
@@ -783,7 +828,10 @@ mod tests {
     use crate::market_data::{
         FxRateKind, FxRatePoint, MemoryMarketDataStore, PriceKind, PricePoint,
     };
-    use crate::models::{Account, Asset, FixedIdGenerator, Transaction};
+    use crate::models::{
+        Account, Asset, FixedIdGenerator, Transaction, TransactionAnnotationPatch,
+        TransactionStandardizedMetadata,
+    };
     use crate::storage::MemoryStorage;
     use chrono::TimeZone;
 
@@ -816,6 +864,7 @@ mod tests {
             refresh: crate::config::RefreshConfig::default(),
             tray: crate::config::TrayConfig::default(),
             spending: crate::config::SpendingConfig::default(),
+            ignore: crate::config::IgnoreConfig::default(),
             git: crate::config::GitConfig::default(),
         };
 
@@ -916,6 +965,7 @@ mod tests {
             refresh: crate::config::RefreshConfig::default(),
             tray: crate::config::TrayConfig::default(),
             spending: crate::config::SpendingConfig::default(),
+            ignore: crate::config::IgnoreConfig::default(),
             git: crate::config::GitConfig::default(),
         };
 
@@ -946,6 +996,107 @@ mod tests {
 
         assert_eq!(out.total, "112");
         assert_eq!(out.transaction_count, 2);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn spending_report_category_uses_annotation_then_metadata_then_uncategorized() -> Result<()>
+    {
+        let storage = MemoryStorage::new();
+        let conn_id = Id::from_string("conn-1");
+        let acct_id = Id::from_string("acct-1");
+        let account = Account::new_with(acct_id.clone(), Utc::now(), "Checking", conn_id);
+        storage.save_account(&account).await?;
+
+        let ids = FixedIdGenerator::new([Id::from_string("tx-meta"), Id::from_string("tx-ann")]);
+        let clock = FixedClock::new(Utc.with_ymd_and_hms(2026, 2, 5, 12, 0, 0).unwrap());
+
+        let tx_meta = Transaction::new_with_generator(
+            &ids,
+            &clock,
+            "-10",
+            Asset::currency("USD"),
+            "Fallback to metadata category",
+        )
+        .with_timestamp(clock.now())
+        .with_standardized_metadata(TransactionStandardizedMetadata {
+            merchant_category_label: Some("Groceries".to_string()),
+            ..Default::default()
+        });
+        let tx_ann = Transaction::new_with_generator(
+            &ids,
+            &clock,
+            "-20",
+            Asset::currency("USD"),
+            "Annotation category wins",
+        )
+        .with_timestamp(clock.now())
+        .with_standardized_metadata(TransactionStandardizedMetadata {
+            merchant_category_label: Some("Shopping".to_string()),
+            ..Default::default()
+        });
+        let tx_ann_id = tx_ann.id.clone();
+        storage
+            .append_transactions(&acct_id, &[tx_meta, tx_ann])
+            .await?;
+        storage
+            .append_transaction_annotation_patches(
+                &acct_id,
+                &[TransactionAnnotationPatch {
+                    transaction_id: tx_ann_id,
+                    timestamp: clock.now(),
+                    description: None,
+                    note: None,
+                    category: Some(Some("Dining".to_string())),
+                    tags: None,
+                }],
+            )
+            .await?;
+
+        let cfg = ResolvedConfig {
+            data_dir: std::path::PathBuf::from("/tmp"),
+            reporting_currency: "USD".to_string(),
+            display: crate::config::DisplayConfig::default(),
+            refresh: crate::config::RefreshConfig::default(),
+            tray: crate::config::TrayConfig::default(),
+            spending: crate::config::SpendingConfig::default(),
+            ignore: crate::config::IgnoreConfig::default(),
+            git: crate::config::GitConfig::default(),
+        };
+
+        let out = spending_report_with_store(
+            &storage,
+            &cfg,
+            SpendingReportOptions {
+                currency: None,
+                start: Some("2026-02-01".to_string()),
+                end: Some("2026-02-28".to_string()),
+                period: "monthly".to_string(),
+                tz: Some("UTC".to_string()),
+                week_start: None,
+                bucket: None,
+                account: Some("acct-1".to_string()),
+                connection: None,
+                status: "posted".to_string(),
+                direction: "outflow".to_string(),
+                group_by: "category".to_string(),
+                top: None,
+                lookback_days: 7,
+                include_noncurrency: false,
+                include_empty: false,
+            },
+            Arc::new(MemoryMarketDataStore::default()),
+        )
+        .await?;
+
+        assert_eq!(out.total, "30");
+        assert_eq!(out.transaction_count, 2);
+        assert_eq!(out.periods.len(), 1);
+        assert_eq!(out.periods[0].breakdown.len(), 2);
+        assert_eq!(out.periods[0].breakdown[0].key, "Dining");
+        assert_eq!(out.periods[0].breakdown[0].total, "20");
+        assert_eq!(out.periods[0].breakdown[1].key, "Groceries");
+        assert_eq!(out.periods[0].breakdown[1].total, "10");
         Ok(())
     }
 
@@ -1005,6 +1156,7 @@ mod tests {
                 ignore_connections: vec![],
                 ignore_tags: vec!["brokerage".to_string()],
             },
+            ignore: crate::config::IgnoreConfig::default(),
             git: crate::config::GitConfig::default(),
         };
 
@@ -1034,6 +1186,98 @@ mod tests {
         .await?;
 
         assert_eq!(out.total, "10");
+        assert_eq!(out.transaction_count, 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn spending_report_ignores_transactions_by_global_regex_rules() -> Result<()> {
+        let storage = MemoryStorage::new();
+        let connection = crate::models::Connection::new(crate::models::ConnectionConfig {
+            name: "Charles Schwab".to_string(),
+            synchronizer: "schwab".to_string(),
+            credentials: None,
+            balance_staleness: None,
+        });
+        let conn_id = connection.id().clone();
+        storage.save_connection(&connection).await?;
+
+        let acct_id = Id::from_string("acct-checking");
+        let account = Account::new_with(
+            acct_id.clone(),
+            Utc::now(),
+            "Investor Checking",
+            conn_id.clone(),
+        );
+        storage.save_account(&account).await?;
+
+        let ids = FixedIdGenerator::new([Id::from_string("tx-cc"), Id::from_string("tx-rent")]);
+        let clock = FixedClock::new(Utc.with_ymd_and_hms(2026, 2, 5, 12, 0, 0).unwrap());
+        let tx_cc = Transaction::new_with_generator(
+            &ids,
+            &clock,
+            "-1000",
+            Asset::currency("USD"),
+            "ACH CHASE CREDIT CRD EPAY 260217",
+        )
+        .with_timestamp(clock.now());
+        let tx_rent = Transaction::new_with_generator(
+            &ids,
+            &clock,
+            "-2000",
+            Asset::currency("USD"),
+            "ACH BALLAST-CZB-6708 WEB PMTS 012626",
+        )
+        .with_timestamp(clock.now());
+        storage
+            .append_transactions(&acct_id, &[tx_cc, tx_rent])
+            .await?;
+
+        let cfg = ResolvedConfig {
+            data_dir: std::path::PathBuf::from("/tmp"),
+            reporting_currency: "USD".to_string(),
+            display: crate::config::DisplayConfig::default(),
+            refresh: crate::config::RefreshConfig::default(),
+            tray: crate::config::TrayConfig::default(),
+            spending: crate::config::SpendingConfig::default(),
+            ignore: crate::config::IgnoreConfig {
+                transaction_rules: vec![crate::config::TransactionIgnoreRule {
+                    account_name: Some("(?i)^Investor Checking$".to_string()),
+                    connection_name: Some("(?i)^Charles Schwab$".to_string()),
+                    synchronizer: Some("(?i)^schwab$".to_string()),
+                    description: Some("(?i)credit\\s+crd\\s+(?:e?pay|autopay)".to_string()),
+                    ..Default::default()
+                }],
+            },
+            git: crate::config::GitConfig::default(),
+        };
+
+        let out = spending_report_with_store(
+            &storage,
+            &cfg,
+            SpendingReportOptions {
+                currency: None,
+                start: Some("2026-02-01".to_string()),
+                end: Some("2026-02-28".to_string()),
+                period: "monthly".to_string(),
+                tz: Some("UTC".to_string()),
+                week_start: None,
+                bucket: None,
+                account: Some("acct-checking".to_string()),
+                connection: None,
+                status: "posted".to_string(),
+                direction: "outflow".to_string(),
+                group_by: "none".to_string(),
+                top: None,
+                lookback_days: 7,
+                include_noncurrency: false,
+                include_empty: false,
+            },
+            Arc::new(MemoryMarketDataStore::default()),
+        )
+        .await?;
+
+        assert_eq!(out.total, "2000");
         assert_eq!(out.transaction_count, 1);
         Ok(())
     }

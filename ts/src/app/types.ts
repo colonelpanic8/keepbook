@@ -52,6 +52,7 @@ export interface BalanceOutput {
 export interface TransactionOutput {
   id: string;
   account_id: string;
+  account_name: string;
   timestamp: string;
   description: string;
   amount: string;

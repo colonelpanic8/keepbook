@@ -57,6 +57,9 @@ pub struct TrayConfig {
 
     /// Spending lookback windows (days) shown in tray menu.
     pub spending_windows_days: Vec<u32>,
+
+    /// Number of recent transactions shown in tray menu (last 30 days).
+    pub transaction_count: usize,
 }
 
 impl Default for TrayConfig {
@@ -64,6 +67,7 @@ impl Default for TrayConfig {
         Self {
             history_points: 8,
             spending_windows_days: vec![7, 30, 90],
+            transaction_count: 30,
         }
     }
 }
@@ -88,6 +92,39 @@ impl Default for SpendingConfig {
             ignore_tags: vec![],
         }
     }
+}
+
+/// Global ignore rules configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct IgnoreConfig {
+    /// Rules for ignoring transactions in app-level transaction views.
+    pub transaction_rules: Vec<TransactionIgnoreRule>,
+}
+
+impl Default for IgnoreConfig {
+    fn default() -> Self {
+        Self {
+            transaction_rules: vec![],
+        }
+    }
+}
+
+/// A single transaction ignore rule.
+///
+/// All configured fields are matched as regex patterns and must match (AND semantics)
+/// for a transaction to be ignored.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct TransactionIgnoreRule {
+    pub account_id: Option<String>,
+    pub account_name: Option<String>,
+    pub connection_id: Option<String>,
+    pub connection_name: Option<String>,
+    pub synchronizer: Option<String>,
+    pub description: Option<String>,
+    pub status: Option<String>,
+    pub amount: Option<String>,
 }
 
 /// Default balance staleness (14 days).
@@ -180,6 +217,10 @@ pub struct Config {
     #[serde(default)]
     pub spending: SpendingConfig,
 
+    /// Global ignore rules.
+    #[serde(default)]
+    pub ignore: IgnoreConfig,
+
     /// Git-related settings.
     #[serde(default)]
     pub git: GitConfig,
@@ -194,6 +235,7 @@ impl Default for Config {
             refresh: RefreshConfig::default(),
             tray: TrayConfig::default(),
             spending: SpendingConfig::default(),
+            ignore: IgnoreConfig::default(),
             git: GitConfig::default(),
         }
     }
@@ -254,6 +296,9 @@ pub struct ResolvedConfig {
     /// Spending report settings.
     pub spending: SpendingConfig,
 
+    /// Global ignore rules.
+    pub ignore: IgnoreConfig,
+
     /// Git-related settings.
     pub git: GitConfig,
 }
@@ -301,6 +346,7 @@ impl ResolvedConfig {
             refresh: config.refresh,
             tray: config.tray,
             spending: config.spending,
+            ignore: config.ignore,
             git: config.git,
         })
     }
@@ -334,6 +380,7 @@ impl ResolvedConfig {
                 refresh: RefreshConfig::default(),
                 tray: TrayConfig::default(),
                 spending: SpendingConfig::default(),
+                ignore: IgnoreConfig::default(),
                 git: GitConfig::default(),
             })
         }
@@ -556,6 +603,12 @@ mod tests {
     }
 
     #[test]
+    fn test_default_ignore_config() {
+        let config = Config::default();
+        assert!(config.ignore.transaction_rules.is_empty());
+    }
+
+    #[test]
     fn test_load_spending_config() -> Result<()> {
         let dir = TempDir::new()?;
         let config_path = dir.path().join("keepbook.toml");
@@ -570,6 +623,37 @@ mod tests {
         assert_eq!(config.spending.ignore_accounts.len(), 2);
         assert_eq!(config.spending.ignore_connections, vec!["Schwab"]);
         assert_eq!(config.spending.ignore_tags, vec!["brokerage"]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_load_ignore_transaction_rules_config() -> Result<()> {
+        let dir = TempDir::new()?;
+        let config_path = dir.path().join("keepbook.toml");
+
+        let mut file = std::fs::File::create(&config_path)?;
+        writeln!(file, "[ignore]")?;
+        writeln!(file, "[[ignore.transaction_rules]]")?;
+        writeln!(file, "account_name = \"(?i)^Investor Checking$\"")?;
+        writeln!(
+            file,
+            "description = \"(?i)credit\\\\s+crd\\\\s+(?:e?pay|autopay)\""
+        )?;
+        writeln!(file, "synchronizer = \"(?i)^schwab$\"")?;
+
+        let config = Config::load(&config_path)?;
+        assert_eq!(config.ignore.transaction_rules.len(), 1);
+        let rule = &config.ignore.transaction_rules[0];
+        assert_eq!(
+            rule.account_name.as_deref(),
+            Some("(?i)^Investor Checking$")
+        );
+        assert_eq!(
+            rule.description.as_deref(),
+            Some("(?i)credit\\s+crd\\s+(?:e?pay|autopay)")
+        );
+        assert_eq!(rule.synchronizer.as_deref(), Some("(?i)^schwab$"));
 
         Ok(())
     }

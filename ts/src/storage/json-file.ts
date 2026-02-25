@@ -25,11 +25,19 @@ import {
 import { Transaction, type TransactionType, type TransactionJSON } from '../models/transaction.js';
 import {
   TransactionAnnotationPatch,
+  applyTransactionAnnotationPatch,
+  isEmptyTransactionAnnotation,
+  type TransactionAnnotationType,
   type TransactionAnnotationPatchType,
   type TransactionAnnotationPatchJSON,
 } from '../models/transaction-annotation.js';
 import { dedupeTransactionsLastWriteWins } from './dedupe.js';
-import { type Storage, type CredentialStore } from './storage.js';
+import {
+  type Storage,
+  type CredentialStore,
+  type CompactionStorage,
+  type JsonlCompactionStats,
+} from './storage.js';
 import { parseCredentialConfigValue } from '../credentials/credential-config.js';
 import { PassCredentialStore } from '../credentials/pass.js';
 
@@ -50,6 +58,52 @@ function toToml(obj: Record<string, unknown>): string {
     else if (typeof value === 'boolean') lines.push(`${key} = ${value}`);
   }
   return lines.join('\n') + '\n';
+}
+
+function compactTransactionAnnotationPatches(
+  patches: TransactionAnnotationPatchType[],
+): TransactionAnnotationPatchType[] {
+  const sorted = [...patches].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+  const byTx = new Map<
+    string,
+    { annotation: TransactionAnnotationType; timestamp: Date; timestampRaw?: string }
+  >();
+
+  for (const patch of sorted) {
+    const key = patch.transaction_id.asStr();
+    const existing = byTx.get(key);
+    const base: TransactionAnnotationType =
+      existing?.annotation ?? { transaction_id: patch.transaction_id };
+    const next = applyTransactionAnnotationPatch(base, patch);
+    byTx.set(key, {
+      annotation: next,
+      timestamp: patch.timestamp,
+      timestampRaw: patch.timestamp_raw,
+    });
+  }
+
+  const compacted: TransactionAnnotationPatchType[] = [];
+  for (const state of byTx.values()) {
+    if (isEmptyTransactionAnnotation(state.annotation)) continue;
+    compacted.push({
+      transaction_id: state.annotation.transaction_id,
+      timestamp: state.timestamp,
+      timestamp_raw: state.timestampRaw,
+      ...(state.annotation.description !== undefined
+        ? { description: state.annotation.description }
+        : {}),
+      ...(state.annotation.note !== undefined ? { note: state.annotation.note } : {}),
+      ...(state.annotation.category !== undefined ? { category: state.annotation.category } : {}),
+      ...(state.annotation.tags !== undefined ? { tags: state.annotation.tags } : {}),
+    });
+  }
+
+  compacted.sort((a, b) => {
+    const tsCmp = a.timestamp.getTime() - b.timestamp.getTime();
+    if (tsCmp !== 0) return tsCmp;
+    return a.transaction_id.asStr().localeCompare(b.transaction_id.asStr());
+  });
+  return compacted;
 }
 
 // ---------------------------------------------------------------------------
@@ -77,7 +131,7 @@ function toToml(obj: Record<string, unknown>): string {
  *       transaction_annotations.jsonl
  * ```
  */
-export class JsonFileStorage implements Storage {
+export class JsonFileStorage implements Storage, CompactionStorage {
   private readonly basePath: string;
 
   constructor(basePath: string) {
@@ -239,6 +293,13 @@ export class JsonFileStorage implements Storage {
     await this.ensureDir(filePath);
     const lines = items.map((item) => JSON.stringify(item)).join('\n') + '\n';
     await fs.appendFile(filePath, lines, 'utf-8');
+  }
+
+  private async writeJsonl(filePath: string, items: unknown[]): Promise<void> {
+    await this.ensureDir(filePath);
+    const lines = items.map((item) => JSON.stringify(item)).join('\n');
+    const content = lines === '' ? '' : `${lines}\n`;
+    await fs.writeFile(filePath, content, 'utf-8');
   }
 
   /**
@@ -585,5 +646,65 @@ export class JsonFileStorage implements Storage {
     const filePath = this.transactionAnnotationsFile(accountId);
     const jsonItems = patches.map(TransactionAnnotationPatch.toJSON);
     await this.appendJsonl(filePath, jsonItems);
+  }
+
+  async recompactAllJsonl(): Promise<JsonlCompactionStats> {
+    const accountIds = await this.listDirs(this.accountsDir());
+    const stats: JsonlCompactionStats = {
+      accounts_processed: accountIds.length,
+      files_rewritten: 0,
+      balance_snapshots_before: 0,
+      balance_snapshots_after: 0,
+      transactions_before: 0,
+      transactions_after: 0,
+      annotation_patches_before: 0,
+      annotation_patches_after: 0,
+    };
+
+    for (const accountId of accountIds) {
+      const balancesPath = this.balancesFile(accountId);
+      if (fsSync.existsSync(balancesPath)) {
+        const balances = await this.getBalanceSnapshots(accountId);
+        stats.balance_snapshots_before += balances.length;
+        const sorted = [...balances].sort(
+          (a, b) => a.timestamp.getTime() - b.timestamp.getTime(),
+        );
+        stats.balance_snapshots_after += sorted.length;
+        await this.writeJsonl(
+          balancesPath,
+          sorted.map((s) => BalanceSnapshot.toJSON(s)),
+        );
+        stats.files_rewritten += 1;
+      }
+
+      const txPath = this.transactionsFile(accountId);
+      if (fsSync.existsSync(txPath)) {
+        const raw = await this.getTransactionsRaw(accountId);
+        stats.transactions_before += raw.length;
+        const compacted = dedupeTransactionsLastWriteWins(raw).sort((a, b) => {
+          const tsCmp = a.timestamp.getTime() - b.timestamp.getTime();
+          if (tsCmp !== 0) return tsCmp;
+          return a.id.asStr().localeCompare(b.id.asStr());
+        });
+        stats.transactions_after += compacted.length;
+        await this.writeJsonl(txPath, compacted.map((t) => Transaction.toJSON(t)));
+        stats.files_rewritten += 1;
+      }
+
+      const annotationsPath = this.transactionAnnotationsFile(accountId);
+      if (fsSync.existsSync(annotationsPath)) {
+        const raw = await this.getTransactionAnnotationPatches(accountId);
+        stats.annotation_patches_before += raw.length;
+        const compacted = compactTransactionAnnotationPatches(raw);
+        stats.annotation_patches_after += compacted.length;
+        await this.writeJsonl(
+          annotationsPath,
+          compacted.map((p) => TransactionAnnotationPatch.toJSON(p)),
+        );
+        stats.files_rewritten += 1;
+      }
+    }
+
+    return stats;
   }
 }

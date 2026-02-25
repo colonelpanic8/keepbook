@@ -8,7 +8,7 @@ import { Account, type AccountConfig } from '../models/account.js';
 import { Asset } from '../models/asset.js';
 import { BalanceSnapshot, AssetBalance } from '../models/balance.js';
 import { Connection, ConnectionState, type ConnectionConfig } from '../models/connection.js';
-import { Transaction, withId, withSynchronizerData } from '../models/transaction.js';
+import { Transaction, withId, withSynchronizerData, withTimestamp } from '../models/transaction.js';
 import { type TransactionAnnotationPatchType } from '../models/transaction-annotation.js';
 import { FixedIdGenerator } from '../models/id-generator.js';
 import { FixedClock } from '../clock.js';
@@ -709,6 +709,97 @@ describe('JsonFileStorage', () => {
       await storage.appendTransactionAnnotationPatches(acctId, []);
       const all = await storage.getTransactionAnnotationPatches(acctId);
       expect(all).toEqual([]);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Recompact
+  // -----------------------------------------------------------------------
+
+  describe('recompactAllJsonl', () => {
+    it('compacts append-only logs and rewrites JSONL files chronologically', async () => {
+      const acctId = Id.fromString('acct-recompact');
+      const acct = makeAccount('Recompact', Id.fromString('conn-1'), acctId);
+      await storage.saveAccount(acct);
+
+      const olderSnapshot = BalanceSnapshot.new(new Date('2024-01-01T00:00:00Z'), [
+        AssetBalance.new(Asset.currency('USD'), '10.0'),
+      ]);
+      const newerSnapshot = BalanceSnapshot.new(new Date('2024-06-01T00:00:00Z'), [
+        AssetBalance.new(Asset.currency('USD'), '20.0'),
+      ]);
+      await storage.appendBalanceSnapshot(acctId, newerSnapshot);
+      await storage.appendBalanceSnapshot(acctId, olderSnapshot);
+
+      const txOld = withTimestamp(
+        withId(makeTransaction('tx-1', '-10.0', 'old'), Id.fromString('tx-1')),
+        new Date('2024-02-01T10:00:00Z'),
+      );
+      const txNew = withTimestamp(
+        withId(makeTransaction('tx-1', '-12.0', 'new'), Id.fromString('tx-1')),
+        new Date('2024-02-02T10:00:00Z'),
+      );
+      const txOther = withTimestamp(
+        withId(makeTransaction('tx-2', '5.0', 'credit'), Id.fromString('tx-2')),
+        new Date('2024-01-15T10:00:00Z'),
+      );
+      await storage.appendTransactions(acctId, [txOld, txNew, txOther]);
+
+      const patchCategory: TransactionAnnotationPatchType = {
+        transaction_id: Id.fromString('tx-anno'),
+        timestamp: new Date('2024-02-04T12:00:00Z'),
+        category: 'food',
+      };
+      const patchNote: TransactionAnnotationPatchType = {
+        transaction_id: Id.fromString('tx-anno'),
+        timestamp: new Date('2024-02-03T12:00:00Z'),
+        note: 'memo',
+      };
+      const patchSetThenClearA: TransactionAnnotationPatchType = {
+        transaction_id: Id.fromString('tx-clear'),
+        timestamp: new Date('2024-02-05T12:00:00Z'),
+        description: 'temp',
+      };
+      const patchSetThenClearB: TransactionAnnotationPatchType = {
+        transaction_id: Id.fromString('tx-clear'),
+        timestamp: new Date('2024-02-06T12:00:00Z'),
+        description: null,
+      };
+      await storage.appendTransactionAnnotationPatches(acctId, [
+        patchCategory,
+        patchNote,
+        patchSetThenClearA,
+        patchSetThenClearB,
+      ]);
+
+      const stats = await storage.recompactAllJsonl();
+      expect(stats).toEqual({
+        accounts_processed: 1,
+        files_rewritten: 3,
+        balance_snapshots_before: 2,
+        balance_snapshots_after: 2,
+        transactions_before: 3,
+        transactions_after: 2,
+        annotation_patches_before: 4,
+        annotation_patches_after: 1,
+      });
+
+      const snapshots = await storage.getBalanceSnapshots(acctId);
+      expect(snapshots).toHaveLength(2);
+      expect(snapshots[0].timestamp.getTime()).toBeLessThan(snapshots[1].timestamp.getTime());
+
+      const txRaw = await storage.getTransactionsRaw(acctId);
+      expect(txRaw).toHaveLength(2);
+      expect(txRaw[0].id.asStr()).toBe('tx-2');
+      expect(txRaw[1].id.asStr()).toBe('tx-1');
+      expect(txRaw[1].description).toBe('new');
+      expect(txRaw[0].timestamp.getTime()).toBeLessThanOrEqual(txRaw[1].timestamp.getTime());
+
+      const patches = await storage.getTransactionAnnotationPatches(acctId);
+      expect(patches).toHaveLength(1);
+      expect(patches[0].transaction_id.asStr()).toBe('tx-anno');
+      expect(patches[0].note).toBe('memo');
+      expect(patches[0].category).toBe('food');
     });
   });
 

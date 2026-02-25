@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use super::Id;
 
@@ -47,14 +47,38 @@ pub struct TransactionAnnotationPatch {
     pub transaction_id: Id,
     pub timestamp: DateTime<Utc>,
 
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_patch_field"
+    )]
     pub description: Option<Option<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_patch_field"
+    )]
     pub note: Option<Option<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_patch_field"
+    )]
     pub category: Option<Option<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_patch_field"
+    )]
     pub tags: Option<Option<Vec<String>>>,
+}
+
+fn deserialize_patch_field<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Ok(Some(Option::<T>::deserialize(deserializer)?))
 }
 
 impl TransactionAnnotationPatch {
@@ -106,5 +130,15 @@ mod tests {
         };
         clear_note.apply_to(&mut ann);
         assert_eq!(ann.note, None);
+    }
+
+    #[test]
+    fn patch_json_null_round_trips_as_explicit_clear() {
+        let patch: TransactionAnnotationPatch = serde_json::from_str(
+            r#"{"transaction_id":"tx-1","timestamp":"2024-02-01T00:00:00Z","description":null}"#,
+        )
+        .unwrap();
+        assert_eq!(patch.description, Some(None));
+        assert_eq!(patch.note, None);
     }
 }

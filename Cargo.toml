@@ -107,6 +107,7 @@ rand = { version = "0.8", optional = true }
 # Base64 encoding
 base64 = { version = "0.22", optional = true }
 rust_decimal = "1"
+regex = "1"
 
 # Error handling
 thiserror = "2"

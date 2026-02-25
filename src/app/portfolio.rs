@@ -197,9 +197,7 @@ pub async fn fetch_historical_prices(
     }
 
     let interval = PriceHistoryInterval::parse(interval)?;
-    let anchor_day = start_date.day();
-    let anchor_month = start_date.month();
-    let aligned_start = align_start_date(start_date, interval, anchor_month, anchor_day);
+    let aligned_start = align_start_date(start_date, interval);
 
     let target_currency = currency.unwrap_or_else(|| config.reporting_currency.clone());
     let target_currency_upper = target_currency.to_uppercase();
@@ -355,7 +353,7 @@ pub async fn fetch_historical_prices(
                 }
             }
 
-            current = advance_interval_date(current, interval, anchor_day, anchor_month);
+            current = advance_interval_date(current, interval);
         }
     }
 
@@ -390,40 +388,29 @@ pub async fn fetch_historical_prices(
     Ok(output)
 }
 
-fn advance_interval_date(
-    date: NaiveDate,
-    interval: PriceHistoryInterval,
-    anchor_day: u32,
-    anchor_month: u32,
-) -> NaiveDate {
+fn advance_interval_date(date: NaiveDate, interval: PriceHistoryInterval) -> NaiveDate {
     match interval {
         PriceHistoryInterval::Daily => date + Duration::days(1),
         PriceHistoryInterval::Weekly => date + Duration::days(7),
         PriceHistoryInterval::Monthly => next_month_end(date),
-        PriceHistoryInterval::Yearly => add_years(date, 1, anchor_month, anchor_day),
+        PriceHistoryInterval::Yearly => next_year_end(date),
     }
 }
 
-fn align_start_date(
-    date: NaiveDate,
-    interval: PriceHistoryInterval,
-    anchor_month: u32,
-    anchor_day: u32,
-) -> NaiveDate {
+fn align_start_date(date: NaiveDate, interval: PriceHistoryInterval) -> NaiveDate {
     match interval {
         PriceHistoryInterval::Monthly => month_end(date),
-        PriceHistoryInterval::Yearly => {
-            let day = anchor_day.min(days_in_month(date.year(), anchor_month));
-            NaiveDate::from_ymd_opt(date.year(), anchor_month, day).expect("valid yearly date")
-        }
+        PriceHistoryInterval::Yearly => year_end(date.year()),
         _ => date,
     }
 }
 
-fn add_years(date: NaiveDate, years: i32, anchor_month: u32, anchor_day: u32) -> NaiveDate {
-    let year = date.year() + years;
-    let day = anchor_day.min(days_in_month(year, anchor_month));
-    NaiveDate::from_ymd_opt(year, anchor_month, day).expect("valid yearly date")
+fn next_year_end(date: NaiveDate) -> NaiveDate {
+    year_end(date.year() + 1)
+}
+
+fn year_end(year: i32) -> NaiveDate {
+    NaiveDate::from_ymd_opt(year, 12, 31).expect("valid year end")
 }
 
 fn next_month_end(date: NaiveDate) -> NaiveDate {
@@ -1251,6 +1238,7 @@ mod tests {
             refresh: RefreshConfig::default(),
             tray: TrayConfig::default(),
             spending: SpendingConfig::default(),
+            ignore: crate::config::IgnoreConfig::default(),
             git: GitConfig::default(),
         };
 
@@ -1328,6 +1316,7 @@ mod tests {
             refresh: RefreshConfig::default(),
             tray: TrayConfig::default(),
             spending: SpendingConfig::default(),
+            ignore: crate::config::IgnoreConfig::default(),
             git: GitConfig::default(),
         };
 
@@ -1433,6 +1422,7 @@ mod tests {
             refresh: RefreshConfig::default(),
             tray: TrayConfig::default(),
             spending: SpendingConfig::default(),
+            ignore: crate::config::IgnoreConfig::default(),
             git: GitConfig::default(),
         };
 
@@ -1524,15 +1514,22 @@ mod tests {
     #[test]
     fn align_start_date_monthly_uses_month_end() {
         let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
-        let aligned = align_start_date(date, PriceHistoryInterval::Monthly, 1, 15);
+        let aligned = align_start_date(date, PriceHistoryInterval::Monthly);
         assert_eq!(aligned, NaiveDate::from_ymd_opt(2024, 1, 31).unwrap());
     }
 
     #[test]
-    fn add_years_handles_leap_day() {
-        let date = NaiveDate::from_ymd_opt(2024, 2, 29).unwrap();
-        let next = add_years(date, 1, 2, 29);
-        assert_eq!(next, NaiveDate::from_ymd_opt(2025, 2, 28).unwrap());
+    fn align_start_date_yearly_uses_year_end() {
+        let date = NaiveDate::from_ymd_opt(2024, 1, 14).unwrap();
+        let aligned = align_start_date(date, PriceHistoryInterval::Yearly);
+        assert_eq!(aligned, NaiveDate::from_ymd_opt(2024, 12, 31).unwrap());
+    }
+
+    #[test]
+    fn advance_interval_date_yearly_uses_next_year_end() {
+        let date = NaiveDate::from_ymd_opt(2024, 12, 31).unwrap();
+        let next = advance_interval_date(date, PriceHistoryInterval::Yearly);
+        assert_eq!(next, NaiveDate::from_ymd_opt(2025, 12, 31).unwrap());
     }
 
     #[test]
@@ -1607,6 +1604,7 @@ mod tests {
             refresh: RefreshConfig::default(),
             tray: TrayConfig::default(),
             spending: SpendingConfig::default(),
+            ignore: crate::config::IgnoreConfig::default(),
             git: GitConfig::default(),
         };
 
@@ -1631,6 +1629,7 @@ mod tests {
             refresh: RefreshConfig::default(),
             tray: TrayConfig::default(),
             spending: SpendingConfig::default(),
+            ignore: crate::config::IgnoreConfig::default(),
             git: GitConfig::default(),
         };
 
@@ -1680,6 +1679,7 @@ mod tests {
             refresh: RefreshConfig::default(),
             tray: TrayConfig::default(),
             spending: SpendingConfig::default(),
+            ignore: crate::config::IgnoreConfig::default(),
             git: GitConfig::default(),
         };
 
@@ -1713,6 +1713,7 @@ mod tests {
             refresh: RefreshConfig::default(),
             tray: TrayConfig::default(),
             spending: SpendingConfig::default(),
+            ignore: crate::config::IgnoreConfig::default(),
             git: GitConfig::default(),
         };
 
@@ -1747,6 +1748,7 @@ mod tests {
             refresh: RefreshConfig::default(),
             tray: TrayConfig::default(),
             spending: SpendingConfig::default(),
+            ignore: crate::config::IgnoreConfig::default(),
             git: GitConfig::default(),
         };
 
@@ -1789,6 +1791,7 @@ mod tests {
             refresh: RefreshConfig::default(),
             tray: TrayConfig::default(),
             spending: SpendingConfig::default(),
+            ignore: crate::config::IgnoreConfig::default(),
             git: GitConfig::default(),
         };
 

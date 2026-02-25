@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { MemoryStorage } from '../storage/memory.js';
 import { NullMarketDataStore, MemoryMarketDataStore } from '../market-data/store.js';
+import { JsonlMarketDataStore } from '../market-data/jsonl-store.js';
 import { FixedClock } from '../clock.js';
 import { FixedIdGenerator } from '../models/id-generator.js';
 import { Id } from '../models/id.js';
@@ -13,6 +17,7 @@ import type { ResolvedConfig } from '../config.js';
 import type { PortfolioSnapshot, AssetSummary } from '../portfolio/models.js';
 import {
   serializeSnapshot,
+  fetchHistoricalPrices,
   portfolioSnapshot,
   portfolioHistory,
   serializeChangeTrigger,
@@ -44,9 +49,19 @@ function makeConfig(overrides?: Partial<ResolvedConfig>): ResolvedConfig {
     },
     tray: { history_points: 8, spending_windows_days: [7, 30, 90] },
     spending: { ignore_accounts: [], ignore_connections: [], ignore_tags: [] },
+    ignore: { transaction_rules: [] },
     git: { auto_commit: false, auto_push: false, merge_master_before_command: false },
     ...overrides,
   };
+}
+
+async function withTempDataDir(fn: (dataDir: string) => Promise<void>): Promise<void> {
+  const dataDir = await mkdtemp(join(tmpdir(), 'keepbook-price-history-'));
+  try {
+    await fn(dataDir);
+  } finally {
+    await rm(dataDir, { recursive: true, force: true });
+  }
 }
 
 /**
@@ -639,6 +654,245 @@ describe('portfolioSnapshot', () => {
     expect(byAccount[0].account_name).toBe('Checking');
     expect(byAccount[0].connection_name).toBe('Test Bank');
     expect(byAccount[0].value_in_base).toBe('500');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fetchHistoricalPrices
+// ---------------------------------------------------------------------------
+
+describe('fetchHistoricalPrices', () => {
+  it('returns cached close prices with expected summary stats', async () => {
+    await withTempDataDir(async (dataDir) => {
+      const storage = new MemoryStorage();
+      const clock = makeClock('2024-01-20T12:00:00Z');
+      const config = makeConfig({ data_dir: dataDir });
+      const marketDataStore = new JsonlMarketDataStore(dataDir);
+
+      const connection = Connection.new(
+        { name: 'Brokerage', synchronizer: 'manual' },
+        makeIdGen('conn-1'),
+        clock,
+      );
+      await storage.saveConnection(connection);
+
+      const account = Account.newWithGenerator(
+        makeIdGen('acct-1'),
+        clock,
+        'Main',
+        Id.fromString('conn-1'),
+      );
+      await storage.saveAccount(account);
+
+      await storage.appendBalanceSnapshot(
+        account.id,
+        BalanceSnapshot.new(new Date('2024-01-15T10:00:00Z'), [
+          AssetBalance.new(Asset.equity('AAPL'), '10'),
+        ]),
+      );
+
+      await marketDataStore.put_prices([
+        {
+          asset_id: AssetId.fromAsset(Asset.equity('AAPL')),
+          as_of_date: '2024-01-15',
+          timestamp: new Date('2024-01-15T16:00:00Z'),
+          price: '182.5',
+          quote_currency: 'USD',
+          kind: 'close',
+          source: 'test',
+        },
+      ]);
+
+      const output = await fetchHistoricalPrices(
+        storage,
+        config,
+        {
+          start: '2024-01-15',
+          end: '2024-01-15',
+          interval: 'daily',
+          include_fx: false,
+        },
+        clock,
+      );
+
+      expect(output).toEqual({
+        scope: { type: 'portfolio' },
+        currency: 'USD',
+        interval: 'daily',
+        start_date: '2024-01-15',
+        end_date: '2024-01-15',
+        earliest_balance_date: '2024-01-15',
+        days: 1,
+        points: 1,
+        assets: [
+          {
+            asset: { type: 'equity', ticker: 'AAPL' },
+            asset_id: 'equity/AAPL',
+          },
+        ],
+        prices: {
+          attempted: 1,
+          existing: 1,
+          fetched: 0,
+          lookback: 0,
+          missing: 0,
+        },
+        failure_count: 0,
+      });
+      expect(output.fx).toBeUndefined();
+      expect(output.failures).toBeUndefined();
+    });
+  });
+
+  it('uses lookback cache hits for prior close prices', async () => {
+    await withTempDataDir(async (dataDir) => {
+      const storage = new MemoryStorage();
+      const clock = makeClock('2024-01-20T12:00:00Z');
+      const config = makeConfig({ data_dir: dataDir });
+      const marketDataStore = new JsonlMarketDataStore(dataDir);
+
+      const connection = Connection.new(
+        { name: 'Brokerage', synchronizer: 'manual' },
+        makeIdGen('conn-1'),
+        clock,
+      );
+      await storage.saveConnection(connection);
+
+      const account = Account.newWithGenerator(
+        makeIdGen('acct-1'),
+        clock,
+        'Main',
+        Id.fromString('conn-1'),
+      );
+      await storage.saveAccount(account);
+
+      await storage.appendBalanceSnapshot(
+        account.id,
+        BalanceSnapshot.new(new Date('2024-01-16T10:00:00Z'), [
+          AssetBalance.new(Asset.equity('AAPL'), '10'),
+        ]),
+      );
+
+      await marketDataStore.put_prices([
+        {
+          asset_id: AssetId.fromAsset(Asset.equity('AAPL')),
+          as_of_date: '2024-01-15',
+          timestamp: new Date('2024-01-15T16:00:00Z'),
+          price: '182.5',
+          quote_currency: 'USD',
+          kind: 'close',
+          source: 'test',
+        },
+      ]);
+
+      const output = await fetchHistoricalPrices(
+        storage,
+        config,
+        {
+          start: '2024-01-16',
+          end: '2024-01-16',
+          interval: 'daily',
+          lookback_days: 7,
+          include_fx: false,
+        },
+        clock,
+      );
+
+      expect(output.prices).toEqual({
+        attempted: 1,
+        existing: 0,
+        fetched: 0,
+        lookback: 1,
+        missing: 0,
+      });
+      expect(output.failure_count).toBe(0);
+    });
+  });
+
+  it('collects fx stats for currency assets when include_fx is enabled', async () => {
+    await withTempDataDir(async (dataDir) => {
+      const storage = new MemoryStorage();
+      const clock = makeClock('2024-01-20T12:00:00Z');
+      const config = makeConfig({ data_dir: dataDir });
+      const marketDataStore = new JsonlMarketDataStore(dataDir);
+
+      const connection = Connection.new(
+        { name: 'Brokerage', synchronizer: 'manual' },
+        makeIdGen('conn-1'),
+        clock,
+      );
+      await storage.saveConnection(connection);
+
+      const account = Account.newWithGenerator(
+        makeIdGen('acct-1'),
+        clock,
+        'Main',
+        Id.fromString('conn-1'),
+      );
+      await storage.saveAccount(account);
+
+      await storage.appendBalanceSnapshot(
+        account.id,
+        BalanceSnapshot.new(new Date('2024-01-15T10:00:00Z'), [
+          AssetBalance.new(Asset.currency('EUR'), '100'),
+        ]),
+      );
+
+      await marketDataStore.put_fx_rates([
+        {
+          base: 'EUR',
+          quote: 'USD',
+          as_of_date: '2024-01-15',
+          timestamp: new Date('2024-01-15T16:00:00Z'),
+          rate: '1.09',
+          kind: 'close',
+          source: 'test',
+        },
+      ]);
+
+      const output = await fetchHistoricalPrices(
+        storage,
+        config,
+        {
+          start: '2024-01-15',
+          end: '2024-01-15',
+          interval: 'daily',
+          include_fx: true,
+        },
+        clock,
+      );
+
+      expect(output.prices).toEqual({
+        attempted: 0,
+        existing: 0,
+        fetched: 0,
+        lookback: 0,
+        missing: 0,
+      });
+      expect(output.fx).toEqual({
+        attempted: 1,
+        existing: 1,
+        fetched: 0,
+        lookback: 0,
+        missing: 0,
+      });
+      expect(output.failure_count).toBe(0);
+    });
+  });
+
+  it('rejects --account and --connection together', async () => {
+    const storage = new MemoryStorage();
+    const config = makeConfig();
+    const clock = makeClock('2024-01-20T12:00:00Z');
+
+    await expect(
+      fetchHistoricalPrices(
+        storage,
+        config,
+        { account: 'acct-1', connection: 'conn-1' },
+        clock,
+      ),
+    ).rejects.toThrow('Specify only one of --account or --connection');
   });
 });
 

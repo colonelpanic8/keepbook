@@ -14,6 +14,7 @@ import {
   type TransactionAnnotationType,
 } from '../models/transaction-annotation.js';
 import { decStrRounded } from './format.js';
+import { compileTransactionIgnoreRules, shouldIgnoreTransaction } from './ignore-rules.js';
 import { valueInReportingCurrencyDetailed } from './value.js';
 import type {
   SpendingOutput,
@@ -384,6 +385,14 @@ export async function spendingReport(
     throw new Error('--account and --connection are mutually exclusive');
   }
 
+  const [allAccounts, allConnections] = await Promise.all([
+    storage.listAccounts(),
+    storage.listConnections(),
+  ]);
+  const accountsById = new Map(allAccounts.map((account) => [account.id.asStr(), account]));
+  const connectionsById = new Map(allConnections.map((connection) => [connection.state.id.asStr(), connection]));
+  const ignoreRules = compileTransactionIgnoreRules(config.ignore);
+
   // Resolve scope + accounts.
   let scope: SpendingScopeOutput = { type: 'portfolio' };
   let accountIds: string[] = [];
@@ -396,12 +405,10 @@ export async function spendingReport(
     const conn = await findConnection(storage, options.connection);
     if (conn === null) throw new Error(`Connection not found: ${options.connection}`);
     scope = { type: 'connection', id: conn.state.id.asStr(), name: conn.config.name };
-    const accounts = await storage.listAccounts();
-    accountIds = accounts.filter((a) => a.connection_id.equals(conn.state.id)).map((a) => a.id.asStr());
+    accountIds = allAccounts.filter((a) => a.connection_id.equals(conn.state.id)).map((a) => a.id.asStr());
   } else {
-    const accounts = await storage.listAccounts();
-    const ignoredIds = await ignoredAccountIdsForPortfolioSpending(storage, config, accounts);
-    accountIds = accounts.filter((a) => !ignoredIds.has(a.id.asStr())).map((a) => a.id.asStr());
+    const ignoredIds = await ignoredAccountIdsForPortfolioSpending(storage, config, allAccounts);
+    accountIds = allAccounts.filter((a) => !ignoredIds.has(a.id.asStr())).map((a) => a.id.asStr());
   }
 
   const marketData = new MarketDataService(marketDataStore).withQuoteStaleness(
@@ -423,6 +430,7 @@ export async function spendingReport(
     asset: AssetType;
     amount: string;
     raw_description: string;
+    metadata_category?: string;
     annotation: TransactionAnnotationType | null;
   };
 
@@ -431,8 +439,12 @@ export async function spendingReport(
   const includeNoncurrency = options.include_noncurrency === true;
 
   for (const accountId of accountIds) {
-    const account = await findAccount(storage, accountId);
-    if (account === null) continue;
+    const account = accountsById.get(accountId);
+    if (account === undefined) continue;
+    const connection = connectionsById.get(account.connection_id.asStr());
+    const connectionId = account.connection_id.asStr();
+    const connectionName = connection?.config.name ?? '';
+    const synchronizer = connection?.config.synchronizer ?? '';
 
     const txns = await storage.getTransactions(account.id);
     const patches = await storage.getTransactionAnnotationPatches(account.id);
@@ -446,6 +458,20 @@ export async function spendingReport(
 
     for (const tx of txns) {
       if (!includeStatus(tx.status, status)) continue;
+      if (
+        shouldIgnoreTransaction(ignoreRules, {
+          account_id: account.id.asStr(),
+          account_name: account.name,
+          connection_id: connectionId,
+          connection_name: connectionName,
+          synchronizer,
+          description: tx.description,
+          status: tx.status,
+          amount: tx.amount,
+        })
+      ) {
+        continue;
+      }
       const localYmd = ymdFromTimestampInTimeZone(tx.timestamp, effectiveTimeZone);
       minDate = minDate === undefined ? localYmd : compareYmd(localYmd, minDate) < 0 ? localYmd : minDate;
 
@@ -463,6 +489,7 @@ export async function spendingReport(
         asset: normalizedAsset,
         amount: tx.amount,
         raw_description: tx.description,
+        metadata_category: tx.standardized_metadata?.merchant_category_label,
         annotation,
       });
     }
@@ -534,7 +561,7 @@ export async function spendingReport(
       switch (groupBy) {
         case 'category': {
           const cat = row.annotation?.category;
-          keys = [cat !== undefined ? cat : 'uncategorized'];
+          keys = [cat ?? row.metadata_category ?? 'uncategorized'];
           break;
         }
         case 'merchant': {

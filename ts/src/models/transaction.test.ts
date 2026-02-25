@@ -9,6 +9,7 @@ import {
   withStatus,
   withId,
   withSynchronizerData,
+  withStandardizedMetadata,
   type TransactionStatus,
 } from './transaction.js';
 
@@ -90,6 +91,35 @@ describe('Transaction', () => {
       expect(modified.synchronizer_data).toEqual({ plaid_id: 'abc123' });
       expect(baseTx.synchronizer_data).toBeNull();
     });
+
+    it('withSynchronizerData derives standardized metadata from chase fields', () => {
+      const modified = withSynchronizerData(baseTx, {
+        merchant_dba_name: 'Coffee Shop',
+        merchant_category_code: '5814',
+        merchant_category_name: 'Fast Food',
+        etu_standard_transaction_type_group_name: 'Purchases',
+        enriched_merchant_names: ['Blue Bottle Coffee'],
+      });
+
+      expect(modified.standardized_metadata).toEqual({
+        merchant_name: 'Blue Bottle Coffee',
+        merchant_category_code: '5814',
+        merchant_category_label: 'Fast Food',
+        transaction_kind: 'purchase',
+        is_internal_transfer_hint: false,
+      });
+    });
+
+    it('withStandardizedMetadata sets explicit metadata', () => {
+      const modified = withStandardizedMetadata(baseTx, {
+        merchant_name: 'Test Merchant',
+        transaction_kind: 'payment',
+      });
+      expect(modified.standardized_metadata).toEqual({
+        merchant_name: 'Test Merchant',
+        transaction_kind: 'payment',
+      });
+    });
   });
 
   describe('JSON serialization', () => {
@@ -124,6 +154,26 @@ describe('Transaction', () => {
       const json = Transaction.toJSON(withData);
 
       expect(json.synchronizer_data).toEqual({ key: 'val' });
+    });
+
+    it('backfills standardized metadata from synchronizer_data when missing', () => {
+      const parsed = Transaction.fromJSON({
+        id: 'test-tx-id',
+        timestamp: '2024-03-20T14:00:00.000Z',
+        amount: '42.00',
+        asset: { type: 'currency', iso_code: 'USD' },
+        description: 'Coffee',
+        status: 'posted',
+        synchronizer_data: {
+          merchant_dba_name: 'Coffee Shop',
+          merchant_category_code: '5814',
+        },
+      });
+
+      expect(parsed.standardized_metadata).toEqual({
+        merchant_name: 'Coffee Shop',
+        merchant_category_code: '5814',
+      });
     });
 
     it('round-trips through JSON', () => {

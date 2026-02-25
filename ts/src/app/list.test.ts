@@ -47,6 +47,7 @@ function makeConfig(overrides?: Partial<ResolvedConfig>): ResolvedConfig {
     },
     tray: { history_points: 8, spending_windows_days: [7, 30, 90] },
     spending: { ignore_accounts: [], ignore_connections: [], ignore_tags: [] },
+    ignore: { transaction_rules: [] },
     git: { auto_commit: false, auto_push: false, merge_master_before_command: false },
     ...overrides,
   };
@@ -536,7 +537,7 @@ describe('listBalances', () => {
 describe('listTransactions', () => {
   it('returns [] when storage is empty', async () => {
     const storage = new MemoryStorage();
-    const result = await listTransactions(storage);
+    const result = await listTransactions(storage, '2000-01-01', '2099-12-31');
     expect(result).toEqual([]);
   });
 
@@ -560,11 +561,12 @@ describe('listTransactions', () => {
     );
     await storage.appendTransactions(acct.id, [tx]);
 
-    const result = await listTransactions(storage);
+    const result = await listTransactions(storage, '2000-01-01', '2099-12-31');
     expect(result).toHaveLength(1);
     expect(result[0]).toEqual({
       id: 'tx-1',
       account_id: 'acct-1',
+      account_name: 'Checking',
       timestamp: '2024-06-15T14:30:00+00:00',
       description: 'Coffee shop',
       amount: '-50.00',
@@ -603,11 +605,12 @@ describe('listTransactions', () => {
       },
     ]);
 
-    const result = await listTransactions(storage);
+    const result = await listTransactions(storage, '2000-01-01', '2099-12-31');
     expect(result).toHaveLength(1);
     expect(result[0]).toEqual({
       id: 'tx-1',
       account_id: 'acct-1',
+      account_name: 'Checking',
       timestamp: '2024-06-15T14:30:00+00:00',
       description: 'Coffee shop',
       amount: '-50.00',
@@ -615,6 +618,107 @@ describe('listTransactions', () => {
       status: 'posted',
       annotation: { category: 'food', tags: ['coffee', 'treat'] },
     });
+  });
+
+  it('applies global ignore regex rules to transactions', async () => {
+    const storage = new MemoryStorage();
+    const clock = makeClock('2026-02-05T14:30:00Z');
+
+    const conn = Connection.new({ name: 'Schwab', synchronizer: 'schwab' }, makeIdGen('conn-1'), clock);
+    await storage.saveConnection(conn);
+
+    const acct = Account.newWithGenerator(
+      makeIdGen('acct-1'),
+      clock,
+      'Investor Checking',
+      Id.fromString('conn-1'),
+    );
+    await storage.saveAccount(acct);
+
+    const txIdGen = makeIdGen('tx-cc', 'tx-rent');
+    const txCc = Transaction.newWithGenerator(
+      txIdGen,
+      clock,
+      '-500',
+      Asset.currency('USD'),
+      'ACH CHASE CREDIT CRD EPAY',
+    );
+    const txRent = Transaction.newWithGenerator(
+      txIdGen,
+      clock,
+      '-2500',
+      Asset.currency('USD'),
+      'BALLAST WEB PMTS',
+    );
+    await storage.appendTransactions(acct.id, [txCc, txRent]);
+
+    const result = await listTransactions(storage, '2000-01-01', '2099-12-31', makeConfig({
+      ignore: {
+        transaction_rules: [
+          {
+            account_name: '(?i)^Investor Checking$',
+            synchronizer: '(?i)^schwab$',
+            description: '(?i)credit\\s+crd\\s+(?:e?pay|autopay)',
+          },
+        ],
+      },
+    }));
+
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('tx-rent');
+    expect(result[0].description).toBe('BALLAST WEB PMTS');
+  });
+
+  it('can include ignored transactions when requested', async () => {
+    const storage = new MemoryStorage();
+    const clock = makeClock('2026-02-05T14:30:00Z');
+
+    const conn = Connection.new({ name: 'Schwab', synchronizer: 'schwab' }, makeIdGen('conn-1'), clock);
+    await storage.saveConnection(conn);
+
+    const acct = Account.newWithGenerator(
+      makeIdGen('acct-1'),
+      clock,
+      'Investor Checking',
+      Id.fromString('conn-1'),
+    );
+    await storage.saveAccount(acct);
+
+    const txIdGen = makeIdGen('tx-cc', 'tx-rent');
+    const txCc = Transaction.newWithGenerator(
+      txIdGen,
+      clock,
+      '-500',
+      Asset.currency('USD'),
+      'ACH CHASE CREDIT CRD EPAY',
+    );
+    const txRent = Transaction.newWithGenerator(
+      txIdGen,
+      clock,
+      '-2500',
+      Asset.currency('USD'),
+      'BALLAST WEB PMTS',
+    );
+    await storage.appendTransactions(acct.id, [txCc, txRent]);
+
+    const config = makeConfig({
+      ignore: {
+        transaction_rules: [
+          {
+            account_name: '(?i)^Investor Checking$',
+            synchronizer: '(?i)^schwab$',
+            description: '(?i)credit\\s+crd\\s+(?:e?pay|autopay)',
+          },
+        ],
+      },
+    });
+
+    const skipped = await listTransactions(storage, '2000-01-01', '2099-12-31', config);
+    expect(skipped).toHaveLength(1);
+    expect(skipped[0].id).toBe('tx-rent');
+
+    const included = await listTransactions(storage, '2000-01-01', '2099-12-31', config, false, false);
+    expect(included).toHaveLength(2);
   });
 
   it('includes transactions from multiple accounts', async () => {
@@ -649,7 +753,7 @@ describe('listTransactions', () => {
     );
     await storage.appendTransactions(acct2.id, [tx2]);
 
-    const result = await listTransactions(storage);
+    const result = await listTransactions(storage, '2000-01-01', '2099-12-31');
     expect(result).toHaveLength(2);
     expect(result[0].account_id).toBe('acct-1');
     expect(result[1].account_id).toBe('acct-2');
@@ -669,34 +773,11 @@ describe('listTransactions', () => {
     const tx3 = Transaction.newWithGenerator(txIdGen, clock, '1.25', Asset.currency('USD'), 'C');
     await storage.appendTransactions(acct.id, [tx1, tx2, tx3]);
 
-    const result = await listTransactions(storage, undefined, true);
+    const result = await listTransactions(storage, '2000-01-01', '2099-12-31', undefined, true);
     expect(result).toHaveLength(3);
     expect(result[0].id).toBe('tx-2');
     expect(result[1].id).toBe('tx-3');
     expect(result[2].id).toBe('tx-1');
-  });
-
-  it('skips spending-ignored accounts by default and can include them', async () => {
-    const storage = new MemoryStorage();
-    const clock = makeClock('2024-06-15T14:30:00Z');
-
-    const acctIdGen = makeIdGen('acct-1');
-    const acct = Account.newWithGenerator(acctIdGen, clock, 'Ignore Me', Id.fromString('conn-1'));
-    await storage.saveAccount(acct);
-
-    const txIdGen = makeIdGen('tx-1');
-    const tx = Transaction.newWithGenerator(txIdGen, clock, '10', Asset.currency('USD'), 'Test');
-    await storage.appendTransactions(acct.id, [tx]);
-
-    const config = makeConfig({
-      spending: { ignore_accounts: ['Ignore Me'], ignore_connections: [], ignore_tags: [] },
-    });
-
-    const skipped = await listTransactions(storage, config);
-    expect(skipped).toHaveLength(0);
-
-    const included = await listTransactions(storage, config, false, false);
-    expect(included).toHaveLength(1);
   });
 
   it('formats timestamp with rfc3339 including subseconds', async () => {
@@ -711,7 +792,7 @@ describe('listTransactions', () => {
     const tx = Transaction.newWithGenerator(txIdGen, clock, '10', Asset.currency('USD'), 'Test');
     await storage.appendTransactions(acct.id, [tx]);
 
-    const result = await listTransactions(storage);
+    const result = await listTransactions(storage, '2000-01-01', '2099-12-31');
     expect(result[0].timestamp).toBe('2024-06-15T14:30:00.456000000+00:00');
   });
 
@@ -727,7 +808,7 @@ describe('listTransactions', () => {
     const tx = Transaction.newWithGenerator(txIdGen, clock, '10', Asset.currency('USD'), 'Test');
     await storage.appendTransactions(acct.id, [tx]);
 
-    const result = await listTransactions(storage);
+    const result = await listTransactions(storage, '2000-01-01', '2099-12-31');
     expect(result[0].status).toBe('posted');
   });
 
@@ -760,7 +841,7 @@ describe('listTransactions', () => {
     );
 
     try {
-      const result = await listTransactions(new JsonFileStorage(dir));
+      const result = await listTransactions(new JsonFileStorage(dir), '2000-01-01', '2099-12-31');
       expect(result).toHaveLength(1);
       expect(result[0].timestamp).toBe('2024-12-04T20:45:27.765747+00:00');
       expect(JSON.stringify(result[0].asset)).toBe('{"symbol":"ICP","type":"crypto"}');

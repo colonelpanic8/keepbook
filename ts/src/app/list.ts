@@ -22,13 +22,14 @@ import {
   formatRfc3339,
   formatRfc3339FromEpochNanos,
 } from './format.js';
-import { DEFAULT_SPENDING_CONFIG, type ResolvedConfig, type SpendingConfig } from '../config.js';
+import { DEFAULT_IGNORE_CONFIG, type ResolvedConfig } from '../config.js';
 import {
   applyTransactionAnnotationPatch,
   isEmptyTransactionAnnotation,
   type TransactionAnnotationType,
 } from '../models/transaction-annotation.js';
 import { valueInReportingCurrencyBestEffort } from './value.js';
+import { compileTransactionIgnoreRules, shouldIgnoreTransaction } from './ignore-rules.js';
 import {
   type ConnectionOutput,
   type AccountOutput,
@@ -259,81 +260,36 @@ export async function listBalances(
 // ---------------------------------------------------------------------------
 
 /**
- * List all transactions for all accounts.
+ * List all transactions for all accounts, filtered by date range.
  */
-function normalizeRule(value: string): string | null {
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed.toLowerCase() : null;
-}
-
-async function ignoredAccountIdsForPortfolioSpending(
-  storage: Storage,
-  spending: SpendingConfig,
-  accounts: AccountType[],
-): Promise<Set<string>> {
-  const ignoreAccounts = new Set(
-    spending.ignore_accounts.map((v) => normalizeRule(v)).filter((v): v is string => v !== null),
-  );
-  const ignoreConnectionsRaw = new Set(
-    spending.ignore_connections
-      .map((v) => normalizeRule(v))
-      .filter((v): v is string => v !== null),
-  );
-  const ignoreTags = new Set(
-    spending.ignore_tags.map((v) => normalizeRule(v)).filter((v): v is string => v !== null),
-  );
-
-  if (ignoreAccounts.size === 0 && ignoreConnectionsRaw.size === 0 && ignoreTags.size === 0) {
-    return new Set();
-  }
-
-  const ignoreConnections = new Set(ignoreConnectionsRaw);
-  const connections = await storage.listConnections();
-  for (const connection of connections) {
-    const connectionId = connection.state.id.asStr().toLowerCase();
-    const connectionName = connection.config.name.toLowerCase();
-    if (ignoreConnectionsRaw.has(connectionId) || ignoreConnectionsRaw.has(connectionName)) {
-      ignoreConnections.add(connectionId);
-    }
-  }
-
-  const ignoredAccountIds = new Set<string>();
-  for (const account of accounts) {
-    const accountId = account.id.asStr().toLowerCase();
-    const accountName = account.name.toLowerCase();
-    const connectionId = account.connection_id.asStr().toLowerCase();
-    const hasIgnoredTag = account.tags
-      .map((tag) => normalizeRule(tag))
-      .filter((tag): tag is string => tag !== null)
-      .some((tag) => ignoreTags.has(tag));
-    if (
-      ignoreAccounts.has(accountId) ||
-      ignoreAccounts.has(accountName) ||
-      ignoreConnections.has(connectionId) ||
-      hasIgnoredTag
-    ) {
-      ignoredAccountIds.add(account.id.asStr());
-    }
-  }
-
-  return ignoredAccountIds;
-}
-
 export async function listTransactions(
   storage: Storage,
+  startStr?: string,
+  endStr?: string,
   config?: ResolvedConfig,
   sortByAmount = false,
-  skipSpendingIgnored = true,
+  skipIgnored = true,
 ): Promise<TransactionOutput[]> {
-  const accounts = await storage.listAccounts();
-  const spendingConfig = config?.spending ?? DEFAULT_SPENDING_CONFIG;
-  const ignoredAccountIds = skipSpendingIgnored
-    ? await ignoredAccountIdsForPortfolioSpending(storage, spendingConfig, accounts)
-    : new Set<string>();
+  const endDate = endStr ? new Date(endStr + 'T23:59:59.999Z') : new Date();
+  const startDate = startStr
+    ? new Date(startStr + 'T00:00:00Z')
+    : new Date(endDate.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+  const [accounts, connections] = await Promise.all([
+    storage.listAccounts(),
+    storage.listConnections(),
+  ]);
+  const connectionsById = new Map(connections.map((connection) => [connection.state.id.asStr(), connection]));
+  const ignoreRules = skipIgnored
+    ? compileTransactionIgnoreRules(config?.ignore ?? DEFAULT_IGNORE_CONFIG)
+    : [];
   const result: TransactionOutput[] = [];
 
   for (const account of accounts) {
-    if (skipSpendingIgnored && ignoredAccountIds.has(account.id.asStr())) continue;
+    const connection = connectionsById.get(account.connection_id.asStr());
+    const connection_id = account.connection_id.asStr();
+    const connection_name = connection?.config.name ?? '';
+    const synchronizer = connection?.config.synchronizer ?? '';
 
     const transactions = await storage.getTransactions(account.id);
     const patches = await storage.getTransactionAnnotationPatches(account.id);
@@ -347,6 +303,23 @@ export async function listTransactions(
     }
 
     for (const tx of transactions) {
+      if (tx.timestamp < startDate || tx.timestamp > endDate) continue;
+      if (
+        skipIgnored &&
+        shouldIgnoreTransaction(ignoreRules, {
+          account_id: account.id.asStr(),
+          account_name: account.name,
+          connection_id,
+          connection_name,
+          synchronizer,
+          description: tx.description,
+          status: tx.status,
+          amount: tx.amount,
+        })
+      ) {
+        continue;
+      }
+
       const ann = annByTx.get(tx.id.asStr());
       const annotation =
         ann && !isEmptyTransactionAnnotation(ann)
@@ -361,6 +334,7 @@ export async function listTransactions(
       const out: TransactionOutput = {
         id: tx.id.asStr(),
         account_id: account.id.asStr(),
+        account_name: account.name,
         timestamp: formatRfc3339PreservingRaw(tx.timestamp, tx.timestamp_raw),
         description: tx.description,
         amount: tx.amount,

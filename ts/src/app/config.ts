@@ -19,6 +19,7 @@ import {
   DEFAULT_GIT_CONFIG,
   DEFAULT_REFRESH_CONFIG,
   DEFAULT_SPENDING_CONFIG,
+  DEFAULT_IGNORE_CONFIG,
   DEFAULT_TRAY_CONFIG,
 } from '../config.js';
 
@@ -81,6 +82,7 @@ export async function loadConfig(
       refresh: parsed.refresh,
       tray: parsed.tray,
       spending: parsed.spending,
+      ignore: parsed.ignore,
       git: parsed.git,
     };
 
@@ -101,6 +103,9 @@ export async function loadConfig(
       ignore_accounts: [...DEFAULT_SPENDING_CONFIG.ignore_accounts],
       ignore_connections: [...DEFAULT_SPENDING_CONFIG.ignore_connections],
       ignore_tags: [...DEFAULT_SPENDING_CONFIG.ignore_tags],
+    },
+    ignore: {
+      transaction_rules: [...DEFAULT_IGNORE_CONFIG.transaction_rules],
     },
     git: { ...DEFAULT_GIT_CONFIG },
   };

@@ -8,7 +8,7 @@
  * - others: not implemented
  */
 
-import { type Storage } from '../storage/storage.js';
+import { type CompactionStorage, type Storage } from '../storage/storage.js';
 import { findConnection } from '../storage/lookup.js';
 import type { RefreshConfig } from '../config.js';
 import { checkBalanceStaleness, resolveBalanceStaleness } from '../staleness.js';
@@ -322,6 +322,14 @@ export async function syncSymlinks(): Promise<object> {
     account_symlinks_created: 0,
     warnings: [],
   };
+}
+
+// ---------------------------------------------------------------------------
+// syncRecompact
+// ---------------------------------------------------------------------------
+
+export async function syncRecompact(storage: CompactionStorage): Promise<object> {
+  return storage.recompactAllJsonl();
 }
 
 // ---------------------------------------------------------------------------

@@ -5,7 +5,7 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 
 import { defaultConfigPath, loadConfig, configOutput } from './config.js';
-import { DEFAULT_REFRESH_CONFIG } from '../config.js';
+import { DEFAULT_REFRESH_CONFIG, DEFAULT_TRAY_CONFIG } from '../config.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -202,7 +202,9 @@ describe('configOutput', () => {
       reporting_currency: 'USD',
       display: {},
       refresh: { ...DEFAULT_REFRESH_CONFIG },
+      tray: { ...DEFAULT_TRAY_CONFIG, spending_windows_days: [...DEFAULT_TRAY_CONFIG.spending_windows_days] },
       spending: { ignore_accounts: [], ignore_connections: [], ignore_tags: [] },
+      ignore: { transaction_rules: [] },
       git: { auto_commit: false, auto_push: false, merge_master_before_command: false },
     });
 
@@ -223,7 +225,9 @@ describe('configOutput', () => {
       reporting_currency: 'EUR',
       display: {},
       refresh: { ...DEFAULT_REFRESH_CONFIG },
+      tray: { ...DEFAULT_TRAY_CONFIG, spending_windows_days: [...DEFAULT_TRAY_CONFIG.spending_windows_days] },
       spending: { ignore_accounts: [], ignore_connections: [], ignore_tags: [] },
+      ignore: { transaction_rules: [] },
       git: { auto_commit: true, auto_push: true, merge_master_before_command: true },
     });
 
@@ -244,7 +248,9 @@ describe('configOutput', () => {
       reporting_currency: 'GBP',
       display: {},
       refresh: { balance_staleness: 1, price_staleness: 2 },
+      tray: { ...DEFAULT_TRAY_CONFIG, spending_windows_days: [...DEFAULT_TRAY_CONFIG.spending_windows_days] },
       spending: { ignore_accounts: [], ignore_connections: [], ignore_tags: [] },
+      ignore: { transaction_rules: [] },
       git: { auto_commit: false, auto_push: false, merge_master_before_command: false },
     }) as Record<string, unknown>;
 

@@ -15,5 +15,5 @@ pub use connection::{
 };
 pub use id::Id;
 pub use id_generator::{FixedIdGenerator, IdGenerator, UuidIdGenerator};
-pub use transaction::{Transaction, TransactionStatus};
+pub use transaction::{Transaction, TransactionStandardizedMetadata, TransactionStatus};
 pub use transaction_annotation::{TransactionAnnotation, TransactionAnnotationPatch};

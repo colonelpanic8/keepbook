@@ -68,6 +68,21 @@ export interface SpendingConfig {
   ignore_tags: string[];
 }
 
+export interface TransactionIgnoreRule {
+  account_id?: string;
+  account_name?: string;
+  connection_id?: string;
+  connection_name?: string;
+  synchronizer?: string;
+  description?: string;
+  status?: string;
+  amount?: string;
+}
+
+export interface IgnoreConfig {
+  transaction_rules: TransactionIgnoreRule[];
+}
+
 export interface Config {
   /** Optional path to the data directory. */
   data_dir?: string;
@@ -81,6 +96,8 @@ export interface Config {
   tray: TrayConfig;
   /** Spending report settings. */
   spending: SpendingConfig;
+  /** Global ignore rules. */
+  ignore: IgnoreConfig;
   /** Git integration settings. */
   git: GitConfig;
 }
@@ -98,6 +115,8 @@ export interface ResolvedConfig {
   tray: TrayConfig;
   /** Spending report settings. */
   spending: SpendingConfig;
+  /** Global ignore rules. */
+  ignore: IgnoreConfig;
   /** Git integration settings. */
   git: GitConfig;
 }
@@ -131,6 +150,10 @@ export const DEFAULT_SPENDING_CONFIG: SpendingConfig = {
   ignore_tags: [],
 };
 
+export const DEFAULT_IGNORE_CONFIG: IgnoreConfig = {
+  transaction_rules: [],
+};
+
 export const DEFAULT_CONFIG: Config = {
   data_dir: undefined,
   reporting_currency: 'USD',
@@ -141,6 +164,9 @@ export const DEFAULT_CONFIG: Config = {
     ignore_accounts: [...DEFAULT_SPENDING_CONFIG.ignore_accounts],
     ignore_connections: [...DEFAULT_SPENDING_CONFIG.ignore_connections],
     ignore_tags: [...DEFAULT_SPENDING_CONFIG.ignore_tags],
+  },
+  ignore: {
+    transaction_rules: [...DEFAULT_IGNORE_CONFIG.transaction_rules],
   },
   git: { ...DEFAULT_GIT_CONFIG },
 };
@@ -164,6 +190,7 @@ export function parseConfig(tomlStr: string): Config {
   const refreshRaw = (raw.refresh ?? {}) as Record<string, unknown>;
   const trayRaw = (raw.tray ?? {}) as Record<string, unknown>;
   const spendingRaw = (raw.spending ?? {}) as Record<string, unknown>;
+  const ignoreRaw = (raw.ignore ?? {}) as Record<string, unknown>;
   const gitRaw = (raw.git ?? {}) as Record<string, unknown>;
   const displayRaw = (raw.display ?? {}) as Record<string, unknown>;
 
@@ -221,6 +248,43 @@ export function parseConfig(tomlStr: string): Config {
     ignore_tags: parseStringArray(spendingRaw.ignore_tags),
   };
 
+  const parseOptionalRegexField = (value: unknown): string | undefined => {
+    if (typeof value !== 'string') return undefined;
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  };
+
+  const ignore: IgnoreConfig = {
+    transaction_rules: Array.isArray(ignoreRaw.transaction_rules)
+      ? ignoreRaw.transaction_rules
+          .map((rawRule): TransactionIgnoreRule => {
+            if (rawRule === null || typeof rawRule !== 'object' || Array.isArray(rawRule)) {
+              return {};
+            }
+            const rule = rawRule as Record<string, unknown>;
+            const accountId = parseOptionalRegexField(rule.account_id);
+            const accountName = parseOptionalRegexField(rule.account_name);
+            const connectionId = parseOptionalRegexField(rule.connection_id);
+            const connectionName = parseOptionalRegexField(rule.connection_name);
+            const synchronizer = parseOptionalRegexField(rule.synchronizer);
+            const description = parseOptionalRegexField(rule.description);
+            const status = parseOptionalRegexField(rule.status);
+            const amount = parseOptionalRegexField(rule.amount);
+            return {
+              ...(accountId !== undefined ? { account_id: accountId } : {}),
+              ...(accountName !== undefined ? { account_name: accountName } : {}),
+              ...(connectionId !== undefined ? { connection_id: connectionId } : {}),
+              ...(connectionName !== undefined ? { connection_name: connectionName } : {}),
+              ...(synchronizer !== undefined ? { synchronizer } : {}),
+              ...(description !== undefined ? { description } : {}),
+              ...(status !== undefined ? { status } : {}),
+              ...(amount !== undefined ? { amount } : {}),
+            };
+          })
+          .filter((rule) => Object.keys(rule).length > 0)
+      : [],
+  };
+
   const config: Config = {
     reporting_currency:
       typeof raw.reporting_currency === 'string'
@@ -230,6 +294,7 @@ export function parseConfig(tomlStr: string): Config {
     refresh,
     tray,
     spending,
+    ignore,
     git,
   };
 

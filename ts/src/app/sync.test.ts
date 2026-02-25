@@ -10,6 +10,7 @@ import {
   syncAll,
   syncAllIfStale,
   syncPrices,
+  syncRecompact,
   syncSymlinks,
   authLogin,
 } from './sync.js';
@@ -316,6 +317,40 @@ describe('syncSymlinks', () => {
       connection_symlinks_created: 0,
       account_symlinks_created: 0,
       warnings: [],
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// syncRecompact
+// ---------------------------------------------------------------------------
+
+describe('syncRecompact', () => {
+  it('returns compaction stats from storage', async () => {
+    const result = await syncRecompact({
+      async recompactAllJsonl() {
+        return {
+          accounts_processed: 2,
+          files_rewritten: 6,
+          balance_snapshots_before: 5,
+          balance_snapshots_after: 5,
+          transactions_before: 10,
+          transactions_after: 7,
+          annotation_patches_before: 4,
+          annotation_patches_after: 3,
+        };
+      },
+    });
+
+    expect(result).toEqual({
+      accounts_processed: 2,
+      files_rewritten: 6,
+      balance_snapshots_before: 5,
+      balance_snapshots_after: 5,
+      transactions_before: 10,
+      transactions_after: 7,
+      annotation_patches_before: 4,
+      annotation_patches_after: 3,
     });
   });
 });

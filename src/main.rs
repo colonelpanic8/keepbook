@@ -191,6 +191,73 @@ enum Command {
         #[arg(long, default_value_t = false)]
         include_empty: bool,
     },
+
+    /// Spending report grouped by category
+    SpendingCategories {
+        /// Period granularity: daily, weekly, monthly, quarterly, yearly, range, custom
+        #[arg(long, default_value = "monthly")]
+        period: String,
+
+        /// Start date (YYYY-MM-DD, default: earliest matching transaction)
+        #[arg(long)]
+        start: Option<String>,
+
+        /// End date (YYYY-MM-DD, default: today in the selected timezone)
+        #[arg(long)]
+        end: Option<String>,
+
+        /// Reporting currency (default: from config)
+        #[arg(long)]
+        currency: Option<String>,
+
+        /// Timezone for bucketing and date filtering (IANA name, default: local)
+        #[arg(long)]
+        tz: Option<String>,
+
+        /// Week start day for weekly periods: sunday or monday (default: sunday)
+        #[arg(long)]
+        week_start: Option<String>,
+
+        /// Custom bucket size (period=custom only). Must be a positive multiple of 1d (e.g. "14d").
+        #[arg(long, value_name = "DURATION", value_parser = parse_duration_arg)]
+        bucket: Option<std::time::Duration>,
+
+        /// Filter to a single account by ID or name (mutually exclusive with --connection)
+        #[arg(long)]
+        account: Option<String>,
+
+        /// Filter to a single connection by ID or name (mutually exclusive with --account)
+        #[arg(long)]
+        connection: Option<String>,
+
+        /// Transaction status filter: posted, posted+pending, all (default: posted)
+        #[arg(long, default_value = "posted")]
+        status: String,
+
+        /// Direction: outflow, inflow, net (default: outflow)
+        #[arg(long, default_value = "outflow")]
+        direction: String,
+
+        /// Limit category rows per period
+        #[arg(long)]
+        top: Option<usize>,
+
+        /// Look back this many days for cached close prices / FX rates (default: 7)
+        #[arg(long, default_value_t = 7)]
+        lookback_days: u32,
+
+        /// Include non-currency assets (equity/crypto) by valuing them using cached close prices.
+        ///
+        /// Default is currency-only spending (still supports FX conversion for currency txns).
+        #[arg(long, default_value_t = false)]
+        include_noncurrency: bool,
+
+        /// Emit empty periods with total 0 and transaction_count 0.
+        ///
+        /// Default output is sparse (only periods with non-zero totals).
+        #[arg(long, default_value_t = false)]
+        include_empty: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -354,6 +421,8 @@ enum SyncCommand {
     },
     /// Rebuild all symlinks (connections/by-name and account directories)
     Symlinks,
+    /// Recompact account JSONL files (dedupe append-only logs and sort chronologically)
+    Recompact,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -424,11 +493,19 @@ enum ListCommand {
 
     /// List all transactions
     Transactions {
+        /// Start date (YYYY-MM-DD, default: 30 days ago)
+        #[arg(long)]
+        start: Option<String>,
+
+        /// End date (YYYY-MM-DD, default: today)
+        #[arg(long)]
+        end: Option<String>,
+
         /// Sort transactions by amount (ascending)
         #[arg(long, default_value_t = false)]
         sort_by_amount: bool,
 
-        /// Include transactions ignored by spending account/connection/tag filters
+        /// Include transactions that would otherwise be ignored by spending/list ignore rules
         #[arg(long, default_value_t = false)]
         include_ignored: bool,
     },
@@ -770,6 +847,10 @@ async fn main() -> Result<()> {
                 let result = app::sync_symlinks(&storage, &config).await?;
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
+            SyncCommand::Recompact => {
+                let result = app::sync_recompact(&storage, &config).await?;
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
         },
 
         Some(Command::Auth(auth_cmd)) => match auth_cmd {
@@ -843,16 +924,21 @@ async fn main() -> Result<()> {
             }
 
             ListCommand::Transactions {
+                start,
+                end,
                 sort_by_amount,
                 include_ignored,
             } => {
-                let transactions = app::list_transactions(
-                    storage_arc.as_ref(),
-                    sort_by_amount,
-                    !include_ignored,
-                    &config,
-                )
-                .await?;
+                let transactions =
+                    app::list_transactions(
+                        storage_arc.as_ref(),
+                        start,
+                        end,
+                        sort_by_amount,
+                        !include_ignored,
+                        &config,
+                    )
+                    .await?;
                 println!("{}", serde_json::to_string_pretty(&transactions)?);
             }
 
@@ -964,6 +1050,49 @@ async fn main() -> Result<()> {
                     status,
                     direction,
                     group_by,
+                    top,
+                    lookback_days,
+                    include_noncurrency,
+                    include_empty,
+                },
+            )
+            .await?;
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        }
+
+        Some(Command::SpendingCategories {
+            period,
+            start,
+            end,
+            currency,
+            tz,
+            week_start,
+            bucket,
+            account,
+            connection,
+            status,
+            direction,
+            top,
+            lookback_days,
+            include_noncurrency,
+            include_empty,
+        }) => {
+            let output = app::spending_report(
+                storage_arc.as_ref(),
+                &config,
+                app::SpendingReportOptions {
+                    currency,
+                    start,
+                    end,
+                    period,
+                    tz,
+                    week_start,
+                    bucket,
+                    account,
+                    connection,
+                    status,
+                    direction,
+                    group_by: "category".to_string(),
                     top,
                     lookback_days,
                     include_noncurrency,

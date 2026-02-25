@@ -9,8 +9,14 @@
 import type { Storage } from '../storage/storage.js';
 import type { MarketDataStore } from '../market-data/store.js';
 import { MarketDataService } from '../market-data/service.js';
+import { JsonlMarketDataStore } from '../market-data/jsonl-store.js';
 import { AssetId } from '../market-data/asset-id.js';
+import type { PricePoint, FxRatePoint } from '../market-data/models.js';
 import { PortfolioService } from '../portfolio/service.js';
+import { Asset, type AssetType } from '../models/asset.js';
+import { Id } from '../models/id.js';
+import type { AccountType } from '../models/account.js';
+import { findAccount, findConnection } from '../storage/lookup.js';
 import type {
   PortfolioSnapshot,
   AssetSummary,
@@ -44,8 +50,13 @@ import type {
   SerializedChangePoint,
   SerializedChangeTrigger,
   ChangePointsOutput,
+  PriceHistoryOutput,
+  PriceHistoryScopeOutput,
+  PriceHistoryStats,
+  PriceHistoryFailure,
 } from './types.js';
 import { Decimal } from '../decimal.js';
+import { tryAutoCommit } from '../git.js';
 
 // ---------------------------------------------------------------------------
 // Serialization
@@ -192,6 +203,635 @@ export async function portfolioSnapshot(
   });
 
   return serializeSnapshot(snapshot);
+}
+
+// ---------------------------------------------------------------------------
+// Market Data Price History
+// ---------------------------------------------------------------------------
+
+type PriceHistoryInterval = 'daily' | 'weekly' | 'monthly' | 'yearly';
+
+type AssetPriceCache = {
+  asset: AssetType;
+  asset_id: AssetId;
+  prices: Map<string, PricePoint>;
+};
+
+type FxCache = Map<string, Map<string, FxRatePoint>>;
+
+type FailureCounter = { count: number };
+
+type FxRateContext = {
+  marketData: MarketDataService;
+  store: JsonlMarketDataStore;
+  fxCache: FxCache;
+  stats: PriceHistoryStats;
+  failures: PriceHistoryFailure[];
+  failureCount: FailureCounter;
+  failureLimit: number;
+  lookbackDays: number;
+};
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+const YMD_REGEX = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+export interface PriceHistoryOptions {
+  account?: string;
+  connection?: string;
+  start?: string;
+  end?: string;
+  interval?: string;
+  lookback_days?: number;
+  request_delay_ms?: number;
+  currency?: string;
+  include_fx?: boolean;
+}
+
+function emptyPriceHistoryStats(): PriceHistoryStats {
+  return { attempted: 0, existing: 0, fetched: 0, lookback: 0, missing: 0 };
+}
+
+function parseHistoryInterval(value: string): PriceHistoryInterval {
+  switch (value.trim().toLowerCase()) {
+    case 'daily':
+      return 'daily';
+    case 'weekly':
+      return 'weekly';
+    case 'monthly':
+      return 'monthly';
+    case 'yearly':
+    case 'annual':
+    case 'annually':
+      return 'yearly';
+    default:
+      throw new Error(
+        `Invalid interval: ${value}. Use: daily, weekly, monthly, yearly, annual`,
+      );
+  }
+}
+
+function intervalAsString(interval: PriceHistoryInterval): string {
+  return interval;
+}
+
+function parseYmdOrThrow(value: string, kind: 'start' | 'end'): string {
+  const trimmed = value.trim();
+  const match = YMD_REGEX.exec(trimmed);
+  if (match === null) {
+    throw new Error(`Invalid ${kind} date: ${value}`);
+  }
+
+  const year = Number.parseInt(match[1], 10);
+  const month = Number.parseInt(match[2], 10);
+  const day = Number.parseInt(match[3], 10);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  if (
+    parsed.getUTCFullYear() !== year ||
+    parsed.getUTCMonth() !== month - 1 ||
+    parsed.getUTCDate() !== day
+  ) {
+    throw new Error(`Invalid ${kind} date: ${value}`);
+  }
+
+  return formatDateYMD(parsed);
+}
+
+function parseYmdDate(value: string): Date {
+  const match = YMD_REGEX.exec(value);
+  if (match === null) {
+    throw new Error(`Invalid date value: ${value}`);
+  }
+  const year = Number.parseInt(match[1], 10);
+  const month = Number.parseInt(match[2], 10);
+  const day = Number.parseInt(match[3], 10);
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
+function compareYmd(a: string, b: string): number {
+  return a.localeCompare(b);
+}
+
+function addDaysYmd(value: string, days: number): string {
+  const parsed = parseYmdDate(value);
+  parsed.setUTCDate(parsed.getUTCDate() + days);
+  return formatDateYMD(parsed);
+}
+
+function daysInMonth(year: number, month: number): number {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+function monthEnd(date: string): string {
+  const parsed = parseYmdDate(date);
+  const year = parsed.getUTCFullYear();
+  const month = parsed.getUTCMonth() + 1;
+  const day = daysInMonth(year, month);
+  return `${year.toString().padStart(4, '0')}-${month.toString().padStart(2, '0')}-${day
+    .toString()
+    .padStart(2, '0')}`;
+}
+
+function yearEnd(year: number): string {
+  return `${year.toString().padStart(4, '0')}-12-31`;
+}
+
+function nextMonthEnd(date: string): string {
+  const parsed = parseYmdDate(date);
+  let year = parsed.getUTCFullYear();
+  let month = parsed.getUTCMonth() + 1;
+  if (month === 12) {
+    year += 1;
+    month = 1;
+  } else {
+    month += 1;
+  }
+  const day = daysInMonth(year, month);
+  return `${year.toString().padStart(4, '0')}-${month.toString().padStart(2, '0')}-${day
+    .toString()
+    .padStart(2, '0')}`;
+}
+
+function nextYearEnd(date: string): string {
+  const parsed = parseYmdDate(date);
+  return yearEnd(parsed.getUTCFullYear() + 1);
+}
+
+function alignStartDate(date: string, interval: PriceHistoryInterval): string {
+  switch (interval) {
+    case 'monthly':
+      return monthEnd(date);
+    case 'yearly':
+      return yearEnd(parseYmdDate(date).getUTCFullYear());
+    default:
+      return date;
+  }
+}
+
+function advanceIntervalDate(date: string, interval: PriceHistoryInterval): string {
+  switch (interval) {
+    case 'daily':
+      return addDaysYmd(date, 1);
+    case 'weekly':
+      return addDaysYmd(date, 7);
+    case 'monthly':
+      return nextMonthEnd(date);
+    case 'yearly':
+      return nextYearEnd(date);
+  }
+}
+
+function daysInclusive(startDate: string, endDate: string): number {
+  const start = parseYmdDate(startDate).getTime();
+  const end = parseYmdDate(endDate).getTime();
+  return Math.floor((end - start) / MS_PER_DAY) + 1;
+}
+
+function fxKey(base: string, quote: string): string {
+  return `${base}|${quote}`;
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+function upsertPriceCache(cache: Map<string, PricePoint>, point: PricePoint): void {
+  const existing = cache.get(point.as_of_date);
+  if (existing === undefined || existing.timestamp.getTime() < point.timestamp.getTime()) {
+    cache.set(point.as_of_date, point);
+  }
+}
+
+function upsertFxCache(cache: Map<string, FxRatePoint>, point: FxRatePoint): void {
+  const existing = cache.get(point.as_of_date);
+  if (existing === undefined || existing.timestamp.getTime() < point.timestamp.getTime()) {
+    cache.set(point.as_of_date, point);
+  }
+}
+
+function resolveCachedPrice(
+  cache: Map<string, PricePoint>,
+  date: string,
+  lookbackDays: number,
+): { point: PricePoint; exact: boolean } | null {
+  const exact = cache.get(date);
+  if (exact !== undefined) {
+    return { point: exact, exact: true };
+  }
+
+  for (let offset = 1; offset <= lookbackDays; offset++) {
+    const target = addDaysYmd(date, -offset);
+    const point = cache.get(target);
+    if (point !== undefined) {
+      return { point, exact: false };
+    }
+  }
+
+  return null;
+}
+
+function resolveCachedFx(
+  cache: Map<string, FxRatePoint>,
+  date: string,
+  lookbackDays: number,
+): { point: FxRatePoint; exact: boolean } | null {
+  const exact = cache.get(date);
+  if (exact !== undefined) {
+    return { point: exact, exact: true };
+  }
+
+  for (let offset = 1; offset <= lookbackDays; offset++) {
+    const target = addDaysYmd(date, -offset);
+    const point = cache.get(target);
+    if (point !== undefined) {
+      return { point, exact: false };
+    }
+  }
+
+  return null;
+}
+
+async function loadPriceCache(
+  store: MarketDataStore,
+  assetId: AssetId,
+): Promise<Map<string, PricePoint>> {
+  const all = await store.get_all_prices(assetId);
+  const cache = new Map<string, PricePoint>();
+  for (const point of all) {
+    if (point.kind !== 'close') continue;
+    upsertPriceCache(cache, point);
+  }
+  return cache;
+}
+
+async function loadFxCache(
+  store: MarketDataStore,
+  base: string,
+  quote: string,
+): Promise<Map<string, FxRatePoint>> {
+  const all = await store.get_all_fx_rates(base, quote);
+  const cache = new Map<string, FxRatePoint>();
+  for (const point of all) {
+    if (point.kind !== 'close') continue;
+    upsertFxCache(cache, point);
+  }
+  return cache;
+}
+
+async function resolvePriceHistoryScope(
+  storage: Storage,
+  account: string | undefined,
+  connection: string | undefined,
+): Promise<{ scope: PriceHistoryScopeOutput; accounts: AccountType[] }> {
+  if (account !== undefined && connection !== undefined) {
+    throw new Error('Specify only one of --account or --connection');
+  }
+
+  if (account !== undefined) {
+    const found = await findAccount(storage, account);
+    if (found === null) {
+      throw new Error(`Account not found: ${account}`);
+    }
+    return {
+      scope: { type: 'account', id: found.id.asStr(), name: found.name },
+      accounts: [found],
+    };
+  }
+
+  if (connection !== undefined) {
+    const found = await findConnection(storage, connection);
+    if (found === null) {
+      throw new Error(`Connection not found: ${connection}`);
+    }
+
+    const accounts: AccountType[] = [];
+    const seenIds = new Set<string>();
+
+    for (const accountId of found.state.account_ids) {
+      const accountIdStr = accountId.asStr();
+      if (seenIds.has(accountIdStr)) continue;
+      seenIds.add(accountIdStr);
+
+      if (!Id.isPathSafe(accountIdStr)) {
+        continue;
+      }
+
+      const accountFromStorage = await storage.getAccount(accountId);
+      if (accountFromStorage === null) continue;
+      if (!accountFromStorage.connection_id.equals(found.state.id)) continue;
+      accounts.push(accountFromStorage);
+    }
+
+    const allAccounts = await storage.listAccounts();
+    for (const accountEntry of allAccounts) {
+      if (!accountEntry.connection_id.equals(found.state.id)) continue;
+      const accountIdStr = accountEntry.id.asStr();
+      if (seenIds.has(accountIdStr)) continue;
+      seenIds.add(accountIdStr);
+      accounts.push(accountEntry);
+    }
+
+    if (accounts.length === 0) {
+      throw new Error(`No accounts found for connection ${found.config.name}`);
+    }
+
+    return {
+      scope: { type: 'connection', id: found.state.id.asStr(), name: found.config.name },
+      accounts,
+    };
+  }
+
+  const accounts = await storage.listAccounts();
+  if (accounts.length === 0) {
+    throw new Error('No accounts found');
+  }
+  return { scope: { type: 'portfolio' }, accounts };
+}
+
+async function ensureFxRate(
+  ctx: FxRateContext,
+  base: string,
+  quote: string,
+  date: string,
+): Promise<void> {
+  ctx.stats.attempted += 1;
+
+  const baseUpper = base.toUpperCase();
+  const quoteUpper = quote.toUpperCase();
+  const pairKey = fxKey(baseUpper, quoteUpper);
+
+  if (!ctx.fxCache.has(pairKey)) {
+    ctx.fxCache.set(pairKey, await loadFxCache(ctx.store, baseUpper, quoteUpper));
+  }
+
+  const pairCache = ctx.fxCache.get(pairKey);
+  if (pairCache === undefined) {
+    return;
+  }
+
+  const cached = resolveCachedFx(pairCache, date, ctx.lookbackDays);
+  if (cached !== null) {
+    if (cached.exact) {
+      ctx.stats.existing += 1;
+    } else {
+      ctx.stats.lookback += 1;
+    }
+    return;
+  }
+
+  try {
+    const fetched = await ctx.marketData.fxClose(baseUpper, quoteUpper, date);
+    if (fetched.as_of_date === date) {
+      ctx.stats.fetched += 1;
+    } else {
+      ctx.stats.lookback += 1;
+    }
+
+    upsertFxCache(pairCache, fetched);
+  } catch (err) {
+    ctx.stats.missing += 1;
+    ctx.failureCount.count += 1;
+    if (ctx.failures.length < ctx.failureLimit) {
+      ctx.failures.push({
+        kind: 'fx',
+        date,
+        error: errorMessage(err),
+        base: baseUpper,
+        quote: quoteUpper,
+      });
+    }
+  }
+}
+
+/**
+ * Fetch historical prices for assets in scope.
+ *
+ * Mirrors Rust `app::fetch_historical_prices` output shape and semantics.
+ */
+export async function fetchHistoricalPrices(
+  storage: Storage,
+  config: ResolvedConfig,
+  options: PriceHistoryOptions,
+  clock?: Clock,
+): Promise<PriceHistoryOutput> {
+  const effectiveClock = clock ?? new SystemClock();
+
+  const lookbackDaysRaw = options.lookback_days ?? 7;
+  if (!Number.isFinite(lookbackDaysRaw) || lookbackDaysRaw < 0) {
+    throw new Error('lookback_days must be a non-negative number');
+  }
+  const lookbackDays = Math.trunc(lookbackDaysRaw);
+
+  const requestDelayMsRaw = options.request_delay_ms ?? 0;
+  if (!Number.isFinite(requestDelayMsRaw) || requestDelayMsRaw < 0) {
+    throw new Error('request_delay_ms must be a non-negative number');
+  }
+  const requestDelayMs = Math.trunc(requestDelayMsRaw);
+  const includeFx = options.include_fx ?? true;
+
+  const { scope, accounts } = await resolvePriceHistoryScope(
+    storage,
+    options.account,
+    options.connection,
+  );
+
+  const assetsByHash = new Map<string, AssetType>();
+  let earliestBalanceDate: string | undefined;
+
+  for (const account of accounts) {
+    const snapshots = await storage.getBalanceSnapshots(account.id);
+    for (const snapshot of snapshots) {
+      const date = formatDateYMD(snapshot.timestamp);
+      if (earliestBalanceDate === undefined || compareYmd(date, earliestBalanceDate) < 0) {
+        earliestBalanceDate = date;
+      }
+      for (const balance of snapshot.balances) {
+        const normalizedAsset = Asset.normalized(balance.asset);
+        assetsByHash.set(Asset.hash(normalizedAsset), normalizedAsset);
+      }
+    }
+  }
+
+  if (assetsByHash.size === 0) {
+    throw new Error('No balances found for selected scope');
+  }
+
+  const startDate =
+    options.start !== undefined
+      ? parseYmdOrThrow(options.start, 'start')
+      : (earliestBalanceDate ?? (() => {
+          throw new Error('No balances found to infer start date');
+        })());
+  const endDate =
+    options.end !== undefined ? parseYmdOrThrow(options.end, 'end') : effectiveClock.today();
+
+  if (compareYmd(startDate, endDate) > 0) {
+    throw new Error('Start date must be on or before end date');
+  }
+
+  const interval = parseHistoryInterval(options.interval ?? 'monthly');
+  const alignedStart = alignStartDate(startDate, interval);
+
+  const targetCurrency = options.currency ?? config.reporting_currency;
+  const targetCurrencyUpper = targetCurrency.toUpperCase();
+
+  const store = new JsonlMarketDataStore(config.data_dir);
+  const marketData = new MarketDataService(store).withLookbackDays(lookbackDays);
+
+  const assetCaches: AssetPriceCache[] = [];
+  for (const asset of assetsByHash.values()) {
+    const assetId = AssetId.fromAsset(asset);
+    assetCaches.push({
+      asset,
+      asset_id: assetId,
+      prices: await loadPriceCache(store, assetId),
+    });
+  }
+
+  assetCaches.sort((a, b) => a.asset_id.asStr().localeCompare(b.asset_id.asStr()));
+
+  const fxCache: FxCache = new Map();
+  if (includeFx) {
+    for (const assetCache of assetCaches) {
+      if (assetCache.asset.type !== 'currency') continue;
+      const base = assetCache.asset.iso_code.toUpperCase();
+      if (base === targetCurrencyUpper) continue;
+      const key = fxKey(base, targetCurrencyUpper);
+      if (!fxCache.has(key)) {
+        fxCache.set(key, await loadFxCache(store, base, targetCurrencyUpper));
+      }
+    }
+  }
+
+  const prices = emptyPriceHistoryStats();
+  const fx = emptyPriceHistoryStats();
+  const failures: PriceHistoryFailure[] = [];
+  const failureCount: FailureCounter = { count: 0 };
+  const failureLimit = 50;
+  const shouldDelayRequests = requestDelayMs > 0;
+
+  const fxCtx: FxRateContext = {
+    marketData,
+    store,
+    fxCache,
+    stats: fx,
+    failures,
+    failureCount,
+    failureLimit,
+    lookbackDays,
+  };
+
+  let current = alignedStart;
+  let points = 0;
+  while (compareYmd(current, endDate) <= 0) {
+    points += 1;
+
+    for (const assetCache of assetCaches) {
+      let shouldDelay = false;
+
+      switch (assetCache.asset.type) {
+        case 'currency': {
+          if (includeFx) {
+            const base = assetCache.asset.iso_code.toUpperCase();
+            if (base !== targetCurrencyUpper) {
+              await ensureFxRate(fxCtx, base, targetCurrencyUpper, current);
+            }
+          }
+          break;
+        }
+
+        case 'equity':
+        case 'crypto': {
+          prices.attempted += 1;
+          const cached = resolveCachedPrice(assetCache.prices, current, lookbackDays);
+          if (cached !== null) {
+            if (cached.exact) {
+              prices.existing += 1;
+            } else {
+              prices.lookback += 1;
+            }
+
+            if (includeFx && cached.point.quote_currency.toUpperCase() !== targetCurrencyUpper) {
+              await ensureFxRate(
+                fxCtx,
+                cached.point.quote_currency.toUpperCase(),
+                targetCurrencyUpper,
+                current,
+              );
+            }
+            break;
+          }
+
+          try {
+            const fetched = await marketData.priceClose(assetCache.asset, current);
+            if (fetched.as_of_date === current) {
+              prices.fetched += 1;
+            } else {
+              prices.lookback += 1;
+            }
+            upsertPriceCache(assetCache.prices, fetched);
+            shouldDelay = shouldDelayRequests;
+
+            if (includeFx && fetched.quote_currency.toUpperCase() !== targetCurrencyUpper) {
+              await ensureFxRate(
+                fxCtx,
+                fetched.quote_currency.toUpperCase(),
+                targetCurrencyUpper,
+                current,
+              );
+            }
+          } catch (err) {
+            prices.missing += 1;
+            failureCount.count += 1;
+            if (failures.length < failureLimit) {
+              failures.push({
+                kind: 'price',
+                date: current,
+                error: errorMessage(err),
+                asset_id: assetCache.asset_id.asStr(),
+                asset: assetCache.asset,
+              });
+            }
+            shouldDelay = shouldDelayRequests;
+          }
+
+          break;
+        }
+      }
+
+      if (shouldDelay) {
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, requestDelayMs);
+        });
+      }
+    }
+
+    current = advanceIntervalDate(current, interval);
+  }
+
+  if (config.git.auto_commit) {
+    try {
+      await tryAutoCommit(config.data_dir, 'market data fetch', config.git.auto_push);
+    } catch {
+      // Keep command behavior best-effort for auto-commit.
+    }
+  }
+
+  return {
+    scope,
+    currency: targetCurrency,
+    interval: intervalAsString(interval),
+    start_date: startDate,
+    end_date: endDate,
+    earliest_balance_date: earliestBalanceDate,
+    days: daysInclusive(startDate, endDate),
+    points,
+    assets: assetCaches.map((cache) => ({ asset: cache.asset, asset_id: cache.asset_id.asStr() })),
+    prices,
+    fx: includeFx ? fx : undefined,
+    failure_count: failureCount.count,
+    failures: failures.length > 0 ? failures : undefined,
+  };
 }
 
 // ---------------------------------------------------------------------------

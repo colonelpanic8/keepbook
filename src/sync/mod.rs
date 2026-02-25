@@ -138,7 +138,8 @@ impl SyncResult {
                             && existing.asset == txn.asset
                             && existing.description == txn.description
                             && existing.status == txn.status
-                            && existing.synchronizer_data == txn.synchronizer_data;
+                            && existing.synchronizer_data == txn.synchronizer_data
+                            && existing.standardized_metadata == txn.standardized_metadata;
                         if unchanged {
                             continue;
                         }

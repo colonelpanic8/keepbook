@@ -10,8 +10,9 @@ use super::{dedupe_transactions_last_write_wins, Storage};
 use crate::credentials::CredentialStore;
 use crate::models::{
     Account, AccountConfig, BalanceSnapshot, Connection, ConnectionConfig, ConnectionState, Id,
-    Transaction,
+    Transaction, TransactionAnnotation, TransactionAnnotationPatch,
 };
+use crate::storage::JsonlCompactionStats;
 
 /// JSON file-based storage implementation.
 ///
@@ -267,6 +268,22 @@ impl JsonFileStorage {
             file.write_all(b"\n").await?;
         }
 
+        Ok(())
+    }
+
+    async fn write_jsonl<T: serde::Serialize>(&self, path: &Path, items: &[T]) -> Result<()> {
+        self.ensure_dir(path).await?;
+
+        let mut content = String::new();
+        for item in items {
+            let line = serde_json::to_string(item).context("Failed to serialize item")?;
+            content.push_str(&line);
+            content.push('\n');
+        }
+
+        fs::write(path, content)
+            .await
+            .with_context(|| format!("Failed to write JSONL file {}", path.display()))?;
         Ok(())
     }
 
@@ -577,6 +594,104 @@ impl JsonFileStorage {
 
         Ok((conn_created, account_created, warnings))
     }
+
+    pub async fn recompact_all_jsonl(&self) -> Result<JsonlCompactionStats> {
+        let account_ids = self.list_dirs(&self.accounts_dir()).await?;
+        let mut stats = JsonlCompactionStats {
+            accounts_processed: account_ids.len(),
+            ..Default::default()
+        };
+
+        for account_id in account_ids {
+            let balances_path = self.balances_file(&account_id)?;
+            if balances_path.exists() {
+                let mut snapshots = self.read_jsonl::<BalanceSnapshot>(&balances_path).await?;
+                stats.balance_snapshots_before += snapshots.len();
+                snapshots.sort_by_key(|s| s.timestamp);
+                stats.balance_snapshots_after += snapshots.len();
+                self.write_jsonl(&balances_path, &snapshots).await?;
+                stats.files_rewritten += 1;
+            }
+
+            let tx_path = self.transactions_file(&account_id)?;
+            if tx_path.exists() {
+                let raw: Vec<Transaction> = self
+                    .read_jsonl::<Transaction>(&tx_path)
+                    .await?
+                    .into_iter()
+                    .map(Transaction::backfill_standardized_metadata)
+                    .collect();
+                stats.transactions_before += raw.len();
+                let mut compacted = dedupe_transactions_last_write_wins(raw);
+                compacted.sort_by(|a, b| {
+                    a.timestamp
+                        .cmp(&b.timestamp)
+                        .then_with(|| a.id.as_str().cmp(b.id.as_str()))
+                });
+                stats.transactions_after += compacted.len();
+                self.write_jsonl(&tx_path, &compacted).await?;
+                stats.files_rewritten += 1;
+            }
+
+            let ann_path = self.transaction_annotations_file(&account_id)?;
+            if ann_path.exists() {
+                let raw = self
+                    .read_jsonl::<TransactionAnnotationPatch>(&ann_path)
+                    .await?;
+                stats.annotation_patches_before += raw.len();
+                let compacted = compact_transaction_annotation_patches(raw);
+                stats.annotation_patches_after += compacted.len();
+                self.write_jsonl(&ann_path, &compacted).await?;
+                stats.files_rewritten += 1;
+            }
+        }
+
+        Ok(stats)
+    }
+}
+
+fn compact_transaction_annotation_patches(
+    patches: Vec<TransactionAnnotationPatch>,
+) -> Vec<TransactionAnnotationPatch> {
+    let mut with_index: Vec<(usize, TransactionAnnotationPatch)> =
+        patches.into_iter().enumerate().collect();
+    with_index.sort_by_key(|(_, p)| p.timestamp);
+
+    let mut by_tx: std::collections::HashMap<
+        Id,
+        (TransactionAnnotation, chrono::DateTime<chrono::Utc>),
+    > = std::collections::HashMap::new();
+
+    for (_, patch) in with_index {
+        let tx_id = patch.transaction_id.clone();
+        let entry = by_tx
+            .entry(tx_id.clone())
+            .or_insert_with(|| (TransactionAnnotation::new(tx_id.clone()), patch.timestamp));
+        patch.apply_to(&mut entry.0);
+        entry.1 = patch.timestamp;
+    }
+
+    let mut out = Vec::new();
+    for (tx_id, (ann, timestamp)) in by_tx {
+        if ann.is_empty() {
+            continue;
+        }
+        out.push(TransactionAnnotationPatch {
+            transaction_id: tx_id,
+            timestamp,
+            description: ann.description.map(Some),
+            note: ann.note.map(Some),
+            category: ann.category.map(Some),
+            tags: ann.tags.map(Some),
+        });
+    }
+
+    out.sort_by(|a, b| {
+        a.timestamp
+            .cmp(&b.timestamp)
+            .then_with(|| a.transaction_id.as_str().cmp(b.transaction_id.as_str()))
+    });
+    out
 }
 
 #[async_trait::async_trait]
@@ -739,7 +854,12 @@ impl Storage for JsonFileStorage {
 
     async fn get_transactions_raw(&self, account_id: &Id) -> Result<Vec<Transaction>> {
         let path = self.transactions_file(account_id)?;
-        self.read_jsonl(&path).await
+        Ok(self
+            .read_jsonl::<Transaction>(&path)
+            .await?
+            .into_iter()
+            .map(Transaction::backfill_standardized_metadata)
+            .collect())
     }
 
     async fn append_transactions(&self, account_id: &Id, txns: &[Transaction]) -> Result<()> {
@@ -813,7 +933,10 @@ mod tests {
     use super::JsonFileStorage;
     use chrono::{TimeZone, Utc};
 
-    use crate::models::{Account, Connection, ConnectionConfig, ConnectionState, Id};
+    use crate::models::{
+        Account, Asset, AssetBalance, BalanceSnapshot, Connection, ConnectionConfig,
+        ConnectionState, Id, Transaction, TransactionAnnotationPatch,
+    };
     use crate::storage::Storage;
 
     #[test]
@@ -906,6 +1029,133 @@ mod tests {
             .map(|c| c.id().to_string())
             .collect();
         assert_eq!(ids, vec!["conn-a".to_string(), "conn-b".to_string()]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn recompact_all_jsonl_compacts_and_sorts_logs() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let storage = JsonFileStorage::new(temp.path());
+        let created_at = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let connection_id = Id::from_string("conn-1");
+        let account_id = Id::from_string("acct-1");
+
+        storage
+            .save_account(&Account::new_with(
+                account_id.clone(),
+                created_at,
+                "Checking",
+                connection_id,
+            ))
+            .await?;
+
+        let older_snapshot = BalanceSnapshot::new(
+            Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap(),
+            vec![AssetBalance::new(Asset::currency("USD"), "10.0")],
+        );
+        let newer_snapshot = BalanceSnapshot::new(
+            Utc.with_ymd_and_hms(2024, 6, 1, 0, 0, 0).unwrap(),
+            vec![AssetBalance::new(Asset::currency("USD"), "20.0")],
+        );
+        storage
+            .append_balance_snapshot(&account_id, &newer_snapshot)
+            .await?;
+        storage
+            .append_balance_snapshot(&account_id, &older_snapshot)
+            .await?;
+
+        let tx_old = Transaction::new("-10.0", Asset::currency("USD"), "old")
+            .with_id(Id::from_string("tx-1"))
+            .with_timestamp(Utc.with_ymd_and_hms(2024, 2, 1, 10, 0, 0).unwrap());
+        let tx_new = Transaction::new("-12.0", Asset::currency("USD"), "new")
+            .with_id(Id::from_string("tx-1"))
+            .with_timestamp(Utc.with_ymd_and_hms(2024, 2, 2, 10, 0, 0).unwrap());
+        let tx_other = Transaction::new("5.0", Asset::currency("USD"), "credit")
+            .with_id(Id::from_string("tx-2"))
+            .with_timestamp(Utc.with_ymd_and_hms(2024, 1, 15, 10, 0, 0).unwrap());
+        storage
+            .append_transactions(&account_id, &[tx_old, tx_new, tx_other])
+            .await?;
+
+        let patch_note = TransactionAnnotationPatch {
+            transaction_id: Id::from_string("tx-anno"),
+            timestamp: Utc.with_ymd_and_hms(2024, 2, 3, 12, 0, 0).unwrap(),
+            description: None,
+            note: Some(Some("memo".to_string())),
+            category: None,
+            tags: None,
+        };
+        let patch_category = TransactionAnnotationPatch {
+            transaction_id: Id::from_string("tx-anno"),
+            timestamp: Utc.with_ymd_and_hms(2024, 2, 4, 12, 0, 0).unwrap(),
+            description: None,
+            note: None,
+            category: Some(Some("food".to_string())),
+            tags: None,
+        };
+        let patch_set_then_clear_a = TransactionAnnotationPatch {
+            transaction_id: Id::from_string("tx-clear"),
+            timestamp: Utc.with_ymd_and_hms(2024, 2, 5, 12, 0, 0).unwrap(),
+            description: Some(Some("temp".to_string())),
+            note: None,
+            category: None,
+            tags: None,
+        };
+        let patch_set_then_clear_b = TransactionAnnotationPatch {
+            transaction_id: Id::from_string("tx-clear"),
+            timestamp: Utc.with_ymd_and_hms(2024, 2, 6, 12, 0, 0).unwrap(),
+            description: Some(None),
+            note: None,
+            category: None,
+            tags: None,
+        };
+        storage
+            .append_transaction_annotation_patches(
+                &account_id,
+                &[
+                    patch_category,
+                    patch_note,
+                    patch_set_then_clear_a,
+                    patch_set_then_clear_b,
+                ],
+            )
+            .await?;
+
+        let stats = storage.recompact_all_jsonl().await?;
+        assert_eq!(stats.accounts_processed, 1);
+        assert_eq!(stats.files_rewritten, 3);
+        assert_eq!(stats.balance_snapshots_before, 2);
+        assert_eq!(stats.balance_snapshots_after, 2);
+        assert_eq!(stats.transactions_before, 3);
+        assert_eq!(stats.transactions_after, 2);
+        assert_eq!(stats.annotation_patches_before, 4);
+        assert_eq!(stats.annotation_patches_after, 1);
+
+        let snapshots = storage.get_balance_snapshots(&account_id).await?;
+        assert_eq!(snapshots.len(), 2);
+        assert!(snapshots[0].timestamp < snapshots[1].timestamp);
+
+        let tx_raw = storage.get_transactions_raw(&account_id).await?;
+        assert_eq!(tx_raw.len(), 2);
+        assert!(tx_raw[0].timestamp <= tx_raw[1].timestamp);
+        assert_eq!(tx_raw[0].id.as_str(), "tx-2");
+        assert_eq!(tx_raw[1].id.as_str(), "tx-1");
+        assert_eq!(tx_raw[1].description, "new");
+
+        let patches = storage
+            .get_transaction_annotation_patches(&account_id)
+            .await?;
+        assert_eq!(patches.len(), 1);
+        assert_eq!(patches[0].transaction_id.as_str(), "tx-anno");
+        assert_eq!(
+            patches[0].note.as_ref().cloned().flatten(),
+            Some("memo".to_string())
+        );
+        assert_eq!(
+            patches[0].category.as_ref().cloned().flatten(),
+            Some("food".to_string())
+        );
+
         Ok(())
     }
 }

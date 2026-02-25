@@ -12,6 +12,7 @@ use crate::models::{
     TransactionAnnotationPatch,
 };
 use anyhow::Result;
+use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 
 /// Storage trait for persisting financial data.
@@ -78,6 +79,18 @@ pub trait Storage: Send + Sync {
     ) -> Result<()>;
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize)]
+pub struct JsonlCompactionStats {
+    pub accounts_processed: usize,
+    pub files_rewritten: usize,
+    pub balance_snapshots_before: usize,
+    pub balance_snapshots_after: usize,
+    pub transactions_before: usize,
+    pub transactions_after: usize,
+    pub annotation_patches_before: usize,
+    pub annotation_patches_after: usize,
+}
+
 /// Filesystem-y operations that only make sense for the JSON file layout.
 #[async_trait::async_trait]
 pub trait SymlinkStorage: Send + Sync {
@@ -88,6 +101,19 @@ pub trait SymlinkStorage: Send + Sync {
 impl SymlinkStorage for JsonFileStorage {
     async fn rebuild_all_symlinks(&self) -> Result<(usize, usize, Vec<String>)> {
         JsonFileStorage::rebuild_all_symlinks(self).await
+    }
+}
+
+/// Filesystem-y maintenance operations for JSONL logs.
+#[async_trait::async_trait]
+pub trait CompactionStorage: Send + Sync {
+    async fn recompact_all_jsonl(&self) -> Result<JsonlCompactionStats>;
+}
+
+#[async_trait::async_trait]
+impl CompactionStorage for JsonFileStorage {
+    async fn recompact_all_jsonl(&self) -> Result<JsonlCompactionStats> {
+        JsonFileStorage::recompact_all_jsonl(self).await
     }
 }
 
@@ -225,7 +251,9 @@ mod tests {
             description: "Test".to_string(),
             status: TransactionStatus::Posted,
             synchronizer_data: serde_json::Value::Object(obj),
+            standardized_metadata: None,
         }
+        .backfill_standardized_metadata()
     }
 
     #[test]

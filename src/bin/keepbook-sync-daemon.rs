@@ -144,6 +144,7 @@ struct KeepbookTrayState {
     last_summary: String,
     history_lines: Vec<String>,
     spending_lines: Vec<String>,
+    transaction_lines: Vec<String>,
 }
 
 impl Default for KeepbookTrayState {
@@ -155,6 +156,7 @@ impl Default for KeepbookTrayState {
             last_summary: "No sync cycle has run yet".to_string(),
             history_lines: vec!["No portfolio history loaded".to_string()],
             spending_lines: vec!["Spending metrics not loaded".to_string()],
+            transaction_lines: vec!["Transactions not loaded".to_string()],
         }
     }
 }
@@ -369,6 +371,38 @@ impl ksni::Tray for KeepbookTray {
 
         // Keep spending metrics as top-level rows (not nested in a submenu).
         items.extend(spending_items);
+
+        let transaction_menu: Vec<MenuItem<Self>> = if self.state.transaction_lines.is_empty() {
+            vec![StandardItem {
+                label: "No recent transactions".to_string(),
+                enabled: false,
+                ..Default::default()
+            }
+            .into()]
+        } else {
+            self.state
+                .transaction_lines
+                .iter()
+                .map(|line| {
+                    StandardItem {
+                        label: line.clone(),
+                        enabled: false,
+                        ..Default::default()
+                    }
+                    .into()
+                })
+                .collect()
+        };
+
+        items.push(
+            SubMenu {
+                label: "Recent Transactions".to_string(),
+                submenu: transaction_menu,
+                ..Default::default()
+            }
+            .into(),
+        );
+
         items.extend([
             MenuItem::Separator,
             StandardItem {
@@ -585,6 +619,7 @@ struct Daemon {
     sync_symlinks: bool,
     history_points: usize,
     spending_windows_days: Vec<u32>,
+    transaction_count: usize,
 }
 
 impl Daemon {
@@ -652,6 +687,108 @@ impl Daemon {
             lines.push("No spending windows configured".to_string());
         }
         state.spending_lines = lines;
+    }
+
+    async fn refresh_transaction_lines(&self, state: &mut KeepbookTrayState) {
+        if self.transaction_count == 0 {
+            state.transaction_lines = vec!["Transaction display disabled".to_string()];
+            return;
+        }
+
+        let result: Result<Vec<String>> = async {
+            let connections = self.storage.list_connections().await?;
+            let accounts = self.storage.list_accounts().await?;
+
+            // Build account_id -> connection name map.
+            let conn_name_by_id: std::collections::HashMap<String, String> = connections
+                .iter()
+                .map(|c| (c.id().to_string(), c.config.name.clone()))
+                .collect();
+            let account_conn_name: std::collections::HashMap<String, String> = accounts
+                .iter()
+                .map(|a| {
+                    let conn_name = conn_name_by_id
+                        .get(&a.connection_id.to_string())
+                        .cloned()
+                        .unwrap_or_else(|| "Unknown".to_string());
+                    (a.id.to_string(), conn_name)
+                })
+                .collect();
+
+            let cutoff = chrono::Utc::now() - chrono::Duration::days(30);
+
+            struct TxRow {
+                timestamp: chrono::DateTime<chrono::Utc>,
+                source: String,
+                amount: String,
+                description: String,
+                asset: keepbook::models::Asset,
+            }
+
+            let mut rows: Vec<TxRow> = Vec::new();
+
+            for account in &accounts {
+                let txns = self.storage.get_transactions(&account.id).await?;
+                let source = account_conn_name
+                    .get(&account.id.to_string())
+                    .cloned()
+                    .unwrap_or_else(|| "Unknown".to_string());
+
+                for tx in txns {
+                    if tx.timestamp < cutoff {
+                        continue;
+                    }
+                    rows.push(TxRow {
+                        timestamp: tx.timestamp,
+                        source: source.clone(),
+                        amount: tx.amount,
+                        description: tx.description,
+                        asset: tx.asset,
+                    });
+                }
+            }
+
+            // Sort newest first.
+            rows.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+            rows.truncate(self.transaction_count);
+
+            let lines: Vec<String> = rows
+                .iter()
+                .map(|row| {
+                    let date = row.timestamp.with_timezone(&chrono::Local).format("%m-%d");
+                    let currency = match &row.asset {
+                        keepbook::models::Asset::Currency { iso_code } => iso_code.as_str(),
+                        keepbook::models::Asset::Equity { ticker, .. } => ticker.as_str(),
+                        keepbook::models::Asset::Crypto { symbol, .. } => symbol.as_str(),
+                    };
+                    let amount = format_tray_currency(&row.amount, currency, &self.config.display);
+                    // Truncate long descriptions (char-safe).
+                    let desc: String = if row.description.chars().count() > 30 {
+                        let truncated: String = row.description.chars().take(27).collect();
+                        format!("{truncated}...")
+                    } else {
+                        row.description.clone()
+                    };
+                    format!("{} | {} | {} | {}", date, row.source, amount, desc)
+                })
+                .collect();
+
+            Ok(lines)
+        }
+        .await;
+
+        match result {
+            Ok(lines) if lines.is_empty() => {
+                state.transaction_lines = vec!["No transactions in last 30 days".to_string()];
+            }
+            Ok(lines) => {
+                state.transaction_lines = lines;
+            }
+            Err(err) => {
+                warn!(error = %err, "unable to refresh tray transaction lines");
+                state.transaction_lines = vec![format!("Transactions unavailable: {err}")];
+            }
+        }
     }
 
     async fn refresh_history_lines(&self, state: &mut KeepbookTrayState) {
@@ -776,6 +913,7 @@ impl Daemon {
 
         self.refresh_history_lines(state).await;
         self.refresh_spending_lines(state).await;
+        self.refresh_transaction_lines(state).await;
         apply_tray_state(tray_handle, state).await;
     }
 
@@ -785,6 +923,7 @@ impl Daemon {
         let mut tray_state = KeepbookTrayState::default();
         self.refresh_history_lines(&mut tray_state).await;
         self.refresh_spending_lines(&mut tray_state).await;
+        self.refresh_transaction_lines(&mut tray_state).await;
 
         let mut tray_handle = match KeepbookTray::new(tray_state.clone(), cmd_tx)
             .assume_sni_available(true)
@@ -883,6 +1022,7 @@ async fn main() -> Result<()> {
     let storage: Arc<dyn Storage> = Arc::new(storage_impl.clone());
     let history_points = cli.history_points.unwrap_or(config.tray.history_points);
     let spending_windows_days = config.tray.spending_windows_days.clone();
+    let transaction_count = config.tray.transaction_count;
 
     let daemon = Daemon {
         storage,
@@ -895,6 +1035,7 @@ async fn main() -> Result<()> {
         sync_symlinks: !cli.no_sync_symlinks,
         history_points,
         spending_windows_days,
+        transaction_count,
     };
 
     daemon.run().await

@@ -67,3 +67,18 @@ export interface Storage {
     patches: TransactionAnnotationPatchType[],
   ): Promise<void>;
 }
+
+export interface JsonlCompactionStats {
+  accounts_processed: number;
+  files_rewritten: number;
+  balance_snapshots_before: number;
+  balance_snapshots_after: number;
+  transactions_before: number;
+  transactions_after: number;
+  annotation_patches_before: number;
+  annotation_patches_after: number;
+}
+
+export interface CompactionStorage {
+  recompactAllJsonl(): Promise<JsonlCompactionStats>;
+}

@@ -103,7 +103,8 @@ function deepEqual(a: unknown, b: unknown): boolean {
 
 /**
  * Check if two transactions are identical for the fields we care about.
- * Matches the Rust logic: timestamp, amount, asset, description, status, synchronizer_data.
+ * Matches the Rust logic: timestamp, amount, asset, description, status,
+ * synchronizer_data, standardized_metadata.
  */
 function transactionsEqual(a: TransactionType, b: TransactionType): boolean {
   return (
@@ -112,7 +113,8 @@ function transactionsEqual(a: TransactionType, b: TransactionType): boolean {
     Asset.equals(a.asset, b.asset) &&
     a.description === b.description &&
     a.status === b.status &&
-    deepEqual(a.synchronizer_data, b.synchronizer_data)
+    deepEqual(a.synchronizer_data, b.synchronizer_data) &&
+    deepEqual(a.standardized_metadata ?? null, b.standardized_metadata ?? null)
   );
 }
 

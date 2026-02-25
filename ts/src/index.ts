@@ -51,12 +51,14 @@ export {
 export {
   Transaction,
   type TransactionType,
+  type TransactionStandardizedMetadata,
   type TransactionStatus,
   type TransactionJSON,
   withTimestamp,
   withStatus,
   withId,
   withSynchronizerData,
+  withStandardizedMetadata,
 } from './models/transaction.js';
 export {
   AssetBalance,

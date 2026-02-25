@@ -43,6 +43,7 @@ function makeConfig(overrides?: Partial<ResolvedConfig>): ResolvedConfig {
     },
     tray: { history_points: 8, spending_windows_days: [7, 30, 90] },
     spending: { ignore_accounts: [], ignore_connections: [], ignore_tags: [] },
+    ignore: { transaction_rules: [] },
     git: { auto_commit: false, auto_push: false, merge_master_before_command: false },
     ...overrides,
   };

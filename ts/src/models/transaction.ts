@@ -9,6 +9,14 @@ import { type AssetType } from './asset.js';
 
 export type TransactionStatus = 'pending' | 'posted' | 'reversed' | 'canceled' | 'failed';
 
+export interface TransactionStandardizedMetadata {
+  merchant_name?: string;
+  merchant_category_code?: string;
+  merchant_category_label?: string;
+  transaction_kind?: string;
+  is_internal_transfer_hint?: boolean;
+}
+
 export interface TransactionType {
   readonly id: Id;
   readonly timestamp: Date;
@@ -18,6 +26,7 @@ export interface TransactionType {
   readonly description: string;
   readonly status: TransactionStatus;
   readonly synchronizer_data: unknown;
+  readonly standardized_metadata?: TransactionStandardizedMetadata | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -32,6 +41,7 @@ export interface TransactionJSON {
   description: string;
   status: TransactionStatus;
   synchronizer_data?: unknown;
+  standardized_metadata?: TransactionStandardizedMetadata;
 }
 
 // ---------------------------------------------------------------------------
@@ -51,7 +61,90 @@ export function withId(tx: TransactionType, id: Id): TransactionType {
 }
 
 export function withSynchronizerData(tx: TransactionType, data: unknown): TransactionType {
-  return { ...tx, synchronizer_data: data };
+  return {
+    ...tx,
+    synchronizer_data: data,
+    standardized_metadata: tx.standardized_metadata ?? deriveStandardizedMetadata(data),
+  };
+}
+
+export function withStandardizedMetadata(
+  tx: TransactionType,
+  metadata: TransactionStandardizedMetadata | null,
+): TransactionType {
+  return { ...tx, standardized_metadata: isEmptyMetadata(metadata) ? null : metadata };
+}
+
+function nonEmpty(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function firstNonEmptyArrayString(value: unknown): string | undefined {
+  if (!Array.isArray(value)) return undefined;
+  for (const item of value) {
+    const s = nonEmpty(item);
+    if (s !== undefined) return s;
+  }
+  return undefined;
+}
+
+function normalizeTransactionKind(raw: string | undefined): string | undefined {
+  if (raw === undefined) return undefined;
+  const value = raw.trim().toLowerCase();
+  if (value === '') return undefined;
+  if (value.includes('purchase')) return 'purchase';
+  if (value.includes('payment')) return 'payment';
+  if (value.includes('transfer')) return 'transfer';
+  if (value.includes('fee')) return 'fee';
+  if (value.includes('interest')) return 'interest';
+  if (value.includes('refund')) return 'refund';
+  if (value.includes('deposit')) return 'deposit';
+  if (value.includes('withdraw')) return 'withdrawal';
+  return undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isEmptyMetadata(value: TransactionStandardizedMetadata | null | undefined): boolean {
+  if (value === null || value === undefined) return true;
+  return Object.keys(value).length === 0;
+}
+
+function deriveStandardizedMetadata(
+  synchronizerData: unknown,
+): TransactionStandardizedMetadata | null {
+  if (!isRecord(synchronizerData)) return null;
+
+  const merchant_name =
+    firstNonEmptyArrayString(synchronizerData.enriched_merchant_names) ??
+    nonEmpty(synchronizerData.merchant_dba_name) ??
+    nonEmpty(synchronizerData.merchant_name);
+  const merchant_category_code = nonEmpty(synchronizerData.merchant_category_code);
+  const merchant_category_label = nonEmpty(synchronizerData.merchant_category_name);
+  const transaction_kind = normalizeTransactionKind(
+    nonEmpty(synchronizerData.etu_standard_transaction_type_group_name) ??
+      nonEmpty(synchronizerData.etu_standard_transaction_type_name),
+  );
+  const is_internal_transfer_hint =
+    transaction_kind === 'transfer' || transaction_kind === 'payment'
+      ? true
+      : transaction_kind === undefined
+        ? undefined
+        : false;
+
+  const metadata: TransactionStandardizedMetadata = {
+    ...(merchant_name !== undefined ? { merchant_name } : {}),
+    ...(merchant_category_code !== undefined ? { merchant_category_code } : {}),
+    ...(merchant_category_label !== undefined ? { merchant_category_label } : {}),
+    ...(transaction_kind !== undefined ? { transaction_kind } : {}),
+    ...(is_internal_transfer_hint !== undefined ? { is_internal_transfer_hint } : {}),
+  };
+
+  return Object.keys(metadata).length > 0 ? metadata : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -92,6 +185,7 @@ export const Transaction = {
       description,
       status: 'posted',
       synchronizer_data: null,
+      standardized_metadata: null,
     };
   },
 
@@ -111,6 +205,9 @@ export const Transaction = {
     if (tx.synchronizer_data !== null) {
       json.synchronizer_data = tx.synchronizer_data;
     }
+    if (!isEmptyMetadata(tx.standardized_metadata)) {
+      json.standardized_metadata = tx.standardized_metadata ?? undefined;
+    }
     return json;
   },
 
@@ -118,6 +215,11 @@ export const Transaction = {
    * Deserialize a transaction from a JSON object.
    */
   fromJSON(json: TransactionJSON): TransactionType {
+    const synchronizerData = json.synchronizer_data ?? null;
+    const standardizedMetadata = isEmptyMetadata(json.standardized_metadata ?? null)
+      ? deriveStandardizedMetadata(synchronizerData)
+      : json.standardized_metadata ?? null;
+
     return {
       id: Id.fromString(json.id),
       timestamp: new Date(json.timestamp),
@@ -126,7 +228,8 @@ export const Transaction = {
       asset: json.asset,
       description: json.description,
       status: json.status,
-      synchronizer_data: json.synchronizer_data ?? null,
+      synchronizer_data: synchronizerData,
+      standardized_metadata: standardizedMetadata,
     };
   },
 } as const;

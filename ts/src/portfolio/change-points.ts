@@ -7,6 +7,7 @@
  */
 
 import { Id } from '../models/id.js';
+import { type AccountType } from '../models/account.js';
 import { type AssetType } from '../models/asset.js';
 import { AssetId } from '../market-data/asset-id.js';
 import { type MarketDataStore } from '../market-data/store.js';
@@ -336,10 +337,10 @@ export async function collectChangePoints(
   let accounts;
   if (options.accountIds && options.accountIds.length > 0) {
     const results = await Promise.all(options.accountIds.map((id) => storage.getAccount(id)));
-    accounts = results.filter((a) => {
-      if (a === null) return false;
-      return storage.getAccountConfig(a.id)?.exclude_from_portfolio !== true;
-    });
+    accounts = results.filter(
+      (a): a is AccountType =>
+        a !== null && storage.getAccountConfig(a.id)?.exclude_from_portfolio !== true,
+    );
   } else {
     const all = await storage.listAccounts();
     accounts = all.filter((a) => storage.getAccountConfig(a.id)?.exclude_from_portfolio !== true);

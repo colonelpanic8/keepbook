@@ -50,6 +50,7 @@ pub struct BalanceOutput {
 pub struct TransactionOutput {
     pub id: String,
     pub account_id: String,
+    pub account_name: String,
     pub timestamp: String,
     pub description: String,
     pub amount: String,

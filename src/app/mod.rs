@@ -1,4 +1,5 @@
 mod config;
+mod ignore_rules;
 mod import;
 mod list;
 mod mutations;
@@ -29,7 +30,7 @@ pub use preflight::{run_preflight, PreflightOptions};
 pub use spending::{spending_report, SpendingReportOptions};
 pub use sync::{
     chase_login, schwab_login, sync_all, sync_all_if_stale, sync_connection,
-    sync_connection_if_stale, sync_prices, sync_symlinks, SyncPricesScopeArg,
+    sync_connection_if_stale, sync_prices, sync_recompact, sync_symlinks, SyncPricesScopeArg,
 };
 pub use types::{
     AccountOutput, AllOutput, AssetInfoOutput, BalanceOutput, ChangePointsOutput, ConnectionOutput,

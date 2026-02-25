@@ -20,7 +20,12 @@ import {
   setTransactionAnnotation,
 } from '../app/mutations.js';
 import { importSchwabTransactions } from '../app/import.js';
-import { portfolioSnapshot, portfolioHistory, portfolioChangePoints } from '../app/portfolio.js';
+import {
+  fetchHistoricalPrices,
+  portfolioSnapshot,
+  portfolioHistory,
+  portfolioChangePoints,
+} from '../app/portfolio.js';
 import { spendingReport } from '../app/spending.js';
 import {
   syncConnection,
@@ -32,6 +37,7 @@ import {
   syncAllIfStale,
   syncAllIfStaleWithOptions,
   syncPrices,
+  syncRecompact,
   syncSymlinks,
   authLogin,
 } from '../app/sync.js';
@@ -177,6 +183,81 @@ program
           status: opts.status,
           direction: opts.direction,
           group_by: opts.groupBy,
+          top: opts.top,
+          lookback_days: opts.lookbackDays,
+          include_noncurrency: opts.includeNoncurrency,
+          include_empty: opts.includeEmpty,
+        });
+      });
+    },
+  );
+
+program
+  .command('spending-categories')
+  .description('Spending report grouped by category')
+  .option(
+    '--period <period>',
+    'period: daily, weekly, monthly, quarterly, yearly, range, custom',
+    'monthly',
+  )
+  .option('--start <date>', 'start date (YYYY-MM-DD)')
+  .option('--end <date>', 'end date (YYYY-MM-DD)')
+  .option('--currency <code>', 'reporting currency (default: from config)')
+  .option('--tz <iana>', 'timezone for bucketing/filtering (IANA name, default: local)')
+  .option('--week-start <day>', 'week start: sunday or monday (default: sunday)')
+  .option('--bucket <dur>', 'bucket size for period=custom (e.g. 14d)')
+  .option('--account <id_or_name>', 'filter to a single account')
+  .option('--connection <id_or_name>', 'filter to a single connection')
+  .option('--status <status>', 'status: posted, posted+pending, all', 'posted')
+  .option('--direction <dir>', 'direction: outflow, inflow, net', 'outflow')
+  .option('--top <n>', 'limit breakdown rows per period', (v: string) => Number.parseInt(v, 10))
+  .option('--lookback-days <n>', 'lookback days for cached close prices / FX (default: 7)', (v: string) =>
+    Number.parseInt(v, 10),
+  )
+  .option(
+    '--include-noncurrency',
+    'include equity/crypto by valuing with cached close prices (default: currency-only)',
+    false,
+  )
+  .option(
+    '--include-empty',
+    'emit empty periods with total 0 (default: sparse output)',
+    false,
+  )
+  .action(
+    async (opts: {
+      period: string;
+      start?: string;
+      end?: string;
+      currency?: string;
+      tz?: string;
+      weekStart?: string;
+      bucket?: string;
+      account?: string;
+      connection?: string;
+      status?: string;
+      direction?: string;
+      top?: number;
+      lookbackDays?: number;
+      includeNoncurrency?: boolean;
+      includeEmpty?: boolean;
+    }) => {
+      await runWithConfig(async (cfg) => {
+        const storage = new JsonFileStorage(cfg.config.data_dir);
+        const marketDataStore = new JsonlMarketDataStore(cfg.config.data_dir);
+        return spendingReport(storage, marketDataStore, cfg.config, {
+          period: opts.period,
+          start: opts.start,
+          end: opts.end,
+          currency: opts.currency,
+          tz: opts.tz,
+          week_start: opts.weekStart,
+          bucket: opts.bucket,
+          account: opts.account,
+          connection: opts.connection,
+          status: opts.status,
+          direction: opts.direction,
+          group_by: 'category',
           top: opts.top,
           lookback_days: opts.lookbackDays,
           include_noncurrency: opts.includeNoncurrency,
@@ -443,19 +524,28 @@ list
 list
   .command('transactions')
   .description('List all transactions')
+  .option('--start <date>', 'start date (YYYY-MM-DD, default: 30 days ago)')
+  .option('--end <date>', 'end date (YYYY-MM-DD, default: today)')
   .option('--sort-by-amount', 'sort transactions by amount (ascending)')
-  .option('--include-ignored', 'include transactions ignored by spending account/connection/tag filters')
-  .action(async (opts: { sortByAmount?: boolean; includeIgnored?: boolean }) => {
+  .option(
+    '--include-ignored',
+    'include transactions ignored by spending/list ignore rules',
+  )
+  .action(
+    async (opts: { start?: string; end?: string; sortByAmount?: boolean; includeIgnored?: boolean }) => {
     await runWithConfig(async (cfg) => {
       const storage = new JsonFileStorage(cfg.config.data_dir);
       return listTransactions(
         storage,
+        opts.start,
+        opts.end,
         cfg.config,
         opts.sortByAmount === true,
         opts.includeIgnored !== true,
       );
     });
-  });
+    },
+  );
 
 list
   .command('price-sources')
@@ -537,6 +627,16 @@ sync
     });
   });
 
+sync
+  .command('recompact')
+  .description('Recompact account JSONL files (dedupe append-only logs and sort chronologically)')
+  .action(async () => {
+    await runWithConfig(async (cfg) => {
+      const storage = new JsonFileStorage(cfg.config.data_dir);
+      return syncRecompact(storage);
+    });
+  });
+
 // ---------------------------------------------------------------------------
 // auth
 // ---------------------------------------------------------------------------
@@ -573,21 +673,47 @@ const marketData = program.command('market-data').description('Market data comma
 
 marketData
   .command('fetch')
-  .description('Fetch market data')
-  .option('--account <id>', 'account ID or name')
-  .option('--connection <id>', 'connection ID or name')
-  .option('--start <date>', 'start date')
-  .option('--end <date>', 'end date')
-  .option('--interval <interval>', 'interval')
-  .option('--lookback-days <days>', 'lookback days')
-  .option('--request-delay-ms <ms>', 'request delay in ms')
-  .option('--currency <code>', 'currency code')
-  .option('--no-fx', 'disable FX conversion')
-  .action(async () => {
-    await runWithConfig(async (_cfg) => {
-      return { success: false, error: 'Market data fetch not yet implemented in TypeScript CLI' };
+  .description('Fetch historical prices for assets in scope')
+  .option('--account <id_or_name>', 'account ID or name (mutually exclusive with --connection)')
+  .option('--connection <id_or_name>', 'connection ID or name (mutually exclusive with --account)')
+  .option('--start <date>', 'start date (YYYY-MM-DD, default: earliest balance date in scope)')
+  .option('--end <date>', 'end date (YYYY-MM-DD, default: today)')
+  .option('--interval <interval>', 'interval: daily, weekly, monthly, yearly/annual', 'monthly')
+  .option('--lookback-days <days>', 'look back this many days when a close price is missing', (v: string) =>
+    Number.parseInt(v, 10),
+  )
+  .option('--request-delay-ms <ms>', 'delay (ms) between price fetches', (v: string) =>
+    Number.parseInt(v, 10),
+  )
+  .option('--currency <code>', 'base currency for FX rates (default: from config)')
+  .option('--no-fx', 'disable FX rate fetching')
+  .action(
+    async (opts: {
+      account?: string;
+      connection?: string;
+      start?: string;
+      end?: string;
+      interval?: string;
+      lookbackDays?: number;
+      requestDelayMs?: number;
+      currency?: string;
+      fx?: boolean;
+    }) => {
+      await runWithConfig(async (cfg) => {
+        const storage = new JsonFileStorage(cfg.config.data_dir);
+        return fetchHistoricalPrices(storage, cfg.config, {
+          account: opts.account,
+          connection: opts.connection,
+          start: opts.start,
+          end: opts.end,
+          interval: opts.interval,
+          lookback_days: opts.lookbackDays,
+          request_delay_ms: opts.requestDelayMs,
+          currency: opts.currency,
+          include_fx: opts.fx,
+        });
+      });
     });
-  });
 
 // ---------------------------------------------------------------------------
 // portfolio
