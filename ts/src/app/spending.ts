@@ -14,7 +14,7 @@ import {
   type TransactionAnnotationType,
 } from '../models/transaction-annotation.js';
 import { decStrRounded } from './format.js';
-import { compileTransactionIgnoreRules, shouldIgnoreTransaction } from './ignore-rules.js';
+import { compileTransactionIgnoreRulesWithSpending, shouldIgnoreTransaction } from './ignore-rules.js';
 import { valueInReportingCurrencyDetailed } from './value.js';
 import type {
   SpendingOutput,
@@ -180,49 +180,24 @@ function normalizeRule(value: string): string | null {
 }
 
 async function ignoredAccountIdsForPortfolioSpending(
-  storage: Storage,
   config: ResolvedConfig,
   accounts: AccountType[],
 ): Promise<Set<string>> {
-  const ignoreAccounts = new Set(
-    config.spending.ignore_accounts.map((v) => normalizeRule(v)).filter((v): v is string => v !== null),
-  );
-  const ignoreConnectionsRaw = new Set(
-    config.spending.ignore_connections.map((v) => normalizeRule(v)).filter((v): v is string => v !== null),
-  );
   const ignoreTags = new Set(
     config.spending.ignore_tags.map((v) => normalizeRule(v)).filter((v): v is string => v !== null),
   );
 
-  if (ignoreAccounts.size === 0 && ignoreConnectionsRaw.size === 0 && ignoreTags.size === 0) {
+  if (ignoreTags.size === 0) {
     return new Set();
-  }
-
-  const ignoreConnections = new Set(ignoreConnectionsRaw);
-  const connections = await storage.listConnections();
-  for (const connection of connections) {
-    const connectionId = connection.state.id.asStr().toLowerCase();
-    const connectionName = connection.config.name.toLowerCase();
-    if (ignoreConnectionsRaw.has(connectionId) || ignoreConnectionsRaw.has(connectionName)) {
-      ignoreConnections.add(connectionId);
-    }
   }
 
   const ignoredAccountIds = new Set<string>();
   for (const account of accounts) {
-    const accountId = account.id.asStr().toLowerCase();
-    const accountName = account.name.toLowerCase();
-    const connectionId = account.connection_id.asStr().toLowerCase();
     const hasIgnoredTag = account.tags
       .map((tag) => normalizeRule(tag))
       .filter((tag): tag is string => tag !== null)
       .some((tag) => ignoreTags.has(tag));
-    if (
-      ignoreAccounts.has(accountId) ||
-      ignoreAccounts.has(accountName) ||
-      ignoreConnections.has(connectionId) ||
-      hasIgnoredTag
-    ) {
+    if (hasIgnoredTag) {
       ignoredAccountIds.add(account.id.asStr());
     }
   }
@@ -391,7 +366,7 @@ export async function spendingReport(
   ]);
   const accountsById = new Map(allAccounts.map((account) => [account.id.asStr(), account]));
   const connectionsById = new Map(allConnections.map((connection) => [connection.state.id.asStr(), connection]));
-  const ignoreRules = compileTransactionIgnoreRules(config.ignore);
+  const ignoreRules = compileTransactionIgnoreRulesWithSpending(config.ignore, config.spending);
 
   // Resolve scope + accounts.
   let scope: SpendingScopeOutput = { type: 'portfolio' };
@@ -407,7 +382,7 @@ export async function spendingReport(
     scope = { type: 'connection', id: conn.state.id.asStr(), name: conn.config.name };
     accountIds = allAccounts.filter((a) => a.connection_id.equals(conn.state.id)).map((a) => a.id.asStr());
   } else {
-    const ignoredIds = await ignoredAccountIdsForPortfolioSpending(storage, config, allAccounts);
+    const ignoredIds = await ignoredAccountIdsForPortfolioSpending(config, allAccounts);
     accountIds = allAccounts.filter((a) => !ignoredIds.has(a.id.asStr())).map((a) => a.id.asStr());
   }
 

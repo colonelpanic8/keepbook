@@ -60,11 +60,23 @@ export interface TrayConfig {
 }
 
 export interface SpendingConfig {
-  /** Ignore matching account IDs or names in default portfolio spending reports. */
+  /**
+   * Ignore matching account IDs or names.
+   *
+   * These are synthesized into transaction ignore rules used by list/spending/TUI views.
+   */
   ignore_accounts: string[];
-  /** Ignore matching connection IDs or names in default portfolio spending reports. */
+  /**
+   * Ignore matching connection IDs or names.
+   *
+   * These are synthesized into transaction ignore rules used by list/spending/TUI views.
+   */
   ignore_connections: string[];
-  /** Ignore accounts containing any matching account tag in default portfolio spending reports. */
+  /**
+   * Ignore accounts containing any matching account tag.
+   *
+   * Used by default portfolio spending scope and by list/TUI ignored-transaction filtering.
+   */
   ignore_tags: string[];
 }
 

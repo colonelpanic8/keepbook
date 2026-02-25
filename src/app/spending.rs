@@ -354,22 +354,9 @@ fn normalized_rule(s: &str) -> Option<String> {
 }
 
 async fn ignored_account_ids_for_portfolio_spending(
-    storage: &dyn Storage,
     config: &ResolvedConfig,
     accounts: &[Account],
 ) -> Result<HashSet<Id>> {
-    let ignore_accounts: HashSet<String> = config
-        .spending
-        .ignore_accounts
-        .iter()
-        .filter_map(|s| normalized_rule(s))
-        .collect();
-    let ignore_connections_raw: HashSet<String> = config
-        .spending
-        .ignore_connections
-        .iter()
-        .filter_map(|s| normalized_rule(s))
-        .collect();
     let ignore_tags: HashSet<String> = config
         .spending
         .ignore_tags
@@ -377,40 +364,19 @@ async fn ignored_account_ids_for_portfolio_spending(
         .filter_map(|s| normalized_rule(s))
         .collect();
 
-    if ignore_accounts.is_empty() && ignore_connections_raw.is_empty() && ignore_tags.is_empty() {
+    if ignore_tags.is_empty() {
         return Ok(HashSet::new());
-    }
-
-    let connections = storage.list_connections().await?;
-    let mut ignore_connections: HashSet<String> = HashSet::new();
-    for value in &ignore_connections_raw {
-        ignore_connections.insert(value.clone());
-    }
-    for conn in connections {
-        let conn_id = conn.id().to_string().to_lowercase();
-        let conn_name = conn.config.name.to_lowercase();
-        if ignore_connections_raw.contains(&conn_id) || ignore_connections_raw.contains(&conn_name)
-        {
-            ignore_connections.insert(conn_id);
-        }
     }
 
     let mut ignored = HashSet::new();
     for account in accounts {
-        let account_id = account.id.to_string().to_lowercase();
-        let account_name = account.name.to_lowercase();
-        let connection_id = account.connection_id.to_string().to_lowercase();
         let has_ignored_tag = account
             .tags
             .iter()
             .filter_map(|tag| normalized_rule(tag))
             .any(|tag| ignore_tags.contains(&tag));
 
-        if ignore_accounts.contains(&account_id)
-            || ignore_accounts.contains(&account_name)
-            || ignore_connections.contains(&connection_id)
-            || has_ignored_tag
-        {
+        if has_ignored_tag {
             ignored.insert(account.id.clone());
         }
     }
@@ -487,8 +453,7 @@ async fn spending_report_with_store(
             )
         } else {
             let accounts = storage.list_accounts().await?;
-            let ignored =
-                ignored_account_ids_for_portfolio_spending(storage, config, &accounts).await?;
+            let ignored = ignored_account_ids_for_portfolio_spending(config, &accounts).await?;
             let ids: Vec<Id> = accounts
                 .into_iter()
                 .filter(|a| !ignored.contains(&a.id))
@@ -521,7 +486,7 @@ async fn spending_report_with_store(
 
     let mut rows: Vec<Row> = Vec::new();
     let mut min_date: Option<NaiveDate> = None;
-    let ignore_matcher = TransactionIgnoreMatcher::from_config(&config.ignore)?;
+    let ignore_matcher = TransactionIgnoreMatcher::from_configs(&config.ignore, &config.spending)?;
     let accounts_by_id: HashMap<Id, Account> = storage
         .list_accounts()
         .await?
@@ -1000,8 +965,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn spending_report_category_uses_annotation_then_metadata_then_uncategorized() -> Result<()>
-    {
+    async fn spending_report_category_uses_annotation_then_metadata_then_uncategorized(
+    ) -> Result<()> {
         let storage = MemoryStorage::new();
         let conn_id = Id::from_string("conn-1");
         let acct_id = Id::from_string("acct-1");

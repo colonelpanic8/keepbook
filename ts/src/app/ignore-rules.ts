@@ -1,4 +1,4 @@
-import type { IgnoreConfig, TransactionIgnoreRule } from '../config.js';
+import type { IgnoreConfig, SpendingConfig, TransactionIgnoreRule } from '../config.js';
 
 export type TransactionIgnoreInput = {
   account_id: string;
@@ -9,6 +9,12 @@ export type TransactionIgnoreInput = {
   description: string;
   status: string;
   amount: string;
+};
+
+const EMPTY_SPENDING_CONFIG: SpendingConfig = {
+  ignore_accounts: [],
+  ignore_connections: [],
+  ignore_tags: [],
 };
 
 type CompiledTransactionIgnoreRule = {
@@ -77,7 +83,48 @@ function compileRule(ruleIndex: number, rule: TransactionIgnoreRule): CompiledTr
 }
 
 export function compileTransactionIgnoreRules(config: IgnoreConfig): CompiledTransactionIgnoreRule[] {
-  return config.transaction_rules.map((rule, idx) => compileRule(idx, rule));
+  return compileTransactionIgnoreRulesWithSpending(config, EMPTY_SPENDING_CONFIG);
+}
+
+function escapeRegexLiteral(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function exactCaseInsensitivePattern(raw: string): string | undefined {
+  const trimmed = raw.trim();
+  if (trimmed === '') return undefined;
+  return `(?i)^${escapeRegexLiteral(trimmed)}$`;
+}
+
+function synthesizeSpendingIgnoreRules(spending: SpendingConfig): TransactionIgnoreRule[] {
+  const derived: TransactionIgnoreRule[] = [];
+
+  for (const value of spending.ignore_accounts) {
+    const pattern = exactCaseInsensitivePattern(value);
+    if (pattern === undefined) continue;
+    derived.push({ account_id: pattern });
+    derived.push({ account_name: pattern });
+  }
+
+  for (const value of spending.ignore_connections) {
+    const pattern = exactCaseInsensitivePattern(value);
+    if (pattern === undefined) continue;
+    derived.push({ connection_id: pattern });
+    derived.push({ connection_name: pattern });
+  }
+
+  return derived;
+}
+
+export function compileTransactionIgnoreRulesWithSpending(
+  config: IgnoreConfig,
+  spending: SpendingConfig,
+): CompiledTransactionIgnoreRule[] {
+  const combined: TransactionIgnoreRule[] = [
+    ...config.transaction_rules,
+    ...synthesizeSpendingIgnoreRules(spending),
+  ];
+  return combined.map((rule, idx) => compileRule(idx, rule));
 }
 
 function matchField(pattern: RegExp | undefined, value: string): boolean {

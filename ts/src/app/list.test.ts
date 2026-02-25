@@ -721,6 +721,116 @@ describe('listTransactions', () => {
     expect(included).toHaveLength(2);
   });
 
+  it('applies spending ignore_accounts to list transactions', async () => {
+    const storage = new MemoryStorage();
+    const clock = makeClock('2026-02-05T14:30:00Z');
+
+    const acct = Account.newWithGenerator(
+      makeIdGen('acct-1'),
+      clock,
+      'Investor Checking',
+      Id.fromString('conn-1'),
+    );
+    await storage.saveAccount(acct);
+
+    const tx = Transaction.newWithGenerator(
+      makeIdGen('tx-1'),
+      clock,
+      '-500',
+      Asset.currency('USD'),
+      'ACH CHASE CREDIT CRD EPAY',
+    );
+    await storage.appendTransactions(acct.id, [tx]);
+
+    const config = makeConfig({
+      spending: {
+        ignore_accounts: ['Investor Checking'],
+        ignore_connections: [],
+        ignore_tags: [],
+      },
+    });
+
+    const skipped = await listTransactions(storage, '2000-01-01', '2099-12-31', config);
+    expect(skipped).toHaveLength(0);
+
+    const included = await listTransactions(storage, '2000-01-01', '2099-12-31', config, false, false);
+    expect(included).toHaveLength(1);
+  });
+
+  it('applies spending ignore_tags to list transactions', async () => {
+    const storage = new MemoryStorage();
+    const clock = makeClock('2026-02-10T00:00:00Z');
+
+    const base = Account.newWithGenerator(
+      makeIdGen('acct-1'),
+      clock,
+      'Individual',
+      Id.fromString('conn-1'),
+    );
+    const acct = { ...base, tags: ['brokerage'] };
+    await storage.saveAccount(acct);
+
+    const tx = Transaction.newWithGenerator(
+      makeIdGen('tx-1'),
+      clock,
+      '-19883.99',
+      Asset.currency('USD'),
+      'Buy ADBE ADOBE INC',
+    );
+    await storage.appendTransactions(acct.id, [tx]);
+
+    const config = makeConfig({
+      spending: {
+        ignore_accounts: [],
+        ignore_connections: [],
+        ignore_tags: ['brokerage'],
+      },
+    });
+
+    const skipped = await listTransactions(storage, '2000-01-01', '2099-12-31', config);
+    expect(skipped).toHaveLength(0);
+
+    const included = await listTransactions(storage, '2000-01-01', '2099-12-31', config, false, false);
+    expect(included).toHaveLength(1);
+  });
+
+  it('ignores internal transfer hints when skipping ignored transactions', async () => {
+    const storage = new MemoryStorage();
+    const clock = makeClock('2026-02-18T12:00:00Z');
+
+    const acct = Account.newWithGenerator(
+      makeIdGen('acct-1'),
+      clock,
+      'Sapphire Reserve (6395)',
+      Id.fromString('conn-1'),
+    );
+    await storage.saveAccount(acct);
+
+    const base = Transaction.newWithGenerator(
+      makeIdGen('tx-1'),
+      clock,
+      '-4450.62',
+      Asset.currency('USD'),
+      'Payment Thank You - Web',
+    );
+    const tx = {
+      ...base,
+      standardized_metadata: {
+        transaction_kind: 'payment' as const,
+        is_internal_transfer_hint: true,
+      },
+    };
+    await storage.appendTransactions(acct.id, [tx]);
+
+    const config = makeConfig();
+
+    const skipped = await listTransactions(storage, '2000-01-01', '2099-12-31', config);
+    expect(skipped).toHaveLength(0);
+
+    const included = await listTransactions(storage, '2000-01-01', '2099-12-31', config, false, false);
+    expect(included).toHaveLength(1);
+  });
+
   it('includes transactions from multiple accounts', async () => {
     const storage = new MemoryStorage();
     const clock = makeClock('2024-06-15T14:30:00Z');

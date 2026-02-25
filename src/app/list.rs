@@ -184,7 +184,10 @@ pub async fn list_transactions(
     };
 
     let ignore_matcher = if skip_ignored {
-        Some(TransactionIgnoreMatcher::from_config(&config.ignore)?)
+        Some(TransactionIgnoreMatcher::from_configs(
+            &config.ignore,
+            &config.spending,
+        )?)
     } else {
         None
     };
@@ -195,8 +198,35 @@ pub async fn list_transactions(
         .map(|c| (c.id().to_string(), c))
         .collect();
     let mut output = Vec::new();
+    let ignored_account_tags: HashSet<String> = if skip_ignored {
+        config
+            .spending
+            .ignore_tags
+            .iter()
+            .filter_map(|tag| {
+                let trimmed = tag.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_lowercase())
+                }
+            })
+            .collect()
+    } else {
+        HashSet::new()
+    };
 
     for account in accounts {
+        if skip_ignored
+            && !ignored_account_tags.is_empty()
+            && account.tags.iter().any(|tag| {
+                let trimmed = tag.trim();
+                !trimmed.is_empty() && ignored_account_tags.contains(&trimmed.to_lowercase())
+            })
+        {
+            continue;
+        }
+
         let connection = connections_by_id.get(&account.connection_id.to_string());
         let connection_id = account.connection_id.to_string();
         let connection_name = connection
@@ -229,6 +259,14 @@ pub async fn list_transactions(
             let status = format!("{:?}", tx.status).to_lowercase();
 
             if skip_ignored {
+                if tx
+                    .standardized_metadata
+                    .as_ref()
+                    .and_then(|md| md.is_internal_transfer_hint)
+                    .unwrap_or(false)
+                {
+                    continue;
+                }
                 if ignore_matcher.as_ref().is_some_and(|matcher| {
                     matcher.is_match(&TransactionIgnoreInput {
                         account_id: account.id.as_str(),
@@ -268,6 +306,7 @@ pub async fn list_transactions(
                 asset: serde_json::to_value(&tx.asset).unwrap_or_default(),
                 status,
                 annotation,
+                standardized_metadata: tx.standardized_metadata.clone(),
             });
         }
     }
@@ -303,6 +342,7 @@ mod tests {
     use crate::clock::{Clock, FixedClock};
     use crate::models::{
         Account, Asset, FixedIdGenerator, Transaction, TransactionAnnotationPatch,
+        TransactionStandardizedMetadata,
     };
     use crate::storage::MemoryStorage;
     use chrono::{TimeZone, Utc};
@@ -388,8 +428,10 @@ mod tests {
             Id::from_string("tx-3"),
         ]);
         let tx1 = Transaction::new_with_generator(&ids, &clock, "10", Asset::currency("USD"), "A");
-        let tx2 = Transaction::new_with_generator(&ids, &clock, "-2.50", Asset::currency("USD"), "B");
-        let tx3 = Transaction::new_with_generator(&ids, &clock, "1.25", Asset::currency("USD"), "C");
+        let tx2 =
+            Transaction::new_with_generator(&ids, &clock, "-2.50", Asset::currency("USD"), "B");
+        let tx3 =
+            Transaction::new_with_generator(&ids, &clock, "1.25", Asset::currency("USD"), "C");
         storage
             .append_transactions(&account_id, &[tx1, tx2, tx3])
             .await?;
@@ -449,7 +491,9 @@ mod tests {
             Asset::currency("USD"),
             "BALLAST WEB PMTS",
         );
-        storage.append_transactions(&account_id, &[tx1, tx2]).await?;
+        storage
+            .append_transactions(&account_id, &[tx1, tx2])
+            .await?;
 
         let config = ResolvedConfig {
             data_dir: std::path::PathBuf::from("/tmp"),
@@ -495,6 +539,198 @@ mod tests {
         )
         .await?;
         assert_eq!(included.len(), 2);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn list_transactions_applies_spending_account_ignore_rules() -> Result<()> {
+        let storage = MemoryStorage::new();
+        let clock = FixedClock::new(Utc.with_ymd_and_hms(2026, 2, 5, 12, 0, 0).unwrap());
+
+        let account_id = Id::from_string("acct-1");
+        let account = Account::new_with(
+            account_id.clone(),
+            clock.now(),
+            "Investor Checking",
+            Id::from_string("conn-1"),
+        );
+        storage.save_account(&account).await?;
+
+        let ids = FixedIdGenerator::new([Id::from_string("tx-1")]);
+        let tx = Transaction::new_with_generator(
+            &ids,
+            &clock,
+            "-500",
+            Asset::currency("USD"),
+            "ACH CHASE CREDIT CRD EPAY",
+        );
+        storage.append_transactions(&account_id, &[tx]).await?;
+
+        let config = ResolvedConfig {
+            data_dir: std::path::PathBuf::from("/tmp"),
+            reporting_currency: "USD".to_string(),
+            display: crate::config::DisplayConfig::default(),
+            refresh: crate::config::RefreshConfig::default(),
+            tray: crate::config::TrayConfig::default(),
+            spending: crate::config::SpendingConfig {
+                ignore_accounts: vec!["Investor Checking".to_string()],
+                ignore_connections: vec![],
+                ignore_tags: vec![],
+            },
+            ignore: crate::config::IgnoreConfig::default(),
+            git: crate::config::GitConfig::default(),
+        };
+
+        let skipped = list_transactions(
+            &storage,
+            Some("2000-01-01".to_string()),
+            Some("2099-12-31".to_string()),
+            false,
+            true,
+            &config,
+        )
+        .await?;
+        assert!(skipped.is_empty());
+
+        let included = list_transactions(
+            &storage,
+            Some("2000-01-01".to_string()),
+            Some("2099-12-31".to_string()),
+            false,
+            false,
+            &config,
+        )
+        .await?;
+        assert_eq!(included.len(), 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn list_transactions_applies_spending_ignore_tags() -> Result<()> {
+        let storage = MemoryStorage::new();
+        let clock = FixedClock::new(Utc.with_ymd_and_hms(2026, 2, 5, 12, 0, 0).unwrap());
+
+        let account_id = Id::from_string("acct-1");
+        let mut account = Account::new_with(
+            account_id.clone(),
+            clock.now(),
+            "Individual",
+            Id::from_string("conn-1"),
+        );
+        account.tags = vec!["brokerage".to_string()];
+        storage.save_account(&account).await?;
+
+        let ids = FixedIdGenerator::new([Id::from_string("tx-1")]);
+        let tx = Transaction::new_with_generator(
+            &ids,
+            &clock,
+            "-19883.99",
+            Asset::currency("USD"),
+            "Buy ADBE ADOBE INC",
+        );
+        storage.append_transactions(&account_id, &[tx]).await?;
+
+        let config = ResolvedConfig {
+            data_dir: std::path::PathBuf::from("/tmp"),
+            reporting_currency: "USD".to_string(),
+            display: crate::config::DisplayConfig::default(),
+            refresh: crate::config::RefreshConfig::default(),
+            tray: crate::config::TrayConfig::default(),
+            spending: crate::config::SpendingConfig {
+                ignore_accounts: vec![],
+                ignore_connections: vec![],
+                ignore_tags: vec!["brokerage".to_string()],
+            },
+            ignore: crate::config::IgnoreConfig::default(),
+            git: crate::config::GitConfig::default(),
+        };
+
+        let skipped = list_transactions(
+            &storage,
+            Some("2000-01-01".to_string()),
+            Some("2099-12-31".to_string()),
+            false,
+            true,
+            &config,
+        )
+        .await?;
+        assert!(skipped.is_empty());
+
+        let included = list_transactions(
+            &storage,
+            Some("2000-01-01".to_string()),
+            Some("2099-12-31".to_string()),
+            false,
+            false,
+            &config,
+        )
+        .await?;
+        assert_eq!(included.len(), 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn list_transactions_ignores_internal_transfer_hints_when_skipping_ignored() -> Result<()>
+    {
+        let storage = MemoryStorage::new();
+        let clock = FixedClock::new(Utc.with_ymd_and_hms(2026, 2, 18, 12, 0, 0).unwrap());
+
+        let account_id = Id::from_string("acct-1");
+        let account = Account::new_with(
+            account_id.clone(),
+            clock.now(),
+            "Sapphire Reserve (6395)",
+            Id::from_string("conn-1"),
+        );
+        storage.save_account(&account).await?;
+
+        let ids = FixedIdGenerator::new([Id::from_string("tx-1")]);
+        let mut tx = Transaction::new_with_generator(
+            &ids,
+            &clock,
+            "-4450.62",
+            Asset::currency("USD"),
+            "Payment Thank You - Web",
+        );
+        tx.standardized_metadata = Some(TransactionStandardizedMetadata {
+            transaction_kind: Some("payment".to_string()),
+            is_internal_transfer_hint: Some(true),
+            ..TransactionStandardizedMetadata::default()
+        });
+        storage.append_transactions(&account_id, &[tx]).await?;
+
+        let config = ResolvedConfig {
+            data_dir: std::path::PathBuf::from("/tmp"),
+            reporting_currency: "USD".to_string(),
+            display: crate::config::DisplayConfig::default(),
+            refresh: crate::config::RefreshConfig::default(),
+            tray: crate::config::TrayConfig::default(),
+            spending: crate::config::SpendingConfig::default(),
+            ignore: crate::config::IgnoreConfig::default(),
+            git: crate::config::GitConfig::default(),
+        };
+
+        let skipped = list_transactions(
+            &storage,
+            Some("2000-01-01".to_string()),
+            Some("2099-12-31".to_string()),
+            false,
+            true,
+            &config,
+        )
+        .await?;
+        assert!(skipped.is_empty());
+
+        let included = list_transactions(
+            &storage,
+            Some("2000-01-01".to_string()),
+            Some("2099-12-31".to_string()),
+            false,
+            false,
+            &config,
+        )
+        .await?;
+        assert_eq!(included.len(), 1);
         Ok(())
     }
 }

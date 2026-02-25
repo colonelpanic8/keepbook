@@ -76,11 +76,17 @@ impl Default for TrayConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SpendingConfig {
-    /// Ignore matching account IDs or names in default portfolio spending reports.
+    /// Ignore matching account IDs or names.
+    ///
+    /// These are synthesized into transaction ignore rules used by list/spending/TUI views.
     pub ignore_accounts: Vec<String>,
-    /// Ignore matching connection IDs or names in default portfolio spending reports.
+    /// Ignore matching connection IDs or names.
+    ///
+    /// These are synthesized into transaction ignore rules used by list/spending/TUI views.
     pub ignore_connections: Vec<String>,
-    /// Ignore accounts containing any matching account tag in default portfolio spending reports.
+    /// Ignore accounts containing any matching account tag.
+    ///
+    /// Used by default portfolio spending scope and by list/TUI ignored-transaction filtering.
     pub ignore_tags: Vec<String>,
 }
 

@@ -22,14 +22,14 @@ import {
   formatRfc3339,
   formatRfc3339FromEpochNanos,
 } from './format.js';
-import { DEFAULT_IGNORE_CONFIG, type ResolvedConfig } from '../config.js';
+import { DEFAULT_IGNORE_CONFIG, DEFAULT_SPENDING_CONFIG, type ResolvedConfig } from '../config.js';
 import {
   applyTransactionAnnotationPatch,
   isEmptyTransactionAnnotation,
   type TransactionAnnotationType,
 } from '../models/transaction-annotation.js';
 import { valueInReportingCurrencyBestEffort } from './value.js';
-import { compileTransactionIgnoreRules, shouldIgnoreTransaction } from './ignore-rules.js';
+import { compileTransactionIgnoreRulesWithSpending, shouldIgnoreTransaction } from './ignore-rules.js';
 import {
   type ConnectionOutput,
   type AccountOutput,
@@ -281,11 +281,32 @@ export async function listTransactions(
   ]);
   const connectionsById = new Map(connections.map((connection) => [connection.state.id.asStr(), connection]));
   const ignoreRules = skipIgnored
-    ? compileTransactionIgnoreRules(config?.ignore ?? DEFAULT_IGNORE_CONFIG)
+    ? compileTransactionIgnoreRulesWithSpending(
+      config?.ignore ?? DEFAULT_IGNORE_CONFIG,
+      config?.spending ?? DEFAULT_SPENDING_CONFIG,
+    )
     : [];
+  const ignoredAccountTags = skipIgnored
+    ? new Set(
+      (config?.spending ?? DEFAULT_SPENDING_CONFIG).ignore_tags
+        .map((tag) => tag.trim().toLowerCase())
+        .filter((tag) => tag.length > 0),
+    )
+    : new Set<string>();
   const result: TransactionOutput[] = [];
 
   for (const account of accounts) {
+    if (
+      skipIgnored &&
+      ignoredAccountTags.size > 0 &&
+      account.tags.some((tag) => {
+        const normalized = tag.trim().toLowerCase();
+        return normalized.length > 0 && ignoredAccountTags.has(normalized);
+      })
+    ) {
+      continue;
+    }
+
     const connection = connectionsById.get(account.connection_id.asStr());
     const connection_id = account.connection_id.asStr();
     const connection_name = connection?.config.name ?? '';
@@ -304,6 +325,9 @@ export async function listTransactions(
 
     for (const tx of transactions) {
       if (tx.timestamp < startDate || tx.timestamp > endDate) continue;
+      if (skipIgnored && tx.standardized_metadata?.is_internal_transfer_hint === true) {
+        continue;
+      }
       if (
         skipIgnored &&
         shouldIgnoreTransaction(ignoreRules, {
