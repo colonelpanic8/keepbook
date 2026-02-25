@@ -433,6 +433,7 @@ export async function spendingReport(
 
     for (const tx of txns) {
       if (!includeStatus(tx.status, status)) continue;
+      if (tx.standardized_metadata?.is_internal_transfer_hint === true) continue;
       if (
         shouldIgnoreTransaction(ignoreRules, {
           account_id: account.id.asStr(),

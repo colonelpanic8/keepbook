@@ -38,6 +38,24 @@ impl TransactionStandardizedMetadata {
             && self.transaction_kind.is_none()
             && self.is_internal_transfer_hint.is_none()
     }
+
+    fn fill_missing_from(&mut self, other: TransactionStandardizedMetadata) {
+        if self.merchant_name.is_none() {
+            self.merchant_name = other.merchant_name;
+        }
+        if self.merchant_category_code.is_none() {
+            self.merchant_category_code = other.merchant_category_code;
+        }
+        if self.merchant_category_label.is_none() {
+            self.merchant_category_label = other.merchant_category_label;
+        }
+        if self.transaction_kind.is_none() {
+            self.transaction_kind = other.transaction_kind;
+        }
+        if self.is_internal_transfer_hint.is_none() {
+            self.is_internal_transfer_hint = other.is_internal_transfer_hint;
+        }
+    }
 }
 
 /// A financial transaction. Stored in monthly JSONL files.
@@ -100,10 +118,7 @@ impl Transaction {
 
     pub fn with_synchronizer_data(mut self, data: serde_json::Value) -> Self {
         self.synchronizer_data = data;
-        if self.standardized_metadata.is_none() {
-            self.standardized_metadata =
-                derive_standardized_metadata_from_synchronizer_data(&self.synchronizer_data);
-        }
+        self.merge_backfilled_standardized_metadata();
         self
     }
 
@@ -113,11 +128,20 @@ impl Transaction {
     }
 
     pub fn backfill_standardized_metadata(mut self) -> Self {
-        if self.standardized_metadata.is_none() {
-            self.standardized_metadata =
-                derive_standardized_metadata_from_synchronizer_data(&self.synchronizer_data);
-        }
+        self.merge_backfilled_standardized_metadata();
         self
+    }
+
+    fn merge_backfilled_standardized_metadata(&mut self) {
+        let Some(derived) =
+            derive_standardized_metadata_from_synchronizer_data(&self.synchronizer_data)
+        else {
+            return;
+        };
+        match self.standardized_metadata.as_mut() {
+            Some(existing) => existing.fill_missing_from(derived),
+            None => self.standardized_metadata = Some(derived),
+        }
     }
 }
 
@@ -305,6 +329,38 @@ mod tests {
         );
 
         let md = tx.standardized_metadata.expect("expected metadata");
+        assert_eq!(
+            md.merchant_category_label.as_deref(),
+            Some("Food And Drink")
+        );
+    }
+
+    #[test]
+    fn backfill_standardized_metadata_merges_missing_fields_when_present() {
+        let tx = Transaction {
+            id: Id::from_string("tx-1"),
+            timestamp: Utc.with_ymd_and_hms(2026, 2, 5, 12, 0, 0).unwrap(),
+            amount: "-10".to_string(),
+            asset: Asset::currency("USD"),
+            description: "Test".to_string(),
+            status: TransactionStatus::Posted,
+            synchronizer_data: serde_json::json!({
+                "merchant_category_code": "5814",
+                "etu_standard_expense_category_code": "FOOD_AND_DRINK",
+            }),
+            standardized_metadata: Some(TransactionStandardizedMetadata {
+                merchant_name: Some("Existing Merchant".to_string()),
+                merchant_category_code: None,
+                merchant_category_label: None,
+                transaction_kind: None,
+                is_internal_transfer_hint: None,
+            }),
+        }
+        .backfill_standardized_metadata();
+
+        let md = tx.standardized_metadata.expect("expected metadata");
+        assert_eq!(md.merchant_name.as_deref(), Some("Existing Merchant"));
+        assert_eq!(md.merchant_category_code.as_deref(), Some("5814"));
         assert_eq!(
             md.merchant_category_label.as_deref(),
             Some("Food And Drink")

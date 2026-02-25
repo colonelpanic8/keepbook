@@ -61,10 +61,11 @@ export function withId(tx: TransactionType, id: Id): TransactionType {
 }
 
 export function withSynchronizerData(tx: TransactionType, data: unknown): TransactionType {
+  const derived = deriveStandardizedMetadata(data);
   return {
     ...tx,
     synchronizer_data: data,
-    standardized_metadata: tx.standardized_metadata ?? deriveStandardizedMetadata(data),
+    standardized_metadata: mergeStandardizedMetadata(tx.standardized_metadata ?? null, derived),
   };
 }
 
@@ -163,6 +164,31 @@ function deriveStandardizedMetadata(
   return Object.keys(metadata).length > 0 ? metadata : null;
 }
 
+function mergeStandardizedMetadata(
+  existing: TransactionStandardizedMetadata | null | undefined,
+  derived: TransactionStandardizedMetadata | null,
+): TransactionStandardizedMetadata | null {
+  const left = isEmptyMetadata(existing) ? null : existing ?? null;
+  if (left === null) return derived;
+  if (derived === null) return left;
+
+  const merchant_name = left.merchant_name ?? derived.merchant_name;
+  const merchant_category_code = left.merchant_category_code ?? derived.merchant_category_code;
+  const merchant_category_label = left.merchant_category_label ?? derived.merchant_category_label;
+  const transaction_kind = left.transaction_kind ?? derived.transaction_kind;
+  const is_internal_transfer_hint =
+    left.is_internal_transfer_hint ?? derived.is_internal_transfer_hint;
+
+  const merged: TransactionStandardizedMetadata = {
+    ...(merchant_name !== undefined ? { merchant_name } : {}),
+    ...(merchant_category_code !== undefined ? { merchant_category_code } : {}),
+    ...(merchant_category_label !== undefined ? { merchant_category_label } : {}),
+    ...(transaction_kind !== undefined ? { transaction_kind } : {}),
+    ...(is_internal_transfer_hint !== undefined ? { is_internal_transfer_hint } : {}),
+  };
+  return Object.keys(merged).length > 0 ? merged : null;
+}
+
 // ---------------------------------------------------------------------------
 // Transaction namespace (factory functions + serialization)
 // ---------------------------------------------------------------------------
@@ -232,9 +258,10 @@ export const Transaction = {
    */
   fromJSON(json: TransactionJSON): TransactionType {
     const synchronizerData = json.synchronizer_data ?? null;
-    const standardizedMetadata = isEmptyMetadata(json.standardized_metadata ?? null)
-      ? deriveStandardizedMetadata(synchronizerData)
-      : json.standardized_metadata ?? null;
+    const standardizedMetadata = mergeStandardizedMetadata(
+      json.standardized_metadata ?? null,
+      deriveStandardizedMetadata(synchronizerData),
+    );
 
     return {
       id: Id.fromString(json.id),

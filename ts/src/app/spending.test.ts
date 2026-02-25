@@ -271,4 +271,39 @@ describe('spendingReport', () => {
     expect(out.total).toBe('2000');
     expect(out.transaction_count).toBe(1);
   });
+
+  it('ignores internal transfer hints in spending rows', async () => {
+    const storage = new MemoryStorage();
+    const cfg = makeConfig();
+
+    const acctId = Id.fromString('acct-1');
+    const connId = Id.fromString('conn-1');
+    await storage.saveAccount(
+      Account.newWith(acctId, new Date('2026-01-01T00:00:00Z'), 'Sapphire Reserve (6395)', connId),
+    );
+
+    const clock = new FixedClock(new Date('2026-02-18T12:00:00Z'));
+    const ids = new FixedIdGenerator([Id.fromString('tx-pay'), Id.fromString('tx-food')]);
+    const txPayment = withStandardizedMetadata(
+      Transaction.newWithGenerator(ids, clock, '-4450.62', Asset.currency('USD'), 'Payment Thank You - Web'),
+      { transaction_kind: 'payment', is_internal_transfer_hint: true },
+    );
+    const txFood = Transaction.newWithGenerator(ids, clock, '-25', Asset.currency('USD'), 'Bay Padel LLC');
+    await storage.appendTransactions(acctId, [txPayment, txFood]);
+
+    const out = await spendingReport(storage, new NullMarketDataStore(), cfg, {
+      period: 'monthly',
+      start: '2026-02-01',
+      end: '2026-02-28',
+      tz: 'UTC',
+      account: 'acct-1',
+      status: 'posted',
+      direction: 'outflow',
+      group_by: 'none',
+      lookback_days: 7,
+    });
+
+    expect(out.total).toBe('25');
+    expect(out.transaction_count).toBe(1);
+  });
 });
