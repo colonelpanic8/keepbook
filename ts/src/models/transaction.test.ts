@@ -120,6 +120,22 @@ describe('Transaction', () => {
       });
     });
 
+    it('withSynchronizerData merges missing metadata fields from synchronizer data', () => {
+      const withExistingMetadata = withStandardizedMetadata(baseTx, {
+        merchant_name: 'Existing Merchant',
+      });
+      const modified = withSynchronizerData(withExistingMetadata, {
+        merchant_category_code: '5814',
+        etu_standard_expense_category_code: 'FOOD_AND_DRINK',
+      });
+
+      expect(modified.standardized_metadata).toEqual({
+        merchant_name: 'Existing Merchant',
+        merchant_category_code: '5814',
+        merchant_category_label: 'Food And Drink',
+      });
+    });
+
     it('withStandardizedMetadata sets explicit metadata', () => {
       const modified = withStandardizedMetadata(baseTx, {
         merchant_name: 'Test Merchant',
@@ -183,6 +199,30 @@ describe('Transaction', () => {
       expect(parsed.standardized_metadata).toEqual({
         merchant_name: 'Coffee Shop',
         merchant_category_code: '5814',
+      });
+    });
+
+    it('backfills missing standardized metadata fields from synchronizer_data', () => {
+      const parsed = Transaction.fromJSON({
+        id: 'test-tx-id',
+        timestamp: '2024-03-20T14:00:00.000Z',
+        amount: '42.00',
+        asset: { type: 'currency', iso_code: 'USD' },
+        description: 'Coffee',
+        status: 'posted',
+        synchronizer_data: {
+          merchant_category_code: '5814',
+          etu_standard_expense_category_code: 'FOOD_AND_DRINK',
+        },
+        standardized_metadata: {
+          merchant_name: 'Existing Merchant',
+        },
+      });
+
+      expect(parsed.standardized_metadata).toEqual({
+        merchant_name: 'Existing Merchant',
+        merchant_category_code: '5814',
+        merchant_category_label: 'Food And Drink',
       });
     });
 
