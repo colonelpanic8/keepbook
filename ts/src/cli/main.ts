@@ -93,10 +93,7 @@ program
   .version('0.1.0')
   .option('-c, --config <path>', 'path to config file')
   .option('--git-merge-master', 'merge origin/master before executing the command')
-  .option(
-    '--skip-git-merge-master',
-    'skip merging origin/master even if enabled in config',
-  );
+  .option('--skip-git-merge-master', 'skip merging origin/master even if enabled in config');
 
 // ---------------------------------------------------------------------------
 // config
@@ -135,19 +132,17 @@ program
   .option('--direction <dir>', 'direction: outflow, inflow, net', 'outflow')
   .option('--group-by <mode>', 'grouping: none, category, merchant, account, tag', 'none')
   .option('--top <n>', 'limit breakdown rows per period', (v: string) => Number.parseInt(v, 10))
-  .option('--lookback-days <n>', 'lookback days for cached close prices / FX (default: 7)', (v: string) =>
-    Number.parseInt(v, 10),
+  .option(
+    '--lookback-days <n>',
+    'lookback days for cached close prices / FX (default: 7)',
+    (v: string) => Number.parseInt(v, 10),
   )
   .option(
     '--include-noncurrency',
     'include equity/crypto by valuing with cached close prices (default: currency-only)',
     false,
   )
-  .option(
-    '--include-empty',
-    'emit empty periods with total 0 (default: sparse output)',
-    false,
-  )
+  .option('--include-empty', 'emit empty periods with total 0 (default: sparse output)', false)
   .action(
     async (opts: {
       period: string;
@@ -211,19 +206,17 @@ program
   .option('--status <status>', 'status: posted, posted+pending, all', 'posted')
   .option('--direction <dir>', 'direction: outflow, inflow, net', 'outflow')
   .option('--top <n>', 'limit breakdown rows per period', (v: string) => Number.parseInt(v, 10))
-  .option('--lookback-days <n>', 'lookback days for cached close prices / FX (default: 7)', (v: string) =>
-    Number.parseInt(v, 10),
+  .option(
+    '--lookback-days <n>',
+    'lookback days for cached close prices / FX (default: 7)',
+    (v: string) => Number.parseInt(v, 10),
   )
   .option(
     '--include-noncurrency',
     'include equity/crypto by valuing with cached close prices (default: currency-only)',
     false,
   )
-  .option(
-    '--include-empty',
-    'emit empty periods with total 0 (default: sparse output)',
-    false,
-  )
+  .option('--include-empty', 'emit empty periods with total 0 (default: sparse output)', false)
   .action(
     async (opts: {
       period: string;
@@ -371,11 +364,7 @@ set
   .option('--balance-backfill <policy>', 'balance backfill policy: none, zero, carry_earliest')
   .option('--clear-balance-backfill', 'clear balance backfill policy override')
   .action(
-    async (opts: {
-      account: string;
-      balanceBackfill?: string;
-      clearBalanceBackfill?: boolean;
-    }) => {
+    async (opts: { account: string; balanceBackfill?: string; clearBalanceBackfill?: boolean }) => {
       await runWithConfig(async (cfg) => {
         const storage = new JsonFileStorage(cfg.config.data_dir);
         const result = await setAccountConfig(storage, opts.account, {
@@ -429,22 +418,17 @@ set
     }) => {
       await runWithConfig(async (cfg) => {
         const storage = new JsonFileStorage(cfg.config.data_dir);
-        const result = await setTransactionAnnotation(
-          storage,
-          opts.account,
-          opts.transaction,
-          {
-            description: opts.description,
-            clear_description: opts.clearDescription,
-            note: opts.note,
-            clear_note: opts.clearNote,
-            category: opts.category,
-            clear_category: opts.clearCategory,
-            tags: opts.tag,
-            tags_empty: opts.tagsEmpty,
-            clear_tags: opts.clearTags,
-          },
-        );
+        const result = await setTransactionAnnotation(storage, opts.account, opts.transaction, {
+          description: opts.description,
+          clear_description: opts.clearDescription,
+          note: opts.note,
+          clear_note: opts.clearNote,
+          category: opts.category,
+          clear_category: opts.clearCategory,
+          tags: opts.tag,
+          tags_empty: opts.tagsEmpty,
+          clear_tags: opts.clearTags,
+        });
         if ((result as { success?: boolean }).success && cfg.config.git.auto_commit) {
           await tryAutoCommit(
             cfg.config.data_dir,
@@ -527,23 +511,25 @@ list
   .option('--start <date>', 'start date (YYYY-MM-DD, default: 30 days ago)')
   .option('--end <date>', 'end date (YYYY-MM-DD, default: today)')
   .option('--sort-by-amount', 'sort transactions by amount (ascending)')
-  .option(
-    '--include-ignored',
-    'include transactions ignored by spending/list ignore rules',
-  )
+  .option('--include-ignored', 'include transactions ignored by spending/list ignore rules')
   .action(
-    async (opts: { start?: string; end?: string; sortByAmount?: boolean; includeIgnored?: boolean }) => {
-    await runWithConfig(async (cfg) => {
-      const storage = new JsonFileStorage(cfg.config.data_dir);
-      return listTransactions(
-        storage,
-        opts.start,
-        opts.end,
-        cfg.config,
-        opts.sortByAmount === true,
-        opts.includeIgnored !== true,
-      );
-    });
+    async (opts: {
+      start?: string;
+      end?: string;
+      sortByAmount?: boolean;
+      includeIgnored?: boolean;
+    }) => {
+      await runWithConfig(async (cfg) => {
+        const storage = new JsonFileStorage(cfg.config.data_dir);
+        return listTransactions(
+          storage,
+          opts.start,
+          opts.end,
+          cfg.config,
+          opts.sortByAmount === true,
+          opts.includeIgnored !== true,
+        );
+      });
     },
   );
 
@@ -564,6 +550,29 @@ list
       const storage = new JsonFileStorage(cfg.config.data_dir);
       const marketDataStore = new JsonlMarketDataStore(cfg.config.data_dir);
       return listAll(storage, cfg.config, marketDataStore);
+    });
+  });
+
+// ---------------------------------------------------------------------------
+// tui
+// ---------------------------------------------------------------------------
+
+program
+  .command('tui')
+  .description('Interactive terminal interface')
+  .option('--view <view>', 'initial view: transactions|net-worth', 'transactions')
+  .option(
+    '--net-worth-interval <interval>',
+    'net-worth update interval: full|hourly|daily|weekly|monthly|yearly',
+    'daily',
+  )
+  .action(async (_opts: { view?: string; netWorthInterval?: string }) => {
+    await run(async () => {
+      return {
+        success: false,
+        error:
+          'The TUI is currently implemented in the Rust CLI only. Use the Rust keepbook binary for `tui`.',
+      };
     });
   });
 
@@ -679,8 +688,10 @@ marketData
   .option('--start <date>', 'start date (YYYY-MM-DD, default: earliest balance date in scope)')
   .option('--end <date>', 'end date (YYYY-MM-DD, default: today)')
   .option('--interval <interval>', 'interval: daily, weekly, monthly, yearly/annual', 'monthly')
-  .option('--lookback-days <days>', 'look back this many days when a close price is missing', (v: string) =>
-    Number.parseInt(v, 10),
+  .option(
+    '--lookback-days <days>',
+    'look back this many days when a close price is missing',
+    (v: string) => Number.parseInt(v, 10),
   )
   .option('--request-delay-ms <ms>', 'delay (ms) between price fetches', (v: string) =>
     Number.parseInt(v, 10),
@@ -713,7 +724,8 @@ marketData
           include_fx: opts.fx,
         });
       });
-    });
+    },
+  );
 
 // ---------------------------------------------------------------------------
 // portfolio

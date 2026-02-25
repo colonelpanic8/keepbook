@@ -27,3 +27,6 @@ pub mod staleness;
 
 #[cfg(feature = "sync")]
 pub mod sync;
+
+#[cfg(feature = "tui")]
+pub mod tui;

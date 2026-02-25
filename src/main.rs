@@ -121,6 +121,17 @@ enum Command {
     #[command(subcommand)]
     Portfolio(PortfolioCommand),
 
+    /// Interactive terminal interface
+    Tui {
+        /// Initial view to open when starting the TUI
+        #[arg(long, value_enum, default_value = "transactions")]
+        view: TuiViewArg,
+
+        /// Granularity of net-worth updates shown in the net-worth view
+        #[arg(long, value_enum, default_value = "daily")]
+        net_worth_interval: NetWorthIntervalArg,
+    },
+
     /// Spending reports based on transaction logs
     Spending {
         /// Period granularity: daily, weekly, monthly, quarterly, yearly, range, custom
@@ -436,6 +447,44 @@ impl From<TransactionsModeArg> for TransactionSyncMode {
         match value {
             TransactionsModeArg::Auto => TransactionSyncMode::Auto,
             TransactionsModeArg::Full => TransactionSyncMode::Full,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum TuiViewArg {
+    Transactions,
+    NetWorth,
+}
+
+impl From<TuiViewArg> for keepbook::tui::TuiView {
+    fn from(value: TuiViewArg) -> Self {
+        match value {
+            TuiViewArg::Transactions => keepbook::tui::TuiView::Transactions,
+            TuiViewArg::NetWorth => keepbook::tui::TuiView::NetWorth,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum NetWorthIntervalArg {
+    Full,
+    Hourly,
+    Daily,
+    Weekly,
+    Monthly,
+    Yearly,
+}
+
+impl From<NetWorthIntervalArg> for keepbook::tui::NetWorthInterval {
+    fn from(value: NetWorthIntervalArg) -> Self {
+        match value {
+            NetWorthIntervalArg::Full => keepbook::tui::NetWorthInterval::Full,
+            NetWorthIntervalArg::Hourly => keepbook::tui::NetWorthInterval::Hourly,
+            NetWorthIntervalArg::Daily => keepbook::tui::NetWorthInterval::Daily,
+            NetWorthIntervalArg::Weekly => keepbook::tui::NetWorthInterval::Weekly,
+            NetWorthIntervalArg::Monthly => keepbook::tui::NetWorthInterval::Monthly,
+            NetWorthIntervalArg::Yearly => keepbook::tui::NetWorthInterval::Yearly,
         }
     }
 }
@@ -929,16 +978,15 @@ async fn main() -> Result<()> {
                 sort_by_amount,
                 include_ignored,
             } => {
-                let transactions =
-                    app::list_transactions(
-                        storage_arc.as_ref(),
-                        start,
-                        end,
-                        sort_by_amount,
-                        !include_ignored,
-                        &config,
-                    )
-                    .await?;
+                let transactions = app::list_transactions(
+                    storage_arc.as_ref(),
+                    start,
+                    end,
+                    sort_by_amount,
+                    !include_ignored,
+                    &config,
+                )
+                .await?;
                 println!("{}", serde_json::to_string_pretty(&transactions)?);
             }
 
@@ -947,6 +995,21 @@ async fn main() -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&output)?);
             }
         },
+
+        Some(Command::Tui {
+            view,
+            net_worth_interval,
+        }) => {
+            keepbook::tui::run_tui(
+                storage_arc.clone(),
+                &config,
+                keepbook::tui::TuiOptions {
+                    start_view: view.into(),
+                    net_worth_interval: net_worth_interval.into(),
+                },
+            )
+            .await?;
+        }
 
         Some(Command::Portfolio(portfolio_cmd)) => match portfolio_cmd {
             PortfolioCommand::Snapshot {

@@ -62,7 +62,7 @@ cli = [
 
 # Fine-grained feature gates for consumers that want a subset.
 app = []
-tui = ["dep:dialoguer"]
+tui = ["app", "config", "dep:dialoguer", "dep:ratatui", "dep:crossterm"]
 config = []
 credentials = []
 git = []
@@ -116,6 +116,8 @@ anyhow = "1"
 # CLI
 clap = { version = "4", features = ["derive"], optional = true }
 dialoguer = { version = "0.11", optional = true }
+ratatui = { version = "0.29", optional = true }
+crossterm = { version = "0.28", optional = true }
 
 # For reading pass credentials
 secrecy = "0.10"
