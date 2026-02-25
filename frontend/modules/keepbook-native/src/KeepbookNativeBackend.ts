@@ -1,4 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { AsyncStorageStorage } from './AsyncStorageStorage';
+import { AsyncStorageMarketDataStore } from './AsyncStorageMarketDataStore';
+import { portfolioHistoryNative } from './portfolioHistoryNative';
+import { spendingReport } from '@keepbook/app/spending';
 
 type ConnectionSummary = {
   id: string;
@@ -37,6 +41,20 @@ export interface KeepbookNativeModuleLike {
     privateKeyPem: string,
     branch: string,
     authToken: string,
+  ): Promise<string>;
+  portfolioHistory(
+    dataDir: string,
+    start: string | null,
+    end: string | null,
+    granularity: string | null,
+  ): Promise<string>;
+  spending(
+    dataDir: string,
+    start: string | null,
+    end: string | null,
+    period: string | null,
+    groupBy: string | null,
+    direction: string | null,
   ): Promise<string>;
 }
 
@@ -194,6 +212,43 @@ async function fetchRepoFile(opts: {
     return fetchGitHubTextOptional({ owner, name, branch, path, authToken: token });
   }
   return fetchTextOptional(`${rawBase}/${path}`, undefined);
+}
+
+const MS_PER_HOUR = 60 * 60 * 1000;
+const MS_PER_DAY = 24 * MS_PER_HOUR;
+
+/**
+ * Build a minimal ResolvedConfig compatible with the TS library.
+ * The shape matches `ResolvedConfig` from `ts/src/config.ts` without
+ * importing the module (which would pull in `node:path`).
+ */
+function buildConfig(dataDir: string) {
+  return {
+    data_dir: dataDir,
+    reporting_currency: 'USD',
+    display: {} as Record<string, unknown>,
+    refresh: {
+      balance_staleness: 14 * MS_PER_DAY,
+      price_staleness: 24 * MS_PER_HOUR,
+    },
+    tray: {
+      history_points: 8,
+      spending_windows_days: [7, 30, 90],
+    },
+    spending: {
+      ignore_accounts: [] as string[],
+      ignore_connections: [] as string[],
+      ignore_tags: [] as string[],
+    },
+    ignore: {
+      transaction_rules: [] as Array<Record<string, unknown>>,
+    },
+    git: {
+      auto_commit: false,
+      auto_push: false,
+      merge_master_before_command: false,
+    },
+  };
 }
 
 const KeepbookNative: KeepbookNativeModuleLike = {
@@ -471,6 +526,69 @@ const KeepbookNative: KeepbookNativeModuleLike = {
       return '';
     } catch (e) {
       return String(e);
+    }
+  },
+
+  async portfolioHistory(
+    dataDir: string,
+    start: string | null,
+    end: string | null,
+    granularity: string | null,
+  ): Promise<string> {
+    const effectiveDataDir = (dataDir || 'git').trim() || 'git';
+    try {
+      const storage = new AsyncStorageStorage(effectiveDataDir);
+      const marketDataStore = new AsyncStorageMarketDataStore(effectiveDataDir);
+      const config = buildConfig(effectiveDataDir);
+
+      const result = await portfolioHistoryNative(
+        storage,
+        marketDataStore,
+        config as any,
+        {
+          start: start ?? undefined,
+          end: end ?? undefined,
+          granularity: granularity ?? 'daily',
+          includePrices: true,
+        },
+      );
+
+      return JSON.stringify(result);
+    } catch (e) {
+      return JSON.stringify({ error: String(e) });
+    }
+  },
+
+  async spending(
+    dataDir: string,
+    start: string | null,
+    end: string | null,
+    period: string | null,
+    groupBy: string | null,
+    direction: string | null,
+  ): Promise<string> {
+    const effectiveDataDir = (dataDir || 'git').trim() || 'git';
+    try {
+      const storage = new AsyncStorageStorage(effectiveDataDir);
+      const marketDataStore = new AsyncStorageMarketDataStore(effectiveDataDir);
+      const config = buildConfig(effectiveDataDir);
+
+      const result = await spendingReport(
+        storage,
+        marketDataStore,
+        config as any,
+        {
+          start: start ?? undefined,
+          end: end ?? undefined,
+          period: period ?? 'monthly',
+          direction: direction ?? 'outflow',
+          group_by: groupBy ?? 'none',
+        },
+      );
+
+      return JSON.stringify(result);
+    } catch (e) {
+      return JSON.stringify({ error: String(e) });
     }
   },
 };

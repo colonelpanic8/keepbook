@@ -1,9 +1,11 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Text, View } from '@/components/Themed';
 import { SpendingChart, type SpendingDataPoint } from '@/components/charts/SpendingChart';
 import { TimeRangeSelector, TimeRange, timeRangeToQuery } from '@/components/charts/TimeRangeSelector';
 import { ChartContainer } from '@/components/charts/ChartContainer';
+import KeepbookNative from '@/modules/keepbook-native';
 
 type GroupBy = 'none' | 'category' | 'merchant' | 'account';
 const GROUP_OPTIONS: { label: string; value: GroupBy }[] = [
@@ -33,19 +35,96 @@ function generateMockSpendingData(lookbackDays: number | null, period: string): 
   });
 }
 
+function formatPeriodLabel(startDate: string): string {
+  try {
+    const d = new Date(startDate + 'T00:00:00Z');
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+  } catch {
+    return startDate;
+  }
+}
+
 export default function SpendingScreen() {
   const [timeRange, setTimeRange] = useState(TimeRange.SIX_MONTHS);
   const [groupBy, setGroupBy] = useState<GroupBy>('none');
-  const query = timeRangeToQuery(timeRange);
-  const data = useMemo(() => generateMockSpendingData(query.lookbackDays, query.period), [query.lookbackDays, query.period]);
+  const [data, setData] = useState<SpendingDataPoint[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [usingMock, setUsingMock] = useState(false);
+  const [totalSpending, setTotalSpending] = useState(0);
+  const [txCount, setTxCount] = useState(0);
 
-  const totalSpending = data.reduce((sum, d) => sum + d.total, 0);
+  const query = timeRangeToQuery(timeRange);
+  const mockData = useMemo(
+    () => generateMockSpendingData(query.lookbackDays, query.period),
+    [query.lookbackDays, query.period],
+  );
+
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    setUsingMock(false);
+
+    try {
+      const dataDir = (await AsyncStorage.getItem('keepbook.data_dir')) || 'git';
+      const start = query.lookbackDays
+        ? new Date(Date.now() - query.lookbackDays * 86400000).toISOString().slice(0, 10)
+        : null;
+      const end = new Date().toISOString().slice(0, 10);
+
+      const json = await KeepbookNative.spending(
+        dataDir,
+        start,
+        end,
+        query.period === 'daily' ? 'daily' : query.period === 'weekly' ? 'weekly' : 'monthly',
+        groupBy,
+        'outflow',
+      );
+      const result = JSON.parse(json);
+
+      if (result.error) {
+        setData(mockData);
+        setUsingMock(true);
+        setTotalSpending(mockData.reduce((sum, d) => sum + d.total, 0));
+        setTxCount(0);
+        setLoading(false);
+        return;
+      }
+
+      if (result.periods && result.periods.length > 0) {
+        const points: SpendingDataPoint[] = result.periods.map((p: any) => ({
+          label: formatPeriodLabel(p.start_date),
+          total: Math.abs(parseFloat(p.total)),
+        }));
+        setData(points);
+        setTotalSpending(Math.abs(parseFloat(result.total ?? '0')));
+        setTxCount(result.transaction_count ?? 0);
+      } else {
+        setData(mockData);
+        setUsingMock(true);
+        setTotalSpending(mockData.reduce((sum, d) => sum + d.total, 0));
+        setTxCount(0);
+      }
+      setLoading(false);
+    } catch (err) {
+      setData(mockData);
+      setUsingMock(true);
+      setTotalSpending(mockData.reduce((sum, d) => sum + d.total, 0));
+      setTxCount(0);
+      setLoading(false);
+    }
+  }, [query.lookbackDays, query.period, groupBy, mockData]);
+
+  useEffect(() => {
+    void fetchData();
+  }, [fetchData]);
+
   const avgPerPeriod = data.length > 0 ? totalSpending / data.length : 0;
 
   return (
     <ScrollView style={styles.container}>
       <TimeRangeSelector selected={timeRange} onSelect={setTimeRange} />
-      <ChartContainer loading={false} error={null}>
+      <ChartContainer loading={loading} error={error}>
         <SpendingChart data={data} />
       </ChartContainer>
       <View style={styles.stats}>
@@ -56,6 +135,9 @@ export default function SpendingScreen() {
         <Text style={styles.avgText}>
           Avg ${avgPerPeriod.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / {query.period.replace('ly', '')}
         </Text>
+        {usingMock && (
+          <Text style={styles.mockLabel}>Sample data -- sync from Settings</Text>
+        )}
       </View>
       <View style={styles.groupByRow}>
         {GROUP_OPTIONS.map(({ label, value }) => (
@@ -75,6 +157,7 @@ const styles = StyleSheet.create({
   totalLabel: { fontSize: 14, color: 'rgba(255, 255, 255, 0.5)' },
   totalValue: { fontSize: 28, fontWeight: 'bold' },
   avgText: { fontSize: 14, color: 'rgba(255, 255, 255, 0.5)' },
+  mockLabel: { fontSize: 12, color: 'rgba(255, 255, 255, 0.35)', marginTop: 4 },
   groupByRow: { flexDirection: 'row', justifyContent: 'center', gap: 8, paddingVertical: 12, paddingHorizontal: 16 },
   groupButton: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, backgroundColor: 'rgba(255, 255, 255, 0.08)' },
   groupButtonActive: { backgroundColor: 'rgba(52, 152, 219, 0.9)' },
