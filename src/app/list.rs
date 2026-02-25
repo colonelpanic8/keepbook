@@ -1,7 +1,9 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::str::FromStr;
 
 use anyhow::Result;
+use rust_decimal::Decimal;
 
 use crate::config::ResolvedConfig;
 use crate::market_data::{MarketDataServiceBuilder, PriceSourceRegistry};
@@ -160,11 +162,96 @@ pub async fn list_balances(
     Ok(output)
 }
 
-pub async fn list_transactions(storage: &dyn Storage) -> Result<Vec<TransactionOutput>> {
+fn normalized_rule(s: &str) -> Option<String> {
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_lowercase())
+    }
+}
+
+async fn ignored_account_ids_for_portfolio_spending(
+    storage: &dyn Storage,
+    config: &ResolvedConfig,
+    accounts: &[crate::models::Account],
+) -> Result<HashSet<Id>> {
+    let ignore_accounts: HashSet<String> = config
+        .spending
+        .ignore_accounts
+        .iter()
+        .filter_map(|s| normalized_rule(s))
+        .collect();
+    let ignore_connections_raw: HashSet<String> = config
+        .spending
+        .ignore_connections
+        .iter()
+        .filter_map(|s| normalized_rule(s))
+        .collect();
+    let ignore_tags: HashSet<String> = config
+        .spending
+        .ignore_tags
+        .iter()
+        .filter_map(|s| normalized_rule(s))
+        .collect();
+
+    if ignore_accounts.is_empty() && ignore_connections_raw.is_empty() && ignore_tags.is_empty() {
+        return Ok(HashSet::new());
+    }
+
+    let connections = storage.list_connections().await?;
+    let mut ignore_connections: HashSet<String> = ignore_connections_raw.clone();
+    for conn in connections {
+        let conn_id = conn.id().to_string().to_lowercase();
+        let conn_name = conn.config.name.to_lowercase();
+        if ignore_connections_raw.contains(&conn_id) || ignore_connections_raw.contains(&conn_name)
+        {
+            ignore_connections.insert(conn_id);
+        }
+    }
+
+    let mut ignored = HashSet::new();
+    for account in accounts {
+        let account_id = account.id.to_string().to_lowercase();
+        let account_name = account.name.to_lowercase();
+        let connection_id = account.connection_id.to_string().to_lowercase();
+        let has_ignored_tag = account
+            .tags
+            .iter()
+            .filter_map(|tag| normalized_rule(tag))
+            .any(|tag| ignore_tags.contains(&tag));
+
+        if ignore_accounts.contains(&account_id)
+            || ignore_accounts.contains(&account_name)
+            || ignore_connections.contains(&connection_id)
+            || has_ignored_tag
+        {
+            ignored.insert(account.id.clone());
+        }
+    }
+
+    Ok(ignored)
+}
+
+pub async fn list_transactions(
+    storage: &dyn Storage,
+    sort_by_amount: bool,
+    skip_spending_ignored: bool,
+    config: &ResolvedConfig,
+) -> Result<Vec<TransactionOutput>> {
     let accounts = storage.list_accounts().await?;
+    let ignored_account_ids = if skip_spending_ignored {
+        ignored_account_ids_for_portfolio_spending(storage, config, &accounts).await?
+    } else {
+        HashSet::new()
+    };
     let mut output = Vec::new();
 
     for account in accounts {
+        if skip_spending_ignored && ignored_account_ids.contains(&account.id) {
+            continue;
+        }
+
         let transactions = storage.get_transactions(&account.id).await?;
         let patches = storage
             .get_transaction_annotation_patches(&account.id)
@@ -207,6 +294,19 @@ pub async fn list_transactions(storage: &dyn Storage) -> Result<Vec<TransactionO
         }
     }
 
+    if sort_by_amount {
+        output.sort_by(|a, b| {
+            let left = Decimal::from_str(&a.amount);
+            let right = Decimal::from_str(&b.amount);
+            match (left, right) {
+                (Ok(la), Ok(rb)) => la.cmp(&rb),
+                (Err(_), Ok(_)) => std::cmp::Ordering::Greater,
+                (Ok(_), Err(_)) => std::cmp::Ordering::Less,
+                (Err(_), Err(_)) => a.amount.cmp(&b.amount),
+            }
+        });
+    }
+
     Ok(output)
 }
 
@@ -228,6 +328,18 @@ mod tests {
     };
     use crate::storage::MemoryStorage;
     use chrono::{TimeZone, Utc};
+
+    fn test_config() -> ResolvedConfig {
+        ResolvedConfig {
+            data_dir: std::path::PathBuf::from("/tmp"),
+            reporting_currency: "USD".to_string(),
+            display: crate::config::DisplayConfig::default(),
+            refresh: crate::config::RefreshConfig::default(),
+            tray: crate::config::TrayConfig::default(),
+            spending: crate::config::SpendingConfig::default(),
+            git: crate::config::GitConfig::default(),
+        }
+    }
 
     #[tokio::test]
     async fn list_transactions_includes_annotation_when_present() -> Result<()> {
@@ -259,7 +371,7 @@ mod tests {
             .append_transaction_annotation_patches(&account_id, &[patch])
             .await?;
 
-        let out = list_transactions(&storage).await?;
+        let out = list_transactions(&storage, false, true, &test_config()).await?;
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].id, "tx-1");
         assert_eq!(
@@ -270,6 +382,69 @@ mod tests {
             out[0].annotation.as_ref().unwrap().tags.clone().unwrap(),
             vec!["coffee".to_string()]
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn list_transactions_sorts_by_amount_when_requested() -> Result<()> {
+        let storage = MemoryStorage::new();
+        let clock = FixedClock::new(Utc.with_ymd_and_hms(2026, 2, 5, 12, 0, 0).unwrap());
+
+        let account_id = Id::from_string("acct-1");
+        let account = Account::new_with(
+            account_id.clone(),
+            clock.now(),
+            "Checking",
+            Id::from_string("conn-1"),
+        );
+        storage.save_account(&account).await?;
+
+        let ids = FixedIdGenerator::new([
+            Id::from_string("tx-1"),
+            Id::from_string("tx-2"),
+            Id::from_string("tx-3"),
+        ]);
+        let tx1 = Transaction::new_with_generator(&ids, &clock, "10", Asset::currency("USD"), "A");
+        let tx2 = Transaction::new_with_generator(&ids, &clock, "-2.50", Asset::currency("USD"), "B");
+        let tx3 = Transaction::new_with_generator(&ids, &clock, "1.25", Asset::currency("USD"), "C");
+        storage
+            .append_transactions(&account_id, &[tx1, tx2, tx3])
+            .await?;
+
+        let out = list_transactions(&storage, true, true, &test_config()).await?;
+        assert_eq!(out.len(), 3);
+        assert_eq!(out[0].id, "tx-2");
+        assert_eq!(out[1].id, "tx-3");
+        assert_eq!(out[2].id, "tx-1");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn list_transactions_skips_spending_ignored_accounts_by_default() -> Result<()> {
+        let storage = MemoryStorage::new();
+        let clock = FixedClock::new(Utc.with_ymd_and_hms(2026, 2, 5, 12, 0, 0).unwrap());
+
+        let account_id = Id::from_string("acct-1");
+        let account = Account::new_with(
+            account_id.clone(),
+            clock.now(),
+            "Ignore Me",
+            Id::from_string("conn-1"),
+        );
+        storage.save_account(&account).await?;
+
+        let ids = FixedIdGenerator::new([Id::from_string("tx-1")]);
+        let tx = Transaction::new_with_generator(&ids, &clock, "1", Asset::currency("USD"), "Test");
+        storage.append_transactions(&account_id, &[tx]).await?;
+
+        let mut config = test_config();
+        config.spending.ignore_accounts = vec!["Ignore Me".to_string()];
+
+        let skipped = list_transactions(&storage, false, true, &config).await?;
+        assert_eq!(skipped.len(), 0);
+
+        let included = list_transactions(&storage, false, false, &config).await?;
+        assert_eq!(included.len(), 1);
         Ok(())
     }
 }

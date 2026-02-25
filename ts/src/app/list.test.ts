@@ -655,6 +655,50 @@ describe('listTransactions', () => {
     expect(result[1].account_id).toBe('acct-2');
   });
 
+  it('sorts transactions by amount when requested', async () => {
+    const storage = new MemoryStorage();
+    const clock = makeClock('2024-06-15T14:30:00Z');
+
+    const acctIdGen = makeIdGen('acct-1');
+    const acct = Account.newWithGenerator(acctIdGen, clock, 'Checking', Id.fromString('conn-1'));
+    await storage.saveAccount(acct);
+
+    const txIdGen = makeIdGen('tx-1', 'tx-2', 'tx-3');
+    const tx1 = Transaction.newWithGenerator(txIdGen, clock, '10', Asset.currency('USD'), 'A');
+    const tx2 = Transaction.newWithGenerator(txIdGen, clock, '-2.50', Asset.currency('USD'), 'B');
+    const tx3 = Transaction.newWithGenerator(txIdGen, clock, '1.25', Asset.currency('USD'), 'C');
+    await storage.appendTransactions(acct.id, [tx1, tx2, tx3]);
+
+    const result = await listTransactions(storage, undefined, true);
+    expect(result).toHaveLength(3);
+    expect(result[0].id).toBe('tx-2');
+    expect(result[1].id).toBe('tx-3');
+    expect(result[2].id).toBe('tx-1');
+  });
+
+  it('skips spending-ignored accounts by default and can include them', async () => {
+    const storage = new MemoryStorage();
+    const clock = makeClock('2024-06-15T14:30:00Z');
+
+    const acctIdGen = makeIdGen('acct-1');
+    const acct = Account.newWithGenerator(acctIdGen, clock, 'Ignore Me', Id.fromString('conn-1'));
+    await storage.saveAccount(acct);
+
+    const txIdGen = makeIdGen('tx-1');
+    const tx = Transaction.newWithGenerator(txIdGen, clock, '10', Asset.currency('USD'), 'Test');
+    await storage.appendTransactions(acct.id, [tx]);
+
+    const config = makeConfig({
+      spending: { ignore_accounts: ['Ignore Me'], ignore_connections: [], ignore_tags: [] },
+    });
+
+    const skipped = await listTransactions(storage, config);
+    expect(skipped).toHaveLength(0);
+
+    const included = await listTransactions(storage, config, false, false);
+    expect(included).toHaveLength(1);
+  });
+
   it('formats timestamp with rfc3339 including subseconds', async () => {
     const storage = new MemoryStorage();
     const clock = makeClock('2024-06-15T14:30:00.456Z');

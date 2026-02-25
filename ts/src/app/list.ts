@@ -9,6 +9,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import type { Dirent } from 'node:fs';
 import path from 'node:path';
 import toml from 'toml';
+import { Decimal } from '../decimal.js';
 import { type Storage } from '../storage/storage.js';
 import { type ConnectionType } from '../models/connection.js';
 import { type AccountType } from '../models/account.js';
@@ -21,7 +22,7 @@ import {
   formatRfc3339,
   formatRfc3339FromEpochNanos,
 } from './format.js';
-import type { ResolvedConfig } from '../config.js';
+import { DEFAULT_SPENDING_CONFIG, type ResolvedConfig, type SpendingConfig } from '../config.js';
 import {
   applyTransactionAnnotationPatch,
   isEmptyTransactionAnnotation,
@@ -260,11 +261,80 @@ export async function listBalances(
 /**
  * List all transactions for all accounts.
  */
-export async function listTransactions(storage: Storage): Promise<TransactionOutput[]> {
+function normalizeRule(value: string): string | null {
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed.toLowerCase() : null;
+}
+
+async function ignoredAccountIdsForPortfolioSpending(
+  storage: Storage,
+  spending: SpendingConfig,
+  accounts: AccountType[],
+): Promise<Set<string>> {
+  const ignoreAccounts = new Set(
+    spending.ignore_accounts.map((v) => normalizeRule(v)).filter((v): v is string => v !== null),
+  );
+  const ignoreConnectionsRaw = new Set(
+    spending.ignore_connections
+      .map((v) => normalizeRule(v))
+      .filter((v): v is string => v !== null),
+  );
+  const ignoreTags = new Set(
+    spending.ignore_tags.map((v) => normalizeRule(v)).filter((v): v is string => v !== null),
+  );
+
+  if (ignoreAccounts.size === 0 && ignoreConnectionsRaw.size === 0 && ignoreTags.size === 0) {
+    return new Set();
+  }
+
+  const ignoreConnections = new Set(ignoreConnectionsRaw);
+  const connections = await storage.listConnections();
+  for (const connection of connections) {
+    const connectionId = connection.state.id.asStr().toLowerCase();
+    const connectionName = connection.config.name.toLowerCase();
+    if (ignoreConnectionsRaw.has(connectionId) || ignoreConnectionsRaw.has(connectionName)) {
+      ignoreConnections.add(connectionId);
+    }
+  }
+
+  const ignoredAccountIds = new Set<string>();
+  for (const account of accounts) {
+    const accountId = account.id.asStr().toLowerCase();
+    const accountName = account.name.toLowerCase();
+    const connectionId = account.connection_id.asStr().toLowerCase();
+    const hasIgnoredTag = account.tags
+      .map((tag) => normalizeRule(tag))
+      .filter((tag): tag is string => tag !== null)
+      .some((tag) => ignoreTags.has(tag));
+    if (
+      ignoreAccounts.has(accountId) ||
+      ignoreAccounts.has(accountName) ||
+      ignoreConnections.has(connectionId) ||
+      hasIgnoredTag
+    ) {
+      ignoredAccountIds.add(account.id.asStr());
+    }
+  }
+
+  return ignoredAccountIds;
+}
+
+export async function listTransactions(
+  storage: Storage,
+  config?: ResolvedConfig,
+  sortByAmount = false,
+  skipSpendingIgnored = true,
+): Promise<TransactionOutput[]> {
   const accounts = await storage.listAccounts();
+  const spendingConfig = config?.spending ?? DEFAULT_SPENDING_CONFIG;
+  const ignoredAccountIds = skipSpendingIgnored
+    ? await ignoredAccountIdsForPortfolioSpending(storage, spendingConfig, accounts)
+    : new Set<string>();
   const result: TransactionOutput[] = [];
 
   for (const account of accounts) {
+    if (skipSpendingIgnored && ignoredAccountIds.has(account.id.asStr())) continue;
+
     const transactions = await storage.getTransactions(account.id);
     const patches = await storage.getTransactionAnnotationPatches(account.id);
 
@@ -302,6 +372,28 @@ export async function listTransactions(storage: Storage): Promise<TransactionOut
       }
       result.push(out);
     }
+  }
+
+  if (sortByAmount) {
+    result.sort((a, b) => {
+      let left: Decimal | null = null;
+      let right: Decimal | null = null;
+      try {
+        left = new Decimal(a.amount);
+      } catch {
+        left = null;
+      }
+      try {
+        right = new Decimal(b.amount);
+      } catch {
+        right = null;
+      }
+
+      if (left !== null && right !== null) return left.comparedTo(right);
+      if (left === null && right !== null) return 1;
+      if (left !== null && right === null) return -1;
+      return a.amount.localeCompare(b.amount);
+    });
   }
 
   return result;

@@ -423,7 +423,15 @@ enum ListCommand {
     Balances,
 
     /// List all transactions
-    Transactions,
+    Transactions {
+        /// Sort transactions by amount (ascending)
+        #[arg(long, default_value_t = false)]
+        sort_by_amount: bool,
+
+        /// Include transactions ignored by spending account/connection/tag filters
+        #[arg(long, default_value_t = false)]
+        include_ignored: bool,
+    },
 
     /// List everything
     All,
@@ -834,8 +842,17 @@ async fn main() -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&balances)?);
             }
 
-            ListCommand::Transactions => {
-                let transactions = app::list_transactions(storage_arc.as_ref()).await?;
+            ListCommand::Transactions {
+                sort_by_amount,
+                include_ignored,
+            } => {
+                let transactions = app::list_transactions(
+                    storage_arc.as_ref(),
+                    sort_by_amount,
+                    !include_ignored,
+                    &config,
+                )
+                .await?;
                 println!("{}", serde_json::to_string_pretty(&transactions)?);
             }
 

@@ -443,10 +443,17 @@ list
 list
   .command('transactions')
   .description('List all transactions')
-  .action(async () => {
+  .option('--sort-by-amount', 'sort transactions by amount (ascending)')
+  .option('--include-ignored', 'include transactions ignored by spending account/connection/tag filters')
+  .action(async (opts: { sortByAmount?: boolean; includeIgnored?: boolean }) => {
     await runWithConfig(async (cfg) => {
       const storage = new JsonFileStorage(cfg.config.data_dir);
-      return listTransactions(storage);
+      return listTransactions(
+        storage,
+        cfg.config,
+        opts.sortByAmount === true,
+        opts.includeIgnored !== true,
+      );
     });
   });
 
