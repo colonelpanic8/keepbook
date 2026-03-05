@@ -10,6 +10,7 @@ import {
   syncAll,
   syncAllIfStale,
   syncPrices,
+  syncBackfillMetadata,
   syncRecompact,
   syncSymlinks,
   authLogin,
@@ -351,6 +352,32 @@ describe('syncRecompact', () => {
       transactions_after: 7,
       annotation_patches_before: 4,
       annotation_patches_after: 3,
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// syncBackfillMetadata
+// ---------------------------------------------------------------------------
+
+describe('syncBackfillMetadata', () => {
+  it('returns metadata backfill stats from storage', async () => {
+    const result = await syncBackfillMetadata({
+      async backfillTransactionMetadataAll() {
+        return {
+          accounts_processed: 2,
+          files_rewritten: 1,
+          transactions_examined: 12,
+          transactions_updated: 3,
+        };
+      },
+    });
+
+    expect(result).toEqual({
+      accounts_processed: 2,
+      files_rewritten: 1,
+      transactions_examined: 12,
+      transactions_updated: 3,
     });
   });
 });

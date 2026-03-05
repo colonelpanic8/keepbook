@@ -37,6 +37,8 @@ import {
   type CredentialStore,
   type CompactionStorage,
   type JsonlCompactionStats,
+  type MetadataBackfillStorage,
+  type TransactionMetadataBackfillStats,
 } from './storage.js';
 import { parseCredentialConfigValue } from '../credentials/credential-config.js';
 import { PassCredentialStore } from '../credentials/pass.js';
@@ -131,7 +133,7 @@ function compactTransactionAnnotationPatches(
  *       transaction_annotations.jsonl
  * ```
  */
-export class JsonFileStorage implements Storage, CompactionStorage {
+export class JsonFileStorage implements Storage, CompactionStorage, MetadataBackfillStorage {
   private readonly basePath: string;
 
   constructor(basePath: string) {
@@ -707,4 +709,67 @@ export class JsonFileStorage implements Storage, CompactionStorage {
 
     return stats;
   }
+
+  async backfillTransactionMetadataAll(): Promise<TransactionMetadataBackfillStats> {
+    const accountIds = await this.listDirs(this.accountsDir());
+    const stats: TransactionMetadataBackfillStats = {
+      accounts_processed: accountIds.length,
+      files_rewritten: 0,
+      transactions_examined: 0,
+      transactions_updated: 0,
+    };
+
+    for (const accountId of accountIds) {
+      const txPath = this.transactionsFile(accountId);
+      if (!fsSync.existsSync(txPath)) continue;
+
+      const rawJson = await this.readJsonl<TransactionJSON>(txPath);
+      stats.transactions_examined += rawJson.length;
+
+      let updated = 0;
+      const backfilledJson = rawJson.map((item) => {
+        const backfilled = Transaction.toJSON(Transaction.fromJSON(item));
+        const beforeMetadata = item.standardized_metadata ?? null;
+        const afterMetadata = backfilled.standardized_metadata ?? null;
+        if (!deepEqual(beforeMetadata, afterMetadata)) {
+          updated += 1;
+        }
+        return backfilled;
+      });
+
+      if (updated > 0) {
+        await this.writeJsonl(txPath, backfilledJson);
+        stats.files_rewritten += 1;
+        stats.transactions_updated += updated;
+      }
+    }
+
+    return stats;
+  }
+}
+
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+
+  if (a === null || b === null) return a === b;
+  if (typeof a !== 'object' || typeof b !== 'object') return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b)) return false;
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      if (!deepEqual(a[i], b[i])) return false;
+    }
+    return true;
+  }
+
+  const objA = a as Record<string, unknown>;
+  const objB = b as Record<string, unknown>;
+  const keysA = Object.keys(objA);
+  const keysB = Object.keys(objB);
+  if (keysA.length !== keysB.length) return false;
+  for (const key of keysA) {
+    if (!Object.prototype.hasOwnProperty.call(objB, key)) return false;
+    if (!deepEqual(objA[key], objB[key])) return false;
+  }
+  return true;
 }

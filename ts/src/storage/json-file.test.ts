@@ -803,6 +803,59 @@ describe('JsonFileStorage', () => {
     });
   });
 
+  describe('backfillTransactionMetadataAll', () => {
+    it('persists derived standardized metadata without compacting transaction logs', async () => {
+      const acctId = Id.fromString('acct-backfill');
+      const acct = makeAccount('Backfill', Id.fromString('conn-1'), acctId);
+      await storage.saveAccount(acct);
+
+      const txPath = path.join(tmpDir, 'accounts', acctId.asStr(), 'transactions.jsonl');
+      const oldRow = {
+        id: 'tx-1',
+        timestamp: '2024-02-01T10:00:00Z',
+        amount: '-10.0',
+        asset: { type: 'currency', iso_code: 'USD' },
+        description: 'Coffee',
+        status: 'posted',
+        synchronizer_data: {
+          merchant_category_code: '5814',
+          etu_standard_expense_category_code: 'FOOD_AND_DRINK',
+        },
+        standardized_metadata: {
+          merchant_name: 'Existing Merchant',
+        },
+      };
+      await fs.mkdir(path.dirname(txPath), { recursive: true });
+      await fs.writeFile(txPath, `${JSON.stringify(oldRow)}\n`, 'utf-8');
+
+      const stats = await storage.backfillTransactionMetadataAll();
+      expect(stats).toEqual({
+        accounts_processed: 1,
+        files_rewritten: 1,
+        transactions_examined: 1,
+        transactions_updated: 1,
+      });
+
+      const lines = (await fs.readFile(txPath, 'utf-8'))
+        .trim()
+        .split('\n')
+        .filter((line) => line.length > 0);
+      expect(lines).toHaveLength(1);
+      const row = JSON.parse(lines[0]!) as {
+        standardized_metadata?: {
+          merchant_name?: string;
+          merchant_category_code?: string;
+          merchant_category_label?: string;
+        };
+      };
+      expect(row.standardized_metadata).toEqual({
+        merchant_name: 'Existing Merchant',
+        merchant_category_code: '5814',
+        merchant_category_label: 'Food And Drink',
+      });
+    });
+  });
+
   // -----------------------------------------------------------------------
   // Path safety validation
   // -----------------------------------------------------------------------

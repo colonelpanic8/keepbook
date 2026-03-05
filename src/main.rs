@@ -76,8 +76,29 @@ struct Cli {
     )]
     skip_git_merge_master: bool,
 
+    /// Schwab username override for login autofill.
+    ///
+    /// Equivalent to setting KEEPBOOK_SCHWAB_USERNAME for this command invocation.
+    #[arg(long, global = true)]
+    schwab_username: Option<String>,
+
+    /// Schwab password override for login autofill.
+    ///
+    /// Equivalent to setting KEEPBOOK_SCHWAB_PASSWORD for this command invocation.
+    #[arg(long, global = true)]
+    schwab_password: Option<String>,
+
     #[command(subcommand)]
     command: Option<Command>,
+}
+
+fn apply_runtime_credential_overrides(cli: &Cli) {
+    if let Some(username) = &cli.schwab_username {
+        std::env::set_var("KEEPBOOK_SCHWAB_USERNAME", username);
+    }
+    if let Some(password) = &cli.schwab_password {
+        std::env::set_var("KEEPBOOK_SCHWAB_PASSWORD", password);
+    }
 }
 
 #[derive(Subcommand)]
@@ -434,6 +455,8 @@ enum SyncCommand {
     Symlinks,
     /// Recompact account JSONL files (dedupe append-only logs and sort chronologically)
     Recompact,
+    /// Persist backfilled standardized transaction metadata to JSONL without compaction
+    BackfillMetadata,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -713,6 +736,7 @@ async fn main() -> Result<()> {
         .init();
 
     let cli = Cli::parse();
+    apply_runtime_credential_overrides(&cli);
 
     let config = ResolvedConfig::load_or_default(&cli.config)?;
     let storage = JsonFileStorage::new(&config.data_dir);
@@ -898,6 +922,10 @@ async fn main() -> Result<()> {
             }
             SyncCommand::Recompact => {
                 let result = app::sync_recompact(&storage, &config).await?;
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
+            SyncCommand::BackfillMetadata => {
+                let result = app::sync_backfill_metadata(&storage, &config).await?;
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
         },

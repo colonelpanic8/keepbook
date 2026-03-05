@@ -37,6 +37,7 @@ import {
   syncAllIfStale,
   syncAllIfStaleWithOptions,
   syncPrices,
+  syncBackfillMetadata,
   syncRecompact,
   syncSymlinks,
   authLogin,
@@ -67,9 +68,22 @@ async function runWithConfig(
   fn: (cfg: Awaited<ReturnType<typeof loadConfig>>) => Promise<unknown>,
 ): Promise<void> {
   await run(async () => {
+    const opts = program.opts() as {
+      gitMergeMaster?: boolean;
+      skipGitMergeMaster?: boolean;
+      schwabUsername?: string;
+      schwabPassword?: string;
+    };
+
+    if (opts.schwabUsername !== undefined) {
+      process.env.KEEPBOOK_SCHWAB_USERNAME = opts.schwabUsername;
+    }
+    if (opts.schwabPassword !== undefined) {
+      process.env.KEEPBOOK_SCHWAB_PASSWORD = opts.schwabPassword;
+    }
+
     const cfg = await loadConfig(program.opts().config);
 
-    const opts = program.opts() as { gitMergeMaster?: boolean; skipGitMergeMaster?: boolean };
     const mergeEnabled = opts.gitMergeMaster
       ? true
       : opts.skipGitMergeMaster
@@ -93,7 +107,15 @@ program
   .version('0.1.0')
   .option('-c, --config <path>', 'path to config file')
   .option('--git-merge-master', 'merge origin/master before executing the command')
-  .option('--skip-git-merge-master', 'skip merging origin/master even if enabled in config');
+  .option('--skip-git-merge-master', 'skip merging origin/master even if enabled in config')
+  .option(
+    '--schwab-username <username>',
+    'Schwab username override (equivalent to KEEPBOOK_SCHWAB_USERNAME for this process)',
+  )
+  .option(
+    '--schwab-password <password>',
+    'Schwab password override (equivalent to KEEPBOOK_SCHWAB_PASSWORD for this process)',
+  );
 
 // ---------------------------------------------------------------------------
 // config
@@ -633,6 +655,16 @@ sync
   .action(async () => {
     await runWithConfig(async (_cfg) => {
       return syncSymlinks();
+    });
+  });
+
+sync
+  .command('backfill-metadata')
+  .description('Persist backfilled standardized transaction metadata to JSONL')
+  .action(async () => {
+    await runWithConfig(async (cfg) => {
+      const storage = new JsonFileStorage(cfg.config.data_dir);
+      return syncBackfillMetadata(storage);
     });
   });
 

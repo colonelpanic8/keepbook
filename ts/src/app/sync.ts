@@ -8,7 +8,11 @@
  * - others: not implemented
  */
 
-import { type CompactionStorage, type Storage } from '../storage/storage.js';
+import {
+  type CompactionStorage,
+  type MetadataBackfillStorage,
+  type Storage,
+} from '../storage/storage.js';
 import { findConnection } from '../storage/lookup.js';
 import type { RefreshConfig } from '../config.js';
 import { checkBalanceStaleness, resolveBalanceStaleness } from '../staleness.js';
@@ -330,6 +334,14 @@ export async function syncSymlinks(): Promise<object> {
 
 export async function syncRecompact(storage: CompactionStorage): Promise<object> {
   return storage.recompactAllJsonl();
+}
+
+// ---------------------------------------------------------------------------
+// syncBackfillMetadata
+// ---------------------------------------------------------------------------
+
+export async function syncBackfillMetadata(storage: MetadataBackfillStorage): Promise<object> {
+  return storage.backfillTransactionMetadataAll();
 }
 
 // ---------------------------------------------------------------------------

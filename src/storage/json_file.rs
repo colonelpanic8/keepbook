@@ -12,7 +12,7 @@ use crate::models::{
     Account, AccountConfig, BalanceSnapshot, Connection, ConnectionConfig, ConnectionState, Id,
     Transaction, TransactionAnnotation, TransactionAnnotationPatch,
 };
-use crate::storage::JsonlCompactionStats;
+use crate::storage::{JsonlCompactionStats, TransactionMetadataBackfillStats};
 
 /// JSON file-based storage implementation.
 ///
@@ -648,6 +648,47 @@ impl JsonFileStorage {
 
         Ok(stats)
     }
+
+    pub async fn backfill_transaction_metadata_all(
+        &self,
+    ) -> Result<TransactionMetadataBackfillStats> {
+        let account_ids = self.list_dirs(&self.accounts_dir()).await?;
+        let mut stats = TransactionMetadataBackfillStats {
+            accounts_processed: account_ids.len(),
+            ..Default::default()
+        };
+
+        for account_id in account_ids {
+            let tx_path = self.transactions_file(&account_id)?;
+            if !tx_path.exists() {
+                continue;
+            }
+
+            let raw = self.read_jsonl::<Transaction>(&tx_path).await?;
+            stats.transactions_examined += raw.len();
+
+            let mut updated = 0usize;
+            let backfilled: Vec<Transaction> = raw
+                .into_iter()
+                .map(|tx| {
+                    let before = tx.standardized_metadata.clone();
+                    let next = tx.backfill_standardized_metadata();
+                    if next.standardized_metadata != before {
+                        updated += 1;
+                    }
+                    next
+                })
+                .collect();
+
+            if updated > 0 {
+                self.write_jsonl(&tx_path, &backfilled).await?;
+                stats.files_rewritten += 1;
+                stats.transactions_updated += updated;
+            }
+        }
+
+        Ok(stats)
+    }
 }
 
 fn compact_transaction_annotation_patches(
@@ -936,6 +977,7 @@ mod tests {
     use crate::models::{
         Account, Asset, AssetBalance, BalanceSnapshot, Connection, ConnectionConfig,
         ConnectionState, Id, Transaction, TransactionAnnotationPatch,
+        TransactionStandardizedMetadata,
     };
     use crate::storage::Storage;
 
@@ -1154,6 +1196,76 @@ mod tests {
         assert_eq!(
             patches[0].category.as_ref().cloned().flatten(),
             Some("food".to_string())
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn backfill_transaction_metadata_all_persists_backfilled_fields() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let storage = JsonFileStorage::new(temp.path());
+        let created_at = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let account_id = Id::from_string("acct-1");
+
+        storage
+            .save_account(&Account::new_with(
+                account_id.clone(),
+                created_at,
+                "Checking",
+                Id::from_string("conn-1"),
+            ))
+            .await?;
+
+        let tx = Transaction {
+            id: Id::from_string("tx-1"),
+            timestamp: Utc.with_ymd_and_hms(2024, 2, 1, 10, 0, 0).unwrap(),
+            amount: "-10.0".to_string(),
+            asset: Asset::currency("USD"),
+            description: "Coffee".to_string(),
+            status: crate::models::TransactionStatus::Posted,
+            synchronizer_data: serde_json::json!({
+                "merchant_category_code": "5814",
+                "etu_standard_expense_category_code": "FOOD_AND_DRINK",
+            }),
+            standardized_metadata: Some(TransactionStandardizedMetadata {
+                merchant_name: Some("Existing Merchant".to_string()),
+                merchant_category_code: None,
+                merchant_category_label: None,
+                transaction_kind: None,
+                is_internal_transfer_hint: None,
+            }),
+        };
+        storage.append_transactions(&account_id, &[tx]).await?;
+
+        let tx_path = storage.transactions_file(&account_id)?;
+        let before = storage.read_jsonl::<Transaction>(&tx_path).await?;
+        assert_eq!(before.len(), 1);
+        assert_eq!(
+            before[0]
+                .standardized_metadata
+                .as_ref()
+                .and_then(|m| m.merchant_category_label.as_deref()),
+            None
+        );
+
+        let stats = storage.backfill_transaction_metadata_all().await?;
+        assert_eq!(stats.accounts_processed, 1);
+        assert_eq!(stats.files_rewritten, 1);
+        assert_eq!(stats.transactions_examined, 1);
+        assert_eq!(stats.transactions_updated, 1);
+
+        let after = storage.read_jsonl::<Transaction>(&tx_path).await?;
+        assert_eq!(after.len(), 1);
+        let metadata = after[0]
+            .standardized_metadata
+            .as_ref()
+            .expect("expected metadata");
+        assert_eq!(metadata.merchant_name.as_deref(), Some("Existing Merchant"));
+        assert_eq!(metadata.merchant_category_code.as_deref(), Some("5814"));
+        assert_eq!(
+            metadata.merchant_category_label.as_deref(),
+            Some("Food And Drink")
         );
 
         Ok(())

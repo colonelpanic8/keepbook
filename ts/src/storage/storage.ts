@@ -82,3 +82,14 @@ export interface JsonlCompactionStats {
 export interface CompactionStorage {
   recompactAllJsonl(): Promise<JsonlCompactionStats>;
 }
+
+export interface TransactionMetadataBackfillStats {
+  accounts_processed: number;
+  files_rewritten: number;
+  transactions_examined: number;
+  transactions_updated: number;
+}
+
+export interface MetadataBackfillStorage {
+  backfillTransactionMetadataAll(): Promise<TransactionMetadataBackfillStats>;
+}

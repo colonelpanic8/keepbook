@@ -91,6 +91,14 @@ pub struct JsonlCompactionStats {
     pub annotation_patches_after: usize,
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize)]
+pub struct TransactionMetadataBackfillStats {
+    pub accounts_processed: usize,
+    pub files_rewritten: usize,
+    pub transactions_examined: usize,
+    pub transactions_updated: usize,
+}
+
 /// Filesystem-y operations that only make sense for the JSON file layout.
 #[async_trait::async_trait]
 pub trait SymlinkStorage: Send + Sync {
@@ -114,6 +122,19 @@ pub trait CompactionStorage: Send + Sync {
 impl CompactionStorage for JsonFileStorage {
     async fn recompact_all_jsonl(&self) -> Result<JsonlCompactionStats> {
         JsonFileStorage::recompact_all_jsonl(self).await
+    }
+}
+
+/// Filesystem-y maintenance operation for persisting canonical transaction metadata.
+#[async_trait::async_trait]
+pub trait MetadataBackfillStorage: Send + Sync {
+    async fn backfill_transaction_metadata_all(&self) -> Result<TransactionMetadataBackfillStats>;
+}
+
+#[async_trait::async_trait]
+impl MetadataBackfillStorage for JsonFileStorage {
+    async fn backfill_transaction_metadata_all(&self) -> Result<TransactionMetadataBackfillStats> {
+        JsonFileStorage::backfill_transaction_metadata_all(self).await
     }
 }
 
