@@ -81,6 +81,14 @@ fn parse_duration_arg(s: &str) -> Result<Duration, String> {
     keepbook::duration::parse_duration(s).map_err(|e| e.to_string())
 }
 
+fn parse_nonzero_duration_arg(s: &str) -> Result<Duration, String> {
+    let duration = parse_duration_arg(s)?;
+    if duration.is_zero() {
+        return Err("duration must be greater than 0s".to_string());
+    }
+    Ok(duration)
+}
+
 #[derive(Parser, Debug)]
 #[command(name = "keepbook-sync-daemon")]
 #[command(version = CLI_VERSION)]
@@ -97,6 +105,10 @@ struct Cli {
     /// Add random jitter in the range [-jitter, +jitter] to each interval.
     #[arg(long, default_value = "0s", value_parser = parse_duration_arg)]
     jitter: Duration,
+
+    /// How often to refresh tray content from local data files (for external sync updates).
+    #[arg(long, default_value = "30s", value_parser = parse_nonzero_duration_arg)]
+    refresh_interval: Duration,
 
     /// Override balance staleness threshold for `sync --if-stale` behavior.
     #[arg(long, value_name = "DURATION", value_parser = parse_duration_arg)]
@@ -614,6 +626,7 @@ struct Daemon {
     config: ResolvedConfig,
     interval: Duration,
     jitter: Duration,
+    refresh_interval: Duration,
     sync_on_start: bool,
     sync_prices: bool,
     sync_symlinks: bool,
@@ -911,6 +924,14 @@ impl Daemon {
             }
         }
 
+        self.refresh_tray_state(state, tray_handle).await;
+    }
+
+    async fn refresh_tray_state(
+        &self,
+        state: &mut KeepbookTrayState,
+        tray_handle: &mut Option<ksni::Handle<KeepbookTray>>,
+    ) {
         self.refresh_history_lines(state).await;
         self.refresh_spending_lines(state).await;
         self.refresh_transaction_lines(state).await;
@@ -948,16 +969,24 @@ impl Daemon {
         tray_state.next_cycle = Some(local_now_plus(next_delay));
         apply_tray_state(&mut tray_handle, &tray_state).await;
 
-        loop {
-            let sleep = tokio::time::sleep(next_delay);
-            tokio::pin!(sleep);
+        let mut refresh_tick = tokio::time::interval(self.refresh_interval);
+        refresh_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        refresh_tick.tick().await;
 
+        let sync_sleep = tokio::time::sleep(next_delay);
+        tokio::pin!(sync_sleep);
+
+        loop {
             tokio::select! {
-                _ = &mut sleep => {
+                _ = &mut sync_sleep => {
                     self.run_cycle("scheduled", &mut tray_state, &mut tray_handle).await;
                     next_delay = compute_next_delay(self.interval, self.jitter);
                     tray_state.next_cycle = Some(local_now_plus(next_delay));
                     apply_tray_state(&mut tray_handle, &tray_state).await;
+                    sync_sleep.as_mut().reset(tokio::time::Instant::now() + next_delay);
+                }
+                _ = refresh_tick.tick() => {
+                    self.refresh_tray_state(&mut tray_state, &mut tray_handle).await;
                 }
                 Some(cmd) = cmd_rx.recv() => {
                     match cmd {
@@ -966,6 +995,7 @@ impl Daemon {
                             next_delay = compute_next_delay(self.interval, self.jitter);
                             tray_state.next_cycle = Some(local_now_plus(next_delay));
                             apply_tray_state(&mut tray_handle, &tray_state).await;
+                            sync_sleep.as_mut().reset(tokio::time::Instant::now() + next_delay);
                         }
                         DaemonCommand::Quit => {
                             if let Some(handle) = tray_handle.as_ref() {
@@ -1030,6 +1060,7 @@ async fn main() -> Result<()> {
         config,
         interval: cli.interval,
         jitter: cli.jitter,
+        refresh_interval: cli.refresh_interval,
         sync_on_start: !cli.no_sync_on_start,
         sync_prices: !cli.no_sync_prices,
         sync_symlinks: !cli.no_sync_symlinks,
@@ -1064,6 +1095,15 @@ mod tests {
             assert!(delay >= Duration::from_secs(480));
             assert!(delay <= Duration::from_secs(720));
         }
+    }
+
+    #[test]
+    fn parse_nonzero_duration_rejects_zero() {
+        assert!(parse_nonzero_duration_arg("0s").is_err());
+        assert_eq!(
+            parse_nonzero_duration_arg("30s").expect("duration should parse"),
+            Duration::from_secs(30)
+        );
     }
 
     #[test]
