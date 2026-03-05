@@ -14,7 +14,10 @@ import {
   type TransactionAnnotationType,
 } from '../models/transaction-annotation.js';
 import { decStrRounded } from './format.js';
-import { compileTransactionIgnoreRulesWithSpending, shouldIgnoreTransaction } from './ignore-rules.js';
+import {
+  compileTransactionIgnoreRulesWithSpending,
+  shouldIgnoreTransaction,
+} from './ignore-rules.js';
 import { valueInReportingCurrencyDetailed } from './value.js';
 import type {
   SpendingOutput,
@@ -22,6 +25,8 @@ import type {
   SpendingPeriodOutput,
   SpendingBreakdownEntryOutput,
 } from './types.js';
+
+const SPENDING_IGNORE_TAGS = new Set(['ignore_spending', 'ignore-spending', 'ignore:spending']);
 
 type Ymd = { y: number; m: number; d: number };
 
@@ -120,7 +125,10 @@ type StatusFilter = 'posted' | 'posted+pending' | 'all';
 type GroupBy = 'none' | 'category' | 'merchant' | 'account' | 'tag';
 type WeekStart = 'sunday' | 'monday';
 
-function parsePeriod(period: string, bucket?: string): { period: Period; label: string; bucketDays?: number } {
+function parsePeriod(
+  period: string,
+  bucket?: string,
+): { period: Period; label: string; bucketDays?: number } {
   const p = period.trim().toLowerCase();
   switch (p) {
     case 'daily':
@@ -157,13 +165,15 @@ function parseDirection(s: string | undefined): Direction {
 function parseStatusFilter(s: string | undefined): StatusFilter {
   const v = (s ?? 'posted').trim().toLowerCase();
   if (v === 'posted' || v === 'all') return v;
-  if (v === 'posted+pending' || v === 'posted_pending' || v === 'posted-pending') return 'posted+pending';
+  if (v === 'posted+pending' || v === 'posted_pending' || v === 'posted-pending')
+    return 'posted+pending';
   throw new Error(`Invalid status '${s}'. Valid values: posted, posted+pending, all`);
 }
 
 function parseGroupBy(s: string | undefined): GroupBy {
   const v = (s ?? 'none').trim().toLowerCase();
-  if (v === 'none' || v === 'category' || v === 'merchant' || v === 'account' || v === 'tag') return v;
+  if (v === 'none' || v === 'category' || v === 'merchant' || v === 'account' || v === 'tag')
+    return v;
   throw new Error(`Invalid group_by '${s}'. Valid values: none, category, merchant, account, tag`);
 }
 
@@ -177,6 +187,12 @@ function parseWeekStart(s: string | undefined): WeekStart {
 function normalizeRule(value: string): string | null {
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed.toLowerCase() : null;
+}
+
+function annotationIgnoresSpending(annotation: TransactionAnnotationType | null): boolean {
+  const tags = annotation?.tags;
+  if (tags === undefined) return false;
+  return tags.some((tag) => SPENDING_IGNORE_TAGS.has(tag.trim().toLowerCase()));
 }
 
 async function ignoredAccountIdsForPortfolioSpending(
@@ -336,11 +352,19 @@ export async function spendingReport(
 
   // Timezone: output uses "local" unless explicitly set.
   const tzRaw = options.tz?.trim();
-  const tzLabel = tzRaw && tzRaw.length > 0 && tzRaw.toLowerCase() !== 'local' && tzRaw.toLowerCase() !== 'current'
-    ? tzRaw
-    : 'local';
+  const tzLabel =
+    tzRaw &&
+    tzRaw.length > 0 &&
+    tzRaw.toLowerCase() !== 'local' &&
+    tzRaw.toLowerCase() !== 'current'
+      ? tzRaw
+      : 'local';
   const effectiveTimeZone =
-    tzLabel === 'local' ? Intl.DateTimeFormat().resolvedOptions().timeZone : tzLabel === 'UTC' ? 'UTC' : tzLabel;
+    tzLabel === 'local'
+      ? Intl.DateTimeFormat().resolvedOptions().timeZone
+      : tzLabel === 'UTC'
+        ? 'UTC'
+        : tzLabel;
 
   // Validate timezone early.
   try {
@@ -365,7 +389,9 @@ export async function spendingReport(
     storage.listConnections(),
   ]);
   const accountsById = new Map(allAccounts.map((account) => [account.id.asStr(), account]));
-  const connectionsById = new Map(allConnections.map((connection) => [connection.state.id.asStr(), connection]));
+  const connectionsById = new Map(
+    allConnections.map((connection) => [connection.state.id.asStr(), connection]),
+  );
   const ignoreRules = compileTransactionIgnoreRulesWithSpending(config.ignore, config.spending);
 
   // Resolve scope + accounts.
@@ -380,7 +406,9 @@ export async function spendingReport(
     const conn = await findConnection(storage, options.connection);
     if (conn === null) throw new Error(`Connection not found: ${options.connection}`);
     scope = { type: 'connection', id: conn.state.id.asStr(), name: conn.config.name };
-    accountIds = allAccounts.filter((a) => a.connection_id.equals(conn.state.id)).map((a) => a.id.asStr());
+    accountIds = allAccounts
+      .filter((a) => a.connection_id.equals(conn.state.id))
+      .map((a) => a.id.asStr());
   } else {
     const ignoredIds = await ignoredAccountIdsForPortfolioSpending(config, allAccounts);
     accountIds = allAccounts.filter((a) => !ignoredIds.has(a.id.asStr())).map((a) => a.id.asStr());
@@ -449,7 +477,8 @@ export async function spendingReport(
         continue;
       }
       const localYmd = ymdFromTimestampInTimeZone(tx.timestamp, effectiveTimeZone);
-      minDate = minDate === undefined ? localYmd : compareYmd(localYmd, minDate) < 0 ? localYmd : minDate;
+      minDate =
+        minDate === undefined ? localYmd : compareYmd(localYmd, minDate) < 0 ? localYmd : minDate;
 
       const normalizedAsset = Asset.normalized(tx.asset);
       if (!includeNoncurrency && normalizedAsset.type !== 'currency') {
@@ -458,6 +487,7 @@ export async function spendingReport(
 
       const ann = annByTx.get(tx.id.asStr());
       const annotation = ann && !isEmptyTransactionAnnotation(ann) ? ann : null;
+      if (annotationIgnoresSpending(annotation)) continue;
       rows.push({
         account_id: account.id.asStr(),
         local_date: localYmd,
@@ -475,7 +505,9 @@ export async function spendingReport(
   const startDate = startOpt ?? minDate ?? today;
   const endDate = endOpt ?? today;
   if (compareYmd(endDate, startDate) < 0) {
-    throw new Error(`end date ${ymdToString(endDate)} is before start date ${ymdToString(startDate)}`);
+    throw new Error(
+      `end date ${ymdToString(endDate)} is before start date ${ymdToString(startDate)}`,
+    );
   }
 
   type BucketAgg = {
@@ -492,7 +524,8 @@ export async function spendingReport(
   let grandTotal = new Decimal(0);
 
   for (const row of rows) {
-    if (compareYmd(row.local_date, startDate) < 0 || compareYmd(row.local_date, endDate) > 0) continue;
+    if (compareYmd(row.local_date, startDate) < 0 || compareYmd(row.local_date, endDate) > 0)
+      continue;
 
     // Direction prefilter: valuation is linear with positive prices/FX, so sign is preserved.
     // Avoid counting missing market data for transactions that couldn't contribute.
@@ -527,8 +560,11 @@ export async function spendingReport(
     const bstart = bucketStartFor(row.local_date, period, weekStart, startDate);
     const bkey = ymdToString(bstart);
     const existing = buckets.get(bkey);
-    const agg: BucketAgg =
-      existing?.agg ?? { total: new Decimal(0), tx_count: 0, breakdown: new Map() };
+    const agg: BucketAgg = existing?.agg ?? {
+      total: new Decimal(0),
+      tx_count: 0,
+      breakdown: new Map(),
+    };
     agg.total = agg.total.plus(directed);
     agg.tx_count += 1;
 

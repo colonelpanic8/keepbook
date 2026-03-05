@@ -18,6 +18,8 @@ use super::types::{
 };
 use super::value::{value_in_reporting_currency_detailed, MissingMarketData};
 
+const SPENDING_IGNORE_TAGS: [&str; 3] = ["ignore_spending", "ignore-spending", "ignore:spending"];
+
 #[derive(Debug, Clone)]
 pub struct SpendingReportOptions {
     pub currency: Option<String>,
@@ -353,6 +355,18 @@ fn normalized_rule(s: &str) -> Option<String> {
     }
 }
 
+fn annotation_ignores_spending(annotation: Option<&TransactionAnnotation>) -> bool {
+    annotation
+        .and_then(|ann| ann.tags.as_ref())
+        .map(|tags| {
+            tags.iter().any(|tag| {
+                let normalized = tag.trim().to_lowercase();
+                SPENDING_IGNORE_TAGS.contains(&normalized.as_str())
+            })
+        })
+        .unwrap_or(false)
+}
+
 async fn ignored_account_ids_for_portfolio_spending(
     config: &ResolvedConfig,
     accounts: &[Account],
@@ -565,6 +579,11 @@ async fn spending_report_with_store(
                 continue;
             }
 
+            let annotation = annotations_by_tx.get(&tx.id).cloned();
+            if annotation_ignores_spending(annotation.as_ref()) {
+                continue;
+            }
+
             rows.push(Row {
                 account_id: account_id.clone(),
                 local_date,
@@ -575,7 +594,7 @@ async fn spending_report_with_store(
                     .standardized_metadata
                     .as_ref()
                     .and_then(|m| m.merchant_category_label.clone()),
-                annotation: annotations_by_tx.get(&tx.id).cloned(),
+                annotation,
             });
         }
     }
@@ -1293,6 +1312,86 @@ mod tests {
         .with_timestamp(clock.now());
         storage
             .append_transactions(&acct_id, &[tx_payment, tx_food])
+            .await?;
+
+        let cfg = ResolvedConfig {
+            data_dir: std::path::PathBuf::from("/tmp"),
+            reporting_currency: "USD".to_string(),
+            display: crate::config::DisplayConfig::default(),
+            refresh: crate::config::RefreshConfig::default(),
+            tray: crate::config::TrayConfig::default(),
+            spending: crate::config::SpendingConfig::default(),
+            ignore: crate::config::IgnoreConfig::default(),
+            git: crate::config::GitConfig::default(),
+        };
+
+        let out = spending_report_with_store(
+            &storage,
+            &cfg,
+            SpendingReportOptions {
+                currency: None,
+                start: Some("2026-02-01".to_string()),
+                end: Some("2026-02-28".to_string()),
+                period: "monthly".to_string(),
+                tz: Some("UTC".to_string()),
+                week_start: None,
+                bucket: None,
+                account: Some("acct-1".to_string()),
+                connection: None,
+                status: "posted".to_string(),
+                direction: "outflow".to_string(),
+                group_by: "none".to_string(),
+                top: None,
+                lookback_days: 7,
+                include_noncurrency: false,
+                include_empty: false,
+            },
+            Arc::new(MemoryMarketDataStore::default()),
+        )
+        .await?;
+
+        assert_eq!(out.total, "25");
+        assert_eq!(out.transaction_count, 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn spending_report_ignores_transactions_marked_ignore_spending_tag() -> Result<()> {
+        let storage = MemoryStorage::new();
+        let conn_id = Id::from_string("conn-1");
+        let acct_id = Id::from_string("acct-1");
+        let account = Account::new_with(acct_id.clone(), Utc::now(), "Checking", conn_id);
+        storage.save_account(&account).await?;
+
+        let ids = FixedIdGenerator::new([Id::from_string("tx-keep"), Id::from_string("tx-skip")]);
+        let clock = FixedClock::new(Utc.with_ymd_and_hms(2026, 2, 18, 12, 0, 0).unwrap());
+        let tx_keep =
+            Transaction::new_with_generator(&ids, &clock, "-25", Asset::currency("USD"), "Coffee")
+                .with_timestamp(clock.now());
+        let tx_skip = Transaction::new_with_generator(
+            &ids,
+            &clock,
+            "-30000",
+            Asset::currency("USD"),
+            "WIRE Outgoing Wire",
+        )
+        .with_timestamp(clock.now());
+        let tx_skip_id = tx_skip.id.clone();
+        storage
+            .append_transactions(&acct_id, &[tx_keep, tx_skip])
+            .await?;
+        storage
+            .append_transaction_annotation_patches(
+                &acct_id,
+                &[TransactionAnnotationPatch {
+                    transaction_id: tx_skip_id,
+                    timestamp: clock.now(),
+                    description: None,
+                    note: None,
+                    category: None,
+                    tags: Some(Some(vec!["ignore_spending".to_string()])),
+                }],
+            )
             .await?;
 
         let cfg = ResolvedConfig {

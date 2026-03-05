@@ -36,7 +36,9 @@ describe('spendingReport', () => {
 
     const acctId = Id.fromString('acct-1');
     const connId = Id.fromString('conn-1');
-    await storage.saveAccount(Account.newWith(acctId, new Date('2026-01-01T00:00:00Z'), 'Checking', connId));
+    await storage.saveAccount(
+      Account.newWith(acctId, new Date('2026-01-01T00:00:00Z'), 'Checking', connId),
+    );
 
     // 2026-02-01T02:30Z is 2026-01-31 in America/New_York (winter).
     const clock = new FixedClock(new Date('2026-02-01T02:30:00Z'));
@@ -67,12 +69,26 @@ describe('spendingReport', () => {
 
     const acctId = Id.fromString('acct-1');
     const connId = Id.fromString('conn-1');
-    await storage.saveAccount(Account.newWith(acctId, new Date('2026-01-01T00:00:00Z'), 'Checking', connId));
+    await storage.saveAccount(
+      Account.newWith(acctId, new Date('2026-01-01T00:00:00Z'), 'Checking', connId),
+    );
 
     const clock = new FixedClock(new Date('2026-02-05T12:00:00Z'));
     const ids = new FixedIdGenerator([Id.fromString('tx-eur'), Id.fromString('tx-eq')]);
-    const txEur = Transaction.newWithGenerator(ids, clock, '-10', Asset.currency('EUR'), 'EUR debit');
-    const txEq = Transaction.newWithGenerator(ids, clock, '-2', Asset.equity('AAPL'), 'Buy AAPL shares');
+    const txEur = Transaction.newWithGenerator(
+      ids,
+      clock,
+      '-10',
+      Asset.currency('EUR'),
+      'EUR debit',
+    );
+    const txEq = Transaction.newWithGenerator(
+      ids,
+      clock,
+      '-2',
+      Asset.equity('AAPL'),
+      'Buy AAPL shares',
+    );
     await storage.appendTransactions(acctId, [txEur, txEq]);
 
     const store = new MemoryMarketDataStore();
@@ -122,16 +138,30 @@ describe('spendingReport', () => {
 
     const acctId = Id.fromString('acct-1');
     const connId = Id.fromString('conn-1');
-    await storage.saveAccount(Account.newWith(acctId, new Date('2026-01-01T00:00:00Z'), 'Checking', connId));
+    await storage.saveAccount(
+      Account.newWith(acctId, new Date('2026-01-01T00:00:00Z'), 'Checking', connId),
+    );
 
     const clock = new FixedClock(new Date('2026-02-05T12:00:00Z'));
     const ids = new FixedIdGenerator([Id.fromString('tx-meta'), Id.fromString('tx-ann')]);
     const txMeta = withStandardizedMetadata(
-      Transaction.newWithGenerator(ids, clock, '-10', Asset.currency('USD'), 'Fallback to metadata category'),
+      Transaction.newWithGenerator(
+        ids,
+        clock,
+        '-10',
+        Asset.currency('USD'),
+        'Fallback to metadata category',
+      ),
       { merchant_category_label: 'Groceries' },
     );
     const txAnn = withStandardizedMetadata(
-      Transaction.newWithGenerator(ids, clock, '-20', Asset.currency('USD'), 'Annotation category wins'),
+      Transaction.newWithGenerator(
+        ids,
+        clock,
+        '-20',
+        Asset.currency('USD'),
+        'Annotation category wins',
+      ),
       { merchant_category_label: 'Shopping' },
     );
     await storage.appendTransactions(acctId, [txMeta, txAnn]);
@@ -171,7 +201,12 @@ describe('spendingReport', () => {
     });
 
     const connId = Id.fromString('conn-1');
-    const cardAcct = Account.newWith(Id.fromString('acct-card'), new Date('2026-01-01T00:00:00Z'), 'Card', connId);
+    const cardAcct = Account.newWith(
+      Id.fromString('acct-card'),
+      new Date('2026-01-01T00:00:00Z'),
+      'Card',
+      connId,
+    );
     const brokerageAcct = {
       ...Account.newWith(
         Id.fromString('acct-brokerage'),
@@ -186,7 +221,13 @@ describe('spendingReport', () => {
 
     const clock = new FixedClock(new Date('2026-02-05T12:00:00Z'));
     const ids = new FixedIdGenerator([Id.fromString('tx-card'), Id.fromString('tx-brokerage')]);
-    const txCard = Transaction.newWithGenerator(ids, clock, '-10', Asset.currency('USD'), 'Card spend');
+    const txCard = Transaction.newWithGenerator(
+      ids,
+      clock,
+      '-10',
+      Asset.currency('USD'),
+      'Card spend',
+    );
     const txBrokerage = Transaction.newWithGenerator(
       ids,
       clock,
@@ -235,7 +276,12 @@ describe('spendingReport', () => {
 
     const acctId = Id.fromString('acct-1');
     await storage.saveAccount(
-      Account.newWith(acctId, new Date('2026-01-01T00:00:00Z'), 'Investor Checking', Id.fromString('conn-1')),
+      Account.newWith(
+        acctId,
+        new Date('2026-01-01T00:00:00Z'),
+        'Investor Checking',
+        Id.fromString('conn-1'),
+      ),
     );
 
     const clock = new FixedClock(new Date('2026-02-05T12:00:00Z'));
@@ -285,11 +331,68 @@ describe('spendingReport', () => {
     const clock = new FixedClock(new Date('2026-02-18T12:00:00Z'));
     const ids = new FixedIdGenerator([Id.fromString('tx-pay'), Id.fromString('tx-food')]);
     const txPayment = withStandardizedMetadata(
-      Transaction.newWithGenerator(ids, clock, '-4450.62', Asset.currency('USD'), 'Payment Thank You - Web'),
+      Transaction.newWithGenerator(
+        ids,
+        clock,
+        '-4450.62',
+        Asset.currency('USD'),
+        'Payment Thank You - Web',
+      ),
       { transaction_kind: 'payment', is_internal_transfer_hint: true },
     );
-    const txFood = Transaction.newWithGenerator(ids, clock, '-25', Asset.currency('USD'), 'Bay Padel LLC');
+    const txFood = Transaction.newWithGenerator(
+      ids,
+      clock,
+      '-25',
+      Asset.currency('USD'),
+      'Bay Padel LLC',
+    );
     await storage.appendTransactions(acctId, [txPayment, txFood]);
+
+    const out = await spendingReport(storage, new NullMarketDataStore(), cfg, {
+      period: 'monthly',
+      start: '2026-02-01',
+      end: '2026-02-28',
+      tz: 'UTC',
+      account: 'acct-1',
+      status: 'posted',
+      direction: 'outflow',
+      group_by: 'none',
+      lookback_days: 7,
+    });
+
+    expect(out.total).toBe('25');
+    expect(out.transaction_count).toBe(1);
+  });
+
+  it('ignores transactions tagged ignore_spending in annotation tags', async () => {
+    const storage = new MemoryStorage();
+    const cfg = makeConfig();
+
+    const acctId = Id.fromString('acct-1');
+    const connId = Id.fromString('conn-1');
+    await storage.saveAccount(
+      Account.newWith(acctId, new Date('2026-01-01T00:00:00Z'), 'Investor Checking', connId),
+    );
+
+    const clock = new FixedClock(new Date('2026-02-18T12:00:00Z'));
+    const ids = new FixedIdGenerator([Id.fromString('tx-keep'), Id.fromString('tx-skip')]);
+    const txKeep = Transaction.newWithGenerator(ids, clock, '-25', Asset.currency('USD'), 'Coffee');
+    const txSkip = Transaction.newWithGenerator(
+      ids,
+      clock,
+      '-30000',
+      Asset.currency('USD'),
+      'WIRE Outgoing Wire',
+    );
+    await storage.appendTransactions(acctId, [txKeep, txSkip]);
+    await storage.appendTransactionAnnotationPatches(acctId, [
+      {
+        transaction_id: txSkip.id,
+        timestamp: clock.now(),
+        tags: ['ignore_spending'],
+      },
+    ]);
 
     const out = await spendingReport(storage, new NullMarketDataStore(), cfg, {
       period: 'monthly',
