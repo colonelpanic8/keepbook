@@ -62,7 +62,7 @@ cli = [
 
 # Fine-grained feature gates for consumers that want a subset.
 app = []
-tui = ["app", "config", "dep:dialoguer", "dep:ratatui", "dep:crossterm"]
+tui = ["app", "config", "dep:dialoguer", "dep:ratatui", "dep:crossterm", "dep:reqwest"]
 config = []
 credentials = []
 git = []
