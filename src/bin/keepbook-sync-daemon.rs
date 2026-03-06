@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -13,6 +13,7 @@ use keepbook::sync::TransactionSyncMode;
 use ksni::menu::*;
 use ksni::MenuItem;
 use ksni::TrayMethods;
+use notify::{Config as NotifyConfig, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use rand::Rng;
 use rust_decimal::Decimal;
 use std::str::FromStr;
@@ -39,6 +40,7 @@ const OVERLAY_SYNC_64: &[u8] = include_bytes!("../../assets/overlay-sync-64.png"
 const OVERLAY_ERROR_32: &[u8] = include_bytes!("../../assets/overlay-error-32.png");
 const OVERLAY_ERROR_48: &[u8] = include_bytes!("../../assets/overlay-error-48.png");
 const OVERLAY_ERROR_64: &[u8] = include_bytes!("../../assets/overlay-error-64.png");
+const DATA_WATCH_DEBOUNCE: Duration = Duration::from_millis(500);
 
 fn png_to_argb32(png_data: &[u8]) -> ksni::Icon {
     let img = image::load_from_memory_with_format(png_data, image::ImageFormat::Png)
@@ -89,6 +91,33 @@ fn parse_nonzero_duration_arg(s: &str) -> Result<Duration, String> {
     Ok(duration)
 }
 
+fn should_refresh_for_fs_event_kind(kind: &EventKind) -> bool {
+    matches!(
+        kind,
+        EventKind::Any | EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
+    )
+}
+
+fn start_data_dir_watcher(
+    data_dir: &Path,
+    refresh_signal_tx: mpsc::UnboundedSender<()>,
+) -> notify::Result<RecommendedWatcher> {
+    let mut watcher =
+        notify::recommended_watcher(move |result: notify::Result<notify::Event>| match result {
+            Ok(event) => {
+                if should_refresh_for_fs_event_kind(&event.kind) {
+                    let _ = refresh_signal_tx.send(());
+                }
+            }
+            Err(err) => {
+                warn!(error = %err, "data directory watch event failed");
+            }
+        })?;
+    watcher.configure(NotifyConfig::default())?;
+    watcher.watch(data_dir, RecursiveMode::Recursive)?;
+    Ok(watcher)
+}
+
 #[derive(Parser, Debug)]
 #[command(name = "keepbook-sync-daemon")]
 #[command(version = CLI_VERSION)]
@@ -106,7 +135,7 @@ struct Cli {
     #[arg(long, default_value = "0s", value_parser = parse_duration_arg)]
     jitter: Duration,
 
-    /// How often to refresh tray content from local data files (for external sync updates).
+    /// How often to refresh tray content from local data files as a fallback safety net.
     #[arg(long, default_value = "30s", value_parser = parse_nonzero_duration_arg)]
     refresh_interval: Duration,
 
@@ -973,6 +1002,29 @@ impl Daemon {
         refresh_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         refresh_tick.tick().await;
 
+        let (watch_refresh_tx, mut watch_refresh_rx) = mpsc::unbounded_channel::<()>();
+        let watcher = match start_data_dir_watcher(&self.config.data_dir, watch_refresh_tx) {
+            Ok(watcher) => {
+                info!(
+                    path = %self.config.data_dir.display(),
+                    debounce_ms = DATA_WATCH_DEBOUNCE.as_millis(),
+                    "watching keepbook data directory for tray refresh"
+                );
+                Some(watcher)
+            }
+            Err(err) => {
+                warn!(
+                    error = %err,
+                    path = %self.config.data_dir.display(),
+                    "unable to watch data directory; relying on periodic tray refresh fallback"
+                );
+                None
+            }
+        };
+        let data_watch_debounce = tokio::time::sleep(Duration::from_secs(24 * 60 * 60));
+        tokio::pin!(data_watch_debounce);
+        let mut data_watch_debounce_armed = false;
+
         let sync_sleep = tokio::time::sleep(next_delay);
         tokio::pin!(sync_sleep);
 
@@ -986,6 +1038,17 @@ impl Daemon {
                     sync_sleep.as_mut().reset(tokio::time::Instant::now() + next_delay);
                 }
                 _ = refresh_tick.tick() => {
+                    self.refresh_tray_state(&mut tray_state, &mut tray_handle).await;
+                }
+                Some(()) = watch_refresh_rx.recv(), if watcher.is_some() => {
+                    while watch_refresh_rx.try_recv().is_ok() {}
+                    data_watch_debounce
+                        .as_mut()
+                        .reset(tokio::time::Instant::now() + DATA_WATCH_DEBOUNCE);
+                    data_watch_debounce_armed = true;
+                }
+                _ = &mut data_watch_debounce, if data_watch_debounce_armed => {
+                    data_watch_debounce_armed = false;
                     self.refresh_tray_state(&mut tray_state, &mut tray_handle).await;
                 }
                 Some(cmd) = cmd_rx.recv() => {
@@ -1076,6 +1139,7 @@ async fn main() -> Result<()> {
 mod tests {
     use super::*;
     use ksni::Tray;
+    use notify::event::{AccessKind, CreateKind, ModifyKind, RemoveKind};
 
     #[test]
     fn compute_next_delay_without_jitter_is_constant() {
@@ -1104,6 +1168,27 @@ mod tests {
             parse_nonzero_duration_arg("30s").expect("duration should parse"),
             Duration::from_secs(30)
         );
+    }
+
+    #[test]
+    fn fs_event_filter_includes_state_mutations() {
+        assert!(should_refresh_for_fs_event_kind(&EventKind::Any));
+        assert!(should_refresh_for_fs_event_kind(&EventKind::Create(
+            CreateKind::Any
+        )));
+        assert!(should_refresh_for_fs_event_kind(&EventKind::Modify(
+            ModifyKind::Any
+        )));
+        assert!(should_refresh_for_fs_event_kind(&EventKind::Remove(
+            RemoveKind::Any
+        )));
+    }
+
+    #[test]
+    fn fs_event_filter_excludes_access_events() {
+        assert!(!should_refresh_for_fs_event_kind(&EventKind::Access(
+            AccessKind::Any
+        )));
     }
 
     #[test]

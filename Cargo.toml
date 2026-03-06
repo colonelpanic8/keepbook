@@ -79,7 +79,7 @@ sync = [
   "dep:tempfile",
   "dep:urlencoding",
 ]
-tray = ["dep:ksni", "dep:image"]
+tray = ["dep:ksni", "dep:image", "dep:notify"]
 
 [dependencies]
 # Async runtime
@@ -139,6 +139,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"], optional = true }
 ksni = { version = "0.3", optional = true }
 image = { version = "0.25", optional = true, default-features = false, features = ["png"] }
+notify = { version = "8", optional = true }
 
 [dev-dependencies]
 wiremock = "0.6"
