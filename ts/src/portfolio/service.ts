@@ -357,14 +357,15 @@ export class PortfolioService {
 
       case 'equity':
       case 'crypto': {
-        // Get price: use priceLatest if today, otherwise priceClose
         const today = this.clock.today();
         let pricePoint;
         try {
           if (asOfDate === today) {
             pricePoint = await this.marketData.priceLatest(asset, asOfDate);
           } else {
-            pricePoint = await this.marketData.priceClose(asset, asOfDate);
+            pricePoint =
+              (await this.marketData.valuationPriceFromStore(asset, asOfDate, true)) ??
+              (await this.marketData.priceClose(asset, asOfDate));
           }
         } catch {
           // No price available

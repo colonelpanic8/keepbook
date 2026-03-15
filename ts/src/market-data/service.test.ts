@@ -292,6 +292,33 @@ describe('MarketDataService', () => {
     });
   });
 
+  describe('valuationPriceFromStore', () => {
+    it('prefers a same-day quote over an older close', async () => {
+      await store.put_prices([
+        makePrice({
+          as_of_date: '2024-01-14',
+          price: '180.00',
+          kind: 'close',
+          timestamp: new Date('2024-01-14T21:00:00Z'),
+        }),
+        makePrice({
+          as_of_date: '2024-01-15',
+          price: '186.25',
+          kind: 'quote',
+          timestamp: new Date('2024-01-15T12:00:00Z'),
+        }),
+      ]);
+
+      service = new MarketDataService(store);
+      const result = await service.valuationPriceFromStore(AAPL, '2024-01-15', true);
+
+      expect(result).not.toBeNull();
+      expect(result!.kind).toBe('quote');
+      expect(result!.as_of_date).toBe('2024-01-15');
+      expect(result!.price).toBe('186.25');
+    });
+  });
+
   // -- fxClose --------------------------------------------------------------
 
   describe('fxClose', () => {

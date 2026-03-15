@@ -457,11 +457,19 @@ impl PortfolioService {
                 }
             }
             Asset::Equity { .. } | Asset::Crypto { .. } => {
-                // Get price - try live quote first, fall back to close
+                // Use live pricing for today. Historical valuation prefers an exact-date close,
+                // then a same-day cached quote, before falling back to older closes.
                 let price_result = if as_of_date == self.clock.today() {
                     self.market_data.price_latest(asset, as_of_date).await
                 } else {
-                    self.market_data.price_close(asset, as_of_date).await
+                    match self
+                        .market_data
+                        .valuation_price_from_store(asset, as_of_date, true)
+                        .await?
+                    {
+                        Some(price) => Ok(price),
+                        None => self.market_data.price_close(asset, as_of_date).await,
+                    }
                 };
                 let price_point = match price_result {
                     Ok(p) => p,
@@ -1127,6 +1135,51 @@ mod tests {
 
         assert_eq!(valuation.price.as_deref(), Some("100"));
         assert_eq!(valuation.price_date, Some(as_of_date));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn historical_snapshot_prefers_same_day_quote_over_older_close() -> Result<()> {
+        let storage = Arc::new(MemoryStorage::new());
+        let store = Arc::new(MemoryMarketDataStore::new());
+        let asset = Asset::equity("AAPL");
+        let asset_id = AssetId::from_asset(&asset);
+        let as_of_date = chrono::NaiveDate::from_ymd_opt(2024, 1, 2).unwrap();
+        let quote_timestamp = Utc.with_ymd_and_hms(2024, 1, 2, 12, 0, 0).unwrap();
+
+        store
+            .put_prices(&[
+                PricePoint {
+                    asset_id: asset_id.clone(),
+                    as_of_date: chrono::NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
+                    timestamp: Utc.with_ymd_and_hms(2024, 1, 1, 23, 59, 59).unwrap(),
+                    price: "100".to_string(),
+                    quote_currency: "USD".to_string(),
+                    kind: PriceKind::Close,
+                    source: "close".to_string(),
+                },
+                PricePoint {
+                    asset_id,
+                    as_of_date,
+                    timestamp: quote_timestamp,
+                    price: "110".to_string(),
+                    quote_currency: "USD".to_string(),
+                    kind: PriceKind::Quote,
+                    source: "quote".to_string(),
+                },
+            ])
+            .await?;
+
+        let market_data = Arc::new(MarketDataService::new(store, None));
+        let service = PortfolioService::new(storage, market_data);
+        let valuation = service
+            .value_asset(&asset, Decimal::ONE, "USD", as_of_date)
+            .await?;
+
+        assert_eq!(valuation.price.as_deref(), Some("110"));
+        assert_eq!(valuation.price_date, Some(as_of_date));
+        assert_eq!(valuation.price_timestamp, Some(quote_timestamp));
 
         Ok(())
     }

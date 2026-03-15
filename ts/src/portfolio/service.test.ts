@@ -174,6 +174,34 @@ describe('PortfolioService', () => {
     expect(assetSummary.fx_rate).toBeUndefined();
   });
 
+  it('prefers a same-day historical quote over an older close', async () => {
+    const conn = await createConnection(storage, 'Broker');
+    const account = await createAccount(storage, 'Brokerage', conn);
+    await addSnapshot(storage, account.id, new Date('2026-02-01T12:00:00Z'), [
+      { asset: Asset.equity('AAPL'), amount: '10' },
+    ]);
+
+    await mdStore.put_prices([
+      makePrice(Asset.equity('AAPL'), '2026-02-01', '200'),
+      {
+        ...makePrice(Asset.equity('AAPL'), '2026-02-02', '205'),
+        kind: 'quote',
+        timestamp: new Date('2026-02-02T12:00:00Z'),
+      },
+    ]);
+
+    const service = buildService(new FixedClock(new Date('2026-02-10T00:00:00Z')));
+    const result = await service.calculate(makeQuery({ currency: 'USD', grouping: 'asset' }));
+
+    expect(result.total_value).toBe('2050');
+
+    const assetSummary = result.by_asset![0];
+    expect(assetSummary.price).toBe('205');
+    expect(assetSummary.price_date).toBe('2026-02-02');
+    expect(assetSummary.price_timestamp).toEqual(new Date('2026-02-02T12:00:00Z'));
+    expect(assetSummary.value_in_base).toBe('2050');
+  });
+
   // ---------------------------------------------------------------------------
   // 3. Equity with FX conversion (EUR target, needs USD->EUR rate)
   // ---------------------------------------------------------------------------

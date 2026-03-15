@@ -1306,6 +1306,95 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn portfolio_history_prefers_same_day_quotes_over_older_closes() -> anyhow::Result<()> {
+        let dir = TempDir::new()?;
+        let config = ResolvedConfig {
+            data_dir: dir.path().to_path_buf(),
+            reporting_currency: "USD".to_string(),
+            display: DisplayConfig::default(),
+            refresh: RefreshConfig::default(),
+            tray: TrayConfig::default(),
+            spending: SpendingConfig::default(),
+            ignore: crate::config::IgnoreConfig::default(),
+            git: GitConfig::default(),
+        };
+
+        let storage = Arc::new(MemoryStorage::new());
+        let connection = Connection::new(connection_config("Test Broker"));
+        storage.save_connection(&connection).await?;
+
+        let account = Account::new("Trading", connection.id().clone());
+        storage.save_account(&account).await?;
+
+        let asset = Asset::equity("AAPL");
+        storage
+            .append_balance_snapshot(
+                &account.id,
+                &BalanceSnapshot::new(
+                    Utc.with_ymd_and_hms(2024, 1, 1, 12, 0, 0).unwrap(),
+                    vec![AssetBalance::new(asset.clone(), "10")],
+                ),
+            )
+            .await?;
+
+        let store = JsonlMarketDataStore::new(&config.data_dir);
+        store
+            .put_prices(&[
+                PricePoint {
+                    asset_id: AssetId::from_asset(&asset),
+                    as_of_date: NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
+                    timestamp: Utc.with_ymd_and_hms(2024, 1, 1, 23, 59, 59).unwrap(),
+                    price: "100".to_string(),
+                    quote_currency: "USD".to_string(),
+                    kind: PriceKind::Close,
+                    source: "test".to_string(),
+                },
+                PricePoint {
+                    asset_id: AssetId::from_asset(&asset),
+                    as_of_date: NaiveDate::from_ymd_opt(2024, 1, 2).unwrap(),
+                    timestamp: Utc.with_ymd_and_hms(2024, 1, 2, 12, 0, 0).unwrap(),
+                    price: "110".to_string(),
+                    quote_currency: "USD".to_string(),
+                    kind: PriceKind::Quote,
+                    source: "test".to_string(),
+                },
+                PricePoint {
+                    asset_id: AssetId::from_asset(&asset),
+                    as_of_date: NaiveDate::from_ymd_opt(2024, 1, 3).unwrap(),
+                    timestamp: Utc.with_ymd_and_hms(2024, 1, 3, 12, 0, 0).unwrap(),
+                    price: "120".to_string(),
+                    quote_currency: "USD".to_string(),
+                    kind: PriceKind::Quote,
+                    source: "test".to_string(),
+                },
+            ])
+            .await?;
+
+        let output = portfolio_history(
+            storage,
+            &config,
+            None,
+            Some("2024-01-02".to_string()),
+            Some("2024-01-03".to_string()),
+            "none".to_string(),
+            true,
+        )
+        .await?;
+
+        assert_eq!(output.points.len(), 2);
+        assert_eq!(output.points[0].date, "2024-01-02");
+        assert_eq!(output.points[0].total_value, "1100");
+        assert_eq!(output.points[1].date, "2024-01-03");
+        assert_eq!(output.points[1].total_value, "1200");
+        assert_eq!(
+            output.points[1].percentage_change_from_previous.as_deref(),
+            Some("9.09")
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn portfolio_history_can_jump_when_missing_asset_prices_arrive_late() -> anyhow::Result<()>
     {
         let dir = TempDir::new()?;

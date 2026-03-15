@@ -142,26 +142,43 @@ export class MarketDataService {
   /**
    * Get a valuation price from store only, no external fetching.
    *
-   * - First tries close prices via `priceFromStore`
-   * - If none found and `allowQuoteFallback` is true, tries same-day quote
+   * - First tries an exact-date close
+   * - If none found and `allowQuoteFallback` is true, tries a same-day quote
+   * - Finally falls back to older close prices via `priceFromStore`
    */
   async valuationPriceFromStore(
     asset: AssetType,
     date: string,
     allowQuoteFallback: boolean,
   ): Promise<PricePoint | null> {
-    const close = await this.priceFromStore(asset, date);
+    const normalized = Asset.normalized(asset);
+    const assetId = AssetId.fromAsset(normalized);
+
+    const close = await this.store.get_price(assetId, date, 'close');
     if (close !== null) {
       return close;
     }
 
-    if (!allowQuoteFallback) {
+    if (allowQuoteFallback) {
+      const quote = await this.store.get_price(assetId, date, 'quote');
+      if (quote !== null) {
+        return quote;
+      }
+    }
+
+    if (this.storeLookbackDays_ !== null) {
+      for (let offset = 1; offset <= this.storeLookbackDays_; offset++) {
+        const targetDate = subtractDays(date, offset);
+        const fallback = await this.store.get_price(assetId, targetDate, 'close');
+        if (fallback !== null) {
+          return fallback;
+        }
+      }
       return null;
     }
 
-    const normalized = Asset.normalized(asset);
-    const assetId = AssetId.fromAsset(normalized);
-    return this.store.get_price(assetId, date, 'quote');
+    const all = await this.store.get_all_prices(assetId);
+    return selectLatestPriceOnOrBefore(all, date);
   }
 
   /**

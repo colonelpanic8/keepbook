@@ -118,27 +118,44 @@ impl MarketDataService {
 
     /// Get a valuation price from store only, no external fetching.
     ///
-    /// - First tries close prices via `price_from_store`
-    /// - If none found and `allow_quote_fallback` is true, tries same-day quote
+    /// - First tries an exact-date close
+    /// - If none found and `allow_quote_fallback` is true, tries a same-day quote
+    /// - Finally falls back to older close prices via `price_from_store`
     pub async fn valuation_price_from_store(
         &self,
         asset: &Asset,
         date: NaiveDate,
         allow_quote_fallback: bool,
     ) -> Result<Option<PricePoint>> {
-        if let Some(close) = self.price_from_store(asset, date).await? {
+        let asset = asset.normalized();
+        let asset_id = AssetId::from_asset(&asset);
+
+        if let Some(close) = self.store.get_price(&asset_id, date, PriceKind::Close).await? {
             return Ok(Some(close));
         }
 
-        if !allow_quote_fallback {
+        if allow_quote_fallback {
+            if let Some(quote) = self.store.get_price(&asset_id, date, PriceKind::Quote).await? {
+                return Ok(Some(quote));
+            }
+        }
+
+        if let Some(days) = self.store_lookback_days {
+            for offset in 1..=days {
+                let target_date = date - Duration::days(offset as i64);
+                if let Some(price) = self
+                    .store
+                    .get_price(&asset_id, target_date, PriceKind::Close)
+                    .await?
+                {
+                    return Ok(Some(price));
+                }
+            }
             return Ok(None);
         }
 
-        let asset = asset.normalized();
-        let asset_id = AssetId::from_asset(&asset);
-        self.store
-            .get_price(&asset_id, date, PriceKind::Quote)
-            .await
+        let prices = self.store.get_all_prices(&asset_id).await?;
+        Ok(select_latest_price_on_or_before(prices, date))
     }
 
     pub async fn price_close(&self, asset: &Asset, date: NaiveDate) -> Result<PricePoint> {
@@ -817,6 +834,42 @@ mod tests {
 
         let found = svc.price_from_store(&asset, query_date).await?;
         assert!(found.is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn valuation_price_from_store_prefers_same_day_quote_over_older_close() -> Result<()> {
+        let store = Arc::new(MemoryMarketDataStore::default());
+        let svc = MarketDataService::new(store.clone(), None);
+        let asset = Asset::equity("AAPL");
+        let asset_id = AssetId::from_asset(&asset);
+        let query_date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+
+        store
+            .put_prices(&[
+                make_close(
+                    &asset_id,
+                    NaiveDate::from_ymd_opt(2024, 1, 14).unwrap(),
+                    Utc.with_ymd_and_hms(2024, 1, 14, 23, 59, 59).unwrap(),
+                    "100",
+                ),
+                make_quote(
+                    &asset_id,
+                    query_date,
+                    Utc.with_ymd_and_hms(2024, 1, 15, 12, 0, 0).unwrap(),
+                    "110",
+                ),
+            ])
+            .await?;
+
+        let found = svc
+            .valuation_price_from_store(&asset, query_date, true)
+            .await?;
+        assert!(found.is_some());
+        let found = found.unwrap();
+        assert_eq!(found.kind, PriceKind::Quote);
+        assert_eq!(found.as_of_date, query_date);
+        assert_eq!(found.price, "110");
         Ok(())
     }
 
