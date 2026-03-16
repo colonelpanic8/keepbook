@@ -260,6 +260,56 @@ history-quarterly-totals quarters='8':
 
 alias quarterly-totals := history-quarterly-totals
 
+# Spending totals by category over a time range.
+# Extra spending args can be passed through, e.g.:
+#   just spending-by-category -- --start 2026-01-01 --end 2026-02-01
+#   just spending-by-category -- --connection Chase --status posted+pending
+spending-by-category *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    start=""
+    end=""
+    expect_value=""
+
+    for arg in "$@"; do
+      if [ -n "$expect_value" ]; then
+        if [ "$expect_value" = "start" ]; then
+          start="$arg"
+        else
+          end="$arg"
+        fi
+        expect_value=""
+        continue
+      fi
+
+      case "$arg" in
+        --start)
+          expect_value="start"
+          ;;
+        --start=*)
+          start="${arg#--start=}"
+          ;;
+        --end)
+          expect_value="end"
+          ;;
+        --end=*)
+          end="${arg#--end=}"
+          ;;
+      esac
+    done
+
+    if [ -z "$end" ]; then
+      end="$(date +%F)"
+    fi
+
+    if [ -z "$start" ]; then
+      start="$(date -d "$end -30 days" +%F)"
+    fi
+
+    {{keepbook_cmd}} spending-categories "$@" --period range --start "$start" --end "$end" \
+      | jq '{meta: {start_date, end_date}, total, categories: ((.periods[0]?.breakdown // []) | map({key, value: .total}) | from_entries)}'
+
 # Portfolio snapshot distilled to total and per-account base-currency totals.
 # Extra snapshot args can be passed through, e.g.:
 #   just snapshot-account-totals --date 2026-02-01
