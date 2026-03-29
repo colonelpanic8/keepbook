@@ -11,6 +11,7 @@ import { type AccountType } from '../models/account.js';
 import { type AssetType } from '../models/asset.js';
 import { AssetId } from '../market-data/asset-id.js';
 import { type MarketDataStore } from '../market-data/store.js';
+import { type PricePoint } from '../market-data/models.js';
 import { type Storage } from '../storage/storage.js';
 
 // ---------------------------------------------------------------------------
@@ -154,6 +155,16 @@ export function dateToTimestamp(date: string): Date {
   const month = parseInt(monthStr, 10) - 1; // 0-indexed
   const day = parseInt(dayStr, 10);
   return new Date(Date.UTC(year, month, day, 23, 59, 59));
+}
+
+export function priceToChangeTimestamp(price: PricePoint): Date {
+  switch (price.kind) {
+    case 'quote':
+      return price.timestamp;
+    case 'close':
+    case 'adj_close':
+      return dateToTimestamp(price.as_of_date);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -368,9 +379,7 @@ export async function collectChangePoints(
       const assetId = AssetId.fromString(assetIdStr);
       const prices = await marketData.get_all_prices(assetId);
       for (const price of prices) {
-        // Match Rust behavior: price change points are keyed by as_of_date
-        // (end-of-day), not by quote ingest timestamp.
-        collector.addPriceChange(dateToTimestamp(price.as_of_date), assetId);
+        collector.addPriceChange(priceToChangeTimestamp(price), assetId);
       }
     }
   }

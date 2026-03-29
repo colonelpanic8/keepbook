@@ -1234,8 +1234,10 @@ describe('portfolioHistory', () => {
 
     expect(result.points).toHaveLength(2);
     expect(result.points[0].date).toBe('2024-01-02');
+    expect(result.points[0].timestamp).toBe('2024-01-02T12:00:00+00:00');
     expect(result.points[0].total_value).toBe('1100');
     expect(result.points[1].date).toBe('2024-01-03');
+    expect(result.points[1].timestamp).toBe('2024-01-03T12:00:00+00:00');
     expect(result.points[1].total_value).toBe('1200');
     expect(result.points[1].percentage_change_from_previous).toBe('9.09');
   });

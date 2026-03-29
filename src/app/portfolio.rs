@@ -1383,8 +1383,10 @@ mod tests {
 
         assert_eq!(output.points.len(), 2);
         assert_eq!(output.points[0].date, "2024-01-02");
+        assert_eq!(output.points[0].timestamp, "2024-01-02T12:00:00+00:00");
         assert_eq!(output.points[0].total_value, "1100");
         assert_eq!(output.points[1].date, "2024-01-03");
+        assert_eq!(output.points[1].timestamp, "2024-01-03T12:00:00+00:00");
         assert_eq!(output.points[1].total_value, "1200");
         assert_eq!(
             output.points[1].percentage_change_from_previous.as_deref(),

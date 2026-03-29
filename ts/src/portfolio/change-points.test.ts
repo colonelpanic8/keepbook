@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   ChangePointCollector,
   dateToTimestamp,
+  priceToChangeTimestamp,
   filterByGranularity,
   filterByDateRange,
   collectChangePoints,
@@ -161,6 +162,37 @@ describe('dateToTimestamp', () => {
     expect(result.getUTCHours()).toBe(23);
     expect(result.getUTCMinutes()).toBe(59);
     expect(result.getUTCSeconds()).toBe(59);
+  });
+});
+
+describe('priceToChangeTimestamp', () => {
+  it('preserves quote timestamps', () => {
+    const ts = new Date('2024-06-15T16:00:00Z');
+    expect(
+      priceToChangeTimestamp({
+        asset_id: AssetId.fromAsset(Asset.equity('AAPL')),
+        as_of_date: '2024-06-15',
+        timestamp: ts,
+        price: '190',
+        quote_currency: 'USD',
+        kind: 'quote',
+        source: 'test',
+      }),
+    ).toEqual(ts);
+  });
+
+  it('anchors close prices to end-of-day', () => {
+    expect(
+      priceToChangeTimestamp({
+        asset_id: AssetId.fromAsset(Asset.equity('AAPL')),
+        as_of_date: '2024-06-15',
+        timestamp: new Date('2024-06-20T09:00:00Z'),
+        price: '190',
+        quote_currency: 'USD',
+        kind: 'close',
+        source: 'test',
+      }),
+    ).toEqual(new Date('2024-06-15T23:59:59Z'));
   });
 });
 
@@ -617,5 +649,49 @@ describe('collectChangePoints', () => {
       .filter((t) => t.type === 'price')
       .map((t) => (t.type === 'price' ? t.asset_id.asStr() : ''));
     expect(ids).toEqual(['equity/GOOGL', 'equity/VXUS']);
+  });
+
+  it('preserves intraday quote timestamps for price change points', async () => {
+    const storage = new MemoryStorage();
+    const marketData = new MemoryMarketDataStore();
+
+    const connId = Id.fromString('conn-1');
+    await storage.saveConnection({
+      config: { name: 'Test Connection', synchronizer: 'test' } as ConnectionConfig,
+      state: ConnectionState.newWith(connId, new Date('2024-01-01T00:00:00Z')),
+    });
+
+    const accountId = Id.fromString('acct-1');
+    await storage.saveAccount(
+      Account.newWith(accountId, new Date('2024-01-01T00:00:00Z'), 'Brokerage', connId),
+    );
+
+    await storage.appendBalanceSnapshot(
+      accountId,
+      BalanceSnapshot.new(new Date('2024-06-15T10:00:00Z'), [
+        AssetBalance.new(Asset.equity('AAPL'), '1'),
+      ]),
+    );
+
+    await marketData.put_prices([
+      {
+        asset_id: AssetId.fromAsset(Asset.equity('AAPL')),
+        as_of_date: '2024-06-15',
+        timestamp: new Date('2024-06-15T16:00:00Z'),
+        price: '190',
+        quote_currency: 'USD',
+        kind: 'quote',
+        source: 'test',
+      },
+    ]);
+
+    const points = await collectChangePoints(storage, marketData, { includePrices: true });
+    const pricePoint = points.find(
+      (p) =>
+        p.timestamp.getTime() === new Date('2024-06-15T16:00:00Z').getTime() &&
+        p.triggers.some((t) => t.type === 'price'),
+    );
+
+    expect(pricePoint).toBeDefined();
   });
 });

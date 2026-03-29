@@ -9,6 +9,7 @@ use chrono::{DateTime, Duration, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::market_data::{AssetId, MarketDataStore};
+use crate::market_data::{PriceKind, PricePoint};
 use crate::models::{Asset, Id};
 use crate::storage::Storage;
 
@@ -98,6 +99,15 @@ impl ChangePointCollector {
 
 fn date_to_timestamp(date: NaiveDate) -> DateTime<Utc> {
     date.and_hms_opt(23, 59, 59).expect("valid date").and_utc()
+}
+
+fn price_to_change_timestamp(price: &PricePoint) -> DateTime<Utc> {
+    match price.kind {
+        // Quotes represent intraday movements, so preserve the actual observation time.
+        PriceKind::Quote => price.timestamp,
+        // Closes should affect valuations on their as-of date, even if fetched later.
+        PriceKind::Close | PriceKind::AdjClose => date_to_timestamp(price.as_of_date),
+    }
 }
 
 /// Granularity for filtering change points.
@@ -312,7 +322,7 @@ pub async fn collect_change_points(
         for asset_id in held_assets {
             let prices = market_data.get_all_prices(&asset_id).await?;
             for price in prices {
-                collector.add_price_change(date_to_timestamp(price.as_of_date), asset_id.clone());
+                collector.add_price_change(price_to_change_timestamp(&price), asset_id.clone());
             }
         }
     }
@@ -381,6 +391,40 @@ mod tests {
         assert_eq!(ts.hour(), 23);
         assert_eq!(ts.minute(), 59);
         assert_eq!(ts.second(), 59);
+    }
+
+    #[test]
+    fn price_to_change_timestamp_uses_quote_timestamp() {
+        let quote_ts = make_ts(2026, 2, 1, 14, 15);
+        let price = PricePoint {
+            asset_id: AssetId::from_asset(&Asset::equity("AAPL")),
+            as_of_date: chrono::NaiveDate::from_ymd_opt(2026, 2, 1).unwrap(),
+            timestamp: quote_ts,
+            price: "200".to_string(),
+            quote_currency: "USD".to_string(),
+            kind: PriceKind::Quote,
+            source: "test".to_string(),
+        };
+
+        assert_eq!(price_to_change_timestamp(&price), quote_ts);
+    }
+
+    #[test]
+    fn price_to_change_timestamp_uses_end_of_day_for_closes() {
+        let price = PricePoint {
+            asset_id: AssetId::from_asset(&Asset::equity("AAPL")),
+            as_of_date: chrono::NaiveDate::from_ymd_opt(2026, 2, 1).unwrap(),
+            timestamp: make_ts(2026, 2, 5, 9, 0),
+            price: "200".to_string(),
+            quote_currency: "USD".to_string(),
+            kind: PriceKind::Close,
+            source: "test".to_string(),
+        };
+
+        assert_eq!(
+            price_to_change_timestamp(&price),
+            date_to_timestamp(price.as_of_date)
+        );
     }
 
     #[test]
@@ -790,6 +834,86 @@ mod tests {
             price_ids,
             vec!["equity/GOOGL".to_string(), "equity/VXUS".to_string()]
         );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn collect_change_points_preserves_intraday_quote_timestamps() -> Result<()> {
+        let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new());
+        let market_data: Arc<dyn MarketDataStore> = Arc::new(MemoryMarketDataStore::new());
+
+        let conn_id = Id::from_string("conn-1");
+        let account_id = Id::from_string("acct-1");
+
+        storage
+            .save_connection(&Connection {
+                config: ConnectionConfig {
+                    name: "Test".to_string(),
+                    synchronizer: "manual".to_string(),
+                    credentials: None,
+                    balance_staleness: None,
+                },
+                state: ConnectionState::new_with(conn_id.clone(), make_ts(2024, 1, 1, 0, 0)),
+            })
+            .await?;
+
+        storage
+            .save_account(&Account::new_with(
+                account_id.clone(),
+                make_ts(2024, 1, 1, 0, 0),
+                "Brokerage",
+                conn_id,
+            ))
+            .await?;
+
+        storage
+            .append_balance_snapshot(
+                &account_id,
+                &crate::models::BalanceSnapshot::new(
+                    make_ts(2024, 6, 15, 10, 0),
+                    vec![AssetBalance::new(Asset::equity("AAPL"), "1")],
+                ),
+            )
+            .await?;
+
+        let quote_ts = make_ts(2024, 6, 15, 16, 0);
+        market_data
+            .put_prices(&[PricePoint {
+                asset_id: AssetId::from_asset(&Asset::equity("AAPL")),
+                as_of_date: chrono::NaiveDate::from_ymd_opt(2024, 6, 15).unwrap(),
+                timestamp: quote_ts,
+                price: "190".to_string(),
+                quote_currency: "USD".to_string(),
+                kind: PriceKind::Quote,
+                source: "test".to_string(),
+            }])
+            .await?;
+
+        let points = collect_change_points(
+            &storage,
+            &market_data,
+            &CollectOptions {
+                account_ids: vec![account_id],
+                include_prices: true,
+                include_fx: false,
+                target_currency: None,
+            },
+        )
+        .await?;
+
+        let price_point = points
+            .iter()
+            .find(|p| {
+                p.timestamp == quote_ts
+                    && p.triggers
+                        .iter()
+                        .any(|trigger| matches!(trigger, ChangeTrigger::Price { .. }))
+            })
+            .cloned()
+            .expect("quote-triggered change point should exist");
+
+        assert_eq!(price_point.timestamp, quote_ts);
 
         Ok(())
     }
