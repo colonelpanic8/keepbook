@@ -80,7 +80,7 @@ impl CoinbaseSynchronizer {
             .trim_end_matches('/')
             .replace("https://", "")
             .replace("http://", "");
-        let uri = format!("{} {}{}", method, base, path);
+        let uri = format!("{method} {base}{path}");
 
         let claims = JwtClaims {
             sub: self.key_name.clone(),
@@ -512,6 +512,7 @@ impl Synchronizer for CoinbaseSynchronizer {
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
     use crate::models::ConnectionConfig;

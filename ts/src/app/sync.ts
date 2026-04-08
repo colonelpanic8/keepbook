@@ -13,13 +13,22 @@ import {
   type MetadataBackfillStorage,
   type Storage,
 } from '../storage/storage.js';
+import {
+  JsonlMarketDataStore,
+  type MarketDataJsonlNormalizationStats,
+} from '../market-data/jsonl-store.js';
 import { findConnection } from '../storage/lookup.js';
 import type { RefreshConfig } from '../config.js';
 import { checkBalanceStaleness, resolveBalanceStaleness } from '../staleness.js';
 import type { ConnectionType } from '../models/connection.js';
 import { CoinbaseSynchronizer } from '../sync/synchronizers/coinbase.js';
 import { SchwabSynchronizer } from '../sync/synchronizers/schwab.js';
-import { DefaultSyncOptions, saveSyncResult, type SyncOptions, type Synchronizer } from '../sync/mod.js';
+import {
+  DefaultSyncOptions,
+  saveSyncResult,
+  type SyncOptions,
+  type Synchronizer,
+} from '../sync/mod.js';
 import { SessionCache } from '../credentials/session.js';
 import { parseExportedSession } from '../sync/schwab.js';
 
@@ -332,8 +341,19 @@ export async function syncSymlinks(): Promise<object> {
 // syncRecompact
 // ---------------------------------------------------------------------------
 
-export async function syncRecompact(storage: CompactionStorage): Promise<object> {
-  return storage.recompactAllJsonl();
+export async function syncRecompact(
+  storage: CompactionStorage,
+  marketData: JsonlMarketDataStore,
+): Promise<{
+  storage_jsonl: Awaited<ReturnType<CompactionStorage['recompactAllJsonl']>>;
+  market_data_jsonl: MarketDataJsonlNormalizationStats;
+}> {
+  const storageStats = await storage.recompactAllJsonl();
+  const marketDataStats = await marketData.recompactAllJsonl();
+  return {
+    storage_jsonl: storageStats,
+    market_data_jsonl: marketDataStats,
+  };
 }
 
 // ---------------------------------------------------------------------------

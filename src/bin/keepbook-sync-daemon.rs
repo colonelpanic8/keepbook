@@ -1240,8 +1240,10 @@ mod tests {
     #[test]
     fn recent_spending_is_not_rendered_as_submenu() {
         let (cmd_tx, _cmd_rx) = mpsc::unbounded_channel();
-        let mut state = KeepbookTrayState::default();
-        state.spending_lines = vec!["Last 7d: $42 (3 txns)".to_string()];
+        let state = KeepbookTrayState {
+            spending_lines: vec!["Last 7d: $42 (3 txns)".to_string()],
+            ..KeepbookTrayState::default()
+        };
         let tray = KeepbookTray::new(state, cmd_tx);
 
         let menu = tray.menu();

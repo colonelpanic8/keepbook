@@ -14,18 +14,18 @@ async fn coingecko_fetch_close_hits_mock_server() -> Result<()> {
     let date = Utc::now().date_naive() - Duration::days(1);
     let date_str = date.format("%d-%m-%Y").to_string();
 
-    let body = format!(
-        r#"{{
+    let body = r#"
+        {
             "id": "bitcoin",
             "symbol": "btc",
             "name": "Bitcoin",
-            "market_data": {{
-                "current_price": {{
+            "market_data": {
+                "current_price": {
                     "usd": 42000.0
-                }}
-            }}
-        }}"#
-    );
+                }
+            }
+        }"#
+    .to_string();
 
     Mock::given(method("GET"))
         .and(path("/coins/bitcoin/history"))

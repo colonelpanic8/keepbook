@@ -600,7 +600,7 @@ fn normalize_amount(raw: &str) -> Option<String> {
         s = s[1..s.len() - 1].to_string();
     }
 
-    s = s.trim().replace('$', "").replace(',', "");
+    s = s.trim().replace(['$', ','], "");
 
     // Capture explicit leading sign after stripping formatting.
     if let Some(rest) = s.strip_prefix('-') {
@@ -710,21 +710,21 @@ pub fn parse_exported_transactions_json(
         let mut parts: Vec<String> = Vec::new();
         if let Some(a) = action
             .as_deref()
-            .map(|s| normalize_ws(s))
+            .map(normalize_ws)
             .filter(|s| !s.is_empty())
         {
             parts.push(a);
         }
         if let Some(s) = symbol
             .as_deref()
-            .map(|s| normalize_ws(s))
+            .map(normalize_ws)
             .filter(|s| !s.is_empty())
         {
             parts.push(s);
         }
         if let Some(d) = description
             .as_deref()
-            .map(|s| normalize_ws(s))
+            .map(normalize_ws)
             .filter(|s| !s.is_empty())
         {
             parts.push(d);

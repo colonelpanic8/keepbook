@@ -720,6 +720,7 @@ async fn ensure_fx_rate(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn portfolio_snapshot(
     storage: Arc<dyn Storage>,
     config: &ResolvedConfig,

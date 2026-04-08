@@ -118,7 +118,7 @@ async fn schwab_sync_uses_cached_session_and_base_url_override() -> Result<()> {
     let mut session = SessionData::new().with_token("test-token");
     session.data.insert("api_base".to_string(), server.uri());
     session.cookies = HashMap::new();
-    session_cache.set(&connection.id().to_string(), &session)?;
+    session_cache.set(connection.id().as_ref(), &session)?;
 
     let synchronizer = SchwabSynchronizer::with_session_cache(&connection, session_cache);
     let result = synchronizer
@@ -234,7 +234,7 @@ async fn schwab_preserves_created_at_for_existing_account() -> Result<()> {
     let session_cache = SessionCache::with_path(cache_dir.path())?;
     let mut session = SessionData::new().with_token("test-token");
     session.data.insert("api_base".to_string(), server.uri());
-    session_cache.set(&connection.id().to_string(), &session)?;
+    session_cache.set(connection.id().as_ref(), &session)?;
 
     let synchronizer = SchwabSynchronizer::with_session_cache(&connection, session_cache);
     let result = synchronizer
@@ -311,7 +311,7 @@ async fn schwab_account_ids_are_deterministic() -> Result<()> {
     let session_cache = SessionCache::with_path(cache_dir.path())?;
     let mut session = SessionData::new().with_token("test-token");
     session.data.insert("api_base".to_string(), server.uri());
-    session_cache.set(&connection.id().to_string(), &session)?;
+    session_cache.set(connection.id().as_ref(), &session)?;
 
     let synchronizer = SchwabSynchronizer::with_session_cache(&connection, session_cache);
     let result = synchronizer

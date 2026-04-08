@@ -118,10 +118,9 @@ async function writeJsonl<TJson, T>(
 }
 
 function comparePricePoints(a: PricePoint, b: PricePoint): number {
-  const timeDelta = a.timestamp.getTime() - b.timestamp.getTime();
-  if (timeDelta !== 0) return timeDelta;
   return (
     a.as_of_date.localeCompare(b.as_of_date) ||
+    a.timestamp.getTime() - b.timestamp.getTime() ||
     a.kind.localeCompare(b.kind) ||
     a.quote_currency.localeCompare(b.quote_currency) ||
     a.source.localeCompare(b.source) ||
@@ -131,16 +130,46 @@ function comparePricePoints(a: PricePoint, b: PricePoint): number {
 }
 
 function compareFxRatePoints(a: FxRatePoint, b: FxRatePoint): number {
-  const timeDelta = a.timestamp.getTime() - b.timestamp.getTime();
-  if (timeDelta !== 0) return timeDelta;
   return (
     a.as_of_date.localeCompare(b.as_of_date) ||
+    a.timestamp.getTime() - b.timestamp.getTime() ||
     a.kind.localeCompare(b.kind) ||
     a.base.localeCompare(b.base) ||
     a.quote.localeCompare(b.quote) ||
     a.source.localeCompare(b.source) ||
     a.rate.localeCompare(b.rate)
   );
+}
+
+export interface MarketDataJsonlNormalizationStats {
+  price_files_rewritten: number;
+  fx_files_rewritten: number;
+  price_points_sorted: number;
+  fx_rate_points_sorted: number;
+}
+
+async function collectJsonlFiles(dir: string): Promise<string[]> {
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return [];
+    }
+    throw err;
+  }
+
+  const files: string[] = [];
+  for (const entry of entries) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...(await collectJsonlFiles(path)));
+    } else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
+      files.push(path);
+    }
+  }
+
+  return files;
 }
 
 // ---------------------------------------------------------------------------
@@ -207,8 +236,7 @@ export class JsonlMarketDataStore implements MarketDataStore {
       }
     }
 
-    // Sort by timestamp for consistent ordering
-    allPrices.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+    allPrices.sort(comparePricePoints);
     return allPrices;
   }
 
@@ -275,8 +303,7 @@ export class JsonlMarketDataStore implements MarketDataStore {
       }
     }
 
-    // Sort by timestamp for consistent ordering
-    allRates.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+    allRates.sort(compareFxRatePoints);
     return allRates;
   }
 
@@ -305,6 +332,33 @@ export class JsonlMarketDataStore implements MarketDataStore {
       const all = [...existing, ...items].sort(compareFxRatePoints);
       await writeJsonl<FxRatePointJSON, FxRatePoint>(path, all, fxRatePointToJSON);
     }
+  }
+
+  async recompactAllJsonl(): Promise<MarketDataJsonlNormalizationStats> {
+    const stats: MarketDataJsonlNormalizationStats = {
+      price_files_rewritten: 0,
+      fx_files_rewritten: 0,
+      price_points_sorted: 0,
+      fx_rate_points_sorted: 0,
+    };
+
+    for (const path of await collectJsonlFiles(join(this.basePath, 'prices'))) {
+      const prices = await readJsonl<PricePointJSON, PricePoint>(path, pricePointFromJSON);
+      stats.price_points_sorted += prices.length;
+      prices.sort(comparePricePoints);
+      await writeJsonl<PricePointJSON, PricePoint>(path, prices, pricePointToJSON);
+      stats.price_files_rewritten += 1;
+    }
+
+    for (const path of await collectJsonlFiles(join(this.basePath, 'fx'))) {
+      const rates = await readJsonl<FxRatePointJSON, FxRatePoint>(path, fxRatePointFromJSON);
+      stats.fx_rate_points_sorted += rates.length;
+      rates.sort(compareFxRatePoints);
+      await writeJsonl<FxRatePointJSON, FxRatePoint>(path, rates, fxRatePointToJSON);
+      stats.fx_files_rewritten += 1;
+    }
+
+    return stats;
   }
 
   // -- Asset entries --------------------------------------------------------

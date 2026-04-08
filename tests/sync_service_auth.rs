@@ -132,7 +132,7 @@ async fn sync_service_auth_decline_skips_sync() -> Result<()> {
 
     match outcome {
         SyncOutcome::AuthRequired { .. } => {}
-        other => anyhow::bail!("unexpected outcome: {:?}", other),
+        other => anyhow::bail!("unexpected outcome: {other:?}"),
     }
 
     assert!(!state.login_called.load(Ordering::SeqCst));
@@ -166,7 +166,7 @@ async fn sync_service_auth_accepts_and_syncs() -> Result<()> {
 
     match outcome {
         SyncOutcome::Synced { .. } => {}
-        other => anyhow::bail!("unexpected outcome: {:?}", other),
+        other => anyhow::bail!("unexpected outcome: {other:?}"),
     }
 
     assert!(state.login_called.load(Ordering::SeqCst));
@@ -205,7 +205,7 @@ async fn sync_service_auth_login_failure_returns_auth_required() -> Result<()> {
             assert!(error.contains("Interactive login failed"));
             assert!(error.contains("mock login failed"));
         }
-        other => anyhow::bail!("unexpected outcome: {:?}", other),
+        other => anyhow::bail!("unexpected outcome: {other:?}"),
     }
 
     assert!(state.login_called.load(Ordering::SeqCst));

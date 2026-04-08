@@ -392,18 +392,16 @@ impl SyncService {
                 .await?
                 .filter(|c| c.config.synchronizer == synchronizer_name)
                 .context(format!(
-                    "{} connection not found: {}",
-                    synchronizer_name, id_or_name
+                    "{synchronizer_name} connection not found: {id_or_name}"
                 ))?,
             (None, 1) => matching.into_iter().next().unwrap(),
             (None, 0) => {
-                anyhow::bail!("No {} connections found", synchronizer_name);
+                anyhow::bail!("No {synchronizer_name} connections found");
             }
             (None, n) => {
                 let names: Vec<_> = matching.iter().map(|c| &c.config.name).collect();
                 anyhow::bail!(
-                    "Multiple {} connections found ({n}). Specify one: {names:?}",
-                    synchronizer_name
+                    "Multiple {synchronizer_name} connections found ({n}). Specify one: {names:?}"
                 );
             }
         };

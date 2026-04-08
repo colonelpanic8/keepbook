@@ -5,7 +5,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 
 use crate::config::ResolvedConfig;
-use crate::market_data::MarketDataServiceBuilder;
+use crate::market_data::{JsonlMarketDataStore, MarketDataServiceBuilder};
 use crate::models::{Connection, Id};
 use crate::storage::{CompactionStorage, MetadataBackfillStorage, Storage, SymlinkStorage};
 use crate::sync::{
@@ -457,9 +457,15 @@ pub async fn sync_recompact(
     storage: &dyn CompactionStorage,
     config: &ResolvedConfig,
 ) -> Result<serde_json::Value> {
-    let stats = storage.recompact_all_jsonl().await?;
+    let storage_stats = storage.recompact_all_jsonl().await?;
+    let market_data_stats = JsonlMarketDataStore::new(&config.data_dir)
+        .recompact_all_jsonl()
+        .await?;
     maybe_auto_commit(config, "sync recompact");
-    Ok(serde_json::to_value(stats)?)
+    Ok(serde_json::json!({
+        "storage_jsonl": storage_stats,
+        "market_data_jsonl": market_data_stats,
+    }))
 }
 
 pub async fn sync_backfill_metadata(

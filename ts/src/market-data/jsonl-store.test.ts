@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, rm, readFile } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Asset } from '../models/asset.js';
 import { AssetId } from './asset-id.js';
 import type { PricePoint, FxRatePoint } from './models.js';
-import { AssetRegistryEntryFactory } from './models.js';
+import { AssetRegistryEntryFactory, fxRatePointToJSON, pricePointToJSON } from './models.js';
 import { JsonlMarketDataStore, sanitizeCode } from './jsonl-store.js';
 
 // ---------------------------------------------------------------------------
@@ -179,7 +179,7 @@ describe('JsonlMarketDataStore', () => {
       const all = await store.get_all_prices(assetId);
       expect(all).toHaveLength(3);
 
-      // Should be sorted by timestamp
+      // Should be sorted by as_of_date, then timestamp
       expect(all[0].as_of_date).toBe('2023-12-29');
       expect(all[1].as_of_date).toBe('2024-01-15');
       expect(all[2].as_of_date).toBe('2024-06-15');
@@ -254,6 +254,33 @@ describe('JsonlMarketDataStore', () => {
       expect(parsed[0].as_of_date).toBe('2024-01-15');
       expect(parsed[1].as_of_date).toBe('2024-12-31');
     });
+
+    it('put_prices orders by as_of_date before timestamp', async () => {
+      const assetId = AssetId.fromAsset(Asset.equity('AAPL'));
+      const nextDay = makePricePoint({
+        asset_id: assetId,
+        as_of_date: '2024-04-08',
+        timestamp: new Date('2024-04-08T16:20:47Z'),
+        price: '197.67',
+      });
+      const lateBackfill = makePricePoint({
+        asset_id: assetId,
+        as_of_date: '2024-04-07',
+        timestamp: new Date('2024-04-08T16:27:35Z'),
+        price: '193.49',
+      });
+
+      await store.put_prices([nextDay, lateBackfill]);
+
+      const filePath = join(tmpDir, 'prices', assetId.asStr(), '2024.jsonl');
+      const lines = (await readFile(filePath, 'utf-8'))
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line !== '');
+      const parsed = lines.map((line) => JSON.parse(line));
+      expect(parsed[0].as_of_date).toBe('2024-04-07');
+      expect(parsed[1].as_of_date).toBe('2024-04-08');
+    });
   });
 
   // -- FX rates -------------------------------------------------------------
@@ -278,6 +305,89 @@ describe('JsonlMarketDataStore', () => {
     it('get_fx_rate returns null for missing pair', async () => {
       const result = await store.get_fx_rate('USD', 'EUR', '2024-01-15', 'close');
       expect(result).toBeNull();
+    });
+
+    it('recompactAllJsonl resorts market-data files by as_of_date', async () => {
+      const assetId = AssetId.fromAsset(Asset.equity('AAPL'));
+      const pricePath = join(tmpDir, 'prices', assetId.asStr(), '2024.jsonl');
+      await mkdir(join(tmpDir, 'prices', assetId.asStr()), { recursive: true });
+      await writeFile(
+        pricePath,
+        [
+          JSON.stringify(
+            pricePointToJSON(
+              makePricePoint({
+                asset_id: assetId,
+                as_of_date: '2024-04-08',
+                timestamp: new Date('2024-04-08T16:20:47Z'),
+                price: '197.67',
+              }),
+            ),
+          ),
+          JSON.stringify(
+            pricePointToJSON(
+              makePricePoint({
+                asset_id: assetId,
+                as_of_date: '2024-04-07',
+                timestamp: new Date('2024-04-08T16:27:35Z'),
+                price: '193.49',
+              }),
+            ),
+          ),
+        ].join('\n') + '\n',
+        'utf-8',
+      );
+
+      const fxPath = join(tmpDir, 'fx', 'USD-EUR', '2024.jsonl');
+      await mkdir(join(tmpDir, 'fx', 'USD-EUR'), { recursive: true });
+      await writeFile(
+        fxPath,
+        [
+          JSON.stringify(
+            fxRatePointToJSON(
+              makeFxRatePoint({
+                as_of_date: '2024-04-08',
+                timestamp: new Date('2024-04-08T16:20:47Z'),
+                rate: '0.93',
+              }),
+            ),
+          ),
+          JSON.stringify(
+            fxRatePointToJSON(
+              makeFxRatePoint({
+                as_of_date: '2024-04-07',
+                timestamp: new Date('2024-04-08T16:27:35Z'),
+                rate: '0.92',
+              }),
+            ),
+          ),
+        ].join('\n') + '\n',
+        'utf-8',
+      );
+
+      const stats = await store.recompactAllJsonl();
+      expect(stats).toEqual({
+        price_files_rewritten: 1,
+        fx_files_rewritten: 1,
+        price_points_sorted: 2,
+        fx_rate_points_sorted: 2,
+      });
+
+      const resortedPrices = (await readFile(pricePath, 'utf-8'))
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line !== '')
+        .map((line) => JSON.parse(line));
+      expect(resortedPrices[0].as_of_date).toBe('2024-04-07');
+      expect(resortedPrices[1].as_of_date).toBe('2024-04-08');
+
+      const resortedFx = (await readFile(fxPath, 'utf-8'))
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line !== '')
+        .map((line) => JSON.parse(line));
+      expect(resortedFx[0].as_of_date).toBe('2024-04-07');
+      expect(resortedFx[1].as_of_date).toBe('2024-04-08');
     });
 
     it('get_fx_rate selects latest by timestamp', async () => {

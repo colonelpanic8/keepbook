@@ -326,6 +326,7 @@ pub async fn set_account_config(
     Ok(result)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn set_transaction_annotation(
     storage: &dyn Storage,
     config: &ResolvedConfig,

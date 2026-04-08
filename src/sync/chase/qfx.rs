@@ -238,8 +238,6 @@ fn parse_ofx_datetime(raw: &str) -> Result<DateTime<Utc>> {
                 // Support -5, +3, -0500, +0530.
                 let sign = if off_part.starts_with('-') {
                     -1i32
-                } else if off_part.starts_with('+') {
-                    1i32
                 } else {
                     1i32
                 };

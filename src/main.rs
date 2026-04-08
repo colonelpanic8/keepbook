@@ -453,7 +453,7 @@ enum SyncCommand {
     },
     /// Rebuild all symlinks (connections/by-name and account directories)
     Symlinks,
-    /// Recompact account JSONL files (dedupe append-only logs and sort chronologically)
+    /// Recompact account and market-data JSONL files (dedupe append-only logs and sort canonically)
     Recompact,
     /// Persist backfilled standardized transaction metadata to JSONL without compaction
     BackfillMetadata,

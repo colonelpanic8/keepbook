@@ -3,7 +3,7 @@ import type { MarketDataStore } from '../market-data/store.js';
 import { MarketDataService } from '../market-data/service.js';
 import { Decimal } from '../decimal.js';
 import { parseDuration } from '../duration.js';
-import type { TransactionType, TransactionStatus } from '../models/transaction.js';
+import type { TransactionStatus } from '../models/transaction.js';
 import { Asset, type AssetType } from '../models/asset.js';
 import type { AccountType } from '../models/account.js';
 import type { ResolvedConfig } from '../config.js';
@@ -368,8 +368,7 @@ export async function spendingReport(
 
   // Validate timezone early.
   try {
-    // eslint-disable-next-line no-new
-    new Intl.DateTimeFormat('en-CA', { timeZone: effectiveTimeZone }).format(new Date());
+    Intl.DateTimeFormat('en-CA', { timeZone: effectiveTimeZone }).format(new Date());
   } catch {
     throw new Error(`Invalid timezone '${tzRaw}' (expected IANA name, e.g. America/New_York)`);
   }

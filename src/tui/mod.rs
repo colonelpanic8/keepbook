@@ -280,8 +280,7 @@ async fn suggest_regex_with_openai(
         .unwrap_or_else(|_| OPENAI_REGEX_SUGGESTION_MODEL_DEFAULT.to_string());
 
     let prompt = format!(
-        "Category: {category}\nAccount: {}\nStatus: {}\nAmount: {}\nDescription: {}\n\nReturn exactly one Rust regex pattern that matches this description style and avoids overmatching unrelated merchants. No explanation.",
-        account_name, status, amount, description
+        "Category: {category}\nAccount: {account_name}\nStatus: {status}\nAmount: {amount}\nDescription: {description}\n\nReturn exactly one Rust regex pattern that matches this description style and avoids overmatching unrelated merchants. No explanation."
     );
 
     let client = reqwest::Client::builder()

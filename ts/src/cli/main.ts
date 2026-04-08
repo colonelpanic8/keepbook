@@ -28,13 +28,9 @@ import {
 } from '../app/portfolio.js';
 import { spendingReport } from '../app/spending.js';
 import {
-  syncConnection,
   syncConnectionWithOptions,
-  syncConnectionIfStale,
   syncConnectionIfStaleWithOptions,
-  syncAll,
   syncAllWithOptions,
-  syncAllIfStale,
   syncAllIfStaleWithOptions,
   syncPrices,
   syncBackfillMetadata,
@@ -670,11 +666,12 @@ sync
 
 sync
   .command('recompact')
-  .description('Recompact account JSONL files (dedupe append-only logs and sort chronologically)')
+  .description('Recompact account and market-data JSONL files (dedupe logs and sort canonically)')
   .action(async () => {
     await runWithConfig(async (cfg) => {
       const storage = new JsonFileStorage(cfg.config.data_dir);
-      return syncRecompact(storage);
+      const marketData = new JsonlMarketDataStore(cfg.config.data_dir);
+      return syncRecompact(storage, marketData);
     });
   });
 

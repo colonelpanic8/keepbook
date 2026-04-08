@@ -226,7 +226,12 @@ describe('syncAll', () => {
 describe('syncConnectionIfStale', () => {
   it('skips with "not stale" when connection has fresh last_sync', async () => {
     const storage = new MemoryStorage();
-    await addManualConnectionWithLastSync(storage, 'Fresh Bank', 'conn-fresh', '2100-01-01T00:00:00Z');
+    await addManualConnectionWithLastSync(
+      storage,
+      'Fresh Bank',
+      'conn-fresh',
+      '2100-01-01T00:00:00Z',
+    );
 
     const result = await syncConnectionIfStale(storage, 'conn-fresh', DEFAULT_REFRESH);
 
@@ -240,7 +245,12 @@ describe('syncConnectionIfStale', () => {
 
   it('syncs when stale (manual connection returns manual skip shape)', async () => {
     const storage = new MemoryStorage();
-    await addManualConnectionWithLastSync(storage, 'Stale Bank', 'conn-stale', '2000-01-01T00:00:00Z');
+    await addManualConnectionWithLastSync(
+      storage,
+      'Stale Bank',
+      'conn-stale',
+      '2000-01-01T00:00:00Z',
+    );
 
     const result = await syncConnectionIfStale(storage, 'conn-stale', DEFAULT_REFRESH);
 
@@ -266,8 +276,18 @@ describe('syncConnectionIfStale', () => {
 describe('syncAllIfStale', () => {
   it('returns mixed stale/fresh outcomes', async () => {
     const storage = new MemoryStorage();
-    await addManualConnectionWithLastSync(storage, 'Fresh Bank', 'conn-fresh', '2100-01-01T00:00:00Z');
-    await addManualConnectionWithLastSync(storage, 'Stale Bank', 'conn-stale', '2000-01-01T00:00:00Z');
+    await addManualConnectionWithLastSync(
+      storage,
+      'Fresh Bank',
+      'conn-fresh',
+      '2100-01-01T00:00:00Z',
+    );
+    await addManualConnectionWithLastSync(
+      storage,
+      'Stale Bank',
+      'conn-stale',
+      '2000-01-01T00:00:00Z',
+    );
 
     const result = (await syncAllIfStale(storage, DEFAULT_REFRESH)) as SyncAllResultShape;
 
@@ -328,30 +348,50 @@ describe('syncSymlinks', () => {
 
 describe('syncRecompact', () => {
   it('returns compaction stats from storage', async () => {
-    const result = await syncRecompact({
-      async recompactAllJsonl() {
-        return {
-          accounts_processed: 2,
-          files_rewritten: 6,
-          balance_snapshots_before: 5,
-          balance_snapshots_after: 5,
-          transactions_before: 10,
-          transactions_after: 7,
-          annotation_patches_before: 4,
-          annotation_patches_after: 3,
-        };
+    const result = await syncRecompact(
+      {
+        async recompactAllJsonl() {
+          return {
+            accounts_processed: 2,
+            files_rewritten: 6,
+            balance_snapshots_before: 5,
+            balance_snapshots_after: 5,
+            transactions_before: 10,
+            transactions_after: 7,
+            annotation_patches_before: 4,
+            annotation_patches_after: 3,
+          };
+        },
       },
-    });
+      {
+        async recompactAllJsonl() {
+          return {
+            price_files_rewritten: 3,
+            fx_files_rewritten: 1,
+            price_points_sorted: 20,
+            fx_rate_points_sorted: 4,
+          };
+        },
+      } as never,
+    );
 
     expect(result).toEqual({
-      accounts_processed: 2,
-      files_rewritten: 6,
-      balance_snapshots_before: 5,
-      balance_snapshots_after: 5,
-      transactions_before: 10,
-      transactions_after: 7,
-      annotation_patches_before: 4,
-      annotation_patches_after: 3,
+      storage_jsonl: {
+        accounts_processed: 2,
+        files_rewritten: 6,
+        balance_snapshots_before: 5,
+        balance_snapshots_after: 5,
+        transactions_before: 10,
+        transactions_after: 7,
+        annotation_patches_before: 4,
+        annotation_patches_after: 3,
+      },
+      market_data_jsonl: {
+        price_files_rewritten: 3,
+        fx_files_rewritten: 1,
+        price_points_sorted: 20,
+        fx_rate_points_sorted: 4,
+      },
     });
   });
 });

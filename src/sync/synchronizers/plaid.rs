@@ -112,6 +112,7 @@ impl PlaidSynchronizer {
     /// Expected keys:
     /// - `client_id` (or `client-id`)
     /// - `secret`
+    ///
     /// Optional:
     /// - `access_token` (or `access-token`)
     /// - `environment` (`sandbox`, `development`, `production`)
@@ -598,20 +599,22 @@ fn plaid_transaction_to_keepbook(
 }
 
 fn parse_transaction_timestamp(tx: &PlaidTransaction) -> DateTime<Utc> {
-    for datetime in [tx.datetime.as_deref(), tx.authorized_datetime.as_deref()] {
-        if let Some(value) = datetime {
-            if let Ok(parsed) = DateTime::parse_from_rfc3339(value) {
-                return parsed.with_timezone(&Utc);
-            }
+    for value in [tx.datetime.as_deref(), tx.authorized_datetime.as_deref()]
+        .into_iter()
+        .flatten()
+    {
+        if let Ok(parsed) = DateTime::parse_from_rfc3339(value) {
+            return parsed.with_timezone(&Utc);
         }
     }
 
-    for date in [tx.date.as_deref(), tx.authorized_date.as_deref()] {
-        if let Some(value) = date {
-            if let Ok(parsed) = NaiveDate::parse_from_str(value, "%Y-%m-%d") {
-                if let Some(noon) = parsed.and_hms_opt(12, 0, 0) {
-                    return DateTime::from_naive_utc_and_offset(noon, Utc);
-                }
+    for value in [tx.date.as_deref(), tx.authorized_date.as_deref()]
+        .into_iter()
+        .flatten()
+    {
+        if let Ok(parsed) = NaiveDate::parse_from_str(value, "%Y-%m-%d") {
+            if let Some(noon) = parsed.and_hms_opt(12, 0, 0) {
+                return DateTime::from_naive_utc_and_offset(noon, Utc);
             }
         }
     }

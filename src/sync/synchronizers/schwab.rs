@@ -789,8 +789,7 @@ async fn autofill_login_form(
 
   if (!submittedBy) return {{ ok: false, error: "submit failed", frameNames }};
   return {{ ok: true, submittedBy, frameNames }};
-}})({})"#,
-        creds
+}})({creds})"#
     );
 
     let deadline = std::time::Instant::now() + Duration::from_secs(20);

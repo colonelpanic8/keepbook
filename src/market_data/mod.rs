@@ -11,7 +11,7 @@ mod sources;
 mod store;
 pub use asset_id::AssetId;
 pub use builder::MarketDataServiceBuilder;
-pub use jsonl_store::JsonlMarketDataStore;
+pub use jsonl_store::{JsonlMarketDataStore, MarketDataJsonlNormalizationStats};
 pub use models::{AssetRegistryEntry, FxRateKind, FxRatePoint, PriceKind, PricePoint};
 pub use provider::{MarketDataSource, NoopSource};
 pub use registry::PriceSourceRegistry;

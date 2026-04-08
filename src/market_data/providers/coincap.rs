@@ -215,7 +215,7 @@ impl CryptoPriceSource for CoinCapPriceSource {
         let as_of_date = Utc
             .timestamp_millis_opt(point.time)
             .single()
-            .unwrap_or_else(|| Utc::now())
+            .unwrap_or_else(Utc::now)
             .date_naive();
 
         Ok(Some(PricePoint {

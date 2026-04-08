@@ -11,7 +11,7 @@ fn default_reporting_currency() -> String {
 }
 
 /// Display/output formatting configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct DisplayConfig {
     /// If set, values denominated in the output/base currency are rounded to
@@ -35,17 +35,6 @@ pub struct DisplayConfig {
     ///
     /// This only affects optional `*_display` fields and UI surfaces.
     pub currency_fixed_decimals: bool,
-}
-
-impl Default for DisplayConfig {
-    fn default() -> Self {
-        Self {
-            currency_decimals: None,
-            currency_grouping: false,
-            currency_symbol: None,
-            currency_fixed_decimals: false,
-        }
-    }
 }
 
 /// Tray UI configuration.
@@ -73,7 +62,7 @@ impl Default for TrayConfig {
 }
 
 /// Spending report configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct SpendingConfig {
     /// Ignore matching account IDs or names.
@@ -90,30 +79,12 @@ pub struct SpendingConfig {
     pub ignore_tags: Vec<String>,
 }
 
-impl Default for SpendingConfig {
-    fn default() -> Self {
-        Self {
-            ignore_accounts: vec![],
-            ignore_connections: vec![],
-            ignore_tags: vec![],
-        }
-    }
-}
-
 /// Global ignore rules configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct IgnoreConfig {
     /// Rules for ignoring transactions in app-level transaction views.
     pub transaction_rules: Vec<TransactionIgnoreRule>,
-}
-
-impl Default for IgnoreConfig {
-    fn default() -> Self {
-        Self {
-            transaction_rules: vec![],
-        }
-    }
 }
 
 /// A single transaction ignore rule.
@@ -172,7 +143,7 @@ impl Default for RefreshConfig {
 }
 
 /// Git-related configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct GitConfig {
     /// Enable automatic commits after data changes.
@@ -183,16 +154,6 @@ pub struct GitConfig {
 
     /// Merge `origin/master` before running commands.
     pub merge_master_before_command: bool,
-}
-
-impl Default for GitConfig {
-    fn default() -> Self {
-        Self {
-            auto_commit: false,
-            auto_push: false,
-            merge_master_before_command: false,
-        }
-    }
 }
 
 /// Application configuration.
@@ -548,9 +509,9 @@ mod tests {
         writeln!(file, "currency_fixed_decimals = true")?;
 
         let config = Config::load(&config_path)?;
-        assert_eq!(config.display.currency_grouping, true);
+        assert!(config.display.currency_grouping);
         assert_eq!(config.display.currency_symbol.as_deref(), Some("$"));
-        assert_eq!(config.display.currency_fixed_decimals, true);
+        assert!(config.display.currency_fixed_decimals);
 
         Ok(())
     }

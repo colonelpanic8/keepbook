@@ -379,8 +379,8 @@ mod tests {
 
         let out = list_transactions(
             &storage,
-            None,
-            None,
+            Some("2000-01-01".to_string()),
+            Some("2099-12-31".to_string()),
             false,
             true,
             &ResolvedConfig {

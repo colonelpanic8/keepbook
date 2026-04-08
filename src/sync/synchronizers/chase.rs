@@ -182,6 +182,7 @@ impl BrowserApiClient {
     }
 }
 
+#[allow(clippy::large_enum_variant)]
 enum ChaseBackend {
     Direct(ChaseClient),
     Browser(BrowserApiClient),
@@ -771,8 +772,7 @@ fn chase_activity_to_transaction(
 ) -> Option<Transaction> {
     let stable_id = activity.stable_id();
     let tx_id = Id::from_external(&format!(
-        "chase:{}:{}:{}",
-        connection_id, chase_account_id, stable_id
+        "chase:{connection_id}:{chase_account_id}:{stable_id}"
     ));
 
     let date_str = if activity.is_pending() {
@@ -950,17 +950,19 @@ fn chase_activity_to_transaction(
         }
     }
 
-    Some(Transaction {
-        id: tx_id,
-        timestamp,
-        amount: amount.to_string(),
-        asset: Asset::currency(activity.currency_code.as_deref().unwrap_or("USD")).normalized(),
-        description: activity.description(),
-        status,
-        synchronizer_data: Value::Object(synchronizer_data),
-        standardized_metadata: None,
-    })
-    .map(Transaction::backfill_standardized_metadata)
+    Some(
+        Transaction {
+            id: tx_id,
+            timestamp,
+            amount: amount.to_string(),
+            asset: Asset::currency(activity.currency_code.as_deref().unwrap_or("USD")).normalized(),
+            description: activity.description(),
+            status,
+            synchronizer_data: Value::Object(synchronizer_data),
+            standardized_metadata: None,
+        }
+        .backfill_standardized_metadata(),
+    )
 }
 
 fn chase_activity_to_transaction_id(
@@ -970,8 +972,7 @@ fn chase_activity_to_transaction_id(
 ) -> Id {
     let stable_id = activity.stable_id();
     Id::from_external(&format!(
-        "chase:{}:{}:{}",
-        connection_id, chase_account_id, stable_id
+        "chase:{connection_id}:{chase_account_id}:{stable_id}"
     ))
 }
 
@@ -984,6 +985,7 @@ fn chase_overlap_stop_threshold() -> usize {
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
     use crate::sync::chase::api::{
@@ -1134,8 +1136,7 @@ async fn get_card_transactions_auto(
 
         if consecutive_existing >= threshold {
             eprintln!(
-                "Chase: stopping pagination after detecting overlap ({} consecutive existing transactions; set KEEPBOOK_CHASE_OVERLAP_THRESHOLD or use --transactions full)",
-                consecutive_existing
+                "Chase: stopping pagination after detecting overlap ({consecutive_existing} consecutive existing transactions; set KEEPBOOK_CHASE_OVERLAP_THRESHOLD or use --transactions full)"
             );
             break;
         }
@@ -1316,8 +1317,7 @@ async fn autofill_login_iframe(
   }}
 
   return {{ ok: true, submittedBy, btnDisabled: !!btn.disabled }};
-}})({})"#,
-        creds.to_string()
+}})({creds})"#
     );
 
     let deadline = std::time::Instant::now() + Duration::from_secs(20);
@@ -1518,8 +1518,7 @@ async fn fill_sms_code(page: &chromiumoxide::Page, code: &str) -> Result<()> {
     if (tryFill(doc)) return {{ ok: true }};
   }}
   return {{ ok: false, error: 'no code input found' }};
-}})({})"#,
-        code.to_string()
+}})({code})"#
     );
 
     let v: serde_json::Value = page.evaluate(js).await?.into_value()?;
@@ -1652,8 +1651,7 @@ async fn browser_fetch_json(
   }} catch (e) {{
     return {{ ok: false, status: 0, text: String((e && e.message) || e || 'fetch failed') }};
   }}
-}})({})"#,
-        req
+}})({req})"#
     );
 
     let v: serde_json::Value = page.evaluate(js).await?.into_value()?;
