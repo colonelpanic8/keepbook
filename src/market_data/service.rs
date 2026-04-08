@@ -130,12 +130,20 @@ impl MarketDataService {
         let asset = asset.normalized();
         let asset_id = AssetId::from_asset(&asset);
 
-        if let Some(close) = self.store.get_price(&asset_id, date, PriceKind::Close).await? {
+        if let Some(close) = self
+            .store
+            .get_price(&asset_id, date, PriceKind::Close)
+            .await?
+        {
             return Ok(Some(close));
         }
 
         if allow_quote_fallback {
-            if let Some(quote) = self.store.get_price(&asset_id, date, PriceKind::Quote).await? {
+            if let Some(quote) = self
+                .store
+                .get_price(&asset_id, date, PriceKind::Quote)
+                .await?
+            {
                 return Ok(Some(quote));
             }
         }

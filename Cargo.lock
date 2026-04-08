@@ -1625,7 +1625,7 @@ dependencies = [
 
 [[package]]
 name = "keepbook"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1663,7 +1663,7 @@ dependencies = [
 
 [[package]]
 name = "keepbook-ffi"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "chrono",
