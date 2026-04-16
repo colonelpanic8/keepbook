@@ -1,3 +1,4 @@
+import { Decimal } from '../../decimal.js';
 import { Account } from '../../models/account.js';
 import type { AccountType } from '../../models/account.js';
 import { Asset } from '../../models/asset.js';
@@ -36,6 +37,10 @@ function digitsSuffix4(s: string): string | null {
   const digits = s.replace(/[^0-9]/g, '');
   if (digits.length < 4) return null;
   return digits.slice(digits.length - 4);
+}
+
+function normalizeLedgerBalance(statement: QfxStatement, amount: string): string {
+  return statement.kind === 'credit_card' ? decStr(new Decimal(amount).neg()) : amount;
 }
 
 export async function importQfxStatements(
@@ -85,7 +90,7 @@ export async function importQfxStatements(
       if (bestBal === null || asOfMs > bestBal.asOf) {
         bestBal = {
           asOf: asOfMs,
-          amt: decStr(stmt.ledger_balance),
+          amt: normalizeLedgerBalance(stmt, decStr(stmt.ledger_balance)),
           currency: stmt.currency ?? 'USD',
         };
       }

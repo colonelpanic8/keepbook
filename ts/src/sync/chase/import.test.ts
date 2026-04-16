@@ -80,4 +80,52 @@ describe('Chase QFX import (TypeScript)', () => {
     expect(result.connection.state.account_ids.map((id) => id.asStr())).toEqual([expectedAccountId]);
     expect(result.connection.state.last_sync?.status).toBe('success');
   });
+
+  it('treats Chase credit card ledger balances as liabilities', async () => {
+    const ids = new FixedIdGenerator([Id.fromString('conn-1')]);
+    const clock = new FixedClock(new Date('2026-02-10T00:00:00Z'));
+    const conn = Connection.new({ name: 'Chase Cards', synchronizer: 'chase' }, ids, clock);
+
+    const storage = new MemoryStorage();
+    await storage.saveConnection(conn);
+
+    const qfx = `<OFX>
+<CREDITCARDMSGSRSV1>
+<CCSTMTTRNRS>
+<TRNUID>1
+<STATUS>
+<CODE>0
+<SEVERITY>INFO
+</STATUS>
+<CCSTMTRS>
+<CURDEF>USD
+<CCACCTFROM>
+<ACCTID>987654321
+</CCACCTFROM>
+<BANKTRANLIST>
+<STMTTRN>
+<TRNTYPE>DEBIT
+<DTPOSTED>20260205120000[-5:EST]
+<TRNAMT>-45.6700
+<FITID>card-1
+<NAME>BOOKSTORE
+</STMTTRN>
+</BANKTRANLIST>
+<LEDGERBAL>
+<BALAMT>250.00
+<DTASOF>20260206120000[-5:EST]
+</LEDGERBAL>
+</CCSTMTRS>
+</CCSTMTTRNRS>
+</CREDITCARDMSGSRSV1>
+</OFX>`;
+
+    const result = await parseAndImportQfx(conn, storage, [qfx]);
+
+    expect(result.accounts).toHaveLength(1);
+    expect(result.accounts[0].tags).toContain('credit_card');
+    expect(result.balances).toHaveLength(1);
+    expect(result.balances[0][1]).toHaveLength(1);
+    expect(result.balances[0][1][0].asset_balance.amount).toBe('-250');
+  });
 });

@@ -39,6 +39,13 @@ pub struct ChaseSynchronizer {
     credential_store: Option<Box<dyn CredentialStore>>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChaseAccountKind {
+    CreditCard,
+    Mortgage,
+    Other,
+}
+
 struct BrowserApiClient {
     _browser: Browser,
     handler_task: tokio::task::JoinHandle<()>,
@@ -418,19 +425,14 @@ impl ChaseSynchronizer {
                 format!("Chase ({})", acct.mask)
             };
 
-            let is_mortgage = acct.category_type.to_lowercase().contains("mortgage")
-                || acct.account_type.to_lowercase().contains("mortgage");
-            let is_credit_card = acct.category_type.to_lowercase().contains("card")
-                || acct.account_type.to_lowercase().contains("card")
-                || acct.account_type.to_lowercase().contains("credit");
+            let account_kind = chase_account_kind(acct);
+            let is_credit_card = matches!(account_kind, ChaseAccountKind::CreditCard);
 
             let mut tags = vec!["chase".to_string()];
-            if is_credit_card {
-                tags.push("credit_card".to_string());
-            } else if is_mortgage {
-                tags.push("mortgage".to_string());
-            } else {
-                tags.push(acct.account_type.to_lowercase());
+            match account_kind {
+                ChaseAccountKind::CreditCard => tags.push("credit_card".to_string()),
+                ChaseAccountKind::Mortgage => tags.push("mortgage".to_string()),
+                ChaseAccountKind::Other => tags.push(acct.account_type.to_lowercase()),
             }
 
             let mut account = Account::new_with(
@@ -450,15 +452,15 @@ impl ChaseSynchronizer {
             // Fetch balance.
             let mut account_balances: Vec<SyncedAssetBalance> = Vec::new();
 
-            if is_mortgage {
-                match backend.get_mortgage_detail(acct.id).await {
+            match account_kind {
+                ChaseAccountKind::Mortgage => match backend.get_mortgage_detail(acct.id).await {
                     Ok(detail) => {
                         if let Some(ref d) = detail.detail {
                             if let Some(bal) = d.balance {
-                                // Mortgages are liabilities; negate so the balance is negative.
+                                // Mortgages are liabilities; negate so they reduce net worth.
                                 account_balances.push(SyncedAssetBalance::new(AssetBalance::new(
                                     Asset::currency("USD"),
-                                    (-bal).to_string(),
+                                    liability_balance_amount(bal),
                                 )));
                             }
                         }
@@ -469,16 +471,16 @@ impl ChaseSynchronizer {
                             acct.mask, acct.id
                         );
                     }
-                }
-            } else {
-                match backend.get_card_detail(acct.id).await {
+                },
+                ChaseAccountKind::CreditCard => match backend.get_card_detail(acct.id).await {
                     Ok(detail) => {
                         if let Some(ref card) = detail.detail {
                             if let Some(bal) = card.current_balance {
-                                // Credit card balances are amounts owed; negate.
+                                // Credit card balances are amounts owed; negate so they reduce
+                                // net worth, while preserving the sign of overpayments.
                                 account_balances.push(SyncedAssetBalance::new(AssetBalance::new(
                                     Asset::currency("USD"),
-                                    (-bal).to_string(),
+                                    liability_balance_amount(bal),
                                 )));
                             }
                         }
@@ -489,6 +491,11 @@ impl ChaseSynchronizer {
                             acct.mask, acct.id
                         );
                     }
+                },
+                ChaseAccountKind::Other => {
+                    // Chase uses account-type-specific detail endpoints. Until we add an endpoint
+                    // for deposit accounts, avoid routing non-liabilities through the credit-card
+                    // detail path.
                 }
             }
 
@@ -593,6 +600,26 @@ impl ChaseSynchronizer {
             transactions,
         })
     }
+}
+
+fn chase_account_kind(acct: &ActivityAccount) -> ChaseAccountKind {
+    let category_type = acct.category_type.to_lowercase();
+    let account_type = acct.account_type.to_lowercase();
+
+    if category_type.contains("mortgage") || account_type.contains("mortgage") {
+        ChaseAccountKind::Mortgage
+    } else if category_type.contains("card")
+        || account_type.contains("card")
+        || account_type.contains("credit")
+    {
+        ChaseAccountKind::CreditCard
+    } else {
+        ChaseAccountKind::Other
+    }
+}
+
+fn liability_balance_amount(balance: f64) -> String {
+    (-balance).to_string()
 }
 
 #[async_trait::async_trait]
@@ -989,8 +1016,40 @@ fn chase_overlap_stop_threshold() -> usize {
 mod tests {
     use super::*;
     use crate::sync::chase::api::{
-        ChaseActivity, EnrichedMerchant, MerchantDetails, RawMerchantDetails,
+        ActivityAccount, ChaseActivity, EnrichedMerchant, MerchantDetails, RawMerchantDetails,
     };
+
+    fn activity_account(category_type: &str, account_type: &str) -> ActivityAccount {
+        ActivityAccount {
+            id: 123,
+            mask: "1234".to_string(),
+            nickname: "Test".to_string(),
+            category_type: category_type.to_string(),
+            account_type: account_type.to_string(),
+        }
+    }
+
+    #[test]
+    fn chase_account_kind_detects_credit_cards_and_mortgages() {
+        assert_eq!(
+            chase_account_kind(&activity_account("CreditCard", "Card")),
+            ChaseAccountKind::CreditCard
+        );
+        assert_eq!(
+            chase_account_kind(&activity_account("HomeLending", "Mortgage")),
+            ChaseAccountKind::Mortgage
+        );
+        assert_eq!(
+            chase_account_kind(&activity_account("Deposit", "Checking")),
+            ChaseAccountKind::Other
+        );
+    }
+
+    #[test]
+    fn liability_balance_amount_negates_amount_owed_and_preserves_overpayments() {
+        assert_eq!(liability_balance_amount(250.0), "-250");
+        assert_eq!(liability_balance_amount(-25.5), "25.5");
+    }
 
     #[test]
     fn chase_activity_to_transaction_persists_extended_metadata() {
