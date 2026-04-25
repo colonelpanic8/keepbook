@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat >&2 <<'USAGE'
+Usage: agents/keepbook-data/install [options]
+
+Options:
+  --agents-home PATH      Agents data directory (default: ~/dotfiles/dotfiles/agents)
+  --data-dir PATH         Also install the data-directory AGENTS.md into PATH
+  --mode copy|symlink     Install mode for skill/guide/data AGENTS.md (default: copy)
+  --force                 Replace existing installed files
+  -h, --help              Show this help
+USAGE
+}
+
+agents_home="${AGENTS_HOME:-$HOME/dotfiles/dotfiles/agents}"
+data_dir=""
+mode=copy
+force=false
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --agents-home)
+      agents_home="${2:-}"
+      shift 2
+      ;;
+    --data-dir)
+      data_dir="${2:-}"
+      shift 2
+      ;;
+    --mode)
+      mode="${2:-}"
+      shift 2
+      ;;
+    --force)
+      force=true
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      usage
+      exit 2
+      ;;
+  esac
+done
+
+if [[ -z "$agents_home" || -z "$mode" ]]; then
+  usage
+  exit 2
+fi
+
+if [[ "$mode" != "copy" && "$mode" != "symlink" ]]; then
+  printf 'invalid mode: %s\n' "$mode" >&2
+  exit 2
+fi
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd -- "$script_dir/../.." && pwd)"
+skill_src="$script_dir/skills/keepbook-data"
+guide_src="$script_dir/project-guide.md"
+agents_template="$script_dir/AGENTS.md"
+
+install_path() {
+  local src="$1"
+  local dst="$2"
+  local kind="$3"
+
+  mkdir -p "$(dirname -- "$dst")"
+  if [[ -e "$dst" || -L "$dst" ]]; then
+    if [[ "$force" != true ]]; then
+      printf 'refusing to overwrite existing %s; rerun with --force\n' "$dst" >&2
+      return 1
+    fi
+    rm -rf "$dst"
+  fi
+
+  case "$mode" in
+    copy)
+      if [[ "$kind" == "dir" ]]; then
+        cp -R "$src" "$dst"
+      else
+        cp "$src" "$dst"
+      fi
+      ;;
+    symlink)
+      ln -s "$src" "$dst"
+      ;;
+  esac
+}
+
+mkdir -p "$agents_home/skills" "$agents_home/project-guides" "$agents_home/project-links"
+install_path "$skill_src" "$agents_home/skills/keepbook-data" dir
+install_path "$guide_src" "$agents_home/project-guides/keepbook.md" file
+ln -sfn "$repo_root" "$agents_home/project-links/keepbook"
+
+if [[ -n "$data_dir" ]]; then
+  mkdir -p "$data_dir"
+  install_path "$agents_template" "${data_dir%/}/AGENTS.md" file
+fi
+
+printf 'installed keepbook data agent assets into %s via %s\n' "$agents_home" "$mode"
