@@ -3,8 +3,8 @@
  *
  * This adapter reads financial data that was synced from a git repository
  * and stored in AsyncStorage with keys like:
- *   keepbook.file.{dataDir}.data/accounts/{id}/balances.jsonl
- *   keepbook.file.{dataDir}.data/connections/{id}/connection.json
+ *   keepbook.file.{dataDir}.accounts/{id}/balances.jsonl
+ *   keepbook.file.{dataDir}.connections/{id}/connection.json
  *   keepbook.manifest.{dataDir}  (JSON array of all relative paths)
  *
  * This is a READ-ONLY adapter. All write methods throw.
@@ -33,6 +33,7 @@ import {
 } from '@keepbook/models/transaction-annotation';
 import { dedupeTransactionsLastWriteWins } from '@keepbook/storage/dedupe';
 import type { AccountJSON } from '@keepbook/models/account';
+import { getFileContent } from './FileContentStore';
 
 // ---------------------------------------------------------------------------
 // Simple TOML parser for connection config
@@ -44,10 +45,69 @@ function parseTomlStringValue(toml: string, key: string): string | null {
   return m ? m[1] : null;
 }
 
+function parseTomlBooleanValue(toml: string, key: string): boolean | undefined {
+  const re = new RegExp(`^\\s*${key}\\s*=\\s*(true|false)\\s*$`, 'm');
+  const m = toml.match(re);
+  return m ? m[1] === 'true' : undefined;
+}
+
+function parseTomlNumberValue(toml: string, key: string): number | undefined {
+  const re = new RegExp(`^\\s*${key}\\s*=\\s*([0-9]+)\\s*$`, 'm');
+  const m = toml.match(re);
+  if (!m) return undefined;
+  const value = Number(m[1]);
+  return Number.isFinite(value) ? value : undefined;
+}
+
+function parseDurationMs(value: string): number | undefined {
+  const m = value.trim().toLowerCase().match(/^([0-9]+)([dhms])$/);
+  if (!m) return undefined;
+
+  const amount = Number(m[1]);
+  const multipliers: Record<string, number> = {
+    d: 24 * 60 * 60 * 1000,
+    h: 60 * 60 * 1000,
+    m: 60 * 1000,
+    s: 1000,
+  };
+  const multiplier = multipliers[m[2]];
+  if (multiplier === undefined) return undefined;
+  const result = amount * multiplier;
+  return Number.isSafeInteger(result) ? result : undefined;
+}
+
+function parseBalanceBackfillValue(value: string): AccountConfig['balance_backfill'] | undefined {
+  const normalized = value.trim().toLowerCase().replace('-', '_');
+  if (normalized === 'none' || normalized === 'zero' || normalized === 'carry_earliest') {
+    return normalized;
+  }
+  return undefined;
+}
+
 function parseConnectionConfigFromToml(toml: string): ConnectionConfig {
   return {
     name: parseTomlStringValue(toml, 'name') ?? 'unknown',
     synchronizer: parseTomlStringValue(toml, 'synchronizer') ?? 'unknown',
+  };
+}
+
+function parseAccountConfigFromToml(toml: string): AccountConfig {
+  const balanceStalenessRaw = parseTomlStringValue(toml, 'balance_staleness');
+  const balanceStaleness =
+    balanceStalenessRaw !== null
+      ? parseDurationMs(balanceStalenessRaw)
+      : parseTomlNumberValue(toml, 'balance_staleness');
+  const balanceBackfillRaw = parseTomlStringValue(toml, 'balance_backfill');
+  const balanceBackfill =
+    balanceBackfillRaw !== null ? parseBalanceBackfillValue(balanceBackfillRaw) : undefined;
+  const excludeFromPortfolio = parseTomlBooleanValue(toml, 'exclude_from_portfolio');
+
+  return {
+    ...(balanceStaleness !== undefined ? { balance_staleness: balanceStaleness } : {}),
+    ...(balanceBackfill !== undefined ? { balance_backfill: balanceBackfill } : {}),
+    ...(excludeFromPortfolio !== undefined
+      ? { exclude_from_portfolio: excludeFromPortfolio }
+      : {}),
   };
 }
 
@@ -58,6 +118,12 @@ function parseConnectionConfigFromToml(toml: string): ConnectionConfig {
 export class AsyncStorageStorage implements Storage {
   private dataDir: string;
   private manifestCache: string[] | null = null;
+  private accountsCache: AccountType[] | null = null;
+  private connectionsCache: ConnectionType[] | null = null;
+  private accountConfigsCache = new Map<string, AccountConfig | null>();
+  private balanceSnapshotsCache = new Map<string, BalanceSnapshotType[]>();
+  private transactionsCache = new Map<string, TransactionType[]>();
+  private annotationPatchesCache = new Map<string, TransactionAnnotationPatchType[]>();
 
   constructor(dataDir: string) {
     this.dataDir = dataDir;
@@ -66,6 +132,12 @@ export class AsyncStorageStorage implements Storage {
   /** Invalidate cached manifest (e.g. after a sync). */
   clearCache(): void {
     this.manifestCache = null;
+    this.accountsCache = null;
+    this.connectionsCache = null;
+    this.accountConfigsCache.clear();
+    this.balanceSnapshotsCache.clear();
+    this.transactionsCache.clear();
+    this.annotationPatchesCache.clear();
   }
 
   private fileKey(relativePath: string): string {
@@ -84,7 +156,18 @@ export class AsyncStorageStorage implements Storage {
   }
 
   private async readFile(relativePath: string): Promise<string | null> {
-    return AsyncStorage.getItem(this.fileKey(relativePath));
+    return getFileContent(this.fileKey(relativePath));
+  }
+
+  private async loadAccountConfig(accountId: Id): Promise<AccountConfig | null> {
+    const id = accountId.asStr();
+    const cached = this.accountConfigsCache.get(id);
+    if (cached !== undefined) return cached;
+
+    const raw = await this.readFile(`accounts/${id}/account_config.toml`);
+    const config = raw !== null ? parseAccountConfigFromToml(raw) : null;
+    this.accountConfigsCache.set(id, config);
+    return config;
   }
 
   private parseJsonl<T>(content: string): T[] {
@@ -103,11 +186,11 @@ export class AsyncStorageStorage implements Storage {
   }
 
   // -----------------------------------------------------------------------
-  // Account Config (not supported -- would need TOML parsing of account_config.toml)
+  // Account Config
   // -----------------------------------------------------------------------
 
-  getAccountConfig(_accountId: Id): AccountConfig | null {
-    return null;
+  getAccountConfig(accountId: Id): AccountConfig | null {
+    return this.accountConfigsCache.get(accountId.asStr()) ?? null;
   }
 
   // -----------------------------------------------------------------------
@@ -115,20 +198,22 @@ export class AsyncStorageStorage implements Storage {
   // -----------------------------------------------------------------------
 
   async listConnections(): Promise<ConnectionType[]> {
+    if (this.connectionsCache !== null) return this.connectionsCache;
+
     const manifest = await this.getManifest();
 
     // Find all connection.json files
     const connJsonPaths = manifest.filter((p) =>
-      /^data\/connections\/[^/]+\/connection\.json$/.test(p),
+      /^connections\/[^/]+\/connection\.json$/.test(p),
     );
     const connTomlSet = new Set(
-      manifest.filter((p) => /^data\/connections\/[^/]+\/connection\.toml$/.test(p)),
+      manifest.filter((p) => /^connections\/[^/]+\/connection\.toml$/.test(p)),
     );
 
     const connections: ConnectionType[] = [];
     for (const jsonPath of connJsonPaths) {
       try {
-        const id = jsonPath.split('/')[2];
+        const id = jsonPath.split('/')[1];
         if (!id) continue;
 
         const stateRaw = await this.readFile(jsonPath);
@@ -138,7 +223,7 @@ export class AsyncStorageStorage implements Storage {
         const state = ConnectionState.fromJSON(stateJson);
 
         // Parse config from TOML if available
-        const tomlPath = `data/connections/${id}/connection.toml`;
+        const tomlPath = `connections/${id}/connection.toml`;
         let config: ConnectionConfig;
         if (connTomlSet.has(tomlPath)) {
           const tomlRaw = await this.readFile(tomlPath);
@@ -155,12 +240,13 @@ export class AsyncStorageStorage implements Storage {
       }
     }
 
+    this.connectionsCache = connections;
     return connections;
   }
 
   async getConnection(id: Id): Promise<ConnectionType | null> {
     const idStr = id.asStr();
-    const jsonPath = `data/connections/${idStr}/connection.json`;
+    const jsonPath = `connections/${idStr}/connection.json`;
     const stateRaw = await this.readFile(jsonPath);
     if (!stateRaw) return null;
 
@@ -168,7 +254,7 @@ export class AsyncStorageStorage implements Storage {
       const stateJson = JSON.parse(stateRaw) as ConnectionStateJSON;
       const state = ConnectionState.fromJSON(stateJson);
 
-      const tomlPath = `data/connections/${idStr}/connection.toml`;
+      const tomlPath = `connections/${idStr}/connection.toml`;
       const tomlRaw = await this.readFile(tomlPath);
       const config: ConnectionConfig = tomlRaw
         ? parseConnectionConfigFromToml(tomlRaw)
@@ -197,9 +283,11 @@ export class AsyncStorageStorage implements Storage {
   // -----------------------------------------------------------------------
 
   async listAccounts(): Promise<AccountType[]> {
+    if (this.accountsCache !== null) return this.accountsCache;
+
     const manifest = await this.getManifest();
     const acctJsonPaths = manifest.filter((p) =>
-      /^data\/accounts\/[^/]+\/account\.json$/.test(p),
+      /^accounts\/[^/]+\/account\.json$/.test(p),
     );
 
     const accounts: AccountType[] = [];
@@ -208,23 +296,28 @@ export class AsyncStorageStorage implements Storage {
         const raw = await this.readFile(jsonPath);
         if (!raw) continue;
         const json = JSON.parse(raw) as AccountJSON;
-        accounts.push(Account.fromJSON(json));
+        const account = Account.fromJSON(json);
+        await this.loadAccountConfig(account.id);
+        accounts.push(account);
       } catch {
         // Skip invalid accounts
       }
     }
 
+    this.accountsCache = accounts;
     return accounts;
   }
 
   async getAccount(id: Id): Promise<AccountType | null> {
-    const jsonPath = `data/accounts/${id.asStr()}/account.json`;
+    const jsonPath = `accounts/${id.asStr()}/account.json`;
     const raw = await this.readFile(jsonPath);
     if (!raw) return null;
 
     try {
       const json = JSON.parse(raw) as AccountJSON;
-      return Account.fromJSON(json);
+      const account = Account.fromJSON(json);
+      await this.loadAccountConfig(account.id);
+      return account;
     } catch {
       return null;
     }
@@ -247,12 +340,21 @@ export class AsyncStorageStorage implements Storage {
   // -----------------------------------------------------------------------
 
   async getBalanceSnapshots(accountId: Id): Promise<BalanceSnapshotType[]> {
-    const filePath = `data/accounts/${accountId.asStr()}/balances.jsonl`;
+    const cacheKey = accountId.asStr();
+    const cached = this.balanceSnapshotsCache.get(cacheKey);
+    if (cached !== undefined) return cached;
+
+    const filePath = `accounts/${accountId.asStr()}/balances.jsonl`;
     const raw = await this.readFile(filePath);
-    if (!raw) return [];
+    if (!raw) {
+      this.balanceSnapshotsCache.set(cacheKey, []);
+      return [];
+    }
 
     const jsonItems = this.parseJsonl<BalanceSnapshotJSON>(raw);
-    return jsonItems.map(BalanceSnapshot.fromJSON);
+    const snapshots = jsonItems.map(BalanceSnapshot.fromJSON);
+    this.balanceSnapshotsCache.set(cacheKey, snapshots);
+    return snapshots;
   }
 
   async appendBalanceSnapshot(_accountId: Id, _snapshot: BalanceSnapshotType): Promise<void> {
@@ -320,12 +422,21 @@ export class AsyncStorageStorage implements Storage {
   }
 
   async getTransactionsRaw(accountId: Id): Promise<TransactionType[]> {
-    const filePath = `data/accounts/${accountId.asStr()}/transactions.jsonl`;
+    const cacheKey = accountId.asStr();
+    const cached = this.transactionsCache.get(cacheKey);
+    if (cached !== undefined) return cached;
+
+    const filePath = `accounts/${accountId.asStr()}/transactions.jsonl`;
     const raw = await this.readFile(filePath);
-    if (!raw) return [];
+    if (!raw) {
+      this.transactionsCache.set(cacheKey, []);
+      return [];
+    }
 
     const jsonItems = this.parseJsonl<TransactionJSON>(raw);
-    return jsonItems.map(Transaction.fromJSON);
+    const transactions = jsonItems.map(Transaction.fromJSON);
+    this.transactionsCache.set(cacheKey, transactions);
+    return transactions;
   }
 
   async appendTransactions(_accountId: Id, _txns: TransactionType[]): Promise<void> {
@@ -339,12 +450,21 @@ export class AsyncStorageStorage implements Storage {
   async getTransactionAnnotationPatches(
     accountId: Id,
   ): Promise<TransactionAnnotationPatchType[]> {
-    const filePath = `data/accounts/${accountId.asStr()}/transaction_annotations.jsonl`;
+    const cacheKey = accountId.asStr();
+    const cached = this.annotationPatchesCache.get(cacheKey);
+    if (cached !== undefined) return cached;
+
+    const filePath = `accounts/${accountId.asStr()}/transaction_annotations.jsonl`;
     const raw = await this.readFile(filePath);
-    if (!raw) return [];
+    if (!raw) {
+      this.annotationPatchesCache.set(cacheKey, []);
+      return [];
+    }
 
     const jsonItems = this.parseJsonl<TransactionAnnotationPatchJSON>(raw);
-    return jsonItems.map(TransactionAnnotationPatch.fromJSON);
+    const patches = jsonItems.map(TransactionAnnotationPatch.fromJSON);
+    this.annotationPatchesCache.set(cacheKey, patches);
+    return patches;
   }
 
   async appendTransactionAnnotationPatches(

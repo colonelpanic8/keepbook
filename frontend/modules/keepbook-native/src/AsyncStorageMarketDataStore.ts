@@ -2,8 +2,8 @@
  * AsyncStorage-backed implementation of the keepbook MarketDataStore interface.
  *
  * Reads price and FX rate data from AsyncStorage keys like:
- *   keepbook.file.{dataDir}.data/prices/{asset_id}/{year}.jsonl
- *   keepbook.file.{dataDir}.data/fx/{pair}/{year}.jsonl
+ *   keepbook.file.{dataDir}.prices/{asset_id}/{year}.jsonl
+ *   keepbook.file.{dataDir}.fx/{pair}/{year}.jsonl
  *
  * This is a READ-ONLY adapter. All write methods are no-ops.
  */
@@ -21,6 +21,7 @@ import type {
 } from '@keepbook/market-data/models';
 import { pricePointFromJSON, fxRatePointFromJSON } from '@keepbook/market-data/models';
 import { AssetId } from '@keepbook/market-data/asset-id';
+import { getFileContent } from './FileContentStore';
 
 // ---------------------------------------------------------------------------
 // AsyncStorageMarketDataStore
@@ -29,6 +30,8 @@ import { AssetId } from '@keepbook/market-data/asset-id';
 export class AsyncStorageMarketDataStore implements MarketDataStore {
   private dataDir: string;
   private manifestCache: string[] | null = null;
+  private pricesCache = new Map<string, PricePoint[]>();
+  private fxRatesCache = new Map<string, FxRatePoint[]>();
 
   constructor(dataDir: string) {
     this.dataDir = dataDir;
@@ -37,6 +40,8 @@ export class AsyncStorageMarketDataStore implements MarketDataStore {
   /** Invalidate cached manifest. */
   clearCache(): void {
     this.manifestCache = null;
+    this.pricesCache.clear();
+    this.fxRatesCache.clear();
   }
 
   private fileKey(relativePath: string): string {
@@ -55,7 +60,7 @@ export class AsyncStorageMarketDataStore implements MarketDataStore {
   }
 
   private async readFile(relativePath: string): Promise<string | null> {
-    return AsyncStorage.getItem(this.fileKey(relativePath));
+    return getFileContent(this.fileKey(relativePath));
   }
 
   private parseJsonl<T>(content: string): T[] {
@@ -85,8 +90,12 @@ export class AsyncStorageMarketDataStore implements MarketDataStore {
   }
 
   async get_all_prices(assetId: AssetId): Promise<PricePoint[]> {
+    const cacheKey = assetId.asStr();
+    const cached = this.pricesCache.get(cacheKey);
+    if (cached !== undefined) return cached;
+
     const manifest = await this.getManifest();
-    const prefix = `data/prices/${assetId.asStr()}/`;
+    const prefix = `prices/${assetId.asStr()}/`;
     const files = manifest.filter(
       (p) => p.startsWith(prefix) && p.endsWith('.jsonl'),
     );
@@ -102,6 +111,7 @@ export class AsyncStorageMarketDataStore implements MarketDataStore {
       }
     }
 
+    this.pricesCache.set(cacheKey, results);
     return results;
   }
 
@@ -134,9 +144,13 @@ export class AsyncStorageMarketDataStore implements MarketDataStore {
   }
 
   async get_all_fx_rates(base: string, quote: string): Promise<FxRatePoint[]> {
+    const cacheKey = `${base.toUpperCase()}-${quote.toUpperCase()}`;
+    const cached = this.fxRatesCache.get(cacheKey);
+    if (cached !== undefined) return cached;
+
     const manifest = await this.getManifest();
-    const pair = `${base.toUpperCase()}-${quote.toUpperCase()}`;
-    const prefix = `data/fx/${pair}/`;
+    const pair = cacheKey;
+    const prefix = `fx/${pair}/`;
     const files = manifest.filter(
       (p) => p.startsWith(prefix) && p.endsWith('.jsonl'),
     );
@@ -152,6 +166,7 @@ export class AsyncStorageMarketDataStore implements MarketDataStore {
       }
     }
 
+    this.fxRatesCache.set(cacheKey, results);
     return results;
   }
 

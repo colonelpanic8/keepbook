@@ -6,10 +6,58 @@ import * as SecureStore from 'expo-secure-store';
 import { Text, View } from '@/components/Themed';
 import KeepbookNative from '@/modules/keepbook-native';
 
+type GitSyncResult = {
+  ok?: boolean;
+  branch?: string;
+  counts?: {
+    connections?: number;
+    accounts?: number;
+    account_config_files?: number;
+    balance_files?: number;
+    transaction_files?: number;
+    annotation_files?: number;
+    price_files?: number;
+    fx_files?: number;
+    stored_files?: number;
+  };
+};
+
+function parseGitSyncResult(result: string): GitSyncResult | null {
+  if (!result.trim()) return null;
+  try {
+    return JSON.parse(result) as GitSyncResult;
+  } catch {
+    return null;
+  }
+}
+
+function formatSyncStatus(dataDir: string, result: GitSyncResult | null): string {
+  if (!result?.ok) {
+    return `Synced. Using data dir: ${dataDir}`;
+  }
+
+  const counts = result.counts ?? {};
+  const parts = [
+    `${counts.accounts ?? 0} accounts`,
+    `${counts.account_config_files ?? 0} account configs`,
+    `${counts.balance_files ?? 0} balance files`,
+    `${counts.price_files ?? 0} price files`,
+  ];
+  if (counts.fx_files != null && counts.fx_files > 0) {
+    parts.push(`${counts.fx_files} FX files`);
+  }
+  if (counts.transaction_files != null && counts.transaction_files > 0) {
+    parts.push(`${counts.transaction_files} transaction files`);
+  }
+
+  const branchText = result.branch ? ` from ${result.branch}` : '';
+  return `Synced ${parts.join(', ')}${branchText}. Using data dir: ${dataDir}`;
+}
+
 export default function SettingsScreen() {
   const [gitHost, setGitHost] = useState('github.com');
   const [gitRepo, setGitRepo] = useState('colonelpanic8/keepbook-data');
-  const [gitBranch, setGitBranch] = useState('main');
+  const [gitBranch, setGitBranch] = useState('master');
   const [sshUser, setSshUser] = useState('git');
   const [sshPrivateKey, setSshPrivateKey] = useState('');
   const [githubToken, setGithubToken] = useState('');
@@ -72,7 +120,7 @@ export default function SettingsScreen() {
       await Promise.all([
         AsyncStorage.setItem('keepbook.git.host', gitHost.trim()),
         AsyncStorage.setItem('keepbook.git.repo', gitRepo.trim()),
-        AsyncStorage.setItem('keepbook.git.branch', gitBranch.trim() || 'main'),
+        AsyncStorage.setItem('keepbook.git.branch', gitBranch.trim() || 'master'),
         AsyncStorage.setItem('keepbook.git.ssh_user', sshUser.trim()),
       ]);
 
@@ -142,21 +190,22 @@ export default function SettingsScreen() {
   const sync = async () => {
     setStatus('');
     try {
-      const err = await KeepbookNative.gitSync(
+      const syncResultText = await KeepbookNative.gitSync(
         repoDir,
         gitHost.trim(),
         gitRepo.trim(),
         sshUser.trim(),
         sshPrivateKey,
-        (gitBranch.trim() || 'main'),
+        (gitBranch.trim() || 'master'),
         githubToken.trim()
       );
-      if (err) {
-        setStatus(`Sync failed: ${err}`);
+      const syncResult = parseGitSyncResult(syncResultText);
+      if (syncResultText && syncResult?.ok !== true) {
+        setStatus(`Sync failed: ${syncResultText}`);
         return;
       }
       await AsyncStorage.setItem('keepbook.data_dir', dataDir);
-      setStatus(`Synced into ${repoDir}. Using data dir: ${dataDir}`);
+      setStatus(formatSyncStatus(dataDir, syncResult));
     } catch (e) {
       setStatus(`Sync failed: ${String(e)}`);
     }
@@ -197,7 +246,7 @@ export default function SettingsScreen() {
         autoCorrect={false}
         value={gitBranch}
         onChangeText={setGitBranch}
-        placeholder="main"
+        placeholder="master"
       />
 
       <Text style={styles.label}>SSH user</Text>

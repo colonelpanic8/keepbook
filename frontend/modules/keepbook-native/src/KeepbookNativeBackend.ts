@@ -3,6 +3,7 @@ import { AsyncStorageStorage } from './AsyncStorageStorage';
 import { AsyncStorageMarketDataStore } from './AsyncStorageMarketDataStore';
 import { portfolioHistoryNative } from './portfolioHistoryNative';
 import { spendingReport } from '@keepbook/app/spending';
+import { removeFileContentsWithPrefix, setFileContents } from './FileContentStore';
 
 type ConnectionSummary = {
   id: string;
@@ -216,6 +217,7 @@ async function fetchRepoFile(opts: {
 
 const MS_PER_HOUR = 60 * 60 * 1000;
 const MS_PER_DAY = 24 * MS_PER_HOUR;
+const KEEPBOOK_DATA_DEFAULT_BRANCH = 'master';
 
 /**
  * Build a minimal ResolvedConfig compatible with the TS library.
@@ -345,7 +347,7 @@ const KeepbookNative: KeepbookNativeModuleLike = {
   ): Promise<string> {
     const trimmedHost = host.trim();
     const parsed = parseOwnerRepo(repo);
-    const trimmedBranch = (branch || '').trim() || 'main';
+    const trimmedBranch = (branch || '').trim() || KEEPBOOK_DATA_DEFAULT_BRANCH;
 
     if (!parsed) {
       return 'repo must be in the form owner/name';
@@ -360,10 +362,28 @@ const KeepbookNative: KeepbookNativeModuleLike = {
     const dataDir = gitDataDirKey();
 
     try {
-      const treeUrl = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
-        name,
-      )}/git/trees/${encodeURIComponent(trimmedBranch)}?recursive=1`;
-      const tree = await fetchJson(treeUrl, token);
+      let effectiveBranch = trimmedBranch;
+      const treeUrlForBranch = (branchName: string) =>
+        `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+          name,
+        )}/git/trees/${encodeURIComponent(branchName)}?recursive=1`;
+
+      let tree;
+      try {
+        tree = await fetchJson(treeUrlForBranch(effectiveBranch), token);
+      } catch (e) {
+        const message = String(e);
+        if (
+          token &&
+          message.includes('HTTP 404') &&
+          effectiveBranch !== KEEPBOOK_DATA_DEFAULT_BRANCH
+        ) {
+          effectiveBranch = KEEPBOOK_DATA_DEFAULT_BRANCH;
+          tree = await fetchJson(treeUrlForBranch(effectiveBranch), token);
+        } else {
+          throw e;
+        }
+      }
 
       const entries: Array<{ path?: string; type?: string }> = Array.isArray(tree?.tree)
         ? tree.tree
@@ -371,31 +391,38 @@ const KeepbookNative: KeepbookNativeModuleLike = {
       const blobPaths = entries.filter((e) => e.type === 'blob').map((e) => e.path || '');
 
       const connJsonPaths = blobPaths.filter((p) =>
-        /^data\/connections\/[^/]+\/connection\.json$/.test(p),
+        /^connections\/[^/]+\/connection\.json$/.test(p),
       );
       const connTomlPaths = new Set(
-        blobPaths.filter((p) => /^data\/connections\/[^/]+\/connection\.toml$/.test(p)),
+        blobPaths.filter((p) => /^connections\/[^/]+\/connection\.toml$/.test(p)),
       );
       const acctJsonPaths = blobPaths.filter((p) =>
-        /^data\/accounts\/[^/]+\/account\.json$/.test(p),
+        /^accounts\/[^/]+\/account\.json$/.test(p),
+      );
+      const accountConfigPaths = blobPaths.filter((p) =>
+        /^accounts\/[^/]+\/account_config\.toml$/.test(p),
       );
 
       // Additional data file patterns
       const balancePaths = blobPaths.filter((p) =>
-        /^data\/accounts\/[^/]+\/balances\.jsonl$/.test(p),
+        /^accounts\/[^/]+\/balances\.jsonl$/.test(p),
       );
       const transactionPaths = blobPaths.filter((p) =>
-        /^data\/accounts\/[^/]+\/transactions\.jsonl$/.test(p),
+        /^accounts\/[^/]+\/transactions\.jsonl$/.test(p),
       );
       const annotationPaths = blobPaths.filter((p) =>
-        /^data\/accounts\/[^/]+\/transaction_annotations\.jsonl$/.test(p),
+        /^accounts\/[^/]+\/transaction_annotations\.jsonl$/.test(p),
       );
-      const pricePaths = blobPaths.filter((p) => /^data\/prices\/.+\/\d{4}\.jsonl$/.test(p));
-      const fxPaths = blobPaths.filter((p) => /^data\/fx\/[^/]+\/\d{4}\.jsonl$/.test(p));
+      const pricePaths = blobPaths.filter((p) => /^prices\/.+\/\d{4}\.jsonl$/.test(p));
+      const fxPaths = blobPaths.filter((p) => /^fx\/[^/]+\/\d{4}\.jsonl$/.test(p));
+
+      if (acctJsonPaths.length === 0) {
+        return `Sync found 0 account files on ${owner}/${name}@${effectiveBranch}. Check that the repo layout contains accounts/{id}/account.json.`;
+      }
 
       const rawBase = `https://raw.githubusercontent.com/${encodeURIComponent(owner)}/${encodeURIComponent(
         name,
-      )}/${encodeURIComponent(trimmedBranch)}`;
+      )}/${encodeURIComponent(effectiveBranch)}`;
 
       // Cache raw file content fetched during the metadata pass so we
       // can store it later without re-fetching.
@@ -403,22 +430,22 @@ const KeepbookNative: KeepbookNativeModuleLike = {
 
       const connections: ConnectionSummary[] = [];
       for (const p of connJsonPaths) {
-        const id = p.split('/')[2] || '';
+        const id = p.split('/')[1] || '';
         const stateText = token
-          ? await fetchGitHubText({ owner, name, branch: trimmedBranch, path: p, authToken: token })
+          ? await fetchGitHubText({ owner, name, branch: effectiveBranch, path: p, authToken: token })
           : await fetchText(`${rawBase}/${p}`);
         rawContentCache.set(p, stateText);
         const state = JSON.parse(stateText);
 
         let cfgName = id;
         let cfgSync = 'unknown';
-        const tomlPath = `data/connections/${id}/connection.toml`;
+        const tomlPath = `connections/${id}/connection.toml`;
         if (connTomlPaths.has(tomlPath)) {
           const tomlText = token
             ? await fetchGitHubText({
                 owner,
                 name,
-                branch: trimmedBranch,
+                branch: effectiveBranch,
                 path: tomlPath,
                 authToken: token,
               })
@@ -442,7 +469,7 @@ const KeepbookNative: KeepbookNativeModuleLike = {
       const accounts: AccountSummary[] = [];
       for (const p of acctJsonPaths) {
         const acctText = token
-          ? await fetchGitHubText({ owner, name, branch: trimmedBranch, path: p, authToken: token })
+          ? await fetchGitHubText({ owner, name, branch: effectiveBranch, path: p, authToken: token })
           : await fetchText(`${rawBase}/${p}`);
         rawContentCache.set(p, acctText);
         const a = JSON.parse(acctText);
@@ -460,6 +487,7 @@ const KeepbookNative: KeepbookNativeModuleLike = {
       // Collect all paths we need to fetch (balances, transactions,
       // annotations, prices, FX rates).
       const dataFilePaths = [
+        ...accountConfigPaths,
         ...balancePaths,
         ...transactionPaths,
         ...annotationPaths,
@@ -480,7 +508,7 @@ const KeepbookNative: KeepbookNativeModuleLike = {
             const content = await fetchRepoFile({
               owner,
               name,
-              branch: trimmedBranch,
+              branch: effectiveBranch,
               path: p,
               token,
               rawBase,
@@ -512,19 +540,42 @@ const KeepbookNative: KeepbookNativeModuleLike = {
       }
 
       // Write everything to AsyncStorage in batches.
-      const allEntries: Array<[string, string]> = [
+      const metadataEntries: Array<[string, string]> = [
         [storageKey(dataDir, 'connections'), JSON.stringify(connections)],
         [storageKey(dataDir, 'accounts'), JSON.stringify(accounts)],
         [manifestStorageKey(dataDir), JSON.stringify(manifestPaths)],
-        ...fileEntries,
       ];
 
-      for (let i = 0; i < allEntries.length; i += BATCH_SIZE) {
-        await AsyncStorage.multiSet(allEntries.slice(i, i + BATCH_SIZE));
+      await removeFileContentsWithPrefix(`keepbook.file.${dataDir}.`);
+      await AsyncStorage.multiSet(metadataEntries);
+
+      for (let i = 0; i < fileEntries.length; i += BATCH_SIZE) {
+        await setFileContents(fileEntries.slice(i, i + BATCH_SIZE));
       }
 
-      return '';
+      return JSON.stringify({
+        ok: true,
+        branch: effectiveBranch,
+        counts: {
+          connections: connections.length,
+          accounts: accounts.length,
+          account_config_files: accountConfigPaths.length,
+          balance_files: balancePaths.length,
+          transaction_files: transactionPaths.length,
+          annotation_files: annotationPaths.length,
+          price_files: pricePaths.length,
+          fx_files: fxPaths.length,
+          stored_files: manifestPaths.length,
+        },
+      });
     } catch (e) {
+      const message = String(e);
+      if (message.includes('HTTP 404')) {
+        if (!token) {
+          return `Repo ${owner}/${name} or branch ${trimmedBranch} was not found. If this is a private repo, enter a GitHub token with repo read access.`;
+        }
+        return `Repo ${owner}/${name} or branch ${trimmedBranch} was not found. Check the repo name and branch; this data repo currently uses master.`;
+      }
       return String(e);
     }
   },
@@ -536,6 +587,7 @@ const KeepbookNative: KeepbookNativeModuleLike = {
     granularity: string | null,
   ): Promise<string> {
     const effectiveDataDir = (dataDir || 'git').trim() || 'git';
+    const effectiveGranularity = granularity ?? 'daily';
     try {
       const storage = new AsyncStorageStorage(effectiveDataDir);
       const marketDataStore = new AsyncStorageMarketDataStore(effectiveDataDir);
@@ -548,8 +600,8 @@ const KeepbookNative: KeepbookNativeModuleLike = {
         {
           start: start ?? undefined,
           end: end ?? undefined,
-          granularity: granularity ?? 'daily',
-          includePrices: true,
+          granularity: effectiveGranularity,
+          includePrices: effectiveGranularity !== 'none',
         },
       );
 
