@@ -19,6 +19,7 @@ use crate::market_data::PricePoint;
 use crate::models::{Account, AssetBalance, BalanceSnapshot, Connection, Id, Transaction};
 use crate::storage::Storage;
 use anyhow::Result;
+use std::collections::HashSet;
 
 /// How to sync transactions for a connection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -86,8 +87,27 @@ impl SyncResult {
     }
 
     pub async fn save_with_clock(&self, storage: &dyn Storage, clock: &dyn Clock) -> Result<()> {
+        let synced_account_ids: HashSet<Id> = self
+            .accounts
+            .iter()
+            .map(|account| account.id.clone())
+            .collect();
+
         for account in &self.accounts {
             storage.save_account(account).await?;
+        }
+
+        for mut account in storage.list_accounts().await? {
+            if account.connection_id == *self.connection.id()
+                && account.active
+                && !synced_account_ids.contains(&account.id)
+            {
+                account.active = false;
+                storage.save_account(&account).await?;
+                storage
+                    .append_balance_snapshot(&account.id, &BalanceSnapshot::now_with(clock, vec![]))
+                    .await?;
+            }
         }
 
         storage.save_connection(&self.connection).await?;

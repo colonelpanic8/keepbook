@@ -1,6 +1,6 @@
 use anyhow::Result;
 use chrono::Utc;
-use keepbook::models::{Asset, Connection, ConnectionConfig, Id};
+use keepbook::models::{Account, Asset, Connection, ConnectionConfig, Id};
 use keepbook::storage::{JsonFileStorage, Storage};
 use keepbook::sync::synchronizers::CoinbaseSynchronizer;
 use secrecy::SecretString;
@@ -325,6 +325,110 @@ async fn coinbase_account_ids_are_stable() -> Result<()> {
 
     assert_eq!(result.accounts.len(), 1);
     assert_eq!(result.accounts[0].id, Id::from_string("acct-eth"));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn coinbase_preserves_existing_currency_account_when_provider_uuid_changes() -> Result<()> {
+    let server = MockServer::start().await;
+
+    let portfolios_body = r#"{
+        "portfolios": [
+            { "uuid": "p1", "name": "Main" }
+        ]
+    }"#;
+    Mock::given(method("GET"))
+        .and(path("/api/v3/brokerage/portfolios"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(portfolios_body, "application/json"))
+        .mount(&server)
+        .await;
+
+    let breakdown_body = r#"{
+        "breakdown": {
+            "spot_positions": [
+                {
+                    "asset": "ETH",
+                    "account_uuid": "acct-new",
+                    "total_balance_crypto": 18.0,
+                    "is_cash": false
+                }
+            ]
+        }
+    }"#;
+    Mock::given(method("GET"))
+        .and(path("/api/v3/brokerage/portfolios/p1"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(breakdown_body, "application/json"))
+        .mount(&server)
+        .await;
+
+    let fills_body = r#"{"fills": [], "has_next": false}"#;
+    Mock::given(method("GET"))
+        .and(path("/api/v3/brokerage/orders/historical/fills"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(fills_body, "application/json"))
+        .mount(&server)
+        .await;
+
+    let temp = TempDir::new()?;
+    let storage = JsonFileStorage::new(temp.path());
+
+    let mut connection = Connection::new(ConnectionConfig {
+        name: "Coinbase".to_string(),
+        synchronizer: "coinbase".to_string(),
+        credentials: None,
+        balance_staleness: None,
+    });
+
+    let mut existing = Account::new("ETH Wallet", connection.id().clone());
+    existing.id = Id::from_string("acct-old");
+    existing.synchronizer_data = serde_json::json!({
+        "currency": "ETH",
+        "coinbase_account_uuid": "acct-old"
+    });
+    storage.save_account(&existing).await?;
+
+    let mut stale_duplicate = Account::new("ETH Wallet", connection.id().clone());
+    stale_duplicate.id = Id::from_string("acct-new");
+    stale_duplicate.synchronizer_data = serde_json::json!({
+        "currency": "ETH",
+        "coinbase_account_uuid": "acct-new"
+    });
+    storage.save_account(&stale_duplicate).await?;
+
+    let synchronizer = CoinbaseSynchronizer::new("key".to_string(), test_private_key_pem())
+        .with_base_url(server.uri());
+
+    let result = synchronizer
+        .sync_with_storage(&mut connection, &storage)
+        .await?;
+
+    assert_eq!(result.accounts.len(), 1);
+    assert_eq!(result.accounts[0].id.to_string(), "acct-old");
+    assert_eq!(
+        result.accounts[0]
+            .synchronizer_data
+            .get("coinbase_account_uuid")
+            .and_then(|v| v.as_str()),
+        Some("acct-new")
+    );
+
+    result.save(&storage).await?;
+
+    let old = storage
+        .get_account(&Id::from_string("acct-old"))
+        .await?
+        .expect("old account should remain");
+    assert!(old.active);
+    let new = storage
+        .get_account(&Id::from_string("acct-new"))
+        .await?
+        .expect("stale duplicate should remain for history");
+    assert!(!new.active);
+    let new_latest = storage
+        .get_latest_balance_snapshot(&Id::from_string("acct-new"))
+        .await?
+        .expect("stale duplicate should get a terminal empty snapshot");
+    assert!(new_latest.balances.is_empty());
 
     Ok(())
 }

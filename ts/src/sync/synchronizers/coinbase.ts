@@ -254,10 +254,21 @@ export class CoinbaseSynchronizer implements Synchronizer {
     const existingAccounts = await storage.listAccounts();
     const existingById = new Map<string, AccountType>();
     const existingIds = new Set<string>();
+    const existingByCurrency = new Map<string, AccountType>();
     for (const a of existingAccounts) {
       if (a.connection_id.equals(connection.state.id)) {
         existingById.set(a.id.asStr(), a);
         existingIds.add(a.id.asStr());
+        const currency = (a.synchronizer_data as { currency?: unknown } | null)?.currency;
+        if (typeof currency === 'string') {
+          const key = currency.trim().toUpperCase();
+          if (key !== '') {
+            const current = existingByCurrency.get(key);
+            if (current === undefined || a.created_at.getTime() < current.created_at.getTime()) {
+              existingByCurrency.set(key, a);
+            }
+          }
+        }
       }
     }
 
@@ -285,11 +296,17 @@ export class CoinbaseSynchronizer implements Synchronizer {
     const transactions: Array<[Id, TransactionType[]]> = [];
 
     for (const cb of coinbaseAccounts) {
+      const currencyKey = cb.currency.trim().toUpperCase();
+      const existingForCurrency = existingByCurrency.get(currencyKey);
       let accountId: Id;
-      try {
-        accountId = Id.fromStringChecked(cb.uuid);
-      } catch {
-        accountId = Id.fromExternal(`coinbase:${cb.uuid}`);
+      if (existingForCurrency !== undefined) {
+        accountId = existingForCurrency.id;
+      } else {
+        try {
+          accountId = Id.fromStringChecked(cb.uuid);
+        } catch {
+          accountId = Id.fromExternal(`coinbase:${cb.uuid}`);
+        }
       }
 
       const balanceAmount = (() => {
@@ -310,7 +327,7 @@ export class CoinbaseSynchronizer implements Synchronizer {
       const acct: AccountType = {
         ...Account.newWith(accountId, createdAt, cb.name, connection.state.id),
         tags: ['coinbase', cb.type],
-        synchronizer_data: { currency: cb.currency },
+        synchronizer_data: { currency: cb.currency, coinbase_account_uuid: cb.uuid },
       };
 
       const asset = Asset.crypto(cb.currency);

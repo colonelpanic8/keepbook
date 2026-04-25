@@ -4,6 +4,7 @@ import { generateKeyPairSync } from 'node:crypto';
 
 import { MemoryStorage } from '../../storage/memory.js';
 import { Connection } from '../../models/connection.js';
+import { Account } from '../../models/account.js';
 import { Id } from '../../models/id.js';
 import { CoinbaseSynchronizer } from './coinbase.js';
 import { saveSyncResult } from '../mod.js';
@@ -223,5 +224,80 @@ describe('CoinbaseSynchronizer (TypeScript)', () => {
 
     await new Promise<void>((resolve) => started.server.close(() => resolve()));
   });
-});
 
+  it('preserves an existing currency account when Coinbase changes the provider uuid', async () => {
+    const started = await startServer((req, res) => {
+      const url = req.url ?? '';
+      res.setHeader('Content-Type', 'application/json');
+      if (req.method === 'GET' && url === '/api/v3/brokerage/portfolios') {
+        res.end(JSON.stringify({ portfolios: [{ uuid: 'p1', name: 'Main' }] }));
+        return;
+      }
+      if (req.method === 'GET' && url === '/api/v3/brokerage/portfolios/p1') {
+        res.end(
+          JSON.stringify({
+            breakdown: {
+              spot_positions: [
+                {
+                  asset: 'ETH',
+                  account_uuid: 'acct-new',
+                  total_balance_crypto: 18,
+                  is_cash: false,
+                },
+              ],
+            },
+          }),
+        );
+        return;
+      }
+      if (req.method === 'GET' && url === '/api/v3/brokerage/orders/historical/fills') {
+        res.end(JSON.stringify({ fills: [], has_next: false }));
+        return;
+      }
+      res.statusCode = 404;
+      res.end(JSON.stringify({ error: 'not found' }));
+    });
+
+    const storage = new MemoryStorage();
+    const conn = Connection.new({ name: 'Coinbase', synchronizer: 'coinbase' });
+    const oldAccount = {
+      ...Account.newWith(
+        Id.fromString('acct-old'),
+        new Date('2026-02-03T00:00:00Z'),
+        'ETH Wallet',
+        conn.state.id,
+      ),
+      synchronizer_data: { currency: 'ETH', coinbase_account_uuid: 'acct-old' },
+    };
+    const staleDuplicate = {
+      ...Account.newWith(
+        Id.fromString('acct-new'),
+        new Date('2026-04-24T00:00:00Z'),
+        'ETH Wallet',
+        conn.state.id,
+      ),
+      synchronizer_data: { currency: 'ETH', coinbase_account_uuid: 'acct-new' },
+    };
+    await storage.saveAccount(oldAccount);
+    await storage.saveAccount(staleDuplicate);
+
+    const syncer = new CoinbaseSynchronizer('test-key', privateKeyPem, started.baseUrl);
+    const result = await syncer.sync(conn, storage);
+
+    expect(result.accounts).toHaveLength(1);
+    expect(result.accounts[0].id.asStr()).toBe('acct-old');
+    expect((result.accounts[0].synchronizer_data as { coinbase_account_uuid?: string }).coinbase_account_uuid)
+      .toBe('acct-new');
+
+    await saveSyncResult(result, storage);
+
+    const oldSaved = await storage.getAccount(Id.fromString('acct-old'));
+    expect(oldSaved?.active).toBe(true);
+    const staleSaved = await storage.getAccount(Id.fromString('acct-new'));
+    expect(staleSaved?.active).toBe(false);
+    const staleLatest = await storage.getLatestBalanceSnapshot(Id.fromString('acct-new'));
+    expect(staleLatest?.balances).toEqual([]);
+
+    await new Promise<void>((resolve) => started.server.close(() => resolve()));
+  });
+});

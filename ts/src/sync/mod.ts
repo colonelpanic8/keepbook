@@ -134,10 +134,22 @@ export async function saveSyncResult(
   clock?: Clock,
 ): Promise<void> {
   const effectiveClock = clock ?? new SystemClock();
+  const syncedAccountIds = new Set(result.accounts.map((account) => account.id.asStr()));
 
   // 1. Save all accounts
   for (const account of result.accounts) {
     await storage.saveAccount(account);
+  }
+
+  for (const account of await storage.listAccounts()) {
+    if (
+      account.connection_id.equals(result.connection.state.id) &&
+      account.active &&
+      !syncedAccountIds.has(account.id.asStr())
+    ) {
+      await storage.saveAccount({ ...account, active: false });
+      await storage.appendBalanceSnapshot(account.id, BalanceSnapshot.nowWith(effectiveClock, []));
+    }
   }
 
   // 2. Save the connection

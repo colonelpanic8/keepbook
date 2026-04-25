@@ -308,11 +308,42 @@ impl CoinbaseSynchronizer {
 
         // Load existing accounts to check for history
         let existing_accounts = storage.list_accounts().await?;
+        let existing_by_id: HashMap<Id, Account> = existing_accounts
+            .iter()
+            .filter(|a| a.connection_id == *connection.id())
+            .map(|a| (a.id.clone(), a.clone()))
+            .collect();
         let existing_ids: HashSet<Id> = existing_accounts
             .iter()
             .filter(|a| a.connection_id == *connection.id())
             .map(|a| a.id.clone())
             .collect();
+        let mut existing_by_currency: HashMap<String, Account> = HashMap::new();
+        for account in existing_accounts
+            .iter()
+            .filter(|a| a.connection_id == *connection.id())
+        {
+            let Some(currency) = account
+                .synchronizer_data
+                .get("currency")
+                .and_then(|v| v.as_str())
+            else {
+                continue;
+            };
+            let currency = currency.trim().to_uppercase();
+            if currency.is_empty() {
+                continue;
+            }
+
+            existing_by_currency
+                .entry(currency)
+                .and_modify(|current| {
+                    if account.created_at < current.created_at {
+                        *current = account.clone();
+                    }
+                })
+                .or_insert_with(|| account.clone());
+        }
 
         let mut account_uuid_by_currency: HashMap<String, String> = HashMap::new();
         for account in &coinbase_accounts {
@@ -344,12 +375,20 @@ impl CoinbaseSynchronizer {
         let mut transactions: Vec<(Id, Vec<Transaction>)> = Vec::new();
 
         for cb_account in coinbase_accounts {
-            // Use Coinbase's UUID directly as our account ID
-            let account_id = match Id::from_string_checked(&cb_account.uuid) {
-                Ok(id) => id,
-                // Fall back to a deterministic, filesystem-safe id for weird external values.
-                Err(_) => Id::from_external(&format!("coinbase:{}", cb_account.uuid)),
-            };
+            let currency_key = cb_account.currency.trim().to_uppercase();
+            let account_id =
+                if let Some(existing) = existing_by_currency.get(&currency_key).cloned() {
+                    existing.id
+                } else {
+                    // Use Coinbase's UUID directly for newly discovered accounts. If Coinbase later
+                    // moves the same asset to a new internal bucket (for example after staking), the
+                    // currency match above preserves continuity with the existing keepbook account.
+                    match Id::from_string_checked(&cb_account.uuid) {
+                        Ok(id) => id,
+                        // Fall back to a deterministic, filesystem-safe id for weird external values.
+                        Err(_) => Id::from_external(&format!("coinbase:{}", cb_account.uuid)),
+                    }
+                };
             let asset = Asset::crypto(&cb_account.currency);
             let balance_amount: f64 = cb_account.available_balance.value.parse().unwrap_or(0.0);
 
@@ -373,9 +412,8 @@ impl CoinbaseSynchronizer {
             }
 
             // Get existing account's created_at or use now
-            let created_at = existing_accounts
-                .iter()
-                .find(|a| a.id == account_id)
+            let created_at = existing_by_id
+                .get(&account_id)
                 .map(|a| a.created_at)
                 .unwrap_or_else(Utc::now);
 
@@ -388,6 +426,7 @@ impl CoinbaseSynchronizer {
                 active: true,
                 synchronizer_data: serde_json::json!({
                     "currency": cb_account.currency,
+                    "coinbase_account_uuid": cb_account.uuid,
                 }),
             };
 

@@ -378,6 +378,9 @@ impl JsonFileStorage {
                         );
                         continue;
                     }
+                    if !account.active {
+                        continue;
+                    }
                     if seen_ids.insert(account.id.clone()) {
                         accounts.push(account);
                     }
@@ -397,7 +400,9 @@ impl JsonFileStorage {
             .await?
             .into_iter()
             .filter(|account| {
-                account.connection_id == *conn.id() && !seen_ids.contains(&account.id)
+                account.active
+                    && account.connection_id == *conn.id()
+                    && !seen_ids.contains(&account.id)
             })
             .collect();
 
