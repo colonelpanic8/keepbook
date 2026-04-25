@@ -3,7 +3,13 @@ import { AsyncStorageStorage } from './AsyncStorageStorage';
 import { AsyncStorageMarketDataStore } from './AsyncStorageMarketDataStore';
 import { portfolioHistoryNative } from './portfolioHistoryNative';
 import { spendingReport } from '@keepbook/app/spending';
-import { removeFileContentsWithPrefix, setFileContents } from './FileContentStore';
+import { decStrRounded, formatDateYMD } from '@keepbook/app/format';
+import { valueInReportingCurrencyBestEffort } from '@keepbook/app/value';
+import { MarketDataService } from '@keepbook/market-data/service';
+import { getFileContent, setFileContents } from './FileContentStore';
+import { BalanceSnapshot, type AssetBalanceJSON } from '@keepbook/models/balance';
+import { Id } from '@keepbook/models/id';
+import { Decimal } from '@keepbook/decimal';
 
 type ConnectionSummary = {
   id: string;
@@ -21,6 +27,20 @@ type AccountSummary = {
   connection_id: string;
   created_at: string;
   active: boolean;
+  current_balance?: AccountBalanceSnapshotSummary;
+};
+
+type AccountBalanceSummary = AssetBalanceJSON & {
+  value_in_base: string | null;
+  base_currency: string;
+};
+
+type AccountBalanceSnapshotSummary = {
+  timestamp: string;
+  balances: AccountBalanceSummary[];
+  total_value_in_base?: string | null;
+  base_currency?: string;
+  currency_decimals?: number;
 };
 
 export interface KeepbookNativeModuleLike {
@@ -88,9 +108,117 @@ function parseOwnerRepo(repo: string): { owner: string; name: string } | null {
 }
 
 function parseTomlStringValue(toml: string, key: string): string | null {
-  const re = new RegExp(`^\\s*${key}\\s*=\\s*\"([^\"]*)\"\\s*$`, 'm');
+  const re = new RegExp(`^\\s*${key}\\s*=\\s*(\"(?:\\\\.|[^\"\\\\])*\")\\s*(?:#.*)?$`, 'm');
   const m = toml.match(re);
-  return m ? m[1] : null;
+  return m ? parseTomlBasicString(m[1]) : null;
+}
+
+function parseTomlNumberValue(toml: string, key: string): number | undefined {
+  const re = new RegExp(`^\\s*${key}\\s*=\\s*([0-9]+)\\s*(?:#.*)?$`, 'm');
+  const m = toml.match(re);
+  if (!m) return undefined;
+  const value = Number(m[1]);
+  return Number.isFinite(value) ? value : undefined;
+}
+
+function parseTomlBasicString(value: string): string {
+  try {
+    return JSON.parse(value) as string;
+  } catch {
+    return value.slice(1, -1);
+  }
+}
+
+function parseTomlStringArrayValue(toml: string, key: string): string[] {
+  const lines = toml.split(/\r?\n/);
+  let arrayLiteral: string | null = null;
+  let collecting = false;
+  let buffer = '';
+
+  for (const line of lines) {
+    if (!collecting) {
+      const start = line.match(new RegExp(`^\\s*${key}\\s*=\\s*(\\[.*)$`));
+      if (!start) continue;
+      collecting = true;
+      buffer = start[1];
+    } else {
+      buffer += `\n${line}`;
+    }
+
+    if (buffer.includes(']')) {
+      arrayLiteral = buffer.slice(0, buffer.indexOf(']') + 1);
+      break;
+    }
+  }
+
+  if (arrayLiteral === null) return [];
+
+  const values: string[] = [];
+  const itemRe = /"(?:\\.|[^"\\])*"/g;
+  for (const item of arrayLiteral.match(itemRe) ?? []) {
+    values.push(parseTomlBasicString(item));
+  }
+  return values;
+}
+
+function parseTomlSection(toml: string, section: string): string {
+  const lines = toml.split(/\r?\n/);
+  const selected: string[] = [];
+  let inSection = false;
+
+  for (const line of lines) {
+    const header = line.match(/^\s*\[([^\]]+)\]\s*(?:#.*)?$/);
+    if (header) {
+      inSection = header[1].trim() === section;
+      continue;
+    }
+    if (inSection) selected.push(line);
+  }
+
+  return selected.join('\n');
+}
+
+type TransactionIgnoreRuleConfig = {
+  account_id?: string;
+  account_name?: string;
+  connection_id?: string;
+  connection_name?: string;
+  synchronizer?: string;
+  description?: string;
+  status?: string;
+  amount?: string;
+};
+
+function parseTomlTransactionIgnoreRules(toml: string): TransactionIgnoreRuleConfig[] {
+  const rules: TransactionIgnoreRuleConfig[] = [];
+  let current: TransactionIgnoreRuleConfig | null = null;
+
+  for (const line of toml.split(/\r?\n/)) {
+    const arrayHeader = line.match(/^\s*\[\[([^\]]+)\]\]\s*(?:#.*)?$/);
+    if (arrayHeader) {
+      if (current !== null) rules.push(current);
+      current = arrayHeader[1].trim() === 'ignore.transaction_rules' ? {} : null;
+      continue;
+    }
+
+    const tableHeader = line.match(/^\s*\[([^\]]+)\]\s*(?:#.*)?$/);
+    if (tableHeader) {
+      if (current !== null) rules.push(current);
+      current = null;
+      continue;
+    }
+
+    if (current === null) continue;
+
+    const field = line.match(
+      /^\s*(account_id|account_name|connection_id|connection_name|synchronizer|description|status|amount)\s*=\s*("(?:\\.|[^"\\])*")\s*(?:#.*)?$/,
+    );
+    if (!field) continue;
+    current[field[1] as keyof TransactionIgnoreRuleConfig] = parseTomlBasicString(field[2]);
+  }
+
+  if (current !== null) rules.push(current);
+  return rules.filter((rule) => Object.values(rule).some((value) => value !== undefined));
 }
 
 async function fetchJson(url: string, authToken?: string): Promise<any> {
@@ -224,11 +352,23 @@ const KEEPBOOK_DATA_DEFAULT_BRANCH = 'master';
  * The shape matches `ResolvedConfig` from `ts/src/config.ts` without
  * importing the module (which would pull in `node:path`).
  */
-function buildConfig(dataDir: string) {
+async function buildConfig(dataDir: string) {
+  const configToml = await getFileContent(fileStorageKey(dataDir, 'keepbook.toml'));
+  const displayToml = configToml ? parseTomlSection(configToml, 'display') : '';
+  const spendingToml = configToml ? parseTomlSection(configToml, 'spending') : '';
+  const configuredCurrencyDecimals = parseTomlNumberValue(displayToml, 'currency_decimals');
+
   return {
     data_dir: dataDir,
-    reporting_currency: 'USD',
-    display: {} as Record<string, unknown>,
+    reporting_currency: configToml
+      ? (parseTomlStringValue(configToml, 'reporting_currency') ?? 'USD')
+      : 'USD',
+    display: {
+      currency_decimals:
+        configuredCurrencyDecimals !== undefined && Number.isInteger(configuredCurrencyDecimals)
+          ? configuredCurrencyDecimals
+          : 2,
+    },
     refresh: {
       balance_staleness: 14 * MS_PER_DAY,
       price_staleness: 24 * MS_PER_HOUR,
@@ -238,12 +378,12 @@ function buildConfig(dataDir: string) {
       spending_windows_days: [7, 30, 90, 365],
     },
     spending: {
-      ignore_accounts: [] as string[],
-      ignore_connections: [] as string[],
-      ignore_tags: [] as string[],
+      ignore_accounts: parseTomlStringArrayValue(spendingToml, 'ignore_accounts'),
+      ignore_connections: parseTomlStringArrayValue(spendingToml, 'ignore_connections'),
+      ignore_tags: parseTomlStringArrayValue(spendingToml, 'ignore_tags'),
     },
     ignore: {
-      transaction_rules: [] as Array<Record<string, unknown>>,
+      transaction_rules: configToml ? parseTomlTransactionIgnoreRules(configToml) : [],
     },
     git: {
       auto_commit: false,
@@ -330,7 +470,63 @@ const KeepbookNative: KeepbookNativeModuleLike = {
     const dataDir = (_dataDir || 'demo').trim() || 'demo';
     try {
       const v = await AsyncStorage.getItem(storageKey(dataDir, 'accounts'));
-      return v || '[]';
+      const accounts = JSON.parse(v || '[]') as AccountSummary[];
+      const storage = new AsyncStorageStorage(dataDir);
+      const config = await buildConfig(dataDir);
+      const baseCurrency = config.reporting_currency.trim().toUpperCase();
+      const marketData = new MarketDataService(new AsyncStorageMarketDataStore(dataDir));
+      const withBalances = await Promise.all(
+        accounts.map(async (account) => {
+          const latest = await storage.getLatestBalanceSnapshot(Id.fromString(account.id));
+          if (latest === null) return account;
+          const latestJson = BalanceSnapshot.toJSON(latest);
+          const asOfDate = formatDateYMD(latest.timestamp);
+          const assetCount = new Set(
+            latestJson.balances.map((balance) => JSON.stringify(balance.asset)),
+          ).size;
+          const balances = await Promise.all(
+            latest.balances.map(async (balance, index) => {
+              const valueInBase = await valueInReportingCurrencyBestEffort(
+                marketData,
+                balance.asset,
+                balance.amount,
+                baseCurrency,
+                asOfDate,
+                config.display.currency_decimals,
+              );
+              return {
+                ...latestJson.balances[index],
+                value_in_base: valueInBase,
+                base_currency: baseCurrency,
+              };
+            }),
+          );
+          const multiAssetTotal =
+            assetCount > 1
+              ? balances.every((balance) => balance.value_in_base !== null)
+                ? decStrRounded(
+                    balances.reduce(
+                      (sum, balance) => sum.plus(new Decimal(balance.value_in_base ?? 0)),
+                      new Decimal(0),
+                    ),
+                    config.display.currency_decimals,
+                  )
+                : null
+              : undefined;
+          return {
+            ...account,
+            current_balance: {
+              timestamp: latestJson.timestamp,
+              balances,
+              currency_decimals: config.display.currency_decimals,
+              ...(multiAssetTotal !== undefined
+                ? { total_value_in_base: multiAssetTotal, base_currency: baseCurrency }
+                : {}),
+            },
+          };
+        }),
+      );
+      return JSON.stringify(withBalances);
     } catch (e) {
       return JSON.stringify({ error: String(e) });
     }
@@ -389,6 +585,7 @@ const KeepbookNative: KeepbookNativeModuleLike = {
         ? tree.tree
         : [];
       const blobPaths = entries.filter((e) => e.type === 'blob').map((e) => e.path || '');
+      const configPaths = blobPaths.filter((p) => p === 'keepbook.toml');
 
       const connJsonPaths = blobPaths.filter((p) =>
         /^connections\/[^/]+\/connection\.json$/.test(p),
@@ -487,6 +684,7 @@ const KeepbookNative: KeepbookNativeModuleLike = {
       // Collect all paths we need to fetch (balances, transactions,
       // annotations, prices, FX rates).
       const dataFilePaths = [
+        ...configPaths,
         ...accountConfigPaths,
         ...balancePaths,
         ...transactionPaths,
@@ -546,12 +744,12 @@ const KeepbookNative: KeepbookNativeModuleLike = {
         [manifestStorageKey(dataDir), JSON.stringify(manifestPaths)],
       ];
 
-      await removeFileContentsWithPrefix(`keepbook.file.${dataDir}.`);
-      await AsyncStorage.multiSet(metadataEntries);
-
+      // Publish file contents before the manifest so readers never see a
+      // manifest for a sync whose config/transaction files are still missing.
       for (let i = 0; i < fileEntries.length; i += BATCH_SIZE) {
         await setFileContents(fileEntries.slice(i, i + BATCH_SIZE));
       }
+      await AsyncStorage.multiSet(metadataEntries);
 
       return JSON.stringify({
         ok: true,
@@ -559,6 +757,7 @@ const KeepbookNative: KeepbookNativeModuleLike = {
         counts: {
           connections: connections.length,
           accounts: accounts.length,
+          config_files: configPaths.length,
           account_config_files: accountConfigPaths.length,
           balance_files: balancePaths.length,
           transaction_files: transactionPaths.length,
@@ -591,7 +790,7 @@ const KeepbookNative: KeepbookNativeModuleLike = {
     try {
       const storage = new AsyncStorageStorage(effectiveDataDir);
       const marketDataStore = new AsyncStorageMarketDataStore(effectiveDataDir);
-      const config = buildConfig(effectiveDataDir);
+      const config = await buildConfig(effectiveDataDir);
 
       const result = await portfolioHistoryNative(
         storage,
@@ -623,7 +822,7 @@ const KeepbookNative: KeepbookNativeModuleLike = {
     try {
       const storage = new AsyncStorageStorage(effectiveDataDir);
       const marketDataStore = new AsyncStorageMarketDataStore(effectiveDataDir);
-      const config = buildConfig(effectiveDataDir);
+      const config = await buildConfig(effectiveDataDir);
 
       const result = await spendingReport(
         storage,

@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useFocusEffect } from '@react-navigation/native';
 import { Text, View } from '@/components/Themed';
 import { SpendingChart, type SpendingDataPoint } from '@/components/charts/SpendingChart';
 import { TimeRangeSelector, TimeRange, timeRangeToQuery } from '@/components/charts/TimeRangeSelector';
@@ -257,9 +258,11 @@ export default function SpendingScreen() {
     }
   }, [query.lookbackDays, period, groupBy, direction, mockData]);
 
-  useEffect(() => {
-    void fetchData();
-  }, [fetchData]);
+  useFocusEffect(
+    useCallback(() => {
+      void fetchData();
+    }, [fetchData]),
+  );
 
   const avgPerPeriod = data.length > 0 ? totalSpending / data.length : 0;
   const periodLabel = periodNoun(period);
