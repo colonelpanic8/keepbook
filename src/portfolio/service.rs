@@ -40,14 +40,24 @@ struct AssetHolding {
     #[allow(dead_code)]
     asset: Asset,
     amount: String,
+    cost_basis: Option<String>,
     timestamp: DateTime<Utc>,
 }
 
 /// Aggregated data for a single asset across all accounts.
 struct AssetAggregate {
     total_amount: Decimal,
+    amount_with_cost_basis: Decimal,
+    total_cost_basis: Option<Decimal>,
     latest_balance_date: NaiveDate,
     holdings: Vec<AssetHolding>,
+}
+
+#[derive(Debug, Default)]
+struct GainsTotals {
+    total_cost_basis: Option<Decimal>,
+    total_unrealized_gain: Option<Decimal>,
+    prospective_capital_gains_tax: Option<Decimal>,
 }
 
 /// Context loaded from storage for portfolio calculation.
@@ -85,12 +95,13 @@ impl PortfolioService {
             .await?;
 
         // Build asset summaries and calculate total value
-        let (mut asset_summaries, total_value) = self.build_asset_summaries(
+        let (mut asset_summaries, total_value, gains_totals) = self.build_asset_summaries(
             &by_asset_agg,
             &price_cache,
             &ctx.account_map,
             query.include_detail,
             query.currency_decimals,
+            query.capital_gains_tax_rate,
         )?;
 
         // Build account summaries
@@ -122,6 +133,15 @@ impl PortfolioService {
             as_of_date: query.as_of_date,
             currency: query.currency.clone(),
             total_value: format_base_currency_value(total_value, query.currency_decimals),
+            total_cost_basis: gains_totals
+                .total_cost_basis
+                .map(|v| format_base_currency_value(v, query.currency_decimals)),
+            total_unrealized_gain: gains_totals
+                .total_unrealized_gain
+                .map(|v| format_base_currency_value(v, query.currency_decimals)),
+            prospective_capital_gains_tax: gains_totals
+                .prospective_capital_gains_tax
+                .map(|v| format_base_currency_value(v, query.currency_decimals)),
             by_asset,
             by_account,
         })
@@ -214,11 +234,19 @@ impl PortfolioService {
                     .entry(asset_key.clone())
                     .or_insert_with(|| AssetAggregate {
                         total_amount: Decimal::ZERO,
+                        amount_with_cost_basis: Decimal::ZERO,
+                        total_cost_basis: None,
                         latest_balance_date: balance_date,
                         holdings: Vec::new(),
                     });
 
                 entry.total_amount += amount;
+                if let Some(cost_basis) = &asset_balance.cost_basis {
+                    let cost_basis = Decimal::from_str(cost_basis)?;
+                    entry.amount_with_cost_basis += amount;
+                    entry.total_cost_basis =
+                        Some(entry.total_cost_basis.unwrap_or(Decimal::ZERO) + cost_basis);
+                }
                 if balance_date > entry.latest_balance_date {
                     entry.latest_balance_date = balance_date;
                 }
@@ -226,6 +254,7 @@ impl PortfolioService {
                     account_id: account_id.clone(),
                     asset: asset_key.clone(),
                     amount: asset_balance.amount.clone(),
+                    cost_basis: asset_balance.cost_basis.clone(),
                     timestamp: snapshot.timestamp,
                 });
             }
@@ -261,9 +290,11 @@ impl PortfolioService {
         account_map: &HashMap<Id, Account>,
         include_detail: bool,
         currency_decimals: Option<u32>,
-    ) -> Result<(Vec<AssetSummary>, Decimal)> {
+        capital_gains_tax_rate: Option<Decimal>,
+    ) -> Result<(Vec<AssetSummary>, Decimal, GainsTotals)> {
         let mut summaries = Vec::new();
         let mut total_value = Decimal::ZERO;
+        let mut gains_totals = GainsTotals::default();
 
         for (asset, agg) in by_asset {
             let valuation = price_cache.get(asset).with_context(|| {
@@ -277,8 +308,41 @@ impl PortfolioService {
                 total_value += v;
             }
 
+            let cost_basis = agg.total_cost_basis;
+            let unrealized_gain = match (valuation.value, cost_basis) {
+                (Some(unit_price), Some(total_basis)) => {
+                    Some((unit_price * agg.amount_with_cost_basis) - total_basis)
+                }
+                _ => None,
+            };
+            let prospective_tax = unrealized_gain
+                .filter(|gain| *gain > Decimal::ZERO)
+                .and_then(|gain| capital_gains_tax_rate.map(|rate| gain * rate));
+
+            if let Some(total_basis) = cost_basis {
+                gains_totals.total_cost_basis =
+                    Some(gains_totals.total_cost_basis.unwrap_or(Decimal::ZERO) + total_basis);
+            }
+            if let Some(gain) = unrealized_gain {
+                gains_totals.total_unrealized_gain =
+                    Some(gains_totals.total_unrealized_gain.unwrap_or(Decimal::ZERO) + gain);
+            }
+            if let Some(tax) = prospective_tax {
+                gains_totals.prospective_capital_gains_tax = Some(
+                    gains_totals
+                        .prospective_capital_gains_tax
+                        .unwrap_or(Decimal::ZERO)
+                        + tax,
+                );
+            }
+
             let holdings_detail = if include_detail {
-                Some(Self::build_holdings_detail(&agg.holdings, account_map)?)
+                Some(Self::build_holdings_detail(
+                    &agg.holdings,
+                    account_map,
+                    valuation.value,
+                    currency_decimals,
+                )?)
             } else {
                 None
             };
@@ -294,17 +358,24 @@ impl PortfolioService {
                 fx_date: valuation.fx_date,
                 value_in_base: asset_value
                     .map(|v| format_base_currency_value(v, currency_decimals)),
+                cost_basis: cost_basis.map(|v| format_base_currency_value(v, currency_decimals)),
+                unrealized_gain: unrealized_gain
+                    .map(|v| format_base_currency_value(v, currency_decimals)),
+                prospective_capital_gains_tax: prospective_tax
+                    .map(|v| format_base_currency_value(v, currency_decimals)),
                 holdings: holdings_detail,
             });
         }
 
-        Ok((summaries, total_value))
+        Ok((summaries, total_value, gains_totals))
     }
 
     /// Build holdings detail for an asset.
     fn build_holdings_detail(
         holdings: &[AssetHolding],
         account_map: &HashMap<Id, Account>,
+        unit_value: Option<Decimal>,
+        currency_decimals: Option<u32>,
     ) -> Result<Vec<AccountHolding>> {
         let mut detail = Vec::new();
 
@@ -319,6 +390,25 @@ impl PortfolioService {
                 account_name,
                 amount: Decimal::from_str(&holding.amount)?.normalize().to_string(),
                 balance_date: holding.timestamp.date_naive(),
+                cost_basis: holding
+                    .cost_basis
+                    .as_ref()
+                    .map(|cost_basis| {
+                        Decimal::from_str(cost_basis)
+                            .map(|v| format_base_currency_value(v, currency_decimals))
+                    })
+                    .transpose()?,
+                unrealized_gain: match (&holding.cost_basis, unit_value) {
+                    (Some(cost_basis), Some(unit_value)) => {
+                        let amount = Decimal::from_str(&holding.amount)?;
+                        let cost_basis = Decimal::from_str(cost_basis)?;
+                        Some(format_base_currency_value(
+                            unit_value * amount - cost_basis,
+                            currency_decimals,
+                        ))
+                    }
+                    _ => None,
+                },
             });
         }
 
@@ -567,6 +657,8 @@ mod tests {
             asset.clone(),
             super::AssetAggregate {
                 total_amount: Decimal::ONE,
+                amount_with_cost_basis: Decimal::ZERO,
+                total_cost_basis: None,
                 latest_balance_date: chrono::NaiveDate::from_ymd_opt(2026, 2, 1).unwrap(),
                 holdings: Vec::new(),
             },
@@ -577,7 +669,7 @@ mod tests {
         let account_map: std::collections::HashMap<Id, Account> = std::collections::HashMap::new();
 
         let err = service
-            .build_asset_summaries(&by_asset, &price_cache, &account_map, false, None)
+            .build_asset_summaries(&by_asset, &price_cache, &account_map, false, None, None)
             .unwrap_err();
         assert!(err.to_string().contains("missing valuation"));
     }
@@ -644,6 +736,7 @@ mod tests {
             currency_decimals: None,
             grouping: Grouping::Both,
             include_detail: false,
+            capital_gains_tax_rate: None,
         };
         let result = service.calculate(&query).await?;
 
@@ -716,6 +809,7 @@ mod tests {
             currency_decimals: None,
             grouping: Grouping::Asset,
             include_detail: false,
+            capital_gains_tax_rate: None,
         };
         let result = service.calculate(&query).await?;
 
@@ -730,6 +824,74 @@ mod tests {
         assert_eq!(by_asset[0].price, Some("200".to_string()));
         assert_eq!(by_asset[0].fx_rate, Some("0.91".to_string()));
         assert_eq!(by_asset[0].value_in_base, Some("1820".to_string()));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn calculate_reports_unrealized_gain_and_tax_from_cost_basis() -> Result<()> {
+        let storage = Arc::new(MemoryStorage::new());
+        let connection = Connection::new(ConnectionConfig {
+            name: "Broker".to_string(),
+            synchronizer: "manual".to_string(),
+            credentials: None,
+            balance_staleness: None,
+        });
+        storage.save_connection(&connection).await?;
+
+        let account = Account::new("Brokerage", connection.id().clone());
+        storage.save_account(&account).await?;
+
+        let snapshot = BalanceSnapshot::new(
+            Utc.with_ymd_and_hms(2026, 2, 1, 12, 0, 0).unwrap(),
+            vec![AssetBalance::new(Asset::equity("AAPL"), "10").with_cost_basis("1500")],
+        );
+        storage
+            .append_balance_snapshot(&account.id, &snapshot)
+            .await?;
+
+        let store = Arc::new(MemoryMarketDataStore::new());
+        let as_of_date = chrono::NaiveDate::from_ymd_opt(2026, 2, 1).unwrap();
+        store
+            .put_prices(&[PricePoint {
+                asset_id: AssetId::from_asset(&Asset::equity("AAPL")),
+                as_of_date,
+                timestamp: Utc::now(),
+                price: "200".to_string(),
+                quote_currency: "USD".to_string(),
+                kind: PriceKind::Close,
+                source: "test".to_string(),
+            }])
+            .await?;
+
+        let market_data = Arc::new(MarketDataService::new(store, None));
+        let service = PortfolioService::new(storage, market_data);
+        let query = PortfolioQuery {
+            as_of_date: chrono::NaiveDate::from_ymd_opt(2026, 2, 2).unwrap(),
+            currency: "USD".to_string(),
+            currency_decimals: None,
+            grouping: Grouping::Asset,
+            include_detail: true,
+            capital_gains_tax_rate: Some(Decimal::new(238, 3)),
+        };
+        let result = service.calculate(&query).await?;
+
+        assert_eq!(result.total_value, "2000");
+        assert_eq!(result.total_cost_basis, Some("1500".to_string()));
+        assert_eq!(result.total_unrealized_gain, Some("500".to_string()));
+        assert_eq!(
+            result.prospective_capital_gains_tax,
+            Some("119".to_string())
+        );
+
+        let asset = &result.by_asset.unwrap()[0];
+        assert_eq!(asset.cost_basis, Some("1500".to_string()));
+        assert_eq!(asset.unrealized_gain, Some("500".to_string()));
+        assert_eq!(asset.prospective_capital_gains_tax, Some("119".to_string()));
+        assert_eq!(
+            asset.holdings.as_ref().unwrap()[0].unrealized_gain,
+            Some("500".to_string())
+        );
 
         Ok(())
     }
@@ -777,6 +939,7 @@ mod tests {
             currency_decimals: None,
             grouping: Grouping::Asset,
             include_detail: true,
+            capital_gains_tax_rate: None,
         };
         let result = service.calculate(&query).await?;
 
@@ -845,6 +1008,7 @@ mod tests {
             currency_decimals: None,
             grouping: Grouping::Asset,
             include_detail: false,
+            capital_gains_tax_rate: None,
         };
         let result = service.calculate(&query).await?;
 
@@ -898,6 +1062,7 @@ mod tests {
             currency_decimals: None,
             grouping: Grouping::Both,
             include_detail: false,
+            capital_gains_tax_rate: None,
         };
 
         let result = service.calculate(&query).await?;
@@ -946,6 +1111,7 @@ mod tests {
             currency_decimals: None,
             grouping: Grouping::Account,
             include_detail: false,
+            capital_gains_tax_rate: None,
         };
 
         let result = service.calculate(&query).await?;
@@ -1007,6 +1173,7 @@ mod tests {
             currency_decimals: None,
             grouping: Grouping::Both,
             include_detail: false,
+            capital_gains_tax_rate: None,
         };
 
         let result = service.calculate(&query).await?;
@@ -1060,6 +1227,7 @@ mod tests {
             currency_decimals: None,
             grouping: Grouping::Both,
             include_detail: false,
+            capital_gains_tax_rate: None,
         };
 
         let result = service.calculate(&query).await?;

@@ -22,7 +22,7 @@ fn group_int_digits(int_part: &str) -> String {
     for (i, ch) in int_part.chars().enumerate() {
         out.push(ch);
         let remaining = len.saturating_sub(i + 1);
-        if remaining > 0 && remaining % 3 == 0 {
+        if remaining > 0 && remaining.is_multiple_of(3) {
             out.push(',');
         }
     }

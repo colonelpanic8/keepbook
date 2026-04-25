@@ -21,20 +21,6 @@ export interface RefreshConfig {
   price_staleness: number;
 }
 
-export interface HistoryConfig {
-  /**
-   * When true, historical valuation may project a later cached price or FX
-   * rate backward when no acceptable earlier reading exists.
-   */
-  allow_future_projection: boolean;
-
-  /**
-   * Optional bound for older cached history lookups before future projection
-   * is considered. When omitted, older lookup remains unbounded.
-   */
-  lookback_days?: number;
-}
-
 export interface GitConfig {
   /** Whether to auto-commit data changes. */
   auto_commit: boolean;
@@ -67,10 +53,8 @@ export interface DisplayConfig {
 }
 
 export interface TrayConfig {
-  /** Maximum number of recent portfolio history rows shown in the tray menu. */
+  /** Number of recent portfolio history points shown in tray menu. */
   history_points: number;
-  /** Relative-date DSL entries expanded into tray history rows. */
-  history_spec: string[];
   /** Spending lookback windows (days) shown in tray menu. */
   spending_windows_days: number[];
 }
@@ -94,6 +78,20 @@ export interface SpendingConfig {
    * Used by default portfolio spending scope and by list/TUI ignored-transaction filtering.
    */
   ignore_tags: string[];
+}
+
+export interface LatentCapitalGainsTaxConfig {
+  /** Include a virtual liability account in portfolio snapshots. */
+  enabled: boolean;
+  /** Tax rate as a decimal fraction (for example, 0.23 for 23%). */
+  rate?: number;
+  /** Display name for the virtual account. */
+  account_name: string;
+}
+
+export interface PortfolioConfig {
+  /** Optional virtual account that subtracts estimated latent capital gains tax. */
+  latent_capital_gains_tax: LatentCapitalGainsTaxConfig;
 }
 
 export interface TransactionIgnoreRule {
@@ -120,12 +118,12 @@ export interface Config {
   display: DisplayConfig;
   /** Refresh / staleness settings. */
   refresh: RefreshConfig;
-  /** Historical valuation settings. */
-  history: HistoryConfig;
   /** Tray UI settings. */
   tray: TrayConfig;
   /** Spending report settings. */
   spending: SpendingConfig;
+  /** Portfolio reporting settings. */
+  portfolio: PortfolioConfig;
   /** Global ignore rules. */
   ignore: IgnoreConfig;
   /** Git integration settings. */
@@ -141,12 +139,12 @@ export interface ResolvedConfig {
   display: DisplayConfig;
   /** Refresh / staleness settings. */
   refresh: RefreshConfig;
-  /** Historical valuation settings. */
-  history: HistoryConfig;
   /** Tray UI settings. */
   tray: TrayConfig;
   /** Spending report settings. */
   spending: SpendingConfig;
+  /** Portfolio reporting settings. */
+  portfolio: PortfolioConfig;
   /** Global ignore rules. */
   ignore: IgnoreConfig;
   /** Git integration settings. */
@@ -165,10 +163,6 @@ export const DEFAULT_REFRESH_CONFIG: RefreshConfig = {
   price_staleness: 24 * MS_PER_HOUR,
 };
 
-export const DEFAULT_HISTORY_CONFIG: HistoryConfig = {
-  allow_future_projection: false,
-};
-
 export const DEFAULT_GIT_CONFIG: GitConfig = {
   auto_commit: false,
   auto_push: false,
@@ -176,15 +170,21 @@ export const DEFAULT_GIT_CONFIG: GitConfig = {
 };
 
 export const DEFAULT_TRAY_CONFIG: TrayConfig = {
-  history_points: 17,
-  history_spec: ['last 4 days', '1 week ago', '2 weeks ago', 'last 12 months'],
-  spending_windows_days: [7, 30, 90, 365],
+  history_points: 8,
+  spending_windows_days: [7, 30, 90],
 };
 
 export const DEFAULT_SPENDING_CONFIG: SpendingConfig = {
   ignore_accounts: [],
   ignore_connections: [],
   ignore_tags: [],
+};
+
+export const DEFAULT_PORTFOLIO_CONFIG: PortfolioConfig = {
+  latent_capital_gains_tax: {
+    enabled: false,
+    account_name: 'Latent Capital Gains Tax',
+  },
 };
 
 export const DEFAULT_IGNORE_CONFIG: IgnoreConfig = {
@@ -196,16 +196,17 @@ export const DEFAULT_CONFIG: Config = {
   reporting_currency: 'USD',
   display: {},
   refresh: { ...DEFAULT_REFRESH_CONFIG },
-  history: { ...DEFAULT_HISTORY_CONFIG },
   tray: {
     ...DEFAULT_TRAY_CONFIG,
-    history_spec: [...DEFAULT_TRAY_CONFIG.history_spec],
     spending_windows_days: [...DEFAULT_TRAY_CONFIG.spending_windows_days],
   },
   spending: {
     ignore_accounts: [...DEFAULT_SPENDING_CONFIG.ignore_accounts],
     ignore_connections: [...DEFAULT_SPENDING_CONFIG.ignore_connections],
     ignore_tags: [...DEFAULT_SPENDING_CONFIG.ignore_tags],
+  },
+  portfolio: {
+    latent_capital_gains_tax: { ...DEFAULT_PORTFOLIO_CONFIG.latent_capital_gains_tax },
   },
   ignore: {
     transaction_rules: [...DEFAULT_IGNORE_CONFIG.transaction_rules],
@@ -231,8 +232,8 @@ export function parseConfig(tomlStr: string): Config {
 
   const refreshRaw = (raw.refresh ?? {}) as Record<string, unknown>;
   const trayRaw = (raw.tray ?? {}) as Record<string, unknown>;
-  const historyRaw = (raw.history ?? {}) as Record<string, unknown>;
   const spendingRaw = (raw.spending ?? {}) as Record<string, unknown>;
+  const portfolioRaw = (raw.portfolio ?? {}) as Record<string, unknown>;
   const ignoreRaw = (raw.ignore ?? {}) as Record<string, unknown>;
   const gitRaw = (raw.git ?? {}) as Record<string, unknown>;
   const displayRaw = (raw.display ?? {}) as Record<string, unknown>;
@@ -248,31 +249,16 @@ export function parseConfig(tomlStr: string): Config {
         : DEFAULT_REFRESH_CONFIG.price_staleness,
   };
 
+  const autoCommit =
+    typeof gitRaw.auto_commit === 'boolean' ? gitRaw.auto_commit : DEFAULT_GIT_CONFIG.auto_commit;
   const git: GitConfig = {
-    auto_commit:
-      typeof gitRaw.auto_commit === 'boolean' ? gitRaw.auto_commit : DEFAULT_GIT_CONFIG.auto_commit,
-    auto_push:
-      typeof gitRaw.auto_push === 'boolean' ? gitRaw.auto_push : DEFAULT_GIT_CONFIG.auto_push,
+    auto_commit: autoCommit,
+    auto_push: typeof gitRaw.auto_push === 'boolean' ? gitRaw.auto_push : autoCommit,
     merge_master_before_command:
       typeof gitRaw.merge_master_before_command === 'boolean'
         ? gitRaw.merge_master_before_command
         : DEFAULT_GIT_CONFIG.merge_master_before_command,
   };
-
-  const history: HistoryConfig = {
-    allow_future_projection:
-      typeof historyRaw.allow_future_projection === 'boolean'
-        ? historyRaw.allow_future_projection
-        : DEFAULT_HISTORY_CONFIG.allow_future_projection,
-  };
-  if (
-    typeof historyRaw.lookback_days === 'number' &&
-    Number.isInteger(historyRaw.lookback_days) &&
-    Number.isFinite(historyRaw.lookback_days) &&
-    historyRaw.lookback_days >= 0
-  ) {
-    history.lookback_days = historyRaw.lookback_days;
-  }
 
   const tray: TrayConfig = {
     history_points:
@@ -281,15 +267,8 @@ export function parseConfig(tomlStr: string): Config {
       trayRaw.history_points >= 0
         ? trayRaw.history_points
         : DEFAULT_TRAY_CONFIG.history_points,
-    history_spec: [...DEFAULT_TRAY_CONFIG.history_spec],
     spending_windows_days: [...DEFAULT_TRAY_CONFIG.spending_windows_days],
   };
-  if (Array.isArray(trayRaw.history_spec)) {
-    tray.history_spec = trayRaw.history_spec
-      .filter((v): v is string => typeof v === 'string')
-      .map((v) => v.trim())
-      .filter((v) => v.length > 0);
-  }
   if (Array.isArray(trayRaw.spending_windows_days)) {
     tray.spending_windows_days = trayRaw.spending_windows_days
       .filter(
@@ -311,6 +290,24 @@ export function parseConfig(tomlStr: string): Config {
     ignore_accounts: parseStringArray(spendingRaw.ignore_accounts),
     ignore_connections: parseStringArray(spendingRaw.ignore_connections),
     ignore_tags: parseStringArray(spendingRaw.ignore_tags),
+  };
+
+  const latentTaxRaw = (portfolioRaw.latent_capital_gains_tax ?? {}) as Record<string, unknown>;
+  const latentTax: LatentCapitalGainsTaxConfig = {
+    enabled:
+      typeof latentTaxRaw.enabled === 'boolean'
+        ? latentTaxRaw.enabled
+        : DEFAULT_PORTFOLIO_CONFIG.latent_capital_gains_tax.enabled,
+    account_name:
+      typeof latentTaxRaw.account_name === 'string' && latentTaxRaw.account_name.trim().length > 0
+        ? latentTaxRaw.account_name.trim()
+        : DEFAULT_PORTFOLIO_CONFIG.latent_capital_gains_tax.account_name,
+  };
+  if (typeof latentTaxRaw.rate === 'number' && Number.isFinite(latentTaxRaw.rate)) {
+    latentTax.rate = latentTaxRaw.rate;
+  }
+  const portfolio: PortfolioConfig = {
+    latent_capital_gains_tax: latentTax,
   };
 
   const parseOptionalRegexField = (value: unknown): string | undefined => {
@@ -357,9 +354,9 @@ export function parseConfig(tomlStr: string): Config {
         : DEFAULT_CONFIG.reporting_currency,
     display: {},
     refresh,
-    history,
     tray,
     spending,
+    portfolio,
     ignore,
     git,
   };

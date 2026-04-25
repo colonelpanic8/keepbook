@@ -231,6 +231,7 @@ export async function setBalance(
   accountIdStr: string,
   assetStr: string,
   amountStr: string,
+  costBasisOrClock?: string | Clock,
   clock?: Clock,
 ): Promise<object> {
   let accountId: Id;
@@ -271,19 +272,44 @@ export async function setBalance(
     };
   }
 
-  const balance = AssetBalance.new(asset, decStr(amount));
-  const snapshot = BalanceSnapshot.nowWith(clock ?? new SystemClock(), [balance]);
+  let costBasis: Decimal | undefined;
+  if (typeof costBasisOrClock === 'string') {
+    try {
+      costBasis = new Decimal(costBasisOrClock);
+    } catch {
+      return {
+        success: false,
+        error: `Invalid cost basis: '${costBasisOrClock}'`,
+      };
+    }
+  }
+
+  const effectiveClock =
+    typeof costBasisOrClock === 'string' || costBasisOrClock === undefined
+      ? (clock ?? new SystemClock())
+      : costBasisOrClock;
+  const balance = AssetBalance.new(
+    asset,
+    decStr(amount),
+    costBasis === undefined ? undefined : decStr(costBasis),
+  );
+  const snapshot = BalanceSnapshot.nowWith(effectiveClock, [balance]);
 
   await storage.appendBalanceSnapshot(account.id, snapshot);
 
+  const balanceOut: Record<string, unknown> = {
+    account_id: account.id.asStr(),
+    asset,
+    amount: decStr(amount),
+    timestamp: formatRfc3339(snapshot.timestamp),
+  };
+  if (costBasis !== undefined) {
+    balanceOut.cost_basis = decStr(costBasis);
+  }
+
   return {
     success: true,
-    balance: {
-      account_id: account.id.asStr(),
-      asset,
-      amount: decStr(amount),
-      timestamp: formatRfc3339(snapshot.timestamp),
-    },
+    balance: balanceOut,
   };
 }
 
@@ -453,7 +479,11 @@ export async function setTransactionAnnotation(
   const patch: TransactionAnnotationPatchType = {
     transaction_id: transactionId,
     timestamp: now,
-    ...(clearDescription ? { description: null } : description !== undefined ? { description } : {}),
+    ...(clearDescription
+      ? { description: null }
+      : description !== undefined
+        ? { description }
+        : {}),
     ...(clearNote ? { note: null } : note !== undefined ? { note } : {}),
     ...(clearCategory ? { category: null } : category !== undefined ? { category } : {}),
     ...(clearTags

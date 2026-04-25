@@ -4,6 +4,7 @@
  * Port of the Rust `portfolio::models` module.
  */
 
+import type { Decimal } from '../decimal.js';
 import type { AssetType } from '../models/asset.js';
 
 // ---------------------------------------------------------------------------
@@ -30,6 +31,11 @@ export interface PortfolioQuery {
   grouping: Grouping;
   /** Whether to include per-account holdings detail in asset summaries. */
   include_detail: boolean;
+  /**
+   * Optional capital gains tax rate as a decimal fraction (for example,
+   * 0.238 for 23.8%).
+   */
+  capital_gains_tax_rate?: Decimal;
 }
 
 // ---------------------------------------------------------------------------
@@ -41,6 +47,9 @@ export interface PortfolioSnapshot {
   currency: string;
   /** Decimal string (normalized, no trailing zeros). */
   total_value: string;
+  total_cost_basis?: string;
+  total_unrealized_gain?: string;
+  prospective_capital_gains_tax?: string;
   by_asset?: AssetSummary[];
   by_account?: AccountSummary[];
 }
@@ -67,6 +76,12 @@ export interface AssetSummary {
   fx_date?: string;
   /** Decimal string value in base/target currency. Undefined if price unavailable. */
   value_in_base?: string;
+  /** Decimal string total known cost basis. */
+  cost_basis?: string;
+  /** Decimal string unrealized gain for holdings with known cost basis. */
+  unrealized_gain?: string;
+  /** Decimal string estimated tax on positive unrealized gains when a tax rate is supplied. */
+  prospective_capital_gains_tax?: string;
   /** Per-account holdings detail (only when include_detail is true). */
   holdings?: AccountHolding[];
 }
@@ -82,6 +97,10 @@ export interface AccountHolding {
   amount: string;
   /** "YYYY-MM-DD" date of the balance snapshot. */
   balance_date: string;
+  /** Decimal string known cost basis for this holding. */
+  cost_basis?: string;
+  /** Decimal string unrealized gain for this holding. */
+  unrealized_gain?: string;
 }
 
 // ---------------------------------------------------------------------------

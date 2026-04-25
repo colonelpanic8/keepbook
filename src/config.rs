@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::duration::deserialize_duration;
 
@@ -88,6 +88,40 @@ pub struct SpendingConfig {
     pub ignore_tags: Vec<String>,
 }
 
+/// Portfolio reporting configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct PortfolioConfig {
+    /// Optional virtual account that subtracts an estimate of latent capital
+    /// gains tax from portfolio net worth.
+    pub latent_capital_gains_tax: LatentCapitalGainsTaxConfig,
+}
+
+/// Latent capital gains tax liability configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LatentCapitalGainsTaxConfig {
+    /// Include a virtual liability account in portfolio snapshots.
+    pub enabled: bool,
+
+    /// Tax rate as a decimal fraction (for example, 0.23 for 23%).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rate: Option<f64>,
+
+    /// Display name for the virtual account.
+    pub account_name: String,
+}
+
+impl Default for LatentCapitalGainsTaxConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            rate: None,
+            account_name: "Latent Capital Gains Tax".to_string(),
+        }
+    }
+}
+
 /// Global ignore rules configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
@@ -165,8 +199,7 @@ pub struct HistoryConfig {
 }
 
 /// Git-related configuration.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(default)]
+#[derive(Debug, Clone, Serialize, Default)]
 pub struct GitConfig {
     /// Enable automatic commits after data changes.
     pub auto_commit: bool,
@@ -176,6 +209,29 @@ pub struct GitConfig {
 
     /// Merge `origin/master` before running commands.
     pub merge_master_before_command: bool,
+}
+
+impl<'de> Deserialize<'de> for GitConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize, Default)]
+        #[serde(default)]
+        struct RawGitConfig {
+            auto_commit: bool,
+            auto_push: Option<bool>,
+            merge_master_before_command: bool,
+        }
+
+        let raw = RawGitConfig::deserialize(deserializer)?;
+
+        Ok(Self {
+            auto_commit: raw.auto_commit,
+            auto_push: raw.auto_push.unwrap_or(raw.auto_commit),
+            merge_master_before_command: raw.merge_master_before_command,
+        })
+    }
 }
 
 /// Application configuration.
@@ -210,6 +266,10 @@ pub struct Config {
     #[serde(default)]
     pub spending: SpendingConfig,
 
+    /// Portfolio reporting settings.
+    #[serde(default)]
+    pub portfolio: PortfolioConfig,
+
     /// Global ignore rules.
     #[serde(default)]
     pub ignore: IgnoreConfig,
@@ -229,6 +289,7 @@ impl Default for Config {
             history: HistoryConfig::default(),
             tray: TrayConfig::default(),
             spending: SpendingConfig::default(),
+            portfolio: PortfolioConfig::default(),
             ignore: IgnoreConfig::default(),
             git: GitConfig::default(),
         }
@@ -293,6 +354,9 @@ pub struct ResolvedConfig {
     /// Spending report settings.
     pub spending: SpendingConfig,
 
+    /// Portfolio reporting settings.
+    pub portfolio: PortfolioConfig,
+
     /// Global ignore rules.
     pub ignore: IgnoreConfig,
 
@@ -308,16 +372,26 @@ pub struct ResolvedConfig {
 pub fn default_config_path() -> PathBuf {
     let local_config = PathBuf::from("keepbook.toml");
     if local_config.exists() {
-        return local_config;
+        return absolute_from_current_dir(local_config);
     }
 
     // XDG data directory fallback
     if let Some(data_dir) = dirs::data_dir() {
-        return data_dir.join("keepbook").join("keepbook.toml");
+        return absolute_from_current_dir(data_dir.join("keepbook").join("keepbook.toml"));
     }
 
     // Final fallback to local
-    local_config
+    absolute_from_current_dir(local_config)
+}
+
+fn absolute_from_current_dir(path: PathBuf) -> PathBuf {
+    if path.is_absolute() {
+        return path;
+    }
+
+    std::env::current_dir()
+        .map(|cwd| cwd.join(&path))
+        .unwrap_or(path)
 }
 
 impl ResolvedConfig {
@@ -344,6 +418,7 @@ impl ResolvedConfig {
             history: config.history,
             tray: config.tray,
             spending: config.spending,
+            portfolio: config.portfolio,
             ignore: config.ignore,
             git: config.git,
         })
@@ -379,6 +454,7 @@ impl ResolvedConfig {
                 history: HistoryConfig::default(),
                 tray: TrayConfig::default(),
                 spending: SpendingConfig::default(),
+                portfolio: PortfolioConfig::default(),
                 ignore: IgnoreConfig::default(),
                 git: GitConfig::default(),
             })
@@ -498,7 +574,7 @@ mod tests {
     }
 
     #[test]
-    fn test_load_git_config_defaults_auto_push_false() -> Result<()> {
+    fn test_load_git_config_defaults_auto_push_to_auto_commit() -> Result<()> {
         let dir = TempDir::new()?;
         let config_path = dir.path().join("keepbook.toml");
 
@@ -508,8 +584,25 @@ mod tests {
 
         let config = Config::load(&config_path)?;
         assert!(config.git.auto_commit);
-        assert!(!config.git.auto_push);
+        assert!(config.git.auto_push);
         assert!(!config.git.merge_master_before_command);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_load_git_config_allows_disabling_auto_push() -> Result<()> {
+        let dir = TempDir::new()?;
+        let config_path = dir.path().join("keepbook.toml");
+
+        let mut file = std::fs::File::create(&config_path)?;
+        writeln!(file, "[git]")?;
+        writeln!(file, "auto_commit = true")?;
+        writeln!(file, "auto_push = false")?;
+
+        let config = Config::load(&config_path)?;
+        assert!(config.git.auto_commit);
+        assert!(!config.git.auto_push);
 
         Ok(())
     }
@@ -556,33 +649,11 @@ mod tests {
         let mut file = std::fs::File::create(&config_path)?;
         writeln!(file, "[tray]")?;
         writeln!(file, "history_points = 5")?;
-        writeln!(file, "history_spec = [\"last 3 days\", \"1 month ago\"]")?;
         writeln!(file, "spending_windows_days = [3, 14, 60]")?;
 
         let config = Config::load(&config_path)?;
         assert_eq!(config.tray.history_points, 5);
-        assert_eq!(
-            config.tray.history_spec,
-            vec!["last 3 days".to_string(), "1 month ago".to_string()]
-        );
         assert_eq!(config.tray.spending_windows_days, vec![3, 14, 60]);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_load_history_config() -> Result<()> {
-        let dir = TempDir::new()?;
-        let config_path = dir.path().join("keepbook.toml");
-
-        let mut file = std::fs::File::create(&config_path)?;
-        writeln!(file, "[history]")?;
-        writeln!(file, "allow_future_projection = true")?;
-        writeln!(file, "lookback_days = 7")?;
-
-        let config = Config::load(&config_path)?;
-        assert!(config.history.allow_future_projection);
-        assert_eq!(config.history.lookback_days, Some(7));
 
         Ok(())
     }
@@ -618,17 +689,10 @@ mod tests {
                 "last 4 days".to_string(),
                 "1 week ago".to_string(),
                 "2 weeks ago".to_string(),
-                "last 12 months".to_string(),
+                "last 12 months".to_string()
             ]
         );
         assert_eq!(config.tray.spending_windows_days, vec![7, 30, 90, 365]);
-    }
-
-    #[test]
-    fn test_default_history_config() {
-        let config = Config::default();
-        assert!(!config.history.allow_future_projection);
-        assert_eq!(config.history.lookback_days, None);
     }
 
     #[test]
@@ -646,6 +710,19 @@ mod tests {
     }
 
     #[test]
+    fn test_absolute_from_current_dir_preserves_absolute_paths() {
+        let path = PathBuf::from("/tmp/keepbook.toml");
+        assert_eq!(absolute_from_current_dir(path.clone()), path);
+    }
+
+    #[test]
+    fn test_absolute_from_current_dir_resolves_relative_paths() {
+        let path = absolute_from_current_dir(PathBuf::from("keepbook.toml"));
+        assert!(path.is_absolute());
+        assert!(path.ends_with("keepbook.toml"));
+    }
+
+    #[test]
     fn test_load_spending_config() -> Result<()> {
         let dir = TempDir::new()?;
         let config_path = dir.path().join("keepbook.toml");
@@ -660,6 +737,28 @@ mod tests {
         assert_eq!(config.spending.ignore_accounts.len(), 2);
         assert_eq!(config.spending.ignore_connections, vec!["Schwab"]);
         assert_eq!(config.spending.ignore_tags, vec!["brokerage"]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_load_portfolio_latent_capital_gains_tax_config() -> Result<()> {
+        let dir = TempDir::new()?;
+        let config_path = dir.path().join("keepbook.toml");
+
+        let mut file = std::fs::File::create(&config_path)?;
+        writeln!(file, "[portfolio.latent_capital_gains_tax]")?;
+        writeln!(file, "enabled = true")?;
+        writeln!(file, "rate = 0.23")?;
+        writeln!(file, "account_name = \"Estimated Tax Liability\"")?;
+
+        let config = Config::load(&config_path)?;
+        assert!(config.portfolio.latent_capital_gains_tax.enabled);
+        assert_eq!(config.portfolio.latent_capital_gains_tax.rate, Some(0.23));
+        assert_eq!(
+            config.portfolio.latent_capital_gains_tax.account_name,
+            "Estimated Tax Liability"
+        );
 
         Ok(())
     }

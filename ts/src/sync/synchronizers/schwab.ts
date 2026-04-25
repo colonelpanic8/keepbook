@@ -29,12 +29,18 @@ function todayUtc(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-function transactionTimeFrame(mode: TransactionSyncMode, existingCount: number): TransactionHistoryTimeFrame {
+function transactionTimeFrame(
+  mode: TransactionSyncMode,
+  existingCount: number,
+): TransactionHistoryTimeFrame {
   if (mode === 'full') return 'All';
   return existingCount === 0 ? 'All' : 'Last6Months';
 }
 
-function bankingSelectedAccountId(accountNumberDisplayFull: string, fallbackAccountId: string): string {
+function bankingSelectedAccountId(
+  accountNumberDisplayFull: string,
+  fallbackAccountId: string,
+): string {
   const digits = accountNumberDisplayFull.replace(/\D/g, '');
   return digits === '' ? fallbackAccountId : digits;
 }
@@ -88,7 +94,9 @@ export class SchwabSynchronizer implements Synchronizer {
     const historyAccounts = await client
       .getTransactionHistoryBrokerageAccounts()
       .catch((_err) => [] as Array<{ id: string; nickName?: string }>);
-    const allPositions: Position[] = positionsResp.security_groupings.flatMap((g) => g.Positions ?? []);
+    const allPositions: Position[] = positionsResp.security_groupings.flatMap(
+      (g) => g.Positions ?? [],
+    );
     const historyAccountIdsByName = new Map<string, string>();
     for (const acct of historyAccounts) {
       const id = acct.id.trim();
@@ -106,13 +114,16 @@ export class SchwabSynchronizer implements Synchronizer {
 
     const accounts: AccountType[] = [];
     const balances: Array<[Id, SyncedAssetBalance[]]> = [];
-    const transactions: Array<[Id, ReturnType<typeof parseSchwabBrokerageTransactions>['transactions']]> = [];
+    const transactions: Array<
+      [Id, ReturnType<typeof parseSchwabBrokerageTransactions>['transactions']]
+    > = [];
 
     for (const schwabAccount of accountsResp.accounts) {
       const accountId = Id.fromExternal(schwabAccount.AccountId);
       const createdAt = existingById.get(accountId.asStr())?.created_at ?? now;
 
-      const name = schwabAccount.NickName.trim() === '' ? schwabAccount.DefaultName : schwabAccount.NickName;
+      const name =
+        schwabAccount.NickName.trim() === '' ? schwabAccount.DefaultName : schwabAccount.NickName;
       const account: AccountType = {
         ...Account.newWith(accountId, createdAt, name, connection.state.id),
         tags: ['schwab', schwabAccount.AccountType.toLowerCase()],
@@ -126,7 +137,11 @@ export class SchwabSynchronizer implements Synchronizer {
           if (position.DefaultSymbol === 'CASH') continue;
 
           const asset = Asset.equity(position.DefaultSymbol);
-          const assetBalance = AssetBalance.new(asset, position.Quantity.toString());
+          const assetBalance = AssetBalance.new(
+            asset,
+            position.Quantity.toString(),
+            position.Cost.toString(),
+          );
 
           const price: PricePoint = {
             asset_id: AssetId.fromAsset(asset),
@@ -190,11 +205,16 @@ export class SchwabSynchronizer implements Synchronizer {
           schwabAccount.AccountNumberDisplayFull,
           schwabAccount.AccountId,
         );
-        const bankNickname = schwabAccount.DefaultName.trim() === '' ? name : schwabAccount.DefaultName;
+        const bankNickname =
+          schwabAccount.DefaultName.trim() === '' ? name : schwabAccount.DefaultName;
 
         let historyRows: BankingTransaction[] = [];
         try {
-          historyRows = await client.getBankingTransactions(bankTxAccountId, bankNickname, timeFrame);
+          historyRows = await client.getBankingTransactions(
+            bankTxAccountId,
+            bankNickname,
+            timeFrame,
+          );
         } catch (err) {
           if (timeFrame === 'All') {
             console.warn(

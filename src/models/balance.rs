@@ -11,6 +11,10 @@ pub struct AssetBalance {
     pub asset: Asset,
     /// Amount as string to avoid floating point precision issues
     pub amount: String,
+    /// Optional total cost basis for this holding, denominated in the
+    /// portfolio/reporting currency used for gain estimates.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost_basis: Option<String>,
 }
 
 impl AssetBalance {
@@ -18,7 +22,13 @@ impl AssetBalance {
         Self {
             asset,
             amount: amount.into(),
+            cost_basis: None,
         }
+    }
+
+    pub fn with_cost_basis(mut self, cost_basis: impl Into<String>) -> Self {
+        self.cost_basis = Some(cost_basis.into());
+        self
     }
 }
 

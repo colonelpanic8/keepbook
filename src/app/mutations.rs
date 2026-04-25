@@ -222,12 +222,18 @@ pub async fn set_balance(
     account_id: &str,
     asset_str: &str,
     amount: &str,
+    cost_basis: Option<&str>,
 ) -> Result<serde_json::Value> {
     let amount = amount.trim();
     if amount.is_empty() {
         anyhow::bail!("Amount cannot be empty");
     }
     rust_decimal::Decimal::from_str(amount).with_context(|| format!("Invalid amount: {amount}"))?;
+    let cost_basis = cost_basis.map(str::trim).filter(|value| !value.is_empty());
+    if let Some(cost_basis) = cost_basis {
+        rust_decimal::Decimal::from_str(cost_basis)
+            .with_context(|| format!("Invalid cost basis: {cost_basis}"))?;
+    }
 
     let id = Id::from_string_checked(account_id)
         .with_context(|| format!("Invalid account id: {account_id}"))?;
@@ -242,20 +248,28 @@ pub async fn set_balance(
     let asset = parse_asset(asset_str)?;
 
     // Create balance snapshot with single asset
-    let asset_balance = AssetBalance::new(asset.clone(), amount);
+    let mut asset_balance = AssetBalance::new(asset.clone(), amount);
+    if let Some(cost_basis) = cost_basis {
+        asset_balance = asset_balance.with_cost_basis(cost_basis);
+    }
     let snapshot = BalanceSnapshot::now(vec![asset_balance]);
 
     // Append balance snapshot
     storage.append_balance_snapshot(&id, &snapshot).await?;
 
+    let mut balance = serde_json::json!({
+        "account_id": account_id,
+        "asset": serde_json::to_value(&asset)?,
+        "amount": amount,
+        "timestamp": snapshot.timestamp.to_rfc3339()
+    });
+    if let Some(cost_basis) = cost_basis {
+        balance["cost_basis"] = serde_json::json!(cost_basis);
+    }
+
     let result = serde_json::json!({
         "success": true,
-        "balance": {
-            "account_id": account_id,
-            "asset": serde_json::to_value(&asset)?,
-            "amount": amount,
-            "timestamp": snapshot.timestamp.to_rfc3339()
-        }
+        "balance": balance
     });
 
     maybe_auto_commit(config, &format!("set balance {account_id} {asset_str}"));

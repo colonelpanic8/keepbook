@@ -104,10 +104,10 @@ async fn json_storage_get_transactions_raw_includes_duplicates_in_append_order()
     let newer = Transaction::new("-1", Asset::currency("USD"), "New").with_id(tx_id.clone());
 
     storage
-        .append_transactions(&account.id, &[older.clone()])
+        .append_transactions(&account.id, std::slice::from_ref(&older))
         .await?;
     storage
-        .append_transactions(&account.id, &[newer.clone()])
+        .append_transactions(&account.id, std::slice::from_ref(&newer))
         .await?;
 
     let raw = storage.get_transactions_raw(&account.id).await?;

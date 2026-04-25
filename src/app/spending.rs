@@ -857,6 +857,7 @@ mod tests {
             history: crate::config::HistoryConfig::default(),
             tray: crate::config::TrayConfig::default(),
             spending: crate::config::SpendingConfig::default(),
+            portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
             git: crate::config::GitConfig::default(),
         };
@@ -959,6 +960,7 @@ mod tests {
             history: crate::config::HistoryConfig::default(),
             tray: crate::config::TrayConfig::default(),
             spending: crate::config::SpendingConfig::default(),
+            portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
             git: crate::config::GitConfig::default(),
         };
@@ -1055,6 +1057,7 @@ mod tests {
             history: crate::config::HistoryConfig::default(),
             tray: crate::config::TrayConfig::default(),
             spending: crate::config::SpendingConfig::default(),
+            portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
             git: crate::config::GitConfig::default(),
         };
@@ -1152,6 +1155,7 @@ mod tests {
                 ignore_connections: vec![],
                 ignore_tags: vec!["brokerage".to_string()],
             },
+            portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
             git: crate::config::GitConfig::default(),
         };
@@ -1237,6 +1241,7 @@ mod tests {
             history: crate::config::HistoryConfig::default(),
             tray: crate::config::TrayConfig::default(),
             spending: crate::config::SpendingConfig::default(),
+            portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig {
                 transaction_rules: vec![crate::config::TransactionIgnoreRule {
                     account_name: Some("(?i)^Investor Checking$".to_string()),
@@ -1327,6 +1332,7 @@ mod tests {
             history: crate::config::HistoryConfig::default(),
             tray: crate::config::TrayConfig::default(),
             spending: crate::config::SpendingConfig::default(),
+            portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
             git: crate::config::GitConfig::default(),
         };
@@ -1408,6 +1414,7 @@ mod tests {
             history: crate::config::HistoryConfig::default(),
             tray: crate::config::TrayConfig::default(),
             spending: crate::config::SpendingConfig::default(),
+            portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
             git: crate::config::GitConfig::default(),
         };

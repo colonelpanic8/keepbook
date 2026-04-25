@@ -5,7 +5,7 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 
 import { defaultConfigPath, loadConfig, configOutput } from './config.js';
-import { DEFAULT_HISTORY_CONFIG, DEFAULT_REFRESH_CONFIG, DEFAULT_TRAY_CONFIG } from '../config.js';
+import { DEFAULT_REFRESH_CONFIG, DEFAULT_TRAY_CONFIG } from '../config.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -34,16 +34,8 @@ describe('defaultConfigPath', () => {
 
   afterEach(() => {
     process.chdir(originalCwd);
-    if (originalHome === undefined) {
-      delete process.env.HOME;
-    } else {
-      process.env.HOME = originalHome;
-    }
-    if (originalXdgDataHome === undefined) {
-      delete process.env.XDG_DATA_HOME;
-    } else {
-      process.env.XDG_DATA_HOME = originalXdgDataHome;
-    }
+    process.env.HOME = originalHome;
+    process.env.XDG_DATA_HOME = originalXdgDataHome;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -95,6 +87,18 @@ describe('defaultConfigPath', () => {
 
     expect(defaultConfigPath()).toBe(path.join(xdgDataHome, 'keepbook', 'keepbook.toml'));
   });
+
+  it('resolves relative XDG_DATA_HOME to an absolute path', () => {
+    const cwd = path.join(tmpDir, 'cwd');
+    fs.mkdirSync(cwd, { recursive: true });
+
+    process.chdir(cwd);
+    process.env.XDG_DATA_HOME = 'relative-xdg-data';
+
+    expect(defaultConfigPath()).toBe(
+      path.join(cwd, 'relative-xdg-data', 'keepbook', 'keepbook.toml'),
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -138,6 +142,18 @@ describe('loadConfig', () => {
     expect(config.git.merge_master_before_command).toBe(true);
     expect(config.refresh.balance_staleness).toBe(7 * 24 * 60 * 60 * 1000);
     expect(config.refresh.price_staleness).toBe(12 * 60 * 60 * 1000);
+  });
+
+  it('defaults auto_push to true when auto_commit is enabled', async () => {
+    const tomlContent = ['[git]', 'auto_commit = true'].join('\n');
+    const configFile = path.join(tmpDir, 'keepbook.toml');
+    fs.writeFileSync(configFile, tomlContent, 'utf-8');
+
+    const { config } = await loadConfig(configFile);
+
+    expect(config.git.auto_commit).toBe(true);
+    expect(config.git.auto_push).toBe(true);
+    expect(config.git.merge_master_before_command).toBe(false);
   });
 
   it('resolves data_dir relative to config file parent', async () => {
@@ -210,9 +226,14 @@ describe('configOutput', () => {
       reporting_currency: 'USD',
       display: {},
       refresh: { ...DEFAULT_REFRESH_CONFIG },
-      history: { ...DEFAULT_HISTORY_CONFIG },
-      tray: { ...DEFAULT_TRAY_CONFIG, spending_windows_days: [...DEFAULT_TRAY_CONFIG.spending_windows_days] },
+      tray: {
+        ...DEFAULT_TRAY_CONFIG,
+        spending_windows_days: [...DEFAULT_TRAY_CONFIG.spending_windows_days],
+      },
       spending: { ignore_accounts: [], ignore_connections: [], ignore_tags: [] },
+      portfolio: {
+        latent_capital_gains_tax: { enabled: false, account_name: 'Latent Capital Gains Tax' },
+      },
       ignore: { transaction_rules: [] },
       git: { auto_commit: false, auto_push: false, merge_master_before_command: false },
     });
@@ -220,6 +241,12 @@ describe('configOutput', () => {
     expect(result).toEqual({
       config_file: '/path/to/keepbook.toml',
       data_directory: '/path/to/data',
+      portfolio: {
+        latent_capital_gains_tax: {
+          enabled: false,
+          account_name: 'Latent Capital Gains Tax',
+        },
+      },
       git: {
         auto_commit: false,
         auto_push: false,
@@ -234,9 +261,14 @@ describe('configOutput', () => {
       reporting_currency: 'EUR',
       display: {},
       refresh: { ...DEFAULT_REFRESH_CONFIG },
-      history: { ...DEFAULT_HISTORY_CONFIG },
-      tray: { ...DEFAULT_TRAY_CONFIG, spending_windows_days: [...DEFAULT_TRAY_CONFIG.spending_windows_days] },
+      tray: {
+        ...DEFAULT_TRAY_CONFIG,
+        spending_windows_days: [...DEFAULT_TRAY_CONFIG.spending_windows_days],
+      },
       spending: { ignore_accounts: [], ignore_connections: [], ignore_tags: [] },
+      portfolio: {
+        latent_capital_gains_tax: { enabled: false, account_name: 'Latent Capital Gains Tax' },
+      },
       ignore: { transaction_rules: [] },
       git: { auto_commit: true, auto_push: true, merge_master_before_command: true },
     });
@@ -244,6 +276,12 @@ describe('configOutput', () => {
     expect(result).toEqual({
       config_file: '/some/file.toml',
       data_directory: '/data',
+      portfolio: {
+        latent_capital_gains_tax: {
+          enabled: false,
+          account_name: 'Latent Capital Gains Tax',
+        },
+      },
       git: {
         auto_commit: true,
         auto_push: true,
@@ -258,13 +296,20 @@ describe('configOutput', () => {
       reporting_currency: 'GBP',
       display: {},
       refresh: { balance_staleness: 1, price_staleness: 2 },
-      history: { ...DEFAULT_HISTORY_CONFIG },
-      tray: { ...DEFAULT_TRAY_CONFIG, spending_windows_days: [...DEFAULT_TRAY_CONFIG.spending_windows_days] },
+      tray: {
+        ...DEFAULT_TRAY_CONFIG,
+        spending_windows_days: [...DEFAULT_TRAY_CONFIG.spending_windows_days],
+      },
       spending: { ignore_accounts: [], ignore_connections: [], ignore_tags: [] },
+      portfolio: {
+        latent_capital_gains_tax: { enabled: false, account_name: 'Latent Capital Gains Tax' },
+      },
       ignore: { transaction_rules: [] },
       git: { auto_commit: false, auto_push: false, merge_master_before_command: false },
     }) as Record<string, unknown>;
 
-    expect(Object.keys(result).sort()).toEqual(['config_file', 'data_directory', 'git'].sort());
+    expect(Object.keys(result).sort()).toEqual(
+      ['config_file', 'data_directory', 'portfolio', 'git'].sort(),
+    );
   });
 });

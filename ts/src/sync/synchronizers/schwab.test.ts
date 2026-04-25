@@ -123,7 +123,8 @@ describe('SchwabSynchronizer (TypeScript)', () => {
 
       if (
         req.method === 'POST' &&
-        url === '/api/is.TransactionHistoryWeb/TransactionHistoryInterface/TransactionHistory/brokerage/transactions'
+        url ===
+          '/api/is.TransactionHistoryWeb/TransactionHistoryInterface/TransactionHistory/brokerage/transactions'
       ) {
         const chunks: Buffer[] = [];
         req.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
@@ -234,7 +235,8 @@ describe('SchwabSynchronizer (TypeScript)', () => {
 
       if (
         req.method === 'POST' &&
-        url === '/api/is.TransactionHistoryWeb/TransactionHistoryInterface/TransactionHistory/banking/non-pledged-asset-line/transactions'
+        url ===
+          '/api/is.TransactionHistoryWeb/TransactionHistoryInterface/TransactionHistory/banking/non-pledged-asset-line/transactions'
       ) {
         const chunks: Buffer[] = [];
         req.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
@@ -319,8 +321,18 @@ describe('SchwabSynchronizer (TypeScript)', () => {
 
     // Brokerage: AAPL position (CASH filtered out) + cash balance from balances.Cash
     const brokerageBalances = result.balances.find(([id]) => id.equals(brokerage!.id))?.[1] ?? [];
-    expect(brokerageBalances.some((b) => (b.asset_balance.asset as { type: string }).type === 'equity')).toBe(true);
-    expect(brokerageBalances.some((b) => (b.asset_balance.asset as { type: string }).type === 'currency')).toBe(true);
+    expect(
+      brokerageBalances.some((b) => (b.asset_balance.asset as { type: string }).type === 'equity'),
+    ).toBe(true);
+    expect(
+      brokerageBalances.some(
+        (b) => (b.asset_balance.asset as { type: string }).type === 'currency',
+      ),
+    ).toBe(true);
+    const aaplBalance = brokerageBalances.find(
+      (b) => (b.asset_balance.asset as { ticker?: string }).ticker === 'AAPL',
+    );
+    expect(aaplBalance?.asset_balance.cost_basis).toBe('150');
 
     // Bank: total balance as USD
     const checkingBalances = result.balances.find(([id]) => id.equals(checking!.id))?.[1] ?? [];
@@ -340,9 +352,13 @@ describe('SchwabSynchronizer (TypeScript)', () => {
 
     expect(brokerageTxRequestBodies).toHaveLength(2);
     expect((brokerageTxRequestBodies[0] as { timeFrame?: string }).timeFrame).toBe('All');
-    expect((brokerageTxRequestBodies[0] as { selectedAccountId?: string }).selectedAccountId).toBe('acct-1');
+    expect((brokerageTxRequestBodies[0] as { selectedAccountId?: string }).selectedAccountId).toBe(
+      'acct-1',
+    );
     expect((brokerageTxRequestBodies[0] as { bookmark?: unknown }).bookmark).toBeNull();
-    expect((brokerageTxRequestBodies[1] as { selectedAccountId?: string }).selectedAccountId).toBe('acct-1');
+    expect((brokerageTxRequestBodies[1] as { selectedAccountId?: string }).selectedAccountId).toBe(
+      'acct-1',
+    );
     expect((brokerageTxRequestBodies[1] as { bookmark?: unknown }).bookmark).not.toBeNull();
 
     expect(bankingTxRequestBodies).toHaveLength(1);

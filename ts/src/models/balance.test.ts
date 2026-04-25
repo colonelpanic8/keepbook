@@ -19,6 +19,12 @@ describe('AssetBalance', () => {
 
       expect(balance.amount).toBe('0.00145000');
     });
+
+    it('stores optional cost basis', () => {
+      const balance = AssetBalance.new(Asset.equity('AAPL'), '10', '1500.00');
+
+      expect(balance.cost_basis).toBe('1500.00');
+    });
   });
 
   describe('JSON serialization', () => {
@@ -28,6 +34,14 @@ describe('AssetBalance', () => {
 
       expect(json.asset).toEqual({ type: 'currency', iso_code: 'EUR' });
       expect(json.amount).toBe('250.50');
+      expect(json.cost_basis).toBeUndefined();
+    });
+
+    it('serializes optional cost basis', () => {
+      const balance = AssetBalance.new(Asset.equity('AAPL'), '10', '1500');
+      const json = AssetBalance.toJSON(balance);
+
+      expect(json.cost_basis).toBe('1500');
     });
 
     it('round-trips through JSON', () => {

@@ -11,14 +11,13 @@ import { Id } from '../models/id.js';
 import { Connection } from '../models/connection.js';
 import { Account } from '../models/account.js';
 import { BalanceSnapshot, AssetBalance } from '../models/balance.js';
-import { Asset } from '../models/asset.js';
+import { Asset, type AssetType } from '../models/asset.js';
 import { AssetId } from '../market-data/asset-id.js';
-import { DEFAULT_HISTORY_CONFIG, DEFAULT_TRAY_CONFIG, type ResolvedConfig } from '../config.js';
+import type { ResolvedConfig } from '../config.js';
 import type { PortfolioSnapshot, AssetSummary } from '../portfolio/models.js';
 import {
   serializeSnapshot,
   fetchHistoricalPrices,
-  fillPricesAtDate,
   portfolioSnapshot,
   portfolioHistory,
   serializeChangeTrigger,
@@ -48,13 +47,11 @@ function makeConfig(overrides?: Partial<ResolvedConfig>): ResolvedConfig {
       balance_staleness: 14 * 86400000,
       price_staleness: 86400000,
     },
-    history: { ...DEFAULT_HISTORY_CONFIG },
-    tray: {
-      ...DEFAULT_TRAY_CONFIG,
-      history_spec: [...DEFAULT_TRAY_CONFIG.history_spec],
-      spending_windows_days: [...DEFAULT_TRAY_CONFIG.spending_windows_days],
-    },
+    tray: { history_points: 8, spending_windows_days: [7, 30, 90] },
     spending: { ignore_accounts: [], ignore_connections: [], ignore_tags: [] },
+    portfolio: {
+      latent_capital_gains_tax: { enabled: false, account_name: 'Latent Capital Gains Tax' },
+    },
     ignore: { transaction_rules: [] },
     git: { auto_commit: false, auto_push: false, merge_master_before_command: false },
     ...overrides,
@@ -76,7 +73,7 @@ async function withTempDataDir(fn: (dataDir: string) => Promise<void>): Promise<
 async function setupStorageWithBalance(
   clock: FixedClock,
   balanceTimestamp: string,
-  balances: { asset: ReturnType<typeof Asset.currency>; amount: string }[],
+  balances: { asset: AssetType; amount: string; cost_basis?: string }[],
 ): Promise<{ storage: MemoryStorage; accountId: Id; connectionId: Id }> {
   const storage = new MemoryStorage();
   const connIdGen = makeIdGen('conn-1');
@@ -89,7 +86,7 @@ async function setupStorageWithBalance(
 
   const snapshot = BalanceSnapshot.new(
     new Date(balanceTimestamp),
-    balances.map((b) => AssetBalance.new(b.asset, b.amount)),
+    balances.map((b) => AssetBalance.new(b.asset, b.amount, b.cost_basis)),
   );
   await storage.appendBalanceSnapshot(acct.id, snapshot);
 
@@ -661,6 +658,59 @@ describe('portfolioSnapshot', () => {
     expect(byAccount[0].connection_name).toBe('Test Bank');
     expect(byAccount[0].value_in_base).toBe('500');
   });
+
+  it('adds configured latent tax as a virtual account without storing an account', async () => {
+    const clock = makeClock('2024-06-15T12:00:00Z');
+    const { storage } = await setupStorageWithBalance(clock, '2024-06-14T10:00:00Z', [
+      { asset: Asset.equity('AAPL'), amount: '10', cost_basis: '1500' },
+    ]);
+    const store = new MemoryMarketDataStore();
+    await store.put_prices([
+      {
+        asset_id: AssetId.fromAsset(Asset.equity('AAPL')),
+        as_of_date: '2024-06-15',
+        timestamp: new Date('2024-06-15T16:00:00Z'),
+        price: '200',
+        quote_currency: 'USD',
+        kind: 'close',
+        source: 'test',
+      },
+    ]);
+    const config = makeConfig({
+      portfolio: {
+        latent_capital_gains_tax: {
+          enabled: true,
+          rate: 0.23,
+          account_name: 'Latent Capital Gains Tax',
+        },
+      },
+    });
+
+    const result = (await portfolioSnapshot(
+      storage,
+      store,
+      config,
+      { groupBy: 'both' },
+      clock,
+    )) as Record<string, unknown>;
+
+    expect(result.total_value).toBe('1885');
+    expect(result.total_cost_basis).toBe('1500');
+    expect(result.total_unrealized_gain).toBe('500');
+    expect(result.prospective_capital_gains_tax).toBe('115');
+
+    const byAccount = result.by_account as Record<string, unknown>[];
+    expect(byAccount).toHaveLength(2);
+    expect(byAccount[0].value_in_base).toBe('2000');
+    expect(byAccount[1]).toEqual({
+      account_id: 'virtual:latent_capital_gains_tax',
+      account_name: 'Latent Capital Gains Tax',
+      connection_name: 'Virtual',
+      value_in_base: '-115',
+    });
+
+    expect(await storage.listAccounts()).toHaveLength(1);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -815,80 +865,6 @@ describe('fetchHistoricalPrices', () => {
     });
   });
 
-  it('projects future prices for history when configured', async () => {
-    await withTempDataDir(async (dataDir) => {
-      const storage = new MemoryStorage();
-      const clock = makeClock('2024-01-20T12:00:00Z');
-      const config = makeConfig({
-        data_dir: dataDir,
-        history: {
-          allow_future_projection: true,
-          lookback_days: 7,
-        },
-      });
-      const marketDataStore = new JsonlMarketDataStore(dataDir);
-
-      const connection = Connection.new(
-        { name: 'Brokerage', synchronizer: 'manual' },
-        makeIdGen('conn-1'),
-        clock,
-      );
-      await storage.saveConnection(connection);
-
-      const account = Account.newWithGenerator(
-        makeIdGen('acct-1'),
-        clock,
-        'Main',
-        Id.fromString('conn-1'),
-      );
-      await storage.saveAccount(account);
-
-      await storage.appendBalanceSnapshot(
-        account.id,
-        BalanceSnapshot.new(new Date('2024-01-15T10:00:00Z'), [
-          AssetBalance.new(Asset.equity('AAPL'), '10'),
-        ]),
-      );
-
-      await marketDataStore.put_prices([
-        {
-          asset_id: AssetId.fromAsset(Asset.equity('AAPL')),
-          as_of_date: '2024-01-01',
-          timestamp: new Date('2024-01-01T16:00:00Z'),
-          price: '100',
-          quote_currency: 'USD',
-          kind: 'close',
-          source: 'test',
-        },
-        {
-          asset_id: AssetId.fromAsset(Asset.equity('AAPL')),
-          as_of_date: '2024-01-20',
-          timestamp: new Date('2024-01-20T16:00:00Z'),
-          price: '120',
-          quote_currency: 'USD',
-          kind: 'close',
-          source: 'test',
-        },
-      ]);
-
-      const output = await portfolioHistory(
-        storage,
-        marketDataStore,
-        config,
-        {
-          start: '2024-01-15',
-          end: '2024-01-15',
-          granularity: 'none',
-          includePrices: false,
-        },
-        clock,
-      );
-
-      expect(output.points).toHaveLength(1);
-      expect(output.points[0].total_value).toBe('1200');
-    });
-  });
-
   it('collects fx stats for currency assets when include_fx is enabled', async () => {
     await withTempDataDir(async (dataDir) => {
       const storage = new MemoryStorage();
@@ -968,67 +944,6 @@ describe('fetchHistoricalPrices', () => {
     await expect(
       fetchHistoricalPrices(storage, config, { account: 'acct-1', connection: 'conn-1' }, clock),
     ).rejects.toThrow('Specify only one of --account or --connection');
-  });
-});
-
-describe('fillPricesAtDate', () => {
-  it('fills a single daily point using the historical fetch path', async () => {
-    await withTempDataDir(async (dataDir) => {
-      const storage = new MemoryStorage();
-      const clock = makeClock('2024-01-20T12:00:00Z');
-      const config = makeConfig({ data_dir: dataDir });
-      const marketDataStore = new JsonlMarketDataStore(dataDir);
-
-      const connection = Connection.new(
-        { name: 'Brokerage', synchronizer: 'manual' },
-        makeIdGen('conn-1'),
-        clock,
-      );
-      await storage.saveConnection(connection);
-
-      const account = Account.newWithGenerator(
-        makeIdGen('acct-1'),
-        clock,
-        'Main',
-        Id.fromString('conn-1'),
-      );
-      await storage.saveAccount(account);
-
-      await storage.appendBalanceSnapshot(
-        account.id,
-        BalanceSnapshot.new(new Date('2024-01-15T10:00:00Z'), [
-          AssetBalance.new(Asset.equity('AAPL'), '10'),
-        ]),
-      );
-
-      await marketDataStore.put_prices([
-        {
-          asset_id: AssetId.fromAsset(Asset.equity('AAPL')),
-          as_of_date: '2024-01-15',
-          timestamp: new Date('2024-01-15T16:00:00Z'),
-          price: '182.5',
-          quote_currency: 'USD',
-          kind: 'close',
-          source: 'test',
-        },
-      ]);
-
-      const output = await fillPricesAtDate(
-        storage,
-        config,
-        {
-          date: '2024-01-15',
-          include_fx: false,
-        },
-        clock,
-      );
-
-      expect(output.interval).toBe('daily');
-      expect(output.start_date).toBe('2024-01-15');
-      expect(output.end_date).toBe('2024-01-15');
-      expect(output.points).toBe(1);
-      expect(output.prices.existing).toBe(1);
-    });
   });
 });
 

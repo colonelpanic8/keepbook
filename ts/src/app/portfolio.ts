@@ -67,12 +67,15 @@ import { tryAutoCommit } from '../git.js';
  * All fields are already JSON-safe strings.
  */
 function serializeHolding(h: AccountHolding): object {
-  return {
+  const out: Record<string, unknown> = {
     account_id: h.account_id,
     account_name: h.account_name,
     amount: h.amount,
     balance_date: h.balance_date,
   };
+  if (h.cost_basis !== undefined) out.cost_basis = h.cost_basis;
+  if (h.unrealized_gain !== undefined) out.unrealized_gain = h.unrealized_gain;
+  return out;
 }
 
 /**
@@ -96,6 +99,11 @@ function serializeAssetSummary(s: AssetSummary): object {
   if (s.fx_rate !== undefined) out.fx_rate = s.fx_rate;
   if (s.fx_date !== undefined) out.fx_date = s.fx_date;
   if (s.value_in_base !== undefined) out.value_in_base = s.value_in_base;
+  if (s.cost_basis !== undefined) out.cost_basis = s.cost_basis;
+  if (s.unrealized_gain !== undefined) out.unrealized_gain = s.unrealized_gain;
+  if (s.prospective_capital_gains_tax !== undefined) {
+    out.prospective_capital_gains_tax = s.prospective_capital_gains_tax;
+  }
   if (s.holdings !== undefined) {
     out.holdings = s.holdings.map(serializeHolding);
   }
@@ -133,6 +141,13 @@ export function serializeSnapshot(snapshot: PortfolioSnapshot): object {
     total_value: snapshot.total_value,
   };
 
+  if (snapshot.total_cost_basis !== undefined) out.total_cost_basis = snapshot.total_cost_basis;
+  if (snapshot.total_unrealized_gain !== undefined) {
+    out.total_unrealized_gain = snapshot.total_unrealized_gain;
+  }
+  if (snapshot.prospective_capital_gains_tax !== undefined) {
+    out.prospective_capital_gains_tax = snapshot.prospective_capital_gains_tax;
+  }
   if (snapshot.by_asset !== undefined) {
     out.by_asset = snapshot.by_asset.map(serializeAssetSummary);
   }
@@ -161,6 +176,70 @@ function parseGrouping(s: string | undefined): Grouping {
   }
 }
 
+function parseTaxRateFraction(rate: string, context: string): Decimal {
+  try {
+    return new Decimal(rate).div(100);
+  } catch {
+    throw new Error(`Invalid ${context}: ${rate}`);
+  }
+}
+
+function resolveCapitalGainsTaxRate(
+  config: ResolvedConfig,
+  cliPercentRate: string | undefined,
+): { rate: Decimal | undefined; includeLatentTaxVirtualAccount: boolean } {
+  const latentTax = config.portfolio.latent_capital_gains_tax;
+  if (cliPercentRate !== undefined) {
+    return {
+      rate: parseTaxRateFraction(cliPercentRate, 'capital gains tax rate'),
+      includeLatentTaxVirtualAccount: latentTax.enabled,
+    };
+  }
+
+  if (!latentTax.enabled) {
+    return { rate: undefined, includeLatentTaxVirtualAccount: false };
+  }
+
+  if (latentTax.rate === undefined) {
+    throw new Error('portfolio.latent_capital_gains_tax.enabled requires a rate');
+  }
+
+  return {
+    rate: new Decimal(latentTax.rate),
+    includeLatentTaxVirtualAccount: true,
+  };
+}
+
+function applyLatentTaxVirtualAccount(
+  snapshot: PortfolioSnapshot,
+  config: ResolvedConfig,
+): PortfolioSnapshot {
+  if (snapshot.prospective_capital_gains_tax === undefined) return snapshot;
+
+  const tax = new Decimal(snapshot.prospective_capital_gains_tax);
+  if (tax.lte(0)) return snapshot;
+
+  const totalValue = new Decimal(snapshot.total_value);
+  const next: PortfolioSnapshot = {
+    ...snapshot,
+    total_value: decStrRounded(totalValue.minus(tax), config.display.currency_decimals),
+  };
+
+  if (next.by_account !== undefined) {
+    next.by_account = [
+      ...next.by_account,
+      {
+        account_id: 'virtual:latent_capital_gains_tax',
+        account_name: config.portfolio.latent_capital_gains_tax.account_name,
+        connection_name: 'Virtual',
+        value_in_base: decStrRounded(tax.negated(), config.display.currency_decimals),
+      },
+    ];
+  }
+
+  return next;
+}
+
 // ---------------------------------------------------------------------------
 // Command handler
 // ---------------------------------------------------------------------------
@@ -170,6 +249,7 @@ export interface PortfolioSnapshotOptions {
   date?: string;
   groupBy?: string;
   detail?: boolean;
+  capitalGainsTaxRate?: string;
 }
 
 /**
@@ -190,17 +270,25 @@ export async function portfolioSnapshot(
   const asOfDate = options.date ?? effectiveClock.today();
   const grouping = parseGrouping(options.groupBy);
   const includeDetail = options.detail ?? false;
+  const { rate: capitalGainsTaxRate, includeLatentTaxVirtualAccount } = resolveCapitalGainsTaxRate(
+    config,
+    options.capitalGainsTaxRate,
+  );
 
   const marketDataService = new MarketDataService(marketDataStore);
   const portfolioService = new PortfolioService(storage, marketDataService, effectiveClock);
 
-  const snapshot = await portfolioService.calculate({
+  let snapshot = await portfolioService.calculate({
     as_of_date: asOfDate,
     currency,
     currency_decimals: config.display.currency_decimals,
     grouping,
     include_detail: includeDetail,
+    capital_gains_tax_rate: capitalGainsTaxRate,
   });
+  if (includeLatentTaxVirtualAccount) {
+    snapshot = applyLatentTaxVirtualAccount(snapshot, config);
+  }
 
   return serializeSnapshot(snapshot);
 }
@@ -215,7 +303,6 @@ type AssetPriceCache = {
   asset: AssetType;
   asset_id: AssetId;
   prices: Map<string, PricePoint>;
-  fetched_dates: Set<string>;
 };
 
 type FxCache = Map<string, Map<string, FxRatePoint>>;
@@ -266,9 +353,7 @@ function parseHistoryInterval(value: string): PriceHistoryInterval {
     case 'annually':
       return 'yearly';
     default:
-      throw new Error(
-        `Invalid interval: ${value}. Use: daily, weekly, monthly, yearly, annual`,
-      );
+      throw new Error(`Invalid interval: ${value}. Use: daily, weekly, monthly, yearly, annual`);
   }
 }
 
@@ -396,13 +481,11 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-function upsertPriceCache(cache: Map<string, PricePoint>, point: PricePoint): boolean {
+function upsertPriceCache(cache: Map<string, PricePoint>, point: PricePoint): void {
   const existing = cache.get(point.as_of_date);
   if (existing === undefined || existing.timestamp.getTime() < point.timestamp.getTime()) {
     cache.set(point.as_of_date, point);
-    return true;
   }
-  return false;
 }
 
 function upsertFxCache(cache: Map<string, FxRatePoint>, point: FxRatePoint): void {
@@ -662,7 +745,8 @@ export async function fetchHistoricalPrices(
   const startDate =
     options.start !== undefined
       ? parseYmdOrThrow(options.start, 'start')
-      : (earliestBalanceDate ?? (() => {
+      : (earliestBalanceDate ??
+        (() => {
           throw new Error('No balances found to infer start date');
         })());
   const endDate =
@@ -688,67 +772,10 @@ export async function fetchHistoricalPrices(
       asset,
       asset_id: assetId,
       prices: await loadPriceCache(store, assetId),
-      fetched_dates: new Set<string>(),
     });
   }
 
   assetCaches.sort((a, b) => a.asset_id.asStr().localeCompare(b.asset_id.asStr()));
-
-  const prices = emptyPriceHistoryStats();
-  const fx = emptyPriceHistoryStats();
-  const failures: PriceHistoryFailure[] = [];
-  const failureCount: FailureCounter = { count: 0 };
-  const failureLimit = 50;
-  const shouldDelayRequests = requestDelayMs > 0;
-
-  const fetchStart = addDaysYmd(alignedStart, -lookbackDays);
-  for (const assetCache of assetCaches) {
-    if (assetCache.asset.type !== 'equity' && assetCache.asset.type !== 'crypto') {
-      continue;
-    }
-
-    let needsFetch = false;
-    for (
-      let sampleDate = alignedStart;
-      compareYmd(sampleDate, endDate) <= 0;
-      sampleDate = advanceIntervalDate(sampleDate, interval)
-    ) {
-      if (resolveCachedPrice(assetCache.prices, sampleDate, lookbackDays) === null) {
-        needsFetch = true;
-        break;
-      }
-    }
-
-    if (!needsFetch) {
-      continue;
-    }
-
-    try {
-      const fetchedPrices = await marketData.priceClosesRange(assetCache.asset, fetchStart, endDate);
-      for (const fetched of fetchedPrices) {
-        if (upsertPriceCache(assetCache.prices, fetched)) {
-          assetCache.fetched_dates.add(fetched.as_of_date);
-        }
-      }
-    } catch (err) {
-      failureCount.count += 1;
-      if (failures.length < failureLimit) {
-        failures.push({
-          kind: 'price_range',
-          date: `${fetchStart}/${endDate}`,
-          error: errorMessage(err),
-          asset_id: assetCache.asset_id.asStr(),
-          asset: assetCache.asset,
-        });
-      }
-    }
-
-    if (shouldDelayRequests) {
-      await new Promise<void>((resolve) => {
-        setTimeout(resolve, requestDelayMs);
-      });
-    }
-  }
 
   const fxCache: FxCache = new Map();
   if (includeFx) {
@@ -762,6 +789,13 @@ export async function fetchHistoricalPrices(
       }
     }
   }
+
+  const prices = emptyPriceHistoryStats();
+  const fx = emptyPriceHistoryStats();
+  const failures: PriceHistoryFailure[] = [];
+  const failureCount: FailureCounter = { count: 0 };
+  const failureLimit = 50;
+  const shouldDelayRequests = requestDelayMs > 0;
 
   const fxCtx: FxRateContext = {
     marketData,
@@ -780,6 +814,8 @@ export async function fetchHistoricalPrices(
     points += 1;
 
     for (const assetCache of assetCaches) {
+      let shouldDelay = false;
+
       switch (assetCache.asset.type) {
         case 'currency': {
           if (includeFx) {
@@ -797,11 +833,7 @@ export async function fetchHistoricalPrices(
           const cached = resolveCachedPrice(assetCache.prices, current, lookbackDays);
           if (cached !== null) {
             if (cached.exact) {
-              if (assetCache.fetched_dates.has(cached.point.as_of_date)) {
-                prices.fetched += 1;
-              } else {
-                prices.existing += 1;
-              }
+              prices.existing += 1;
             } else {
               prices.lookback += 1;
             }
@@ -817,20 +849,47 @@ export async function fetchHistoricalPrices(
             break;
           }
 
-          prices.missing += 1;
-          failureCount.count += 1;
-          if (failures.length < failureLimit) {
-            failures.push({
-              kind: 'price',
-              date: current,
-              error: `No close price found for asset ${assetCache.asset_id.asStr()} on or before ${current}`,
-              asset_id: assetCache.asset_id.asStr(),
-              asset: assetCache.asset,
-            });
+          try {
+            const fetched = await marketData.priceClose(assetCache.asset, current);
+            if (fetched.as_of_date === current) {
+              prices.fetched += 1;
+            } else {
+              prices.lookback += 1;
+            }
+            upsertPriceCache(assetCache.prices, fetched);
+            shouldDelay = shouldDelayRequests;
+
+            if (includeFx && fetched.quote_currency.toUpperCase() !== targetCurrencyUpper) {
+              await ensureFxRate(
+                fxCtx,
+                fetched.quote_currency.toUpperCase(),
+                targetCurrencyUpper,
+                current,
+              );
+            }
+          } catch (err) {
+            prices.missing += 1;
+            failureCount.count += 1;
+            if (failures.length < failureLimit) {
+              failures.push({
+                kind: 'price',
+                date: current,
+                error: errorMessage(err),
+                asset_id: assetCache.asset_id.asStr(),
+                asset: assetCache.asset,
+              });
+            }
+            shouldDelay = shouldDelayRequests;
           }
 
           break;
         }
+      }
+
+      if (shouldDelay) {
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, requestDelayMs);
+        });
       }
     }
 
@@ -860,32 +919,6 @@ export async function fetchHistoricalPrices(
     failure_count: failureCount.count,
     failures: failures.length > 0 ? failures : undefined,
   };
-}
-
-export async function fillPricesAtDate(
-  storage: Storage,
-  config: ResolvedConfig,
-  options: Omit<PriceHistoryOptions, 'start' | 'end' | 'interval'> & { date: string },
-  clock?: Clock,
-): Promise<PriceHistoryOutput> {
-  const lookbackDays = options.lookback_days ?? 0;
-
-  return fetchHistoricalPrices(
-    storage,
-    config,
-    {
-      account: options.account,
-      connection: options.connection,
-      start: options.date,
-      end: options.date,
-      interval: 'daily',
-      lookback_days: lookbackDays,
-      request_delay_ms: options.request_delay_ms,
-      currency: options.currency,
-      include_fx: options.include_fx,
-    },
-    clock,
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -970,10 +1003,6 @@ export async function portfolioHistory(
   const granularity = parseGranularity(options.granularity ?? 'none');
 
   const marketDataService = new MarketDataService(marketDataStore);
-  if (typeof config.history.lookback_days === 'number') {
-    marketDataService.withLookbackDays(config.history.lookback_days);
-  }
-  marketDataService.withFutureProjection(config.history.allow_future_projection);
 
   // Collect change points
   const allPoints = await collectChangePoints(storage, marketDataStore, {
@@ -1003,11 +1032,11 @@ export async function portfolioHistory(
 
     const totalValue =
       snapshot.by_asset !== undefined
-        ? computeHistoryTotalValueWithCarryForward(
+        ? (computeHistoryTotalValueWithCarryForward(
             snapshot.by_asset,
             carryForwardUnitValues,
             config.display.currency_decimals,
-          ) ?? snapshot.total_value
+          ) ?? snapshot.total_value)
         : snapshot.total_value;
     const currentTotalValue = new Decimal(totalValue);
 

@@ -243,7 +243,8 @@ impl SchwabSynchronizer {
 
                     let asset = Asset::equity(&position.default_symbol);
                     let asset_balance =
-                        AssetBalance::new(asset.clone(), position.quantity.to_string());
+                        AssetBalance::new(asset.clone(), position.quantity.to_string())
+                            .with_cost_basis(position.cost.to_string());
 
                     let price_point = PricePoint {
                         asset_id: AssetId::from_asset(&asset),

@@ -2,8 +2,8 @@ use anyhow::Result;
 use chrono::Utc;
 use keepbook::app::portfolio_snapshot;
 use keepbook::config::{
-    DisplayConfig, GitConfig, HistoryConfig, IgnoreConfig, RefreshConfig, ResolvedConfig,
-    SpendingConfig, TrayConfig,
+    DisplayConfig, GitConfig, IgnoreConfig, RefreshConfig, ResolvedConfig, SpendingConfig,
+    TrayConfig,
 };
 use keepbook::market_data::{
     AssetId, JsonlMarketDataStore, MarketDataStore, PriceKind, PricePoint,
@@ -32,9 +32,10 @@ async fn portfolio_snapshot_offline_uses_cached_quote() -> Result<()> {
         reporting_currency: "USD".to_string(),
         display: DisplayConfig::default(),
         refresh: RefreshConfig::default(),
-        history: HistoryConfig::default(),
+        history: keepbook::config::HistoryConfig::default(),
         tray: TrayConfig::default(),
         spending: SpendingConfig::default(),
+        portfolio: keepbook::config::PortfolioConfig::default(),
         ignore: IgnoreConfig::default(),
         git: GitConfig::default(),
     };
@@ -81,6 +82,7 @@ async fn portfolio_snapshot_offline_uses_cached_quote() -> Result<()> {
         Some(Utc::now().date_naive().to_string()),
         "asset".to_string(),
         false,
+        None,
         false,
         true,
         false,

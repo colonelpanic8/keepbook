@@ -47,6 +47,7 @@ async fn json_storage_reads_account_config_for_zero_backfill() -> Result<()> {
         currency_decimals: None,
         grouping: Grouping::Account,
         include_detail: false,
+        capital_gains_tax_rate: None,
     };
 
     let snapshot = service.calculate(&query).await?;

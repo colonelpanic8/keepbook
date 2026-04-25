@@ -22,6 +22,10 @@ pub struct PortfolioQuery {
     pub currency_decimals: Option<u32>,
     pub grouping: Grouping,
     pub include_detail: bool,
+    /// Optional capital gains tax rate as a decimal fraction (for example,
+    /// 0.238 for 23.8%). Applied only to positive unrealized gains with known
+    /// cost basis.
+    pub capital_gains_tax_rate: Option<rust_decimal::Decimal>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,6 +33,12 @@ pub struct PortfolioSnapshot {
     pub as_of_date: NaiveDate,
     pub currency: String,
     pub total_value: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_cost_basis: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_unrealized_gain: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prospective_capital_gains_tax: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub by_asset: Option<Vec<AssetSummary>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -55,6 +65,15 @@ pub struct AssetSummary {
     /// Value in base currency. None if price data unavailable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value_in_base: Option<String>,
+    /// Sum of known cost basis for holdings of this asset.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost_basis: Option<String>,
+    /// Unrealized gain for holdings with known cost basis.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unrealized_gain: Option<String>,
+    /// Estimated tax on positive unrealized gains when a tax rate is supplied.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prospective_capital_gains_tax: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub holdings: Option<Vec<AccountHolding>>,
 }
@@ -65,6 +84,10 @@ pub struct AccountHolding {
     pub account_name: String,
     pub amount: String,
     pub balance_date: NaiveDate,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost_basis: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unrealized_gain: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

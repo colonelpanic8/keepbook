@@ -15,8 +15,8 @@ use crate::market_data::{
 };
 use crate::models::{Account, Asset, Id};
 use crate::portfolio::{
-    collect_change_points, filter_by_date_range, filter_by_granularity, CoalesceStrategy,
-    CollectOptions, Granularity, Grouping, PortfolioQuery, PortfolioService,
+    collect_change_points, filter_by_date_range, filter_by_granularity, AccountSummary,
+    CoalesceStrategy, CollectOptions, Granularity, Grouping, PortfolioQuery, PortfolioService,
 };
 use crate::staleness::{
     check_balance_staleness, check_price_staleness, log_balance_staleness, log_price_staleness,
@@ -201,6 +201,7 @@ async fn build_history_point_for_date(
         currency_decimals: config.display.currency_decimals,
         grouping: Grouping::Asset,
         include_detail: false,
+        capital_gains_tax_rate: None,
     };
 
     let snapshot = service.calculate(&query).await?;
@@ -220,6 +221,81 @@ async fn build_history_point_for_date(
         },
         current_total_value,
     ))
+}
+
+fn parse_tax_rate_fraction(rate: &str, context: &str) -> Result<Decimal> {
+    Decimal::from_str(rate)
+        .with_context(|| format!("Invalid {context}: {rate}"))
+        .map(|rate| rate / Decimal::from(100))
+}
+
+fn decimal_from_f64(value: f64, context: &str) -> Result<Decimal> {
+    Decimal::from_str(&value.to_string()).with_context(|| format!("Invalid {context}: {value}"))
+}
+
+fn resolve_capital_gains_tax_rate(
+    config: &ResolvedConfig,
+    cli_percent_rate: Option<String>,
+) -> Result<(Option<Decimal>, bool)> {
+    let latent_tax = &config.portfolio.latent_capital_gains_tax;
+    if let Some(rate) = cli_percent_rate {
+        return Ok((
+            Some(parse_tax_rate_fraction(&rate, "capital gains tax rate")?),
+            latent_tax.enabled,
+        ));
+    }
+
+    if !latent_tax.enabled {
+        return Ok((None, false));
+    }
+
+    let rate = latent_tax
+        .rate
+        .context("portfolio.latent_capital_gains_tax.enabled requires a rate")?;
+    Ok((
+        Some(decimal_from_f64(
+            rate,
+            "portfolio.latent_capital_gains_tax.rate",
+        )?),
+        true,
+    ))
+}
+
+fn apply_latent_tax_virtual_account(
+    snapshot: &mut crate::portfolio::PortfolioSnapshot,
+    config: &ResolvedConfig,
+) -> Result<()> {
+    let Some(tax_str) = &snapshot.prospective_capital_gains_tax else {
+        return Ok(());
+    };
+    let tax = Decimal::from_str(tax_str)
+        .with_context(|| format!("Invalid prospective_capital_gains_tax: {tax_str}"))?;
+    if tax <= Decimal::ZERO {
+        return Ok(());
+    }
+
+    let total_value = Decimal::from_str(&snapshot.total_value)
+        .with_context(|| format!("Invalid total_value: {}", snapshot.total_value))?;
+    snapshot.total_value =
+        format_base_currency_value(total_value - tax, config.display.currency_decimals);
+
+    if let Some(by_account) = snapshot.by_account.as_mut() {
+        by_account.push(AccountSummary {
+            account_id: "virtual:latent_capital_gains_tax".to_string(),
+            account_name: config
+                .portfolio
+                .latent_capital_gains_tax
+                .account_name
+                .clone(),
+            connection_name: "Virtual".to_string(),
+            value_in_base: Some(format_base_currency_value(
+                -tax,
+                config.display.currency_decimals,
+            )),
+        });
+    }
+
+    Ok(())
 }
 
 struct AssetPriceCache {
@@ -974,6 +1050,7 @@ pub async fn portfolio_snapshot(
     date: Option<String>,
     group_by: String,
     detail: bool,
+    capital_gains_tax_rate: Option<String>,
     auto: bool,
     offline: bool,
     dry_run: bool,
@@ -994,6 +1071,9 @@ pub async fn portfolio_snapshot(
         _ => anyhow::bail!("Invalid grouping: {group_by}. Use: asset, account, both"),
     };
 
+    let (capital_gains_tax_rate, include_latent_tax_virtual_account) =
+        resolve_capital_gains_tax_rate(config, capital_gains_tax_rate)?;
+
     // Determine what to refresh based on flags
     // Default (no flags or --auto): auto-refresh stale data
     // --offline: no refresh
@@ -1013,6 +1093,7 @@ pub async fn portfolio_snapshot(
         currency_decimals: config.display.currency_decimals,
         grouping,
         include_detail: detail,
+        capital_gains_tax_rate,
     };
 
     // Setup market data store
@@ -1124,7 +1205,10 @@ pub async fn portfolio_snapshot(
 
     // Calculate and output
     let service = PortfolioService::new(storage.clone(), market_data);
-    let snapshot = service.calculate(&query).await?;
+    let mut snapshot = service.calculate(&query).await?;
+    if include_latent_tax_virtual_account {
+        apply_latent_tax_virtual_account(&mut snapshot, config)?;
+    }
 
     maybe_auto_commit(config, "portfolio snapshot");
 
@@ -1577,6 +1661,7 @@ mod tests {
             history: HistoryConfig::default(),
             tray,
             spending: SpendingConfig::default(),
+            portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
             git: GitConfig::default(),
         };
@@ -1663,6 +1748,7 @@ mod tests {
             history: HistoryConfig::default(),
             tray: TrayConfig::default(),
             spending: SpendingConfig::default(),
+            portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
             git: GitConfig::default(),
         };
@@ -1744,6 +1830,7 @@ mod tests {
             },
             tray: TrayConfig::default(),
             spending: SpendingConfig::default(),
+            portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
             git: GitConfig::default(),
         };
@@ -1818,6 +1905,7 @@ mod tests {
             history: HistoryConfig::default(),
             tray: TrayConfig::default(),
             spending: SpendingConfig::default(),
+            portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
             git: GitConfig::default(),
         };
@@ -1888,6 +1976,7 @@ mod tests {
             history: HistoryConfig::default(),
             tray: TrayConfig::default(),
             spending: SpendingConfig::default(),
+            portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
             git: GitConfig::default(),
         };
@@ -1981,6 +2070,7 @@ mod tests {
             history: HistoryConfig::default(),
             tray: TrayConfig::default(),
             spending: SpendingConfig::default(),
+            portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
             git: GitConfig::default(),
         };
@@ -2088,6 +2178,7 @@ mod tests {
             history: HistoryConfig::default(),
             tray: TrayConfig::default(),
             spending: SpendingConfig::default(),
+            portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
             git: GitConfig::default(),
         };
@@ -2271,6 +2362,7 @@ mod tests {
             history: HistoryConfig::default(),
             tray: TrayConfig::default(),
             spending: SpendingConfig::default(),
+            portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
             git: GitConfig::default(),
         };
@@ -2297,6 +2389,7 @@ mod tests {
             history: HistoryConfig::default(),
             tray: TrayConfig::default(),
             spending: SpendingConfig::default(),
+            portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
             git: GitConfig::default(),
         };
@@ -2348,6 +2441,7 @@ mod tests {
             history: HistoryConfig::default(),
             tray: TrayConfig::default(),
             spending: SpendingConfig::default(),
+            portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
             git: GitConfig::default(),
         };
@@ -2383,6 +2477,7 @@ mod tests {
             history: HistoryConfig::default(),
             tray: TrayConfig::default(),
             spending: SpendingConfig::default(),
+            portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
             git: GitConfig::default(),
         };
@@ -2396,6 +2491,7 @@ mod tests {
             account.id.as_str(),
             "USD",
             "not-a-number",
+            None,
         )
         .await
         .expect_err("expected invalid amount error");
@@ -2419,6 +2515,7 @@ mod tests {
             history: HistoryConfig::default(),
             tray: TrayConfig::default(),
             spending: SpendingConfig::default(),
+            portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
             git: GitConfig::default(),
         };
@@ -2463,6 +2560,7 @@ mod tests {
             history: HistoryConfig::default(),
             tray: TrayConfig::default(),
             spending: SpendingConfig::default(),
+            portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
             git: GitConfig::default(),
         };

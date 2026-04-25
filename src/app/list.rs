@@ -22,7 +22,7 @@ pub async fn list_connections(storage: &dyn Storage) -> Result<Vec<ConnectionOut
     let connections = storage.list_connections().await?;
     let accounts = storage.list_accounts().await?;
     let mut accounts_by_connection: HashMap<Id, HashSet<Id>> = HashMap::new();
-    for account in accounts.into_iter().filter(|account| account.active) {
+    for account in accounts {
         accounts_by_connection
             .entry(account.connection_id.clone())
             .or_default()
@@ -106,7 +106,7 @@ pub async fn list_balances(
     let connections = storage.list_connections().await?;
     let accounts = storage.list_accounts().await?;
     let mut accounts_by_connection: HashMap<Id, HashSet<Id>> = HashMap::new();
-    for account in accounts.into_iter().filter(|account| account.active) {
+    for account in accounts {
         accounts_by_connection
             .entry(account.connection_id.clone())
             .or_default()
@@ -152,6 +152,7 @@ pub async fn list_balances(
                         account_id: account_id.to_string(),
                         asset: serde_json::to_value(&balance.asset)?,
                         amount: balance.amount,
+                        cost_basis: balance.cost_basis,
                         value_in_reporting_currency,
                         reporting_currency: config.reporting_currency.to_uppercase(),
                         timestamp: snapshot.timestamp.to_rfc3339(),
@@ -391,6 +392,7 @@ mod tests {
                 history: crate::config::HistoryConfig::default(),
                 tray: crate::config::TrayConfig::default(),
                 spending: crate::config::SpendingConfig::default(),
+                portfolio: crate::config::PortfolioConfig::default(),
                 ignore: crate::config::IgnoreConfig::default(),
                 git: crate::config::GitConfig::default(),
             },
@@ -451,6 +453,7 @@ mod tests {
                 history: crate::config::HistoryConfig::default(),
                 tray: crate::config::TrayConfig::default(),
                 spending: crate::config::SpendingConfig::default(),
+                portfolio: crate::config::PortfolioConfig::default(),
                 ignore: crate::config::IgnoreConfig::default(),
                 git: crate::config::GitConfig::default(),
             },
@@ -505,6 +508,7 @@ mod tests {
             history: crate::config::HistoryConfig::default(),
             tray: crate::config::TrayConfig::default(),
             spending: crate::config::SpendingConfig::default(),
+            portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig {
                 transaction_rules: vec![crate::config::TransactionIgnoreRule {
                     account_id: None,
@@ -581,6 +585,7 @@ mod tests {
                 ignore_connections: vec![],
                 ignore_tags: vec![],
             },
+            portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
             git: crate::config::GitConfig::default(),
         };
@@ -646,6 +651,7 @@ mod tests {
                 ignore_connections: vec![],
                 ignore_tags: vec!["brokerage".to_string()],
             },
+            portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
             git: crate::config::GitConfig::default(),
         };
@@ -712,6 +718,7 @@ mod tests {
             history: crate::config::HistoryConfig::default(),
             tray: crate::config::TrayConfig::default(),
             spending: crate::config::SpendingConfig::default(),
+            portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
             git: crate::config::GitConfig::default(),
         };

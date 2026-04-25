@@ -47,14 +47,23 @@ interface HoldingEntry {
   account_id: Id;
   asset: AssetType;
   amount: string;
+  cost_basis: string | undefined;
   timestamp: Date;
 }
 
 /** Aggregated data for a single asset across all accounts. */
 interface AssetAggregate {
   total_amount: Decimal;
+  amount_with_cost_basis: Decimal;
+  total_cost_basis: Decimal | undefined;
   latest_balance_date: string; // "YYYY-MM-DD"
   holdings: HoldingEntry[];
+}
+
+interface GainsTotals {
+  total_cost_basis: Decimal | undefined;
+  total_unrealized_gain: Decimal | undefined;
+  prospective_capital_gains_tax: Decimal | undefined;
 }
 
 /** Context loaded from storage for portfolio calculation. */
@@ -104,12 +113,17 @@ export class PortfolioService {
     );
 
     // 4. Build asset summaries and total value
-    const { summaries: assetSummaries, totalValue } = this.buildAssetSummaries(
+    const {
+      summaries: assetSummaries,
+      totalValue,
+      gainsTotals,
+    } = this.buildAssetSummaries(
       byAssetAgg,
       priceCache,
       ctx.account_map,
       query.include_detail,
       query.currency_decimals,
+      query.capital_gains_tax_rate,
     );
 
     // 5. Build account summaries
@@ -136,13 +150,32 @@ export class PortfolioService {
     const byAccount =
       query.grouping === 'account' || query.grouping === 'both' ? accountSummaries : undefined;
 
-    return {
+    const snapshot: PortfolioSnapshot = {
       as_of_date: query.as_of_date,
       currency: query.currency,
       total_value: decStrRounded(totalValue, query.currency_decimals),
       by_asset: byAsset,
       by_account: byAccount,
     };
+    if (gainsTotals.total_cost_basis !== undefined) {
+      snapshot.total_cost_basis = decStrRounded(
+        gainsTotals.total_cost_basis,
+        query.currency_decimals,
+      );
+    }
+    if (gainsTotals.total_unrealized_gain !== undefined) {
+      snapshot.total_unrealized_gain = decStrRounded(
+        gainsTotals.total_unrealized_gain,
+        query.currency_decimals,
+      );
+    }
+    if (gainsTotals.prospective_capital_gains_tax !== undefined) {
+      snapshot.prospective_capital_gains_tax = decStrRounded(
+        gainsTotals.prospective_capital_gains_tax,
+        query.currency_decimals,
+      );
+    }
+    return snapshot;
   }
 
   // -----------------------------------------------------------------------
@@ -254,6 +287,13 @@ export class PortfolioService {
         const existing = byAsset.get(key);
         if (existing !== undefined) {
           existing.agg.total_amount = existing.agg.total_amount.plus(amount);
+          if (assetBalance.cost_basis !== undefined) {
+            const costBasis = new Decimal(assetBalance.cost_basis);
+            existing.agg.amount_with_cost_basis = existing.agg.amount_with_cost_basis.plus(amount);
+            existing.agg.total_cost_basis = (existing.agg.total_cost_basis ?? new Decimal(0)).plus(
+              costBasis,
+            );
+          }
           if (balanceDate > existing.agg.latest_balance_date) {
             existing.agg.latest_balance_date = balanceDate;
           }
@@ -261,19 +301,28 @@ export class PortfolioService {
             account_id: accountId,
             asset: normalizedAsset,
             amount: assetBalance.amount,
+            cost_basis: assetBalance.cost_basis,
             timestamp: snapshot.timestamp,
           });
         } else {
+          const costBasis =
+            assetBalance.cost_basis === undefined
+              ? undefined
+              : new Decimal(assetBalance.cost_basis);
           byAsset.set(key, {
             asset: normalizedAsset,
             agg: {
               total_amount: amount,
+              amount_with_cost_basis:
+                costBasis === undefined ? new Decimal(0) : new Decimal(amount),
+              total_cost_basis: costBasis,
               latest_balance_date: balanceDate,
               holdings: [
                 {
                   account_id: accountId,
                   asset: normalizedAsset,
                   amount: assetBalance.amount,
+                  cost_basis: assetBalance.cost_basis,
                   timestamp: snapshot.timestamp,
                 },
               ],
@@ -435,9 +484,15 @@ export class PortfolioService {
     accountMap: Map<string, AccountType>,
     includeDetail: boolean,
     currencyDecimals: number | undefined,
-  ): { summaries: AssetSummary[]; totalValue: Decimal } {
+    capitalGainsTaxRate: Decimal | undefined,
+  ): { summaries: AssetSummary[]; totalValue: Decimal; gainsTotals: GainsTotals } {
     const summaries: AssetSummary[] = [];
     let totalValue = new Decimal(0);
+    const gainsTotals: GainsTotals = {
+      total_cost_basis: undefined,
+      total_unrealized_gain: undefined,
+      prospective_capital_gains_tax: undefined,
+    };
 
     for (const [key, { asset, agg }] of byAsset) {
       const valuation = priceCache.get(key);
@@ -452,8 +507,34 @@ export class PortfolioService {
         totalValue = totalValue.plus(assetValue);
       }
 
+      const costBasis = agg.total_cost_basis;
+      const unrealizedGain =
+        valuation.value !== undefined && costBasis !== undefined
+          ? valuation.value.times(agg.amount_with_cost_basis).minus(costBasis)
+          : undefined;
+      const prospectiveTax =
+        unrealizedGain !== undefined && unrealizedGain.gt(0) && capitalGainsTaxRate !== undefined
+          ? unrealizedGain.times(capitalGainsTaxRate)
+          : undefined;
+
+      if (costBasis !== undefined) {
+        gainsTotals.total_cost_basis = (gainsTotals.total_cost_basis ?? new Decimal(0)).plus(
+          costBasis,
+        );
+      }
+      if (unrealizedGain !== undefined) {
+        gainsTotals.total_unrealized_gain = (
+          gainsTotals.total_unrealized_gain ?? new Decimal(0)
+        ).plus(unrealizedGain);
+      }
+      if (prospectiveTax !== undefined) {
+        gainsTotals.prospective_capital_gains_tax = (
+          gainsTotals.prospective_capital_gains_tax ?? new Decimal(0)
+        ).plus(prospectiveTax);
+      }
+
       const holdings = includeDetail
-        ? this.buildHoldingsDetail(agg.holdings, accountMap)
+        ? this.buildHoldingsDetail(agg.holdings, accountMap, valuation.value, currencyDecimals)
         : undefined;
 
       const summary: AssetSummary = {
@@ -480,27 +561,49 @@ export class PortfolioService {
       if (valuation.fx_date !== undefined) {
         summary.fx_date = valuation.fx_date;
       }
+      if (costBasis !== undefined) {
+        summary.cost_basis = decStrRounded(costBasis, currencyDecimals);
+      }
+      if (unrealizedGain !== undefined) {
+        summary.unrealized_gain = decStrRounded(unrealizedGain, currencyDecimals);
+      }
+      if (prospectiveTax !== undefined) {
+        summary.prospective_capital_gains_tax = decStrRounded(prospectiveTax, currencyDecimals);
+      }
 
       summaries.push(summary);
     }
 
-    return { summaries, totalValue };
+    return { summaries, totalValue, gainsTotals };
   }
 
   private buildHoldingsDetail(
     holdings: HoldingEntry[],
     accountMap: Map<string, AccountType>,
+    unitValue: Decimal | undefined,
+    currencyDecimals: number | undefined,
   ): AccountHolding[] {
     return holdings.map((h) => {
       const account = accountMap.get(h.account_id.asStr());
       const accountName = account?.name ?? '';
       const amount = new Decimal(h.amount);
-      return {
+      const out: AccountHolding = {
         account_id: h.account_id.asStr(),
         account_name: accountName,
         amount: decStr(amount),
         balance_date: dateToString(h.timestamp),
       };
+      if (h.cost_basis !== undefined) {
+        const costBasis = new Decimal(h.cost_basis);
+        out.cost_basis = decStrRounded(costBasis, currencyDecimals);
+        if (unitValue !== undefined) {
+          out.unrealized_gain = decStrRounded(
+            unitValue.times(amount).minus(costBasis),
+            currencyDecimals,
+          );
+        }
+      }
+      return out;
     });
   }
 

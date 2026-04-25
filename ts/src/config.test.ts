@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_REFRESH_CONFIG,
   DEFAULT_GIT_CONFIG,
-  DEFAULT_HISTORY_CONFIG,
   DEFAULT_TRAY_CONFIG,
   DEFAULT_SPENDING_CONFIG,
+  DEFAULT_PORTFOLIO_CONFIG,
   DEFAULT_IGNORE_CONFIG,
   DEFAULT_CONFIG,
   parseConfig,
@@ -53,10 +53,6 @@ describe('default constants', () => {
       expect(DEFAULT_CONFIG.refresh).toEqual(DEFAULT_REFRESH_CONFIG);
     });
 
-    it('has default history config', () => {
-      expect(DEFAULT_CONFIG.history).toEqual(DEFAULT_HISTORY_CONFIG);
-    });
-
     it('has default git config', () => {
       expect(DEFAULT_CONFIG.git).toEqual(DEFAULT_GIT_CONFIG);
     });
@@ -67,6 +63,10 @@ describe('default constants', () => {
 
     it('has default spending config', () => {
       expect(DEFAULT_CONFIG.spending).toEqual(DEFAULT_SPENDING_CONFIG);
+    });
+
+    it('has default portfolio config', () => {
+      expect(DEFAULT_CONFIG.portfolio).toEqual(DEFAULT_PORTFOLIO_CONFIG);
     });
 
     it('has default ignore config', () => {
@@ -85,9 +85,9 @@ describe('parseConfig', () => {
     expect(config.git.auto_commit).toBe(false);
     expect(config.git.auto_push).toBe(false);
     expect(config.git.merge_master_before_command).toBe(false);
-    expect(config.history).toEqual(DEFAULT_HISTORY_CONFIG);
     expect(config.tray).toEqual(DEFAULT_TRAY_CONFIG);
     expect(config.spending).toEqual(DEFAULT_SPENDING_CONFIG);
+    expect(config.portfolio).toEqual(DEFAULT_PORTFOLIO_CONFIG);
     expect(config.ignore).toEqual(DEFAULT_IGNORE_CONFIG);
   });
 
@@ -111,7 +111,6 @@ currency_decimals = 2
     expect(config.data_dir).toBe('./my-data');
     expect(config.reporting_currency).toBe('USD');
     expect(config.refresh).toEqual(DEFAULT_REFRESH_CONFIG);
-    expect(config.history).toEqual(DEFAULT_HISTORY_CONFIG);
     expect(config.tray).toEqual(DEFAULT_TRAY_CONFIG);
     expect(config.spending).toEqual(DEFAULT_SPENDING_CONFIG);
     expect(config.ignore).toEqual(DEFAULT_IGNORE_CONFIG);
@@ -122,26 +121,11 @@ currency_decimals = 2
     const toml = `
 [tray]
 history_points = 5
-history_spec = ["last 3 days", "1 month ago"]
 spending_windows_days = [3, 14, 60]
 `;
     const config = parseConfig(toml);
     expect(config.tray.history_points).toBe(5);
-    expect(config.tray.history_spec).toEqual(['last 3 days', '1 month ago']);
     expect(config.tray.spending_windows_days).toEqual([3, 14, 60]);
-  });
-
-  it('parses history config', () => {
-    const toml = `
-[history]
-allow_future_projection = true
-lookback_days = 7
-`;
-    const config = parseConfig(toml);
-    expect(config.history).toEqual({
-      allow_future_projection: true,
-      lookback_days: 7,
-    });
   });
 
   it('parses spending ignore config', () => {
@@ -155,6 +139,21 @@ ignore_tags = ["brokerage"]
     expect(config.spending.ignore_accounts).toEqual(['Individual', 'acct-1']);
     expect(config.spending.ignore_connections).toEqual(['Schwab']);
     expect(config.spending.ignore_tags).toEqual(['brokerage']);
+  });
+
+  it('parses latent capital gains tax portfolio config', () => {
+    const toml = `
+[portfolio.latent_capital_gains_tax]
+enabled = true
+rate = 0.23
+account_name = "Estimated Tax Liability"
+`;
+    const config = parseConfig(toml);
+    expect(config.portfolio.latent_capital_gains_tax).toEqual({
+      enabled: true,
+      rate: 0.23,
+      account_name: 'Estimated Tax Liability',
+    });
   });
 
   it('parses global ignore transaction rules', () => {
@@ -216,10 +215,22 @@ merge_master_before_command = true
     expect(config.git.merge_master_before_command).toBe(true);
   });
 
-  it('defaults auto_push to false when omitted', () => {
+  it('defaults auto_push to auto_commit when omitted', () => {
     const toml = `
 [git]
 auto_commit = true
+`;
+    const config = parseConfig(toml);
+    expect(config.git.auto_commit).toBe(true);
+    expect(config.git.auto_push).toBe(true);
+    expect(config.git.merge_master_before_command).toBe(false);
+  });
+
+  it('allows disabling auto_push while auto_commit is enabled', () => {
+    const toml = `
+[git]
+auto_commit = true
+auto_push = false
 `;
     const config = parseConfig(toml);
     expect(config.git.auto_commit).toBe(true);
@@ -249,7 +260,6 @@ merge_master_before_command = true
     expect(config.git.auto_commit).toBe(true);
     expect(config.git.auto_push).toBe(true);
     expect(config.git.merge_master_before_command).toBe(true);
-    expect(config.history).toEqual(DEFAULT_HISTORY_CONFIG);
   });
 });
 

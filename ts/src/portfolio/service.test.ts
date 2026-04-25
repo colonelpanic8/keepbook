@@ -11,6 +11,7 @@ import { AssetId } from '../market-data/asset-id.js';
 import type { PricePoint, FxRatePoint } from '../market-data/models.js';
 import { MarketDataService } from '../market-data/service.js';
 import { FixedClock } from '../clock.js';
+import { Decimal } from '../decimal.js';
 
 import { PortfolioService } from './service.js';
 import type { PortfolioQuery } from './models.js';
@@ -50,9 +51,9 @@ async function addSnapshot(
   storage: MemoryStorage,
   accountId: Id,
   timestamp: Date,
-  balances: Array<{ asset: AssetType; amount: string }>,
+  balances: Array<{ asset: AssetType; amount: string; cost_basis?: string }>,
 ): Promise<void> {
-  const assetBalances = balances.map((b) => AssetBalance.new(b.asset, b.amount));
+  const assetBalances = balances.map((b) => AssetBalance.new(b.asset, b.amount, b.cost_basis));
   const snapshot = BalanceSnapshot.new(timestamp, assetBalances);
   await storage.appendBalanceSnapshot(accountId, snapshot);
 }
@@ -172,6 +173,38 @@ describe('PortfolioService', () => {
     expect(assetSummary.value_in_base).toBe('2000');
     // Same quote currency as target, no FX needed
     expect(assetSummary.fx_rate).toBeUndefined();
+  });
+
+  it('reports unrealized gain and prospective tax from cost basis', async () => {
+    const conn = await createConnection(storage, 'Broker');
+    const account = await createAccount(storage, 'Brokerage', conn);
+    await addSnapshot(storage, account.id, new Date('2026-02-01T12:00:00Z'), [
+      { asset: Asset.equity('AAPL'), amount: '10', cost_basis: '1500' },
+    ]);
+
+    await mdStore.put_prices([makePrice(Asset.equity('AAPL'), '2026-02-02', '200')]);
+
+    const service = buildService();
+    const result = await service.calculate(
+      makeQuery({
+        currency: 'USD',
+        grouping: 'asset',
+        include_detail: true,
+        capital_gains_tax_rate: new Decimal('0.238'),
+      }),
+    );
+
+    expect(result.total_value).toBe('2000');
+    expect(result.total_cost_basis).toBe('1500');
+    expect(result.total_unrealized_gain).toBe('500');
+    expect(result.prospective_capital_gains_tax).toBe('119');
+
+    const assetSummary = result.by_asset![0];
+    expect(assetSummary.cost_basis).toBe('1500');
+    expect(assetSummary.unrealized_gain).toBe('500');
+    expect(assetSummary.prospective_capital_gains_tax).toBe('119');
+    expect(assetSummary.holdings![0].cost_basis).toBe('1500');
+    expect(assetSummary.holdings![0].unrealized_gain).toBe('500');
   });
 
   it('prefers a same-day historical quote over an older close', async () => {

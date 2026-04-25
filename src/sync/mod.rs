@@ -22,18 +22,13 @@ use anyhow::Result;
 use std::collections::HashSet;
 
 /// How to sync transactions for a connection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TransactionSyncMode {
     /// Default behavior: synchronizer may stop early when it detects overlap with stored history.
+    #[default]
     Auto,
     /// Backfill as far back as the synchronizer/provider can fetch (bounded by safety limits).
     Full,
-}
-
-impl Default for TransactionSyncMode {
-    fn default() -> Self {
-        Self::Auto
-    }
 }
 
 /// Options that control how a sync is performed.
@@ -97,15 +92,18 @@ impl SyncResult {
             storage.save_account(account).await?;
         }
 
-        for mut account in storage.list_accounts().await? {
+        for account in storage.list_accounts().await? {
             if account.connection_id == *self.connection.id()
                 && account.active
                 && !synced_account_ids.contains(&account.id)
             {
-                account.active = false;
-                storage.save_account(&account).await?;
+                let mut inactive_account = account.clone();
+                inactive_account.active = false;
+                storage.save_account(&inactive_account).await?;
+
+                let snapshot = BalanceSnapshot::now_with(clock, Vec::new());
                 storage
-                    .append_balance_snapshot(&account.id, &BalanceSnapshot::now_with(clock, vec![]))
+                    .append_balance_snapshot(&inactive_account.id, &snapshot)
                     .await?;
             }
         }

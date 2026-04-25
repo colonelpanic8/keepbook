@@ -17,11 +17,7 @@ import { type AssetType } from '../models/asset.js';
 import { Id } from '../models/id.js';
 import { MarketDataService } from '../market-data/service.js';
 import { NullMarketDataStore, type MarketDataStore } from '../market-data/store.js';
-import {
-  formatDateYMD,
-  formatRfc3339,
-  formatRfc3339FromEpochNanos,
-} from './format.js';
+import { formatDateYMD, formatRfc3339, formatRfc3339FromEpochNanos } from './format.js';
 import { DEFAULT_IGNORE_CONFIG, DEFAULT_SPENDING_CONFIG, type ResolvedConfig } from '../config.js';
 import {
   applyTransactionAnnotationPatch,
@@ -29,7 +25,10 @@ import {
   type TransactionAnnotationType,
 } from '../models/transaction-annotation.js';
 import { valueInReportingCurrencyBestEffort } from './value.js';
-import { compileTransactionIgnoreRulesWithSpending, shouldIgnoreTransaction } from './ignore-rules.js';
+import {
+  compileTransactionIgnoreRulesWithSpending,
+  shouldIgnoreTransaction,
+} from './ignore-rules.js';
 import {
   type ConnectionOutput,
   type AccountOutput,
@@ -42,7 +41,6 @@ import {
 function buildAccountsByConnection(accounts: AccountType[]): Map<string, Set<string>> {
   const accountsByConnection = new Map<string, Set<string>>();
   for (const account of accounts) {
-    if (!account.active) continue;
     const connectionId = account.connection_id.asStr();
     const set = accountsByConnection.get(connectionId);
     if (set !== undefined) {
@@ -132,7 +130,6 @@ function resolveConnectionAccountIds(
   }
 
   for (const account of accounts) {
-    if (!account.active) continue;
     if (!account.connection_id.equals(connection.state.id)) continue;
     const accountIdStr = account.id.asStr();
     if (!validIds.has(accountIdStr)) continue;
@@ -242,14 +239,18 @@ export async function listBalances(
           currencyDecimals,
         );
 
-        result.push({
+        const out: BalanceOutput = {
           account_id: accountId,
           asset: assetForListOutput(balance.asset),
           amount: balance.amount,
           value_in_reporting_currency: valueInReportingCurrencyValue,
           reporting_currency: reportingCurrencyUpper,
           timestamp: formatRfc3339PreservingRaw(snapshot.timestamp, snapshot.timestamp_raw),
-        });
+        };
+        if (balance.cost_basis !== undefined) {
+          out.cost_basis = balance.cost_basis;
+        }
+        result.push(out);
       }
     }
   }
@@ -281,19 +282,21 @@ export async function listTransactions(
     storage.listAccounts(),
     storage.listConnections(),
   ]);
-  const connectionsById = new Map(connections.map((connection) => [connection.state.id.asStr(), connection]));
+  const connectionsById = new Map(
+    connections.map((connection) => [connection.state.id.asStr(), connection]),
+  );
   const ignoreRules = skipIgnored
     ? compileTransactionIgnoreRulesWithSpending(
-      config?.ignore ?? DEFAULT_IGNORE_CONFIG,
-      config?.spending ?? DEFAULT_SPENDING_CONFIG,
-    )
+        config?.ignore ?? DEFAULT_IGNORE_CONFIG,
+        config?.spending ?? DEFAULT_SPENDING_CONFIG,
+      )
     : [];
   const ignoredAccountTags = skipIgnored
     ? new Set(
-      (config?.spending ?? DEFAULT_SPENDING_CONFIG).ignore_tags
-        .map((tag) => tag.trim().toLowerCase())
-        .filter((tag) => tag.length > 0),
-    )
+        (config?.spending ?? DEFAULT_SPENDING_CONFIG).ignore_tags
+          .map((tag) => tag.trim().toLowerCase())
+          .filter((tag) => tag.length > 0),
+      )
     : new Set<string>();
   const result: TransactionOutput[] = [];
 

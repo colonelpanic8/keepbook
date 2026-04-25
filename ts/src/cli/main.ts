@@ -22,12 +22,10 @@ import {
 import { importSchwabTransactions } from '../app/import.js';
 import {
   fetchHistoricalPrices,
-  fillPricesAtDate,
   portfolioSnapshot,
   portfolioHistory,
   portfolioChangePoints,
 } from '../app/portfolio.js';
-import { portfolioGraph } from '../app/graph.js';
 import { spendingReport } from '../app/spending.js';
 import {
   syncConnectionWithOptions,
@@ -362,10 +360,17 @@ set
   .requiredOption('--account <id>', 'account ID')
   .requiredOption('--asset <str>', 'asset identifier')
   .requiredOption('--amount <str>', 'balance amount')
-  .action(async (opts: { account: string; asset: string; amount: string }) => {
+  .option('--cost-basis <str>', 'total cost basis in reporting/portfolio currency')
+  .action(async (opts: { account: string; asset: string; amount: string; costBasis?: string }) => {
     await runWithConfig(async (cfg) => {
       const storage = new JsonFileStorage(cfg.config.data_dir);
-      const result = await setBalance(storage, opts.account, opts.asset, opts.amount);
+      const result = await setBalance(
+        storage,
+        opts.account,
+        opts.asset,
+        opts.amount,
+        opts.costBasis,
+      );
       if (cfg.config.git.auto_commit) {
         await tryAutoCommit(
           cfg.config.data_dir,
@@ -758,47 +763,6 @@ marketData
     },
   );
 
-marketData
-  .command('fill-date')
-  .description('Fill sparse prices for assets in scope at a single date')
-  .requiredOption('--date <date>', 'date to fill (YYYY-MM-DD)')
-  .option('--account <id_or_name>', 'account ID or name (mutually exclusive with --connection)')
-  .option('--connection <id_or_name>', 'connection ID or name (mutually exclusive with --account)')
-  .option(
-    '--lookback-days <days>',
-    'look back this many days when a close price is missing',
-    (v: string) => Number.parseInt(v, 10),
-  )
-  .option('--request-delay-ms <ms>', 'delay (ms) between price fetches', (v: string) =>
-    Number.parseInt(v, 10),
-  )
-  .option('--currency <code>', 'base currency for FX rates (default: from config)')
-  .option('--no-fx', 'disable FX rate fetching')
-  .action(
-    async (opts: {
-      date: string;
-      account?: string;
-      connection?: string;
-      lookbackDays?: number;
-      requestDelayMs?: number;
-      currency?: string;
-      fx?: boolean;
-    }) => {
-      await runWithConfig(async (cfg) => {
-        const storage = new JsonFileStorage(cfg.config.data_dir);
-        return fillPricesAtDate(storage, cfg.config, {
-          date: opts.date,
-          account: opts.account,
-          connection: opts.connection,
-          lookback_days: opts.lookbackDays,
-          request_delay_ms: opts.requestDelayMs,
-          currency: opts.currency,
-          include_fx: opts.fx,
-        });
-      });
-    },
-  );
-
 // ---------------------------------------------------------------------------
 // portfolio
 // ---------------------------------------------------------------------------
@@ -812,12 +776,19 @@ portfolio
   .option('--date <date>', 'as-of date (YYYY-MM-DD)')
   .option('--group-by <grouping>', 'grouping: asset, account, or both')
   .option('--detail', 'include holding detail')
+  .option('--capital-gains-tax-rate <percent>', 'capital gains tax rate percentage')
   .option('--auto', 'auto mode')
   .option('--offline', 'offline mode')
   .option('--dry-run', 'dry run')
   .option('--force-refresh', 'force refresh prices')
   .action(
-    async (opts: { currency?: string; date?: string; groupBy?: string; detail?: boolean }) => {
+    async (opts: {
+      currency?: string;
+      date?: string;
+      groupBy?: string;
+      detail?: boolean;
+      capitalGainsTaxRate?: string;
+    }) => {
       await runWithConfig(async (cfg) => {
         const storage = new JsonFileStorage(cfg.config.data_dir);
         const marketDataStore = new JsonlMarketDataStore(cfg.config.data_dir);
@@ -826,6 +797,7 @@ portfolio
           date: opts.date,
           groupBy: opts.groupBy,
           detail: opts.detail,
+          capitalGainsTaxRate: opts.capitalGainsTaxRate,
         });
       });
     },
@@ -885,64 +857,6 @@ portfolio
           end: opts.end,
           granularity: opts.granularity,
           includePrices: opts.includePrices,
-        });
-      });
-    },
-  );
-
-portfolio
-  .command('graph')
-  .description('Build a static HTML/SVG net-worth graph from portfolio history')
-  .option('--graph-config <path>', 'optional TOML graph config file; flags override file values')
-  .option('--currency <code>', 'reporting currency')
-  .option('--start <date>', 'start date (YYYY-MM-DD)')
-  .option('--end <date>', 'end date (YYYY-MM-DD)')
-  .option('--granularity <granularity>', 'granularity: none, hourly, daily, weekly, monthly, yearly')
-  .option('--include-prices', 'include price change points')
-  .option('--no-include-prices', 'exclude price change points')
-  .option('--output <path>', 'HTML output path')
-  .option('--svg-output <path>', 'SVG output path')
-  .option('--title <title>', 'graph title')
-  .option('--subtitle <subtitle>', 'graph subtitle')
-  .option('--width <px>', 'SVG width in pixels', parseInt)
-  .option('--height <px>', 'SVG height in pixels', parseInt)
-  .option('--min-value <value>', 'lower bound for the value axis', parseFloat)
-  .option('--max-value <value>', 'upper bound for the value axis', parseFloat)
-  .action(
-    async (opts: {
-      graphConfig?: string;
-      currency?: string;
-      start?: string;
-      end?: string;
-      granularity?: string;
-      includePrices?: boolean;
-      output?: string;
-      svgOutput?: string;
-      title?: string;
-      subtitle?: string;
-      width?: number;
-      height?: number;
-      minValue?: number;
-      maxValue?: number;
-    }) => {
-      await runWithConfig(async (cfg) => {
-        const storage = new JsonFileStorage(cfg.config.data_dir);
-        const marketDataStore = new JsonlMarketDataStore(cfg.config.data_dir);
-        return portfolioGraph(storage, marketDataStore, cfg.config, {
-          graphConfig: opts.graphConfig,
-          currency: opts.currency,
-          start: opts.start,
-          end: opts.end,
-          granularity: opts.granularity,
-          includePrices: opts.includePrices,
-          output: opts.output,
-          svgOutput: opts.svgOutput,
-          title: opts.title,
-          subtitle: opts.subtitle,
-          width: opts.width,
-          height: opts.height,
-          minValue: opts.minValue,
-          maxValue: opts.maxValue,
         });
       });
     },

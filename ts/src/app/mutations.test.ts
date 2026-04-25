@@ -351,6 +351,38 @@ describe('setBalance', () => {
     expect(snapshots[0].balances[0].amount).toBe('1234.56');
   });
 
+  it('creates a balance snapshot with optional cost basis', async () => {
+    const storage = new MemoryStorage();
+    const clock = makeClock('2024-06-01T12:00:00Z');
+
+    await addConnection(storage, 'Broker', makeIdGen('conn-1'), clock);
+    await addAccount(storage, 'conn-1', 'Brokerage', [], makeIdGen('acct-1'), clock);
+
+    const balanceClock = makeClock('2024-07-01T10:00:00Z');
+    const result = await setBalance(
+      storage,
+      'acct-1',
+      'equity:AAPL',
+      '10',
+      '1500.00',
+      balanceClock,
+    );
+
+    expect(result).toEqual({
+      success: true,
+      balance: {
+        account_id: 'acct-1',
+        asset: { type: 'equity', ticker: 'AAPL' },
+        amount: '10',
+        cost_basis: '1500',
+        timestamp: '2024-07-01T10:00:00+00:00',
+      },
+    });
+
+    const snapshots = await storage.getBalanceSnapshots(Id.fromString('acct-1'));
+    expect(snapshots[0].balances[0].cost_basis).toBe('1500');
+  });
+
   it('returns error for non-existent account', async () => {
     const storage = new MemoryStorage();
 
@@ -475,13 +507,7 @@ describe('setBalance', () => {
     await addAccount(storage, 'conn-1', 'Checking', [], makeIdGen('acct-1'), clock);
 
     const balanceClock = makeClock('2024-07-01T10:00:00Z');
-    const result = await setBalance(
-      storage,
-      'Checking',
-      'USD',
-      '500',
-      balanceClock,
-    );
+    const result = await setBalance(storage, 'Checking', 'USD', '500', balanceClock);
 
     expect(result).toEqual({
       success: false,
@@ -521,7 +547,9 @@ describe('setAccountConfig', () => {
     await addConnection(storage, 'My Bank', makeIdGen('conn-1'), clock);
     await addAccount(storage, 'conn-1', 'Checking', [], makeIdGen('acct-1'), clock);
 
-    const result = await setAccountConfig(storage, 'acct-1', { balance_backfill: 'carry_earliest' });
+    const result = await setAccountConfig(storage, 'acct-1', {
+      balance_backfill: 'carry_earliest',
+    });
     expect(result).toEqual({
       success: true,
       account: {
@@ -676,13 +704,7 @@ describe('setTransactionAnnotation', () => {
     await storage.appendTransactions(Id.fromString('acct-1'), [tx]);
 
     const setNoteClock = makeClock('2024-06-15T15:00:00Z');
-    await setTransactionAnnotation(
-      storage,
-      'acct-1',
-      'tx-1',
-      { note: 'hello' },
-      setNoteClock,
-    );
+    await setTransactionAnnotation(storage, 'acct-1', 'tx-1', { note: 'hello' }, setNoteClock);
 
     const clearNoteClock = makeClock('2024-06-15T15:00:01Z');
     const result = await setTransactionAnnotation(

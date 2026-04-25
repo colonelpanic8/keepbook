@@ -159,6 +159,10 @@ async fn schwab_sync_uses_cached_session_and_base_url_override() -> Result<()> {
     assert_eq!(price.kind, PriceKind::Close);
     let price_value: f64 = price.price.parse().expect("price should parse");
     assert_eq!(price_value, 150.0);
+    assert_eq!(
+        aapl_balance.asset_balance.cost_basis.as_deref(),
+        Some("600")
+    );
     assert!(has_cash, "expected cash balance from account balances");
     assert!(!has_cash_position, "cash position should be skipped");
 

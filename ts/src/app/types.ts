@@ -40,6 +40,7 @@ export interface BalanceOutput {
   account_id: string;
   asset: AssetType;
   amount: string;
+  cost_basis?: string;
   value_in_reporting_currency: string | null;
   reporting_currency: string;
   timestamp: string;

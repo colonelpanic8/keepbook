@@ -8,6 +8,7 @@ import { Clock, SystemClock } from '../clock.js';
 export interface AssetBalanceType {
   readonly asset: AssetType;
   readonly amount: string;
+  readonly cost_basis?: string;
 }
 
 export interface BalanceSnapshotType {
@@ -23,6 +24,7 @@ export interface BalanceSnapshotType {
 export interface AssetBalanceJSON {
   asset: AssetType;
   amount: string;
+  cost_basis?: string;
 }
 
 export interface BalanceSnapshotJSON {
@@ -38,28 +40,36 @@ export const AssetBalance = {
   /**
    * Create an asset balance.
    */
-  new(asset: AssetType, amount: string): AssetBalanceType {
-    return { asset, amount };
+  new(asset: AssetType, amount: string, costBasis?: string): AssetBalanceType {
+    return costBasis === undefined ? { asset, amount } : { asset, amount, cost_basis: costBasis };
   },
 
   /**
    * Serialize to JSON.
    */
   toJSON(balance: AssetBalanceType): AssetBalanceJSON {
-    return {
+    const out: AssetBalanceJSON = {
       asset: balance.asset,
       amount: balance.amount,
     };
+    if (balance.cost_basis !== undefined) {
+      out.cost_basis = balance.cost_basis;
+    }
+    return out;
   },
 
   /**
    * Deserialize from JSON.
    */
   fromJSON(json: AssetBalanceJSON): AssetBalanceType {
-    return {
+    const out: AssetBalanceType = {
       asset: json.asset,
       amount: json.amount,
     };
+    if (json.cost_basis !== undefined) {
+      return { ...out, cost_basis: json.cost_basis };
+    }
+    return out;
   },
 } as const;
 

@@ -58,7 +58,7 @@ Top-level commands:
   - =schwab login=
   - =chase login=
 - =market-data fetch=
-- =portfolio snapshot|history|change-points|graph=
+- =portfolio snapshot|history|change-points=
 - =spending=
 
 Global options:
@@ -98,28 +98,6 @@ keepbook portfolio snapshot --currency EUR --date 2026-02-01
 
 # Spending report
 keepbook spending --period monthly --group-by category
-
-# Build an ad-hoc static net-worth graph
-keepbook portfolio graph \
-  --start 2026-03-01 \
-  --end 2026-04-01 \
-  --granularity daily \
-  --output artifacts/net-worth-march.html
-#+END_SRC
-
-The graph command writes an SVG and a small HTML wrapper, then prints JSON with
-the generated paths. For repeatable ad-hoc runs, pass =--graph-config <path>=
-with TOML fields matching the flags, for example:
-
-#+BEGIN_SRC toml
-start = "2026-03-01"
-end = "2026-04-01"
-granularity = "daily"
-output = "artifacts/net-worth-march.html"
-title = "March Net Worth"
-# Optional value-axis bounds:
-# min_value = 0
-# max_value = 250000
 #+END_SRC
 
 * Configuration
@@ -156,8 +134,8 @@ price_staleness = "24h"
 [tray]
 # Number of most-recent portfolio history rows shown in tray menu.
 history_points = 8
-# Spending lookback windows (in days) shown in the Recent Spending tray rows.
-spending_windows_days = [7, 30, 90, 365]
+# Spending lookback windows (in days) shown as "Last Nd" rows.
+spending_windows_days = [7, 30, 90]
 
 [spending]
 # Ignore matching account IDs or names in default portfolio spending reports.
@@ -167,8 +145,18 @@ spending_windows_days = [7, 30, 90, 365]
 # Ignore accounts containing any matching account tag in default portfolio spending reports.
 # ignore_tags = ["brokerage"]
 
+[portfolio.latent_capital_gains_tax]
+# Disabled by default. When enabled, portfolio snapshot subtracts a dynamic
+# virtual liability account from total net worth; no account is written to disk.
+enabled = false
+# Decimal fraction, e.g. 0.23 for 23%.
+# rate = 0.23
+account_name = "Latent Capital Gains Tax"
+
 [git]
 auto_commit = false
+# When omitted, auto_push defaults to auto_commit.
+# Set auto_push = false to auto-commit without pushing.
 auto_push = false
 merge_master_before_command = false
 #+END_SRC

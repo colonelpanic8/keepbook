@@ -17,9 +17,9 @@ import {
   resolveDataDir,
   DEFAULT_CONFIG,
   DEFAULT_GIT_CONFIG,
-  DEFAULT_HISTORY_CONFIG,
   DEFAULT_REFRESH_CONFIG,
   DEFAULT_SPENDING_CONFIG,
+  DEFAULT_PORTFOLIO_CONFIG,
   DEFAULT_IGNORE_CONFIG,
   DEFAULT_TRAY_CONFIG,
 } from '../config.js';
@@ -44,7 +44,11 @@ export function defaultConfigPath(): string {
     return localConfig;
   }
 
-  const xdgDataHome = process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share');
+  const configuredXdgDataHome =
+    process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share');
+  const xdgDataHome = path.isAbsolute(configuredXdgDataHome)
+    ? configuredXdgDataHome
+    : path.resolve(configuredXdgDataHome);
   const xdgConfig = path.join(xdgDataHome, 'keepbook', 'keepbook.toml');
   if (fs.existsSync(xdgConfig)) {
     return xdgConfig;
@@ -81,9 +85,9 @@ export async function loadConfig(
       reporting_currency: parsed.reporting_currency,
       display: parsed.display,
       refresh: parsed.refresh,
-      history: parsed.history,
       tray: parsed.tray,
       spending: parsed.spending,
+      portfolio: parsed.portfolio,
       ignore: parsed.ignore,
       git: parsed.git,
     };
@@ -100,16 +104,17 @@ export async function loadConfig(
     reporting_currency: DEFAULT_CONFIG.reporting_currency,
     display: DEFAULT_CONFIG.display,
     refresh: { ...DEFAULT_REFRESH_CONFIG },
-    history: { ...DEFAULT_HISTORY_CONFIG },
     tray: {
       ...DEFAULT_TRAY_CONFIG,
-      history_spec: [...DEFAULT_TRAY_CONFIG.history_spec],
       spending_windows_days: [...DEFAULT_TRAY_CONFIG.spending_windows_days],
     },
     spending: {
       ignore_accounts: [...DEFAULT_SPENDING_CONFIG.ignore_accounts],
       ignore_connections: [...DEFAULT_SPENDING_CONFIG.ignore_connections],
       ignore_tags: [...DEFAULT_SPENDING_CONFIG.ignore_tags],
+    },
+    portfolio: {
+      latent_capital_gains_tax: { ...DEFAULT_PORTFOLIO_CONFIG.latent_capital_gains_tax },
     },
     ignore: {
       transaction_rules: [...DEFAULT_IGNORE_CONFIG.transaction_rules],
@@ -133,6 +138,7 @@ export function configOutput(configPath: string, config: ResolvedConfig): object
   return {
     config_file: configPath,
     data_directory: config.data_dir,
+    portfolio: config.portfolio,
     git: {
       auto_commit: config.git.auto_commit,
       auto_push: config.git.auto_push,
