@@ -355,6 +355,8 @@ pub async fn set_transaction_annotation(
     tags: Vec<String>,
     tags_empty: bool,
     clear_tags: bool,
+    effective_date: Option<String>,
+    clear_effective_date: bool,
 ) -> Result<serde_json::Value> {
     if clear_description && description.is_some() {
         anyhow::bail!("Cannot use --description and --clear-description together");
@@ -367,6 +369,9 @@ pub async fn set_transaction_annotation(
     }
     if clear_tags && (tags_empty || !tags.is_empty()) {
         anyhow::bail!("Cannot use --clear-tags with --tag/--tags-empty");
+    }
+    if clear_effective_date && effective_date.is_some() {
+        anyhow::bail!("Cannot use --effective-date and --clear-effective-date together");
     }
 
     let acct_id = Id::from_string_checked(account_id)
@@ -382,10 +387,20 @@ pub async fn set_transaction_annotation(
         || clear_category
         || !tags.is_empty()
         || tags_empty
-        || clear_tags;
+        || clear_tags
+        || effective_date.is_some()
+        || clear_effective_date;
     if !has_change {
         anyhow::bail!("No annotation fields specified");
     }
+
+    let parsed_effective_date = effective_date
+        .as_deref()
+        .map(|s| {
+            chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")
+                .with_context(|| format!("Invalid effective date: {s}"))
+        })
+        .transpose()?;
 
     // Verify account exists.
     storage
@@ -406,6 +421,7 @@ pub async fn set_transaction_annotation(
         note: None,
         category: None,
         tags: None,
+        effective_date: None,
     };
 
     if clear_description {
@@ -429,6 +445,11 @@ pub async fn set_transaction_annotation(
         patch.tags = Some(Some(Vec::new()));
     } else if !tags.is_empty() {
         patch.tags = Some(Some(tags));
+    }
+    if clear_effective_date {
+        patch.effective_date = Some(None);
+    } else if let Some(v) = parsed_effective_date {
+        patch.effective_date = Some(Some(v));
     }
 
     storage
@@ -483,6 +504,15 @@ pub async fn set_transaction_annotation(
             },
         );
     }
+    if let Some(v) = patch.effective_date {
+        patch_json.insert(
+            "effective_date".to_string(),
+            match v {
+                Some(date) => serde_json::json!(date.to_string()),
+                None => serde_json::Value::Null,
+            },
+        );
+    }
 
     let annotation_json = if ann.is_empty() {
         serde_json::Value::Null
@@ -499,6 +529,12 @@ pub async fn set_transaction_annotation(
         }
         if let Some(v) = ann.tags {
             m.insert("tags".to_string(), serde_json::json!(v));
+        }
+        if let Some(v) = ann.effective_date {
+            m.insert(
+                "effective_date".to_string(),
+                serde_json::json!(v.to_string()),
+            );
         }
         serde_json::Value::Object(m)
     };

@@ -1007,6 +1007,8 @@ async fn handle_category_modal_key(
                         vec![],
                         false,
                         false,
+                        None,
+                        false,
                     )
                     .await?;
                     refresh_transactions_and_rules(app_state, storage.as_ref(), config).await?;
@@ -2226,6 +2228,7 @@ mod tests {
             note: None,
             category: None,
             tags: None,
+            effective_date: None,
         });
         let description = t
             .annotation
@@ -2255,6 +2258,7 @@ mod tests {
             note: None,
             category: Some("food".to_string()),
             tags: None,
+            effective_date: None,
         });
         assert_eq!(transaction_category_string(&t, &matcher), "food");
     }
@@ -2428,6 +2432,7 @@ mod tests {
             note: None,
             category: None,
             tags: Some(vec!["ignore_spending".to_string()]),
+            effective_date: None,
         });
 
         let summaries = summarize_spending_windows(

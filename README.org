@@ -87,6 +87,12 @@ keepbook set transaction \
   --category "Dining" \
   --note "Team lunch"
 
+# Override the reporting/bucketing date without changing the synced timestamp
+keepbook set transaction \
+  --account <account-id> \
+  --transaction <transaction-id> \
+  --effective-date 2026-02-01
+
 # Sync transactions/balances from one source
 keepbook sync connection <connection-id-or-name>
 

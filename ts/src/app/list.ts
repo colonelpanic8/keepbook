@@ -38,6 +38,14 @@ import {
   type AllOutput,
 } from './types.js';
 
+const SPENDING_IGNORE_TAGS = new Set(['ignore_spending', 'ignore-spending', 'ignore:spending']);
+
+function annotationIgnoresSpending(annotation: TransactionAnnotationType): boolean {
+  const tags = annotation.tags;
+  if (tags === undefined) return false;
+  return tags.some((tag) => SPENDING_IGNORE_TAGS.has(tag.trim().toLowerCase()));
+}
+
 function buildAccountsByConnection(accounts: AccountType[]): Map<string, Set<string>> {
   const accountsByConnection = new Map<string, Set<string>>();
   for (const account of accounts) {
@@ -277,6 +285,8 @@ export async function listTransactions(
   const startDate = startStr
     ? new Date(startStr + 'T00:00:00Z')
     : new Date(endDate.getTime() - 30 * 24 * 60 * 60 * 1000);
+  const startYmd = formatDateYMD(startDate);
+  const endYmd = formatDateYMD(endDate);
 
   const [accounts, connections] = await Promise.all([
     storage.listAccounts(),
@@ -329,7 +339,9 @@ export async function listTransactions(
     }
 
     for (const tx of transactions) {
-      if (tx.timestamp < startDate || tx.timestamp > endDate) continue;
+      const ann = annByTx.get(tx.id.asStr());
+      const txYmd = ann?.effective_date ?? formatDateYMD(tx.timestamp);
+      if (txYmd < startYmd || txYmd > endYmd) continue;
       if (skipIgnored && tx.standardized_metadata?.is_internal_transfer_hint === true) {
         continue;
       }
@@ -349,7 +361,6 @@ export async function listTransactions(
         continue;
       }
 
-      const ann = annByTx.get(tx.id.asStr());
       const annotation =
         ann && !isEmptyTransactionAnnotation(ann)
           ? {
@@ -357,8 +368,17 @@ export async function listTransactions(
               ...(ann.note !== undefined ? { note: ann.note } : {}),
               ...(ann.category !== undefined ? { category: ann.category } : {}),
               ...(ann.tags !== undefined ? { tags: ann.tags } : {}),
+              ...(ann.effective_date !== undefined ? { effective_date: ann.effective_date } : {}),
             }
           : undefined;
+      if (
+        skipIgnored &&
+        ann &&
+        !isEmptyTransactionAnnotation(ann) &&
+        annotationIgnoresSpending(ann)
+      ) {
+        continue;
+      }
 
       const out: TransactionOutput = {
         id: tx.id.asStr(),

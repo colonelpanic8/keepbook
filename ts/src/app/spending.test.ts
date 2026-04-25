@@ -7,7 +7,7 @@ import { Id } from '../models/id.js';
 import { Connection } from '../models/connection.js';
 import { Account } from '../models/account.js';
 import { Asset } from '../models/asset.js';
-import { Transaction, withStandardizedMetadata } from '../models/transaction.js';
+import { Transaction, withStandardizedMetadata, withTimestamp } from '../models/transaction.js';
 import { AssetId } from '../market-data/asset-id.js';
 import type { ResolvedConfig } from '../config.js';
 import { spendingReport } from './spending.js';
@@ -21,6 +21,7 @@ function makeConfig(overrides?: Partial<ResolvedConfig>): ResolvedConfig {
       balance_staleness: 14 * 86400000,
       price_staleness: 86400000,
     },
+    history: { allow_future_projection: false },
     tray: { history_points: 8, spending_windows_days: [7, 30, 90] },
     spending: { ignore_accounts: [], ignore_connections: [], ignore_tags: [] },
     portfolio: {
@@ -33,6 +34,64 @@ function makeConfig(overrides?: Partial<ResolvedConfig>): ResolvedConfig {
 }
 
 describe('spendingReport', () => {
+  it('supports end-bound monthly alignment for trailing month buckets', async () => {
+    const storage = new MemoryStorage();
+    const cfg = makeConfig();
+
+    const acctId = Id.fromString('acct-1');
+    const connId = Id.fromString('conn-1');
+    await storage.saveAccount(
+      Account.newWith(acctId, new Date('2026-01-01T00:00:00Z'), 'Checking', connId),
+    );
+
+    const ids = new FixedIdGenerator([
+      Id.fromString('tx-jan-15'),
+      Id.fromString('tx-jan-26'),
+      Id.fromString('tx-feb-25'),
+      Id.fromString('tx-feb-26'),
+      Id.fromString('tx-mar-25'),
+      Id.fromString('tx-mar-26'),
+      Id.fromString('tx-apr-25'),
+    ]);
+    const baseClock = new FixedClock(new Date('2026-01-01T00:00:00Z'));
+    const tx = (date: string, amount: string, description: string) =>
+      withTimestamp(
+        Transaction.newWithGenerator(ids, baseClock, amount, Asset.currency('USD'), description),
+        new Date(`${date}T12:00:00Z`),
+      );
+    await storage.appendTransactions(acctId, [
+      tx('2026-01-15', '-10', 'Jan early'),
+      tx('2026-01-26', '-20', 'Jan trailing'),
+      tx('2026-02-25', '-30', 'Feb trailing'),
+      tx('2026-02-26', '-40', 'Feb next'),
+      tx('2026-03-25', '-50', 'Mar trailing'),
+      tx('2026-03-26', '-60', 'Mar next'),
+      tx('2026-04-25', '-70', 'Apr trailing'),
+    ]);
+
+    const out = await spendingReport(storage, new NullMarketDataStore(), cfg, {
+      period: 'monthly',
+      period_alignment: 'end-bound',
+      start: '2026-01-10',
+      end: '2026-04-25',
+      tz: 'UTC',
+      account: 'acct-1',
+      status: 'posted',
+      direction: 'outflow',
+      group_by: 'none',
+      lookback_days: 7,
+      include_empty: true,
+    });
+
+    expect(out.period_alignment).toBe('end-bound');
+    expect(out.periods.map((p) => [p.start_date, p.end_date, p.total, p.transaction_count])).toEqual([
+      ['2026-01-10', '2026-01-25', '10', 1],
+      ['2026-01-26', '2026-02-25', '50', 2],
+      ['2026-02-26', '2026-03-25', '90', 2],
+      ['2026-03-26', '2026-04-25', '130', 2],
+    ]);
+  });
+
   it('buckets by timezone-local date', async () => {
     const storage = new MemoryStorage();
     const cfg = makeConfig();

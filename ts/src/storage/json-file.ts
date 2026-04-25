@@ -74,8 +74,9 @@ function compactTransactionAnnotationPatches(
   for (const patch of sorted) {
     const key = patch.transaction_id.asStr();
     const existing = byTx.get(key);
-    const base: TransactionAnnotationType =
-      existing?.annotation ?? { transaction_id: patch.transaction_id };
+    const base: TransactionAnnotationType = existing?.annotation ?? {
+      transaction_id: patch.transaction_id,
+    };
     const next = applyTransactionAnnotationPatch(base, patch);
     byTx.set(key, {
       annotation: next,
@@ -97,6 +98,9 @@ function compactTransactionAnnotationPatches(
       ...(state.annotation.note !== undefined ? { note: state.annotation.note } : {}),
       ...(state.annotation.category !== undefined ? { category: state.annotation.category } : {}),
       ...(state.annotation.tags !== undefined ? { tags: state.annotation.tags } : {}),
+      ...(state.annotation.effective_date !== undefined
+        ? { effective_date: state.annotation.effective_date }
+        : {}),
     });
   }
 
@@ -381,7 +385,8 @@ export class JsonFileStorage implements Storage, CompactionStorage, MetadataBack
       // First: inline credentials in connection.toml ([credentials] table).
       const configPath = this.connectionConfigFile(connectionId);
       const rawConfig = this.readTomlSync<ConnectionConfig>(configPath);
-      const inlineCreds = rawConfig !== null ? (rawConfig as { credentials?: unknown }).credentials : undefined;
+      const inlineCreds =
+        rawConfig !== null ? (rawConfig as { credentials?: unknown }).credentials : undefined;
       if (inlineCreds !== undefined && inlineCreds !== null) {
         const cfg = parseCredentialConfigValue(inlineCreds);
         if (cfg.backend === 'pass') {
@@ -668,9 +673,7 @@ export class JsonFileStorage implements Storage, CompactionStorage, MetadataBack
       if (fsSync.existsSync(balancesPath)) {
         const balances = await this.getBalanceSnapshots(accountId);
         stats.balance_snapshots_before += balances.length;
-        const sorted = [...balances].sort(
-          (a, b) => a.timestamp.getTime() - b.timestamp.getTime(),
-        );
+        const sorted = [...balances].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
         stats.balance_snapshots_after += sorted.length;
         await this.writeJsonl(
           balancesPath,
@@ -689,7 +692,10 @@ export class JsonFileStorage implements Storage, CompactionStorage, MetadataBack
           return a.id.asStr().localeCompare(b.id.asStr());
         });
         stats.transactions_after += compacted.length;
-        await this.writeJsonl(txPath, compacted.map((t) => Transaction.toJSON(t)));
+        await this.writeJsonl(
+          txPath,
+          compacted.map((t) => Transaction.toJSON(t)),
+        );
         stats.files_rewritten += 1;
       }
 

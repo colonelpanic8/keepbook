@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, TimeZone, Utc};
 use keepbook::models::{
     Account, Asset, AssetBalance, BalanceSnapshot, Connection, ConnectionConfig, ConnectionState,
-    ConnectionStatus, Id,
+    ConnectionStatus, Id, Transaction, TransactionAnnotationPatch, TransactionStatus,
 };
 use keepbook::storage::{JsonFileStorage, Storage};
 use serde::Deserialize;
@@ -27,6 +27,10 @@ struct Seed {
     accounts: Vec<SeedAccount>,
     #[serde(default)]
     balance_snapshots: Vec<SeedBalanceSnapshot>,
+    #[serde(default)]
+    transactions: Vec<SeedTransaction>,
+    #[serde(default)]
+    transaction_annotation_patches: Vec<SeedTransactionAnnotationPatch>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -63,6 +67,35 @@ struct SeedBalanceSnapshot {
 struct SeedAssetBalance {
     asset: serde_json::Value,
     amount: String,
+    #[serde(default)]
+    cost_basis: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SeedTransaction {
+    account_id: String,
+    id: String,
+    timestamp: String,
+    amount: String,
+    asset: serde_json::Value,
+    description: String,
+    #[serde(default = "default_transaction_status")]
+    status: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SeedTransactionAnnotationPatch {
+    account_id: String,
+    transaction_id: String,
+    timestamp: String,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    note: Option<String>,
+    #[serde(default)]
+    category: Option<String>,
+    #[serde(default)]
+    tags: Option<Vec<String>>,
 }
 
 fn default_true() -> bool {
@@ -77,6 +110,10 @@ fn default_connection_status() -> String {
     "active".to_string()
 }
 
+fn default_transaction_status() -> String {
+    "posted".to_string()
+}
+
 fn fixed_created_at() -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap()
 }
@@ -88,6 +125,17 @@ fn parse_conn_status(value: &str) -> Result<ConnectionStatus> {
         "disconnected" => Ok(ConnectionStatus::Disconnected),
         "pending_reauth" => Ok(ConnectionStatus::PendingReauth),
         _ => anyhow::bail!("Invalid connection status: {value}"),
+    }
+}
+
+fn parse_transaction_status(value: &str) -> Result<TransactionStatus> {
+    match value {
+        "pending" => Ok(TransactionStatus::Pending),
+        "posted" => Ok(TransactionStatus::Posted),
+        "reversed" => Ok(TransactionStatus::Reversed),
+        "canceled" => Ok(TransactionStatus::Canceled),
+        "failed" => Ok(TransactionStatus::Failed),
+        _ => anyhow::bail!("Invalid transaction status: {value}"),
     }
 }
 
@@ -142,11 +190,59 @@ async fn seed_storage(storage: &dyn Storage, seed: &Seed) -> Result<()> {
         for b in &s.balances {
             let asset: Asset =
                 serde_json::from_value(b.asset.clone()).context("Invalid asset JSON")?;
-            balances.push(AssetBalance::new(asset, b.amount.clone()));
+            let mut balance = AssetBalance::new(asset, b.amount.clone());
+            if let Some(cost_basis) = &b.cost_basis {
+                balance = balance.with_cost_basis(cost_basis.clone());
+            }
+            balances.push(balance);
         }
         let snapshot = BalanceSnapshot::new(timestamp, balances);
         storage
             .append_balance_snapshot(&account_id, &snapshot)
+            .await?;
+    }
+
+    for t in &seed.transactions {
+        let account_id = Id::from_string_checked(&t.account_id).context("Invalid account id")?;
+        let id = Id::from_string_checked(&t.id).context("Invalid transaction id")?;
+        let timestamp: DateTime<Utc> = t
+            .timestamp
+            .parse()
+            .with_context(|| format!("Invalid transaction timestamp: {}", t.timestamp))?;
+        let asset: Asset =
+            serde_json::from_value(t.asset.clone()).context("Invalid transaction asset JSON")?;
+        let tx = Transaction {
+            id,
+            timestamp,
+            amount: t.amount.clone(),
+            asset,
+            description: t.description.clone(),
+            status: parse_transaction_status(&t.status)?,
+            synchronizer_data: serde_json::Value::Null,
+            standardized_metadata: None,
+        };
+        storage.append_transactions(&account_id, &[tx]).await?;
+    }
+
+    for p in &seed.transaction_annotation_patches {
+        let account_id = Id::from_string_checked(&p.account_id).context("Invalid account id")?;
+        let transaction_id =
+            Id::from_string_checked(&p.transaction_id).context("Invalid transaction id")?;
+        let timestamp: DateTime<Utc> = p
+            .timestamp
+            .parse()
+            .with_context(|| format!("Invalid annotation timestamp: {}", p.timestamp))?;
+        let patch = TransactionAnnotationPatch {
+            transaction_id,
+            timestamp,
+            description: p.description.clone().map(Some),
+            note: p.note.clone().map(Some),
+            category: p.category.clone().map(Some),
+            tags: p.tags.clone().map(Some),
+            effective_date: None,
+        };
+        storage
+            .append_transaction_annotation_patches(&account_id, &[patch])
             .await?;
     }
 

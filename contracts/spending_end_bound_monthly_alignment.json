@@ -1,0 +1,43 @@
+{
+  "scope": { "type": "account", "id": "acct-1", "name": "Checking" },
+  "currency": "USD",
+  "tz": "UTC",
+  "start_date": "2026-01-10",
+  "end_date": "2026-04-25",
+  "period": "monthly",
+  "period_alignment": "end-bound",
+  "direction": "outflow",
+  "status": "posted",
+  "group_by": "none",
+  "total": "280",
+  "transaction_count": 7,
+  "periods": [
+    {
+      "start_date": "2026-01-10",
+      "end_date": "2026-01-25",
+      "total": "10",
+      "transaction_count": 1
+    },
+    {
+      "start_date": "2026-01-26",
+      "end_date": "2026-02-25",
+      "total": "50",
+      "transaction_count": 2
+    },
+    {
+      "start_date": "2026-02-26",
+      "end_date": "2026-03-25",
+      "total": "90",
+      "transaction_count": 2
+    },
+    {
+      "start_date": "2026-03-26",
+      "end_date": "2026-04-25",
+      "total": "130",
+      "transaction_count": 2
+    }
+  ],
+  "skipped_transaction_count": 0,
+  "missing_price_transaction_count": 0,
+  "missing_fx_transaction_count": 0
+}

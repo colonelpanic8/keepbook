@@ -159,6 +159,10 @@ enum Command {
         #[arg(long, default_value = "monthly")]
         period: String,
 
+        /// Bucket alignment: calendar or end-bound (default: calendar)
+        #[arg(long, default_value = "calendar")]
+        period_alignment: String,
+
         /// Start date (YYYY-MM-DD, default: earliest matching transaction)
         #[arg(long)]
         start: Option<String>,
@@ -229,6 +233,10 @@ enum Command {
         /// Period granularity: daily, weekly, monthly, quarterly, yearly, range, custom
         #[arg(long, default_value = "monthly")]
         period: String,
+
+        /// Bucket alignment: calendar or end-bound (default: calendar)
+        #[arg(long, default_value = "calendar")]
+        period_alignment: String,
 
         /// Start date (YYYY-MM-DD, default: earliest matching transaction)
         #[arg(long)]
@@ -400,6 +408,14 @@ enum SetCommand {
         /// Clear tags field
         #[arg(long)]
         clear_tags: bool,
+
+        /// Override reporting date (YYYY-MM-DD) without changing synced timestamp
+        #[arg(long, conflicts_with = "clear_effective_date")]
+        effective_date: Option<String>,
+
+        /// Clear reporting date override
+        #[arg(long)]
+        clear_effective_date: bool,
     },
 }
 
@@ -842,6 +858,8 @@ async fn main() -> Result<()> {
                 tag,
                 tags_empty,
                 clear_tags,
+                effective_date,
+                clear_effective_date,
             } => {
                 let result = app::set_transaction_annotation(
                     storage_arc.as_ref(),
@@ -857,6 +875,8 @@ async fn main() -> Result<()> {
                     tag,
                     tags_empty,
                     clear_tags,
+                    effective_date,
+                    clear_effective_date,
                 )
                 .await?;
                 println!("{}", serde_json::to_string_pretty(&result)?);
@@ -1126,6 +1146,7 @@ async fn main() -> Result<()> {
 
         Some(Command::Spending {
             period,
+            period_alignment,
             start,
             end,
             currency,
@@ -1150,6 +1171,7 @@ async fn main() -> Result<()> {
                     start,
                     end,
                     period,
+                    period_alignment: Some(period_alignment),
                     tz,
                     week_start,
                     bucket,
@@ -1170,6 +1192,7 @@ async fn main() -> Result<()> {
 
         Some(Command::SpendingCategories {
             period,
+            period_alignment,
             start,
             end,
             currency,
@@ -1193,6 +1216,7 @@ async fn main() -> Result<()> {
                     start,
                     end,
                     period,
+                    period_alignment: Some(period_alignment),
                     tz,
                     week_start,
                     bucket,

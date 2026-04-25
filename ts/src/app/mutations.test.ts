@@ -726,4 +726,59 @@ describe('setTransactionAnnotation', () => {
       annotation: null,
     });
   });
+
+  it('sets and clears effective_date', async () => {
+    const storage = new MemoryStorage();
+    const clock = makeClock('2024-06-15T14:30:00Z');
+
+    await addConnection(storage, 'My Bank', makeIdGen('conn-1'), clock);
+    await addAccount(storage, 'conn-1', 'Checking', [], makeIdGen('acct-1'), clock);
+
+    const tx = Transaction.newWithGenerator(
+      makeIdGen('tx-1'),
+      clock,
+      '-1.00',
+      Asset.currency('USD'),
+      'Rent',
+    );
+    await storage.appendTransactions(Id.fromString('acct-1'), [tx]);
+
+    const setClock = makeClock('2024-06-15T15:00:00Z');
+    const setResult = await setTransactionAnnotation(
+      storage,
+      'acct-1',
+      'tx-1',
+      { effective_date: '2024-06-01' },
+      setClock,
+    );
+    expect(setResult).toEqual({
+      success: true,
+      account_id: 'acct-1',
+      transaction_id: 'tx-1',
+      patch: {
+        timestamp: '2024-06-15T15:00:00+00:00',
+        effective_date: '2024-06-01',
+      },
+      annotation: { effective_date: '2024-06-01' },
+    });
+
+    const clearClock = makeClock('2024-06-15T15:00:01Z');
+    const clearResult = await setTransactionAnnotation(
+      storage,
+      'acct-1',
+      'tx-1',
+      { clear_effective_date: true },
+      clearClock,
+    );
+    expect(clearResult).toEqual({
+      success: true,
+      account_id: 'acct-1',
+      transaction_id: 'tx-1',
+      patch: {
+        timestamp: '2024-06-15T15:00:01+00:00',
+        effective_date: null,
+      },
+      annotation: null,
+    });
+  });
 });

@@ -75,6 +75,8 @@ pub struct TransactionAnnotationOutput {
     pub category: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effective_date: Option<String>,
 }
 
 /// Scope output for spending report.
@@ -111,6 +113,7 @@ pub struct SpendingOutput {
     pub start_date: String,
     pub end_date: String,
     pub period: String,
+    pub period_alignment: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub week_start: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

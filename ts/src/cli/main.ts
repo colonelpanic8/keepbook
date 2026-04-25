@@ -139,6 +139,7 @@ program
     'period: daily, weekly, monthly, quarterly, yearly, range, custom',
     'monthly',
   )
+  .option('--period-alignment <mode>', 'bucket alignment: calendar or end-bound', 'calendar')
   .option('--start <date>', 'start date (YYYY-MM-DD)')
   .option('--end <date>', 'end date (YYYY-MM-DD)')
   .option('--currency <code>', 'reporting currency (default: from config)')
@@ -165,6 +166,7 @@ program
   .action(
     async (opts: {
       period: string;
+      periodAlignment?: string;
       start?: string;
       end?: string;
       currency?: string;
@@ -186,6 +188,7 @@ program
         const marketDataStore = new JsonlMarketDataStore(cfg.config.data_dir);
         return spendingReport(storage, marketDataStore, cfg.config, {
           period: opts.period,
+          period_alignment: opts.periodAlignment,
           start: opts.start,
           end: opts.end,
           currency: opts.currency,
@@ -214,6 +217,7 @@ program
     'period: daily, weekly, monthly, quarterly, yearly, range, custom',
     'monthly',
   )
+  .option('--period-alignment <mode>', 'bucket alignment: calendar or end-bound', 'calendar')
   .option('--start <date>', 'start date (YYYY-MM-DD)')
   .option('--end <date>', 'end date (YYYY-MM-DD)')
   .option('--currency <code>', 'reporting currency (default: from config)')
@@ -239,6 +243,7 @@ program
   .action(
     async (opts: {
       period: string;
+      periodAlignment?: string;
       start?: string;
       end?: string;
       currency?: string;
@@ -259,6 +264,7 @@ program
         const marketDataStore = new JsonlMarketDataStore(cfg.config.data_dir);
         return spendingReport(storage, marketDataStore, cfg.config, {
           period: opts.period,
+          period_alignment: opts.periodAlignment,
           start: opts.start,
           end: opts.end,
           currency: opts.currency,
@@ -428,6 +434,8 @@ set
   )
   .option('--tags-empty', 'set tags to empty array')
   .option('--clear-tags', 'clear tags field')
+  .option('--effective-date <date>', 'override reporting date (YYYY-MM-DD)')
+  .option('--clear-effective-date', 'clear reporting date override')
   .action(
     async (opts: {
       account: string;
@@ -441,6 +449,8 @@ set
       tag: string[];
       tagsEmpty?: boolean;
       clearTags?: boolean;
+      effectiveDate?: string;
+      clearEffectiveDate?: boolean;
     }) => {
       await runWithConfig(async (cfg) => {
         const storage = new JsonFileStorage(cfg.config.data_dir);
@@ -454,6 +464,8 @@ set
           tags: opts.tag,
           tags_empty: opts.tagsEmpty,
           clear_tags: opts.clearTags,
+          effective_date: opts.effectiveDate,
+          clear_effective_date: opts.clearEffectiveDate,
         });
         if ((result as { success?: boolean }).success && cfg.config.git.auto_commit) {
           await tryAutoCommit(

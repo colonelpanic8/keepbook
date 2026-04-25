@@ -90,6 +90,44 @@
     "command": ["list", "balances"]
   },
   {
+    "name": "list_balances_cost_basis",
+    "reporting_currency": "USD",
+    "seed": {
+      "connections": [
+        {
+          "id": "conn-1",
+          "name": "Brokerage",
+          "synchronizer": "manual",
+          "status": "active",
+          "account_ids": ["acct-1"]
+        }
+      ],
+      "accounts": [
+        {
+          "id": "acct-1",
+          "name": "Taxable",
+          "connection_id": "conn-1",
+          "tags": [],
+          "active": true
+        }
+      ],
+      "balance_snapshots": [
+        {
+          "account_id": "acct-1",
+          "timestamp": "2024-01-15T10:00:00Z",
+          "balances": [
+            {
+              "asset": { "type": "equity", "ticker": "AAPL" },
+              "amount": "10",
+              "cost_basis": "1500"
+            }
+          ]
+        }
+      ]
+    },
+    "command": ["list", "balances"]
+  },
+  {
     "name": "list_balances_single_eur_reporting_usd",
     "reporting_currency": "USD",
     "seed": {
@@ -152,6 +190,155 @@
       "--granularity",
       "none"
     ]
+  },
+  {
+    "name": "list_transactions_ignores_annotation_tag",
+    "reporting_currency": "USD",
+    "seed": {
+      "connections": [
+        {
+          "id": "conn-1",
+          "name": "Bank",
+          "synchronizer": "manual",
+          "status": "active",
+          "account_ids": ["acct-1"]
+        }
+      ],
+      "accounts": [
+        {
+          "id": "acct-1",
+          "name": "Checking",
+          "connection_id": "conn-1",
+          "tags": [],
+          "active": true
+        }
+      ],
+      "transactions": [
+        {
+          "account_id": "acct-1",
+          "id": "tx-visible",
+          "timestamp": "2026-02-10T12:00:00Z",
+          "amount": "-12.34",
+          "asset": { "type": "currency", "iso_code": "USD" },
+          "description": "Coffee"
+        },
+        {
+          "account_id": "acct-1",
+          "id": "tx-ignored",
+          "timestamp": "2026-02-11T12:00:00Z",
+          "amount": "-300",
+          "asset": { "type": "currency", "iso_code": "USD" },
+          "description": "WIRE Outgoing Wire"
+        }
+      ],
+      "transaction_annotation_patches": [
+        {
+          "account_id": "acct-1",
+          "transaction_id": "tx-ignored",
+          "timestamp": "2026-02-11T13:00:00Z",
+          "note": "Transfer; ignored from spending",
+          "tags": ["ignore_spending"]
+        }
+      ]
+    },
+    "command": ["list", "transactions", "--start", "2026-02-01", "--end", "2026-02-28"]
+  },
+  {
+    "name": "spending_end_bound_monthly_alignment",
+    "reporting_currency": "USD",
+    "seed": {
+      "connections": [
+        {
+          "id": "conn-1",
+          "name": "Bank",
+          "synchronizer": "manual",
+          "status": "active",
+          "account_ids": ["acct-1"]
+        }
+      ],
+      "accounts": [
+        {
+          "id": "acct-1",
+          "name": "Checking",
+          "connection_id": "conn-1",
+          "tags": [],
+          "active": true
+        }
+      ],
+      "transactions": [
+        {
+          "account_id": "acct-1",
+          "id": "tx-jan-15",
+          "timestamp": "2026-01-15T12:00:00Z",
+          "amount": "-10",
+          "asset": { "type": "currency", "iso_code": "USD" },
+          "description": "Jan early"
+        },
+        {
+          "account_id": "acct-1",
+          "id": "tx-jan-26",
+          "timestamp": "2026-01-26T12:00:00Z",
+          "amount": "-20",
+          "asset": { "type": "currency", "iso_code": "USD" },
+          "description": "Jan trailing"
+        },
+        {
+          "account_id": "acct-1",
+          "id": "tx-feb-25",
+          "timestamp": "2026-02-25T12:00:00Z",
+          "amount": "-30",
+          "asset": { "type": "currency", "iso_code": "USD" },
+          "description": "Feb trailing"
+        },
+        {
+          "account_id": "acct-1",
+          "id": "tx-feb-26",
+          "timestamp": "2026-02-26T12:00:00Z",
+          "amount": "-40",
+          "asset": { "type": "currency", "iso_code": "USD" },
+          "description": "Feb next"
+        },
+        {
+          "account_id": "acct-1",
+          "id": "tx-mar-25",
+          "timestamp": "2026-03-25T12:00:00Z",
+          "amount": "-50",
+          "asset": { "type": "currency", "iso_code": "USD" },
+          "description": "Mar trailing"
+        },
+        {
+          "account_id": "acct-1",
+          "id": "tx-mar-26",
+          "timestamp": "2026-03-26T12:00:00Z",
+          "amount": "-60",
+          "asset": { "type": "currency", "iso_code": "USD" },
+          "description": "Mar next"
+        },
+        {
+          "account_id": "acct-1",
+          "id": "tx-apr-25",
+          "timestamp": "2026-04-25T12:00:00Z",
+          "amount": "-70",
+          "asset": { "type": "currency", "iso_code": "USD" },
+          "description": "Apr trailing"
+        }
+      ]
+    },
+    "command": [
+      "spending",
+      "--period",
+      "monthly",
+      "--period-alignment",
+      "end-bound",
+      "--start",
+      "2026-01-10",
+      "--end",
+      "2026-04-25",
+      "--tz",
+      "UTC",
+      "--account",
+      "acct-1",
+      "--include-empty"
+    ]
   }
 ]
-

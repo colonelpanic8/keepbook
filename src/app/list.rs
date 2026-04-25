@@ -18,6 +18,21 @@ use super::{
     TransactionAnnotationOutput, TransactionOutput,
 };
 
+const SPENDING_IGNORE_TAGS: [&str; 3] = ["ignore_spending", "ignore-spending", "ignore:spending"];
+
+fn annotation_ignores_spending(annotation: &TransactionAnnotation) -> bool {
+    annotation
+        .tags
+        .as_ref()
+        .map(|tags| {
+            tags.iter().any(|tag| {
+                let normalized = tag.trim().to_lowercase();
+                SPENDING_IGNORE_TAGS.contains(&normalized.as_str())
+            })
+        })
+        .unwrap_or(false)
+}
+
 pub async fn list_connections(storage: &dyn Storage) -> Result<Vec<ConnectionOutput>> {
     let connections = storage.list_connections().await?;
     let accounts = storage.list_accounts().await?;
@@ -253,7 +268,10 @@ pub async fn list_transactions(
         }
 
         for tx in transactions {
-            let tx_date = tx.timestamp.date_naive();
+            let ann = annotations_by_tx.get(&tx.id);
+            let tx_date = ann
+                .and_then(|annotation| annotation.effective_date)
+                .unwrap_or_else(|| tx.timestamp.date_naive());
             if tx_date < start_date || tx_date > end_date {
                 continue;
             }
@@ -293,9 +311,17 @@ pub async fn list_transactions(
                         note: ann.note.clone(),
                         category: ann.category.clone(),
                         tags: ann.tags.clone(),
+                        effective_date: ann.effective_date.map(|d| d.to_string()),
                     })
                 }
             });
+            if skip_ignored
+                && annotations_by_tx
+                    .get(&tx.id)
+                    .is_some_and(annotation_ignores_spending)
+            {
+                continue;
+            }
 
             output.push(TransactionOutput {
                 id: tx.id.to_string(),
@@ -373,6 +399,7 @@ mod tests {
             note: None,
             category: Some(Some("food".to_string())),
             tags: Some(Some(vec!["coffee".to_string()])),
+            effective_date: None,
         };
         storage
             .append_transaction_annotation_patches(&account_id, &[patch])
@@ -408,6 +435,163 @@ mod tests {
             out[0].annotation.as_ref().unwrap().tags.clone().unwrap(),
             vec!["coffee".to_string()]
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn list_transactions_filters_by_annotation_effective_date() -> Result<()> {
+        let storage = MemoryStorage::new();
+        let clock = FixedClock::new(Utc.with_ymd_and_hms(2026, 2, 5, 12, 0, 0).unwrap());
+
+        let account_id = Id::from_string("acct-1");
+        let account = Account::new_with(
+            account_id.clone(),
+            clock.now(),
+            "Checking",
+            Id::from_string("conn-1"),
+        );
+        storage.save_account(&account).await?;
+
+        let ids = FixedIdGenerator::new([Id::from_string("tx-1")]);
+        let tx =
+            Transaction::new_with_generator(&ids, &clock, "-1", Asset::currency("USD"), "Rent");
+        storage.append_transactions(&account_id, &[tx]).await?;
+
+        storage
+            .append_transaction_annotation_patches(
+                &account_id,
+                &[TransactionAnnotationPatch {
+                    transaction_id: Id::from_string("tx-1"),
+                    timestamp: clock.now(),
+                    description: None,
+                    note: None,
+                    category: None,
+                    tags: None,
+                    effective_date: Some(Some(
+                        chrono::NaiveDate::from_ymd_opt(2026, 1, 31).unwrap(),
+                    )),
+                }],
+            )
+            .await?;
+
+        let out = list_transactions(
+            &storage,
+            Some("2026-01-31".to_string()),
+            Some("2026-01-31".to_string()),
+            false,
+            true,
+            &ResolvedConfig {
+                data_dir: std::path::PathBuf::from("/tmp"),
+                reporting_currency: "USD".to_string(),
+                display: crate::config::DisplayConfig::default(),
+                refresh: crate::config::RefreshConfig::default(),
+                history: crate::config::HistoryConfig::default(),
+                tray: crate::config::TrayConfig::default(),
+                spending: crate::config::SpendingConfig::default(),
+                portfolio: crate::config::PortfolioConfig::default(),
+                ignore: crate::config::IgnoreConfig::default(),
+                git: crate::config::GitConfig::default(),
+            },
+        )
+        .await?;
+
+        assert_eq!(out.len(), 1);
+        assert_eq!(
+            out[0]
+                .annotation
+                .as_ref()
+                .unwrap()
+                .effective_date
+                .as_deref(),
+            Some("2026-01-31")
+        );
+        assert_eq!(out[0].timestamp, "2026-02-05T12:00:00+00:00");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn list_transactions_skips_annotation_ignore_spending_tags() -> Result<()> {
+        let storage = MemoryStorage::new();
+        let clock = FixedClock::new(Utc.with_ymd_and_hms(2026, 2, 5, 12, 0, 0).unwrap());
+
+        let account_id = Id::from_string("acct-1");
+        let account = Account::new_with(
+            account_id.clone(),
+            clock.now(),
+            "Checking",
+            Id::from_string("conn-1"),
+        );
+        storage.save_account(&account).await?;
+
+        let ids = FixedIdGenerator::new([Id::from_string("tx-1")]);
+        let tx = Transaction::new_with_generator(
+            &ids,
+            &clock,
+            "-30000",
+            Asset::currency("USD"),
+            "WIRE Outgoing Wire",
+        );
+        storage.append_transactions(&account_id, &[tx]).await?;
+
+        storage
+            .append_transaction_annotation_patches(
+                &account_id,
+                &[TransactionAnnotationPatch {
+                    transaction_id: Id::from_string("tx-1"),
+                    timestamp: clock.now(),
+                    description: None,
+                    note: Some(Some("Transfer; ignored from spending".to_string())),
+                    category: None,
+                    tags: Some(Some(vec!["ignore_spending".to_string()])),
+                    effective_date: None,
+                }],
+            )
+            .await?;
+
+        let skipped = list_transactions(
+            &storage,
+            Some("2000-01-01".to_string()),
+            Some("2099-12-31".to_string()),
+            false,
+            true,
+            &ResolvedConfig {
+                data_dir: std::path::PathBuf::from("/tmp"),
+                reporting_currency: "USD".to_string(),
+                display: crate::config::DisplayConfig::default(),
+                refresh: crate::config::RefreshConfig::default(),
+                history: crate::config::HistoryConfig::default(),
+                tray: crate::config::TrayConfig::default(),
+                spending: crate::config::SpendingConfig::default(),
+                portfolio: crate::config::PortfolioConfig::default(),
+                ignore: crate::config::IgnoreConfig::default(),
+                git: crate::config::GitConfig::default(),
+            },
+        )
+        .await?;
+        assert!(skipped.is_empty());
+
+        let included = list_transactions(
+            &storage,
+            Some("2000-01-01".to_string()),
+            Some("2099-12-31".to_string()),
+            false,
+            false,
+            &ResolvedConfig {
+                data_dir: std::path::PathBuf::from("/tmp"),
+                reporting_currency: "USD".to_string(),
+                display: crate::config::DisplayConfig::default(),
+                refresh: crate::config::RefreshConfig::default(),
+                history: crate::config::HistoryConfig::default(),
+                tray: crate::config::TrayConfig::default(),
+                spending: crate::config::SpendingConfig::default(),
+                portfolio: crate::config::PortfolioConfig::default(),
+                ignore: crate::config::IgnoreConfig::default(),
+                git: crate::config::GitConfig::default(),
+            },
+        )
+        .await?;
+        assert_eq!(included.len(), 1);
+        assert!(included[0].annotation.is_some());
         Ok(())
     }
 

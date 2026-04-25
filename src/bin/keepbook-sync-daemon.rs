@@ -1285,6 +1285,7 @@ impl Daemon {
             start: Some(start.format("%Y-%m-%d").to_string()),
             end: Some(end.format("%Y-%m-%d").to_string()),
             period: "range".to_string(),
+            period_alignment: None,
             tz: None,
             week_start: None,
             bucket: None,

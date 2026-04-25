@@ -729,6 +729,7 @@ fn compact_transaction_annotation_patches(
             note: ann.note.map(Some),
             category: ann.category.map(Some),
             tags: ann.tags.map(Some),
+            effective_date: ann.effective_date.map(Some),
         });
     }
 
@@ -1131,6 +1132,7 @@ mod tests {
             note: Some(Some("memo".to_string())),
             category: None,
             tags: None,
+            effective_date: None,
         };
         let patch_category = TransactionAnnotationPatch {
             transaction_id: Id::from_string("tx-anno"),
@@ -1139,6 +1141,7 @@ mod tests {
             note: None,
             category: Some(Some("food".to_string())),
             tags: None,
+            effective_date: None,
         };
         let patch_set_then_clear_a = TransactionAnnotationPatch {
             transaction_id: Id::from_string("tx-clear"),
@@ -1147,6 +1150,7 @@ mod tests {
             note: None,
             category: None,
             tags: None,
+            effective_date: None,
         };
         let patch_set_then_clear_b = TransactionAnnotationPatch {
             transaction_id: Id::from_string("tx-clear"),
@@ -1155,6 +1159,7 @@ mod tests {
             note: None,
             category: None,
             tags: None,
+            effective_date: None,
         };
         storage
             .append_transaction_annotation_patches(

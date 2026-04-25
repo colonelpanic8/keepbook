@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Deserializer, Serialize};
 
 use super::Id;
@@ -15,6 +15,8 @@ pub struct TransactionAnnotation {
     pub category: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_date: Option<NaiveDate>,
 }
 
 impl TransactionAnnotation {
@@ -25,6 +27,7 @@ impl TransactionAnnotation {
             note: None,
             category: None,
             tags: None,
+            effective_date: None,
         }
     }
 
@@ -33,6 +36,7 @@ impl TransactionAnnotation {
             && self.note.is_none()
             && self.category.is_none()
             && self.tags.is_none()
+            && self.effective_date.is_none()
     }
 }
 
@@ -71,6 +75,12 @@ pub struct TransactionAnnotationPatch {
         deserialize_with = "deserialize_patch_field"
     )]
     pub tags: Option<Option<Vec<String>>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_patch_field"
+    )]
+    pub effective_date: Option<Option<NaiveDate>>,
 }
 
 fn deserialize_patch_field<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
@@ -95,6 +105,9 @@ impl TransactionAnnotationPatch {
         if let Some(v) = &self.tags {
             ann.tags = v.clone();
         }
+        if let Some(v) = &self.effective_date {
+            ann.effective_date = *v;
+        }
     }
 }
 
@@ -116,6 +129,7 @@ mod tests {
             note: Some(Some("hello".to_string())),
             category: None,
             tags: None,
+            effective_date: None,
         };
         set_note.apply_to(&mut ann);
         assert_eq!(ann.note, Some("hello".to_string()));
@@ -127,6 +141,7 @@ mod tests {
             note: Some(None),
             category: None,
             tags: None,
+            effective_date: None,
         };
         clear_note.apply_to(&mut ann);
         assert_eq!(ann.note, None);

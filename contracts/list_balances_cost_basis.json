@@ -1,0 +1,11 @@
+[
+  {
+    "account_id": "acct-1",
+    "asset": { "ticker": "AAPL", "type": "equity" },
+    "amount": "10",
+    "cost_basis": "1500",
+    "value_in_reporting_currency": null,
+    "reporting_currency": "USD",
+    "timestamp": "2024-01-15T10:00:00+00:00"
+  }
+]

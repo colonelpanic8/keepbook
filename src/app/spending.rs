@@ -26,6 +26,7 @@ pub struct SpendingReportOptions {
     pub start: Option<String>,
     pub end: Option<String>,
     pub period: String,
+    pub period_alignment: Option<String>,
     pub tz: Option<String>,
     pub week_start: Option<String>,
     pub bucket: Option<std::time::Duration>,
@@ -49,6 +50,12 @@ enum Period {
     Yearly,
     Range,
     CustomDays(u32),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PeriodAlignment {
+    Calendar,
+    EndBound,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -163,6 +170,18 @@ fn parse_period(
     }
 }
 
+fn parse_period_alignment(s: Option<&str>) -> Result<(PeriodAlignment, String)> {
+    match s.unwrap_or("calendar").trim().to_lowercase().as_str() {
+        "" | "calendar" | "start" | "start-bound" | "month-start" => {
+            Ok((PeriodAlignment::Calendar, "calendar".to_string()))
+        }
+        "end" | "end-bound" | "trailing" | "rolling" => {
+            Ok((PeriodAlignment::EndBound, "end-bound".to_string()))
+        }
+        other => anyhow::bail!("Invalid period alignment: {other}. Use: calendar, end-bound"),
+    }
+}
+
 fn parse_direction(s: &str) -> Result<(Direction, String)> {
     match s.trim().to_lowercase().as_str() {
         "outflow" => Ok((Direction::Outflow, "outflow".to_string())),
@@ -249,6 +268,14 @@ fn last_day_of_month(year: i32, month: u32) -> NaiveDate {
     first_next - chrono::Duration::days(1)
 }
 
+fn add_months_clamped(date: NaiveDate, months: i32) -> NaiveDate {
+    let total_months = date.year() * 12 + date.month0() as i32 + months;
+    let year = total_months.div_euclid(12);
+    let month = total_months.rem_euclid(12) as u32 + 1;
+    let day = date.day().min(last_day_of_month(year, month).day());
+    NaiveDate::from_ymd_opt(year, month, day).expect("valid date")
+}
+
 fn bucket_start_for(
     date: NaiveDate,
     period: Period,
@@ -300,6 +327,18 @@ fn bucket_end_for(start: NaiveDate, period: Period, range_end: NaiveDate) -> Nai
     }
 }
 
+fn end_bound_bucket_start_for_end(end: NaiveDate, period: Period) -> NaiveDate {
+    match period {
+        Period::Daily => end,
+        Period::Weekly => end - chrono::Duration::days(6),
+        Period::Monthly => add_months_clamped(end, -1) + chrono::Duration::days(1),
+        Period::Quarterly => add_months_clamped(end, -3) + chrono::Duration::days(1),
+        Period::Yearly => add_months_clamped(end, -12) + chrono::Duration::days(1),
+        Period::Range => end,
+        Period::CustomDays(days) => end - chrono::Duration::days(days as i64 - 1),
+    }
+}
+
 fn next_bucket_start(start: NaiveDate, period: Period) -> NaiveDate {
     match period {
         Period::Daily => start + chrono::Duration::days(1),
@@ -323,6 +362,63 @@ fn next_bucket_start(start: NaiveDate, period: Period) -> NaiveDate {
         Period::Yearly => NaiveDate::from_ymd_opt(start.year() + 1, 1, 1).expect("valid date"),
         Period::Range => start, // caller should special-case
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct BucketInterval {
+    start: NaiveDate,
+    end: NaiveDate,
+}
+
+fn build_bucket_intervals(
+    start_date: NaiveDate,
+    end_date: NaiveDate,
+    period: Period,
+    week_start: WeekStart,
+    alignment: PeriodAlignment,
+) -> Vec<BucketInterval> {
+    if matches!(period, Period::Range) {
+        return vec![BucketInterval {
+            start: start_date,
+            end: end_date,
+        }];
+    }
+
+    match alignment {
+        PeriodAlignment::Calendar => {
+            let mut start = bucket_start_for(start_date, period, week_start, start_date);
+            let mut intervals = Vec::new();
+            while start <= end_date {
+                intervals.push(BucketInterval {
+                    start,
+                    end: bucket_end_for(start, period, end_date),
+                });
+                start = next_bucket_start(start, period);
+            }
+            intervals
+        }
+        PeriodAlignment::EndBound => {
+            let mut intervals = Vec::new();
+            let mut end = end_date;
+            loop {
+                let start = end_bound_bucket_start_for_end(end, period);
+                intervals.push(BucketInterval { start, end });
+                if start <= start_date {
+                    break;
+                }
+                end = start - chrono::Duration::days(1);
+            }
+            intervals.reverse();
+            intervals
+        }
+    }
+}
+
+fn bucket_start_from_intervals(date: NaiveDate, intervals: &[BucketInterval]) -> Option<NaiveDate> {
+    intervals
+        .iter()
+        .find(|interval| date >= interval.start && date <= interval.end)
+        .map(|interval| interval.start)
 }
 
 fn clamp_date(date: NaiveDate, min: NaiveDate, max: NaiveDate) -> NaiveDate {
@@ -426,6 +522,8 @@ async fn spending_report_with_store(
 
     let (tz, tz_label) = TzSpec::parse(opts.tz.as_deref())?;
     let (period, period_label, bucket_days) = parse_period(&opts.period, opts.bucket)?;
+    let (period_alignment, period_alignment_label) =
+        parse_period_alignment(opts.period_alignment.as_deref())?;
     let (direction, direction_label) = parse_direction(&opts.direction)?;
     let (status_filter, status_label) = parse_status_filter(&opts.status)?;
     let (group_by, group_by_label) = parse_group_by(&opts.group_by)?;
@@ -568,7 +666,11 @@ async fn spending_report_with_store(
                 continue;
             }
 
-            let local_date = tz.date_in_tz(tx.timestamp);
+            let annotation = annotations_by_tx.get(&tx.id).cloned();
+            let local_date = annotation
+                .as_ref()
+                .and_then(|ann| ann.effective_date)
+                .unwrap_or_else(|| tz.date_in_tz(tx.timestamp));
             min_date = Some(match min_date {
                 None => local_date,
                 Some(d) => d.min(local_date),
@@ -579,7 +681,6 @@ async fn spending_report_with_store(
                 continue;
             }
 
-            let annotation = annotations_by_tx.get(&tx.id).cloned();
             if annotation_ignores_spending(annotation.as_ref()) {
                 continue;
             }
@@ -605,6 +706,12 @@ async fn spending_report_with_store(
     if end_date < start_date {
         anyhow::bail!("end date {end_date} is before start date {start_date}");
     }
+    let intervals =
+        build_bucket_intervals(start_date, end_date, period, week_start, period_alignment);
+    let interval_ends: HashMap<NaiveDate, NaiveDate> = intervals
+        .iter()
+        .map(|interval| (interval.start, interval.end))
+        .collect();
 
     let mut buckets: HashMap<NaiveDate, BucketAgg> = HashMap::new();
     let mut skipped = 0usize;
@@ -670,7 +777,9 @@ async fn spending_report_with_store(
         included_tx += 1;
         grand_total += directed;
 
-        let bucket_start = bucket_start_for(row.local_date, period, week_start, start_date);
+        let Some(bucket_start) = bucket_start_from_intervals(row.local_date, &intervals) else {
+            continue;
+        };
         let agg = buckets.entry(bucket_start).or_default();
         agg.total += directed;
         agg.tx_count += 1;
@@ -712,17 +821,7 @@ async fn spending_report_with_store(
     }
 
     let mut starts: Vec<NaiveDate> = if opts.include_empty {
-        let mut s = bucket_start_for(start_date, period, week_start, start_date);
-        let mut out = Vec::new();
-        if matches!(period, Period::Range) {
-            out.push(s);
-        } else {
-            while s <= end_date {
-                out.push(s);
-                s = next_bucket_start(s, period);
-            }
-        }
-        out
+        intervals.iter().map(|interval| interval.start).collect()
     } else {
         let mut out: Vec<NaiveDate> = buckets.keys().cloned().collect();
         out.sort();
@@ -735,7 +834,10 @@ async fn spending_report_with_store(
 
     let mut period_outputs = Vec::new();
     for bstart in starts {
-        let bend = bucket_end_for(bstart, period, end_date);
+        let bend = interval_ends
+            .get(&bstart)
+            .copied()
+            .unwrap_or_else(|| bucket_end_for(bstart, period, end_date));
         let clamped_start = clamp_date(bstart, start_date, end_date);
         let clamped_end = clamp_date(bend, start_date, end_date);
         let agg = buckets.get(&bstart);
@@ -791,6 +893,7 @@ async fn spending_report_with_store(
         start_date: format_ymd(start_date),
         end_date: format_ymd(end_date),
         period: period_label,
+        period_alignment: period_alignment_label,
         week_start: if matches!(period, Period::Weekly) {
             Some(week_start_label)
         } else {
@@ -826,6 +929,117 @@ mod tests {
     };
     use crate::storage::MemoryStorage;
     use chrono::TimeZone;
+
+    #[tokio::test]
+    async fn spending_report_supports_end_bound_monthly_alignment() -> Result<()> {
+        let storage = MemoryStorage::new();
+        let conn_id = Id::from_string("conn-1");
+        let acct_id = Id::from_string("acct-1");
+        let account = Account::new_with(acct_id.clone(), Utc::now(), "Checking", conn_id);
+        storage.save_account(&account).await?;
+
+        let ids = FixedIdGenerator::new([
+            Id::from_string("tx-jan-15"),
+            Id::from_string("tx-jan-26"),
+            Id::from_string("tx-feb-25"),
+            Id::from_string("tx-feb-26"),
+            Id::from_string("tx-mar-25"),
+            Id::from_string("tx-mar-26"),
+            Id::from_string("tx-apr-25"),
+        ]);
+        let clock = FixedClock::new(Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap());
+        let tx = |date: (i32, u32, u32), amount: &str, description: &str| {
+            Transaction::new_with_generator(
+                &ids,
+                &clock,
+                amount,
+                Asset::currency("USD"),
+                description,
+            )
+            .with_timestamp(
+                Utc.with_ymd_and_hms(date.0, date.1, date.2, 12, 0, 0)
+                    .unwrap(),
+            )
+        };
+        storage
+            .append_transactions(
+                &acct_id,
+                &[
+                    tx((2026, 1, 15), "-10", "Jan early"),
+                    tx((2026, 1, 26), "-20", "Jan trailing"),
+                    tx((2026, 2, 25), "-30", "Feb trailing"),
+                    tx((2026, 2, 26), "-40", "Feb next"),
+                    tx((2026, 3, 25), "-50", "Mar trailing"),
+                    tx((2026, 3, 26), "-60", "Mar next"),
+                    tx((2026, 4, 25), "-70", "Apr trailing"),
+                ],
+            )
+            .await?;
+
+        let cfg = ResolvedConfig {
+            data_dir: std::path::PathBuf::from("/tmp"),
+            reporting_currency: "USD".to_string(),
+            display: crate::config::DisplayConfig::default(),
+            refresh: crate::config::RefreshConfig::default(),
+            history: crate::config::HistoryConfig::default(),
+            tray: crate::config::TrayConfig::default(),
+            spending: crate::config::SpendingConfig::default(),
+            portfolio: crate::config::PortfolioConfig::default(),
+            ignore: crate::config::IgnoreConfig::default(),
+            git: crate::config::GitConfig::default(),
+        };
+
+        let out = spending_report_with_store(
+            &storage,
+            &cfg,
+            SpendingReportOptions {
+                currency: None,
+                start: Some("2026-01-10".to_string()),
+                end: Some("2026-04-25".to_string()),
+                period: "monthly".to_string(),
+                period_alignment: Some("end-bound".to_string()),
+                tz: Some("UTC".to_string()),
+                week_start: None,
+                bucket: None,
+                account: Some("acct-1".to_string()),
+                connection: None,
+                status: "posted".to_string(),
+                direction: "outflow".to_string(),
+                group_by: "none".to_string(),
+                top: None,
+                lookback_days: 7,
+                include_noncurrency: false,
+                include_empty: true,
+            },
+            Arc::new(MemoryMarketDataStore::default()),
+        )
+        .await?;
+
+        assert_eq!(out.period_alignment, "end-bound");
+        let periods: Vec<_> = out
+            .periods
+            .iter()
+            .map(|p| {
+                (
+                    p.start_date.as_str(),
+                    p.end_date.as_str(),
+                    p.total.as_str(),
+                    p.transaction_count,
+                )
+            })
+            .collect();
+        assert_eq!(
+            periods,
+            vec![
+                ("2026-01-10", "2026-01-25", "10", 1),
+                ("2026-01-26", "2026-02-25", "50", 2),
+                ("2026-02-26", "2026-03-25", "90", 2),
+                ("2026-03-26", "2026-04-25", "130", 2),
+            ]
+        );
+
+        Ok(())
+    }
 
     #[tokio::test]
     async fn spending_report_buckets_by_timezone_date() -> Result<()> {
@@ -870,6 +1084,7 @@ mod tests {
                 start: Some("2026-01-30".to_string()),
                 end: Some("2026-02-02".to_string()),
                 period: "daily".to_string(),
+                period_alignment: None,
                 tz: Some("America/New_York".to_string()),
                 week_start: None,
                 bucket: None,
@@ -973,6 +1188,7 @@ mod tests {
                 start: Some("2026-02-01".to_string()),
                 end: Some("2026-02-28".to_string()),
                 period: "monthly".to_string(),
+                period_alignment: None,
                 tz: Some("UTC".to_string()),
                 week_start: None,
                 bucket: None,
@@ -1045,6 +1261,7 @@ mod tests {
                     note: None,
                     category: Some(Some("Dining".to_string())),
                     tags: None,
+                    effective_date: None,
                 }],
             )
             .await?;
@@ -1070,6 +1287,7 @@ mod tests {
                 start: Some("2026-02-01".to_string()),
                 end: Some("2026-02-28".to_string()),
                 period: "monthly".to_string(),
+                period_alignment: None,
                 tz: Some("UTC".to_string()),
                 week_start: None,
                 bucket: None,
@@ -1168,6 +1386,7 @@ mod tests {
                 start: Some("2026-02-01".to_string()),
                 end: Some("2026-02-28".to_string()),
                 period: "monthly".to_string(),
+                period_alignment: None,
                 tz: Some("UTC".to_string()),
                 week_start: None,
                 bucket: None,
@@ -1262,6 +1481,7 @@ mod tests {
                 start: Some("2026-02-01".to_string()),
                 end: Some("2026-02-28".to_string()),
                 period: "monthly".to_string(),
+                period_alignment: None,
                 tz: Some("UTC".to_string()),
                 week_start: None,
                 bucket: None,
@@ -1345,6 +1565,7 @@ mod tests {
                 start: Some("2026-02-01".to_string()),
                 end: Some("2026-02-28".to_string()),
                 period: "monthly".to_string(),
+                period_alignment: None,
                 tz: Some("UTC".to_string()),
                 week_start: None,
                 bucket: None,
@@ -1402,6 +1623,7 @@ mod tests {
                     note: None,
                     category: None,
                     tags: Some(Some(vec!["ignore_spending".to_string()])),
+                    effective_date: None,
                 }],
             )
             .await?;
@@ -1427,6 +1649,7 @@ mod tests {
                 start: Some("2026-02-01".to_string()),
                 end: Some("2026-02-28".to_string()),
                 period: "monthly".to_string(),
+                period_alignment: None,
                 tz: Some("UTC".to_string()),
                 week_start: None,
                 bucket: None,

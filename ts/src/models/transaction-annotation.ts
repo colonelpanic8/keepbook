@@ -10,6 +10,7 @@ export interface TransactionAnnotationType {
   readonly note?: string;
   readonly category?: string;
   readonly tags?: string[];
+  readonly effective_date?: string;
 }
 
 export function isEmptyTransactionAnnotation(a: TransactionAnnotationType): boolean {
@@ -17,7 +18,8 @@ export function isEmptyTransactionAnnotation(a: TransactionAnnotationType): bool
     a.description === undefined &&
     a.note === undefined &&
     a.category === undefined &&
-    a.tags === undefined
+    a.tags === undefined &&
+    a.effective_date === undefined
   );
 }
 
@@ -38,6 +40,7 @@ export interface TransactionAnnotationPatchType {
   readonly note?: string | null;
   readonly category?: string | null;
   readonly tags?: string[] | null;
+  readonly effective_date?: string | null;
 }
 
 export interface TransactionAnnotationPatchJSON {
@@ -47,6 +50,7 @@ export interface TransactionAnnotationPatchJSON {
   note?: string | null;
   category?: string | null;
   tags?: string[] | null;
+  effective_date?: string | null;
 }
 
 export const TransactionAnnotationPatch = {
@@ -59,6 +63,7 @@ export const TransactionAnnotationPatch = {
     if (p.note !== undefined) json.note = p.note;
     if (p.category !== undefined) json.category = p.category;
     if (p.tags !== undefined) json.tags = p.tags;
+    if (p.effective_date !== undefined) json.effective_date = p.effective_date;
     return json;
   },
 
@@ -71,6 +76,7 @@ export const TransactionAnnotationPatch = {
       note: json.note,
       category: json.category,
       tags: json.tags,
+      effective_date: json.effective_date,
     };
   },
 } as const;
@@ -86,11 +92,10 @@ export function applyTransactionAnnotationPatch(
   let out: TransactionAnnotationType = base;
 
   if (patch.description !== undefined) {
-    const { description: _old, ...rest } = out as TransactionAnnotationType & { description?: string };
-    out =
-      patch.description === null
-        ? rest
-        : { ...rest, description: patch.description };
+    const { description: _old, ...rest } = out as TransactionAnnotationType & {
+      description?: string;
+    };
+    out = patch.description === null ? rest : { ...rest, description: patch.description };
   }
   if (patch.note !== undefined) {
     const { note: _old, ...rest } = out as TransactionAnnotationType & { note?: string };
@@ -104,7 +109,12 @@ export function applyTransactionAnnotationPatch(
     const { tags: _old, ...rest } = out as TransactionAnnotationType & { tags?: string[] };
     out = patch.tags === null ? rest : { ...rest, tags: patch.tags };
   }
+  if (patch.effective_date !== undefined) {
+    const { effective_date: _old, ...rest } = out as TransactionAnnotationType & {
+      effective_date?: string;
+    };
+    out = patch.effective_date === null ? rest : { ...rest, effective_date: patch.effective_date };
+  }
 
   return out;
 }
-

@@ -13,7 +13,7 @@ import { AssetBalance, BalanceSnapshot } from '../models/balance.js';
 import { Id } from '../models/id.js';
 import { type IdGenerator, UuidIdGenerator } from '../models/id-generator.js';
 import { type Clock, SystemClock } from '../clock.js';
-import { parseAsset, formatRfc3339, decStr } from './format.js';
+import { parseAsset, formatRfc3339, decStr, formatDateYMD } from './format.js';
 import { Decimal } from '../decimal.js';
 import {
   TransactionAnnotationPatch,
@@ -400,6 +400,8 @@ export type SetTransactionAnnotationArgs = {
   tags?: string[];
   tags_empty?: boolean;
   clear_tags?: boolean;
+  effective_date?: string;
+  clear_effective_date?: boolean;
 };
 
 /**
@@ -424,6 +426,8 @@ export async function setTransactionAnnotation(
   const tags = args.tags ?? [];
   const tagsEmpty = args.tags_empty ?? false;
   const clearTags = args.clear_tags ?? false;
+  const effectiveDate = args.effective_date;
+  const clearEffectiveDate = args.clear_effective_date ?? false;
 
   if (clearDescription && description !== undefined) {
     return { success: false, error: 'Cannot use description and clear_description together' };
@@ -437,6 +441,22 @@ export async function setTransactionAnnotation(
   if (clearTags && (tagsEmpty || tags.length > 0)) {
     return { success: false, error: 'Cannot use clear_tags with tags/tags_empty' };
   }
+  if (clearEffectiveDate && effectiveDate !== undefined) {
+    return {
+      success: false,
+      error: 'Cannot use effective_date and clear_effective_date together',
+    };
+  }
+  if (effectiveDate !== undefined) {
+    const parsedEffectiveDate = new Date(`${effectiveDate}T00:00:00Z`);
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(effectiveDate) ||
+      Number.isNaN(parsedEffectiveDate.getTime()) ||
+      formatDateYMD(parsedEffectiveDate) !== effectiveDate
+    ) {
+      return { success: false, error: `Invalid effective date: ${effectiveDate}` };
+    }
+  }
 
   const hasChange =
     description !== undefined ||
@@ -447,7 +467,9 @@ export async function setTransactionAnnotation(
     clearCategory ||
     tags.length > 0 ||
     tagsEmpty ||
-    clearTags;
+    clearTags ||
+    effectiveDate !== undefined ||
+    clearEffectiveDate;
   if (!hasChange) {
     return { success: false, error: 'No annotation fields specified' };
   }
@@ -493,6 +515,11 @@ export async function setTransactionAnnotation(
         : tags.length > 0
           ? { tags: [...tags] }
           : {}),
+    ...(clearEffectiveDate
+      ? { effective_date: null }
+      : effectiveDate !== undefined
+        ? { effective_date: effectiveDate }
+        : {}),
   };
 
   await storage.appendTransactionAnnotationPatches(accountId, [patch]);
@@ -511,6 +538,7 @@ export async function setTransactionAnnotation(
   if (patchJson.note !== undefined) patchOut.note = patchJson.note;
   if (patchJson.category !== undefined) patchOut.category = patchJson.category;
   if (patchJson.tags !== undefined) patchOut.tags = patchJson.tags;
+  if (patchJson.effective_date !== undefined) patchOut.effective_date = patchJson.effective_date;
 
   let annotationOut: Record<string, unknown> | null = null;
   if (!isEmptyTransactionAnnotation(ann)) {
@@ -519,6 +547,7 @@ export async function setTransactionAnnotation(
     if (ann.note !== undefined) m.note = ann.note;
     if (ann.category !== undefined) m.category = ann.category;
     if (ann.tags !== undefined) m.tags = ann.tags;
+    if (ann.effective_date !== undefined) m.effective_date = ann.effective_date;
     annotationOut = m;
   }
 

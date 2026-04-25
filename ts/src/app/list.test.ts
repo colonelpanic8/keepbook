@@ -45,6 +45,7 @@ function makeConfig(overrides?: Partial<ResolvedConfig>): ResolvedConfig {
       balance_staleness: 14 * 86400000,
       price_staleness: 24 * 60 * 60 * 1000,
     },
+    history: { allow_future_projection: false },
     tray: { history_points: 8, spending_windows_days: [7, 30, 90] },
     spending: { ignore_accounts: [], ignore_connections: [], ignore_tags: [] },
     portfolio: {
@@ -624,6 +625,88 @@ describe('listTransactions', () => {
       asset: { type: 'currency', iso_code: 'USD' },
       status: 'posted',
       annotation: { category: 'food', tags: ['coffee', 'treat'] },
+    });
+  });
+
+  it('filters transactions by annotation effective_date when present', async () => {
+    const storage = new MemoryStorage();
+    const clock = makeClock('2026-02-05T12:00:00Z');
+
+    const acct = Account.newWithGenerator(
+      makeIdGen('acct-1'),
+      clock,
+      'Checking',
+      Id.fromString('conn-1'),
+    );
+    await storage.saveAccount(acct);
+
+    const tx = Transaction.newWithGenerator(
+      makeIdGen('tx-1'),
+      clock,
+      '-4448.88',
+      Asset.currency('USD'),
+      'Rent',
+    );
+    await storage.appendTransactions(acct.id, [tx]);
+    await storage.appendTransactionAnnotationPatches(acct.id, [
+      {
+        transaction_id: Id.fromString('tx-1'),
+        timestamp: new Date('2026-02-05T13:00:00Z'),
+        effective_date: '2026-01-31',
+      },
+    ]);
+
+    const included = await listTransactions(storage, '2026-01-31', '2026-01-31');
+    expect(included).toHaveLength(1);
+    expect(included[0].timestamp).toBe('2026-02-05T12:00:00+00:00');
+    expect(included[0].annotation).toEqual({ effective_date: '2026-01-31' });
+
+    const excluded = await listTransactions(storage, '2026-02-05', '2026-02-05');
+    expect(excluded).toHaveLength(0);
+  });
+
+  it('skips transactions tagged ignore_spending in annotation tags', async () => {
+    const storage = new MemoryStorage();
+    const clock = makeClock('2024-06-15T14:30:00Z');
+
+    const acctIdGen = makeIdGen('acct-1');
+    const acct = Account.newWithGenerator(acctIdGen, clock, 'Checking', Id.fromString('conn-1'));
+    await storage.saveAccount(acct);
+
+    const txIdGen = makeIdGen('tx-1');
+    const tx = Transaction.newWithGenerator(
+      txIdGen,
+      clock,
+      '-30000.00',
+      Asset.currency('USD'),
+      'WIRE Outgoing Wire',
+    );
+    await storage.appendTransactions(acct.id, [tx]);
+
+    await storage.appendTransactionAnnotationPatches(acct.id, [
+      {
+        transaction_id: Id.fromString('tx-1'),
+        timestamp: new Date('2024-06-15T15:00:00Z'),
+        note: 'Transfer; ignored from spending',
+        tags: ['ignore_spending'],
+      },
+    ]);
+
+    const skipped = await listTransactions(storage, '2000-01-01', '2099-12-31', makeConfig());
+    expect(skipped).toHaveLength(0);
+
+    const included = await listTransactions(
+      storage,
+      '2000-01-01',
+      '2099-12-31',
+      makeConfig(),
+      false,
+      false,
+    );
+    expect(included).toHaveLength(1);
+    expect(included[0].annotation).toEqual({
+      note: 'Transfer; ignored from spending',
+      tags: ['ignore_spending'],
     });
   });
 

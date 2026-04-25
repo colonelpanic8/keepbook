@@ -47,6 +47,10 @@ function parseYmd(s: string): Ymd {
   return { y, m: mo, d };
 }
 
+function effectiveYmd(annotation: TransactionAnnotationType | undefined, fallback: Ymd): Ymd {
+  return annotation?.effective_date !== undefined ? parseYmd(annotation.effective_date) : fallback;
+}
+
 function ymdToUtcDate(ymd: Ymd): Date {
   return new Date(Date.UTC(ymd.y, ymd.m - 1, ymd.d, 0, 0, 0));
 }
@@ -84,6 +88,14 @@ function lastDayOfMonth(y: number, m: number): Ymd {
   // month param is 1-12, Date.UTC month is 0-11; using (m, 0) yields last day of month m.
   const d = new Date(Date.UTC(y, m, 0));
   return utcDateToYmd(d);
+}
+
+function addMonthsClamped(ymd: Ymd, months: number): Ymd {
+  const totalMonths = ymd.y * 12 + (ymd.m - 1) + months;
+  const y = Math.floor(totalMonths / 12);
+  const m = (((totalMonths % 12) + 12) % 12) + 1;
+  const d = Math.min(ymd.d, lastDayOfMonth(y, m).d);
+  return { y, m, d };
 }
 
 function weekdayFromYmd(ymd: Ymd): number {
@@ -124,6 +136,7 @@ type Direction = 'outflow' | 'inflow' | 'net';
 type StatusFilter = 'posted' | 'posted+pending' | 'all';
 type GroupBy = 'none' | 'category' | 'merchant' | 'account' | 'tag';
 type WeekStart = 'sunday' | 'monday';
+type PeriodAlignment = 'calendar' | 'end-bound';
 
 function parsePeriod(
   period: string,
@@ -154,6 +167,17 @@ function parsePeriod(
         `Invalid period '${period}'. Valid values: daily, weekly, monthly, quarterly, yearly, range, custom`,
       );
   }
+}
+
+function parsePeriodAlignment(s: string | undefined): PeriodAlignment {
+  const v = (s ?? 'calendar').trim().toLowerCase();
+  if (v === '' || v === 'calendar' || v === 'start' || v === 'start-bound' || v === 'month-start') {
+    return 'calendar';
+  }
+  if (v === 'end' || v === 'end-bound' || v === 'trailing' || v === 'rolling') {
+    return 'end-bound';
+  }
+  throw new Error(`Invalid period alignment '${s}'. Valid values: calendar, end-bound`);
 }
 
 function parseDirection(s: string | undefined): Direction {
@@ -323,11 +347,73 @@ function nextBucketStart(start: Ymd, period: Period): Ymd {
   }
 }
 
+type BucketInterval = { start: Ymd; end: Ymd };
+
+function endBoundBucketStartForEnd(end: Ymd, period: Period): Ymd {
+  if (typeof period === 'object') {
+    return addDays(end, -(period.custom_days - 1));
+  }
+  switch (period) {
+    case 'daily':
+      return end;
+    case 'weekly':
+      return addDays(end, -6);
+    case 'monthly':
+      return addDays(addMonthsClamped(end, -1), 1);
+    case 'quarterly':
+      return addDays(addMonthsClamped(end, -3), 1);
+    case 'yearly':
+      return addDays(addMonthsClamped(end, -12), 1);
+    case 'range':
+      return end;
+  }
+}
+
+function buildBucketIntervals(
+  startDate: Ymd,
+  endDate: Ymd,
+  period: Period,
+  weekStart: WeekStart,
+  alignment: PeriodAlignment,
+): BucketInterval[] {
+  if (typeof period !== 'object' && period === 'range') {
+    return [{ start: startDate, end: endDate }];
+  }
+
+  if (alignment === 'calendar') {
+    const intervals: BucketInterval[] = [];
+    let start = bucketStartFor(startDate, period, weekStart, startDate);
+    while (compareYmd(start, endDate) <= 0) {
+      intervals.push({ start, end: bucketEndFor(start, period, endDate) });
+      start = nextBucketStart(start, period);
+    }
+    return intervals;
+  }
+
+  const intervals: BucketInterval[] = [];
+  let end = endDate;
+  for (;;) {
+    const start = endBoundBucketStartForEnd(end, period);
+    intervals.push({ start, end });
+    if (compareYmd(start, startDate) <= 0) break;
+    end = addDays(start, -1);
+  }
+  intervals.reverse();
+  return intervals;
+}
+
+function bucketStartFromIntervals(date: Ymd, intervals: BucketInterval[]): Ymd | undefined {
+  return intervals.find(
+    (interval) => compareYmd(date, interval.start) >= 0 && compareYmd(date, interval.end) <= 0,
+  )?.start;
+}
+
 export type SpendingReportOptions = {
   currency?: string;
   start?: string;
   end?: string;
   period: string;
+  period_alignment?: string;
   tz?: string;
   week_start?: string;
   bucket?: string;
@@ -374,6 +460,7 @@ export async function spendingReport(
   }
 
   const { period, label: periodLabel, bucketDays } = parsePeriod(options.period, options.bucket);
+  const periodAlignment = parsePeriodAlignment(options.period_alignment);
   const direction = parseDirection(options.direction);
   const status = parseStatusFilter(options.status);
   const groupBy = parseGroupBy(options.group_by);
@@ -475,7 +562,12 @@ export async function spendingReport(
       ) {
         continue;
       }
-      const localYmd = ymdFromTimestampInTimeZone(tx.timestamp, effectiveTimeZone);
+      const ann = annByTx.get(tx.id.asStr());
+      const annotation = ann && !isEmptyTransactionAnnotation(ann) ? ann : null;
+      const localYmd = effectiveYmd(
+        ann,
+        ymdFromTimestampInTimeZone(tx.timestamp, effectiveTimeZone),
+      );
       minDate =
         minDate === undefined ? localYmd : compareYmd(localYmd, minDate) < 0 ? localYmd : minDate;
 
@@ -484,8 +576,6 @@ export async function spendingReport(
         continue;
       }
 
-      const ann = annByTx.get(tx.id.asStr());
-      const annotation = ann && !isEmptyTransactionAnnotation(ann) ? ann : null;
       if (annotationIgnoresSpending(annotation)) continue;
       rows.push({
         account_id: account.id.asStr(),
@@ -508,6 +598,10 @@ export async function spendingReport(
       `end date ${ymdToString(endDate)} is before start date ${ymdToString(startDate)}`,
     );
   }
+  const intervals = buildBucketIntervals(startDate, endDate, period, weekStart, periodAlignment);
+  const intervalEnds = new Map(
+    intervals.map((interval) => [ymdToString(interval.start), interval.end]),
+  );
 
   type BucketAgg = {
     total: Decimal;
@@ -556,7 +650,8 @@ export async function spendingReport(
     includedTx += 1;
     grandTotal = grandTotal.plus(directed);
 
-    const bstart = bucketStartFor(row.local_date, period, weekStart, startDate);
+    const bstart = bucketStartFromIntervals(row.local_date, intervals);
+    if (bstart === undefined) continue;
     const bkey = ymdToString(bstart);
     const existing = buckets.get(bkey);
     const agg: BucketAgg = existing?.agg ?? {
@@ -606,25 +701,13 @@ export async function spendingReport(
 
   const includeEmpty = options.include_empty === true;
   const bucketKeys: string[] = includeEmpty
-    ? (() => {
-        const keys: string[] = [];
-        let s = bucketStartFor(startDate, period, weekStart, startDate);
-        if (typeof period !== 'object' && period === 'range') {
-          keys.push(ymdToString(s));
-          return keys;
-        }
-        while (compareYmd(s, endDate) <= 0) {
-          keys.push(ymdToString(s));
-          s = nextBucketStart(s, period);
-        }
-        return keys;
-      })()
+    ? intervals.map((interval) => ymdToString(interval.start))
     : keysSorted;
 
   for (const bkey of bucketKeys) {
     const b = buckets.get(bkey);
     const start = b?.start ?? parseYmd(bkey);
-    const bend = bucketEndFor(start, period, endDate);
+    const bend = intervalEnds.get(bkey) ?? bucketEndFor(start, period, endDate);
     const clampedStart = clampYmd(start, startDate, endDate);
     const clampedEnd = clampYmd(bend, startDate, endDate);
 
@@ -667,6 +750,7 @@ export async function spendingReport(
     start_date: ymdToString(startDate),
     end_date: ymdToString(endDate),
     period: periodLabel,
+    period_alignment: periodAlignment,
     direction,
     status,
     group_by: groupBy,

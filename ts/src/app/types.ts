@@ -67,6 +67,7 @@ export interface TransactionAnnotationOutput {
   note?: string;
   category?: string;
   tags?: string[];
+  effective_date?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -99,6 +100,7 @@ export interface SpendingOutput {
   start_date: string;
   end_date: string;
   period: string;
+  period_alignment: string;
   week_start?: string;
   bucket_days?: number;
   direction: string;
