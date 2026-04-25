@@ -34,8 +34,16 @@ describe('defaultConfigPath', () => {
 
   afterEach(() => {
     process.chdir(originalCwd);
-    process.env.HOME = originalHome;
-    process.env.XDG_DATA_HOME = originalXdgDataHome;
+    if (originalHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
+    if (originalXdgDataHome === undefined) {
+      delete process.env.XDG_DATA_HOME;
+    } else {
+      process.env.XDG_DATA_HOME = originalXdgDataHome;
+    }
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
