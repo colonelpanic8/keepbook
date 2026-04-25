@@ -20,18 +20,26 @@ pub(crate) const DEFAULT_TRANSACTION_LOOKBACK_DAYS: i64 = 730; // ~2 years
 /// Build the date-range query parameters for the transactions endpoint.
 ///
 /// Default lookback is ~2 years. Override with `KEEPBOOK_CHASE_LOOKBACK_DAYS`.
+/// For manual backfills around Chase pagination issues, set
+/// `KEEPBOOK_CHASE_START_DATE` and/or `KEEPBOOK_CHASE_END_DATE` as YYYY-MM-DD.
 pub(crate) fn transaction_date_range_params() -> String {
     let lookback = std::env::var("KEEPBOOK_CHASE_LOOKBACK_DAYS")
         .ok()
         .and_then(|s| s.trim().parse::<i64>().ok())
         .filter(|n| *n > 0)
         .unwrap_or(DEFAULT_TRANSACTION_LOOKBACK_DAYS);
-    let today = chrono::Utc::now().date_naive();
-    let start = today - chrono::Duration::days(lookback);
+    let end = std::env::var("KEEPBOOK_CHASE_END_DATE")
+        .ok()
+        .and_then(|s| chrono::NaiveDate::parse_from_str(s.trim(), "%Y-%m-%d").ok())
+        .unwrap_or_else(|| chrono::Utc::now().date_naive());
+    let start = std::env::var("KEEPBOOK_CHASE_START_DATE")
+        .ok()
+        .and_then(|s| chrono::NaiveDate::parse_from_str(s.trim(), "%Y-%m-%d").ok())
+        .unwrap_or_else(|| end - chrono::Duration::days(lookback));
     format!(
         "&account-activity-start-date={}&account-activity-end-date={}&request-type-code=T",
         start.format("%Y-%m-%d"),
-        today.format("%Y-%m-%d"),
+        end.format("%Y-%m-%d"),
     )
 }
 
