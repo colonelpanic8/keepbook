@@ -44,6 +44,7 @@ import { JsonFileStorage } from '../storage/json-file.js';
 import { JsonlMarketDataStore } from '../market-data/jsonl-store.js';
 import { tryAutoCommit } from '../git.js';
 import { runPreflight } from '../app/preflight.js';
+import { cliVersion } from './version.js';
 
 // ---------------------------------------------------------------------------
 // Helper
@@ -100,7 +101,7 @@ const program = new Command();
 program
   .name('keepbook')
   .description('Personal finance tracking CLI')
-  .version('0.1.0')
+  .version(cliVersion())
   .option('-c, --config <path>', 'path to config file')
   .option('--git-merge-master', 'merge origin/master before executing the command')
   .option('--skip-git-merge-master', 'skip merging origin/master even if enabled in config')
