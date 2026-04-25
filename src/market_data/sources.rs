@@ -18,6 +18,30 @@ pub trait EquityPriceSource: Send + Sync {
         date: NaiveDate,
     ) -> Result<Option<PricePoint>>;
 
+    /// Fetch end-of-day closing prices for a date range.
+    ///
+    /// Providers that support historical range endpoints should override this
+    /// so backfills can make one network request per asset instead of one
+    /// request per asset/date. The default preserves existing single-date
+    /// behavior for providers without range support.
+    async fn fetch_closes(
+        &self,
+        asset: &Asset,
+        asset_id: &AssetId,
+        start: NaiveDate,
+        end: NaiveDate,
+    ) -> Result<Vec<PricePoint>> {
+        let mut prices = Vec::new();
+        let mut current = start;
+        while current <= end {
+            if let Some(price) = self.fetch_close(asset, asset_id, current).await? {
+                prices.push(price);
+            }
+            current = current.succ_opt().expect("date should advance");
+        }
+        Ok(prices)
+    }
+
     /// Fetch real-time or delayed quote (current price).
     /// Default implementation returns None (not supported).
     async fn fetch_quote(&self, _asset: &Asset, _asset_id: &AssetId) -> Result<Option<PricePoint>> {
@@ -36,6 +60,25 @@ pub trait CryptoPriceSource: Send + Sync {
         asset_id: &AssetId,
         date: NaiveDate,
     ) -> Result<Option<PricePoint>>;
+
+    /// Fetch end-of-day closing prices for a date range.
+    async fn fetch_closes(
+        &self,
+        asset: &Asset,
+        asset_id: &AssetId,
+        start: NaiveDate,
+        end: NaiveDate,
+    ) -> Result<Vec<PricePoint>> {
+        let mut prices = Vec::new();
+        let mut current = start;
+        while current <= end {
+            if let Some(price) = self.fetch_close(asset, asset_id, current).await? {
+                prices.push(price);
+            }
+            current = current.succ_opt().expect("date should advance");
+        }
+        Ok(prices)
+    }
 
     /// Fetch real-time or delayed quote (current price).
     /// Default implementation returns None (not supported).
@@ -129,6 +172,47 @@ impl EquityPriceRouter {
         }
         warn!(asset_id = %asset_id, date = %date, "no equity close price found from any source");
         Ok(None)
+    }
+
+    pub async fn fetch_closes(
+        &self,
+        asset: &Asset,
+        asset_id: &AssetId,
+        start: NaiveDate,
+        end: NaiveDate,
+    ) -> Result<Vec<PricePoint>> {
+        debug!(asset_id = %asset_id, start = %start, end = %end, "fetching equity close price range");
+        for source in &self.sources {
+            let _limit = self.rate_limits.get(source.name());
+            match source.fetch_closes(asset, asset_id, start, end).await {
+                Ok(prices) if !prices.is_empty() => {
+                    info!(
+                        source = source.name(),
+                        asset_id = %asset_id,
+                        start = %start,
+                        end = %end,
+                        count = prices.len(),
+                        "equity price range fetched"
+                    );
+                    return Ok(prices);
+                }
+                Ok(_) => {
+                    debug!(source = source.name(), asset_id = %asset_id, "no prices from source");
+                    continue;
+                }
+                Err(e) => {
+                    warn!(
+                        source = source.name(),
+                        asset_id = %asset_id,
+                        error = %e,
+                        "equity price range fetch failed"
+                    );
+                    continue;
+                }
+            }
+        }
+        warn!(asset_id = %asset_id, start = %start, end = %end, "no equity close prices found from any source");
+        Ok(Vec::new())
     }
 
     pub async fn fetch_quote(
@@ -226,6 +310,47 @@ impl CryptoPriceRouter {
         }
         warn!(asset_id = %asset_id, date = %date, "no crypto close price found from any source");
         Ok(None)
+    }
+
+    pub async fn fetch_closes(
+        &self,
+        asset: &Asset,
+        asset_id: &AssetId,
+        start: NaiveDate,
+        end: NaiveDate,
+    ) -> Result<Vec<PricePoint>> {
+        debug!(asset_id = %asset_id, start = %start, end = %end, "fetching crypto close price range");
+        for source in &self.sources {
+            let _limit = self.rate_limits.get(source.name());
+            match source.fetch_closes(asset, asset_id, start, end).await {
+                Ok(prices) if !prices.is_empty() => {
+                    info!(
+                        source = source.name(),
+                        asset_id = %asset_id,
+                        start = %start,
+                        end = %end,
+                        count = prices.len(),
+                        "crypto price range fetched"
+                    );
+                    return Ok(prices);
+                }
+                Ok(_) => {
+                    debug!(source = source.name(), asset_id = %asset_id, "no prices from source");
+                    continue;
+                }
+                Err(e) => {
+                    warn!(
+                        source = source.name(),
+                        asset_id = %asset_id,
+                        error = %e,
+                        "crypto price range fetch failed"
+                    );
+                    continue;
+                }
+            }
+        }
+        warn!(asset_id = %asset_id, start = %start, end = %end, "no crypto close prices found from any source");
+        Ok(Vec::new())
     }
 
     pub async fn fetch_quote(

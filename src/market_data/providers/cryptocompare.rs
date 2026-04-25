@@ -101,13 +101,23 @@ impl CryptoComparePriceSource {
             .unwrap_or(symbol_upper)
     }
 
-    async fn fetch_histoday(&self, symbol: &str, date: NaiveDate) -> Result<Option<f64>> {
+    async fn fetch_histoday_range(
+        &self,
+        symbol: &str,
+        start: NaiveDate,
+        end: NaiveDate,
+    ) -> Result<Vec<HistoryPoint>> {
+        if start > end {
+            return Ok(Vec::new());
+        }
+
         let to_ts = Utc
-            .from_utc_datetime(&(date + Duration::days(1)).and_hms_opt(0, 0, 0).unwrap())
+            .from_utc_datetime(&(end + Duration::days(1)).and_hms_opt(0, 0, 0).unwrap())
             .timestamp();
+        let limit = (end - start).num_days().max(0);
 
         let url = format!(
-            "{CRYPTOCOMPARE_API_BASE}/data/v2/histoday?fsym={symbol}&tsym=USD&limit=1&toTs={to_ts}"
+            "{CRYPTOCOMPARE_API_BASE}/data/v2/histoday?fsym={symbol}&tsym=USD&limit={limit}&toTs={to_ts}"
         );
 
         let mut request = self.client.get(&url).header("Accept", "application/json");
@@ -133,7 +143,21 @@ impl CryptoComparePriceSource {
             return Err(anyhow!("CryptoCompare API error: {message}"));
         }
 
-        let points = data.data.map(|d| d.data).unwrap_or_default();
+        let mut points = data.data.map(|d| d.data).unwrap_or_default();
+        points.retain(|point| {
+            let date = Utc
+                .timestamp_opt(point.time, 0)
+                .single()
+                .unwrap_or_else(Utc::now)
+                .date_naive();
+            date >= start && date <= end
+        });
+
+        Ok(points)
+    }
+
+    async fn fetch_histoday(&self, symbol: &str, date: NaiveDate) -> Result<Option<f64>> {
+        let points = self.fetch_histoday_range(symbol, date, date).await?;
         let Some(point) = points.into_iter().last() else {
             return Ok(None);
         };
@@ -179,6 +203,51 @@ impl CryptoPriceSource for CryptoComparePriceSource {
             kind: PriceKind::Close,
             source: self.name().to_string(),
         }))
+    }
+
+    async fn fetch_closes(
+        &self,
+        asset: &Asset,
+        asset_id: &AssetId,
+        start: NaiveDate,
+        end: NaiveDate,
+    ) -> Result<Vec<PricePoint>> {
+        let symbol = match asset {
+            Asset::Crypto { symbol, .. } => symbol,
+            _ => return Ok(Vec::new()),
+        };
+
+        let mapped_symbol = self.map_symbol(symbol);
+        let points = self
+            .fetch_histoday_range(&mapped_symbol, start, end)
+            .await?;
+        let now = Utc::now();
+        let mut prices = Vec::new();
+        for point in points {
+            let Some(price) = point.close else {
+                continue;
+            };
+            if price <= 0.0 {
+                continue;
+            }
+            let as_of_date = Utc
+                .timestamp_opt(point.time, 0)
+                .single()
+                .unwrap_or_else(Utc::now)
+                .date_naive();
+            prices.push(PricePoint {
+                asset_id: asset_id.clone(),
+                as_of_date,
+                timestamp: now,
+                price: price.to_string(),
+                quote_currency: "USD".to_string(),
+                kind: PriceKind::Close,
+                source: self.name().to_string(),
+            });
+        }
+
+        prices.sort_by_key(|p| p.as_of_date);
+        Ok(prices)
     }
 
     fn name(&self) -> &str {

@@ -108,6 +108,59 @@ impl AlphaVantagePriceSource {
             source: self.name().to_string(),
         })
     }
+
+    async fn fetch_time_series(
+        &self,
+        ticker: &str,
+        exchange: Option<&str>,
+        start: NaiveDate,
+    ) -> Result<TimeSeriesResponse> {
+        let symbol = self.format_symbol(ticker, exchange);
+        let outputsize = if start < (Utc::now().date_naive() - Duration::days(120)) {
+            "full"
+        } else {
+            "compact"
+        };
+
+        let response = self
+            .client
+            .get(BASE_URL)
+            .query(&[
+                ("function", "TIME_SERIES_DAILY"),
+                ("symbol", &symbol),
+                ("outputsize", outputsize),
+                ("apikey", &self.api_key),
+            ])
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            return Err(anyhow!(
+                "Alpha Vantage API request failed with status: {}",
+                response.status()
+            ));
+        }
+
+        let text = response.text().await?;
+
+        if let Ok(error) = serde_json::from_str::<ErrorResponse>(&text) {
+            if error.error_message.is_some() || error.note.is_some() {
+                if let Some(msg) = error.error_message {
+                    return Err(anyhow!("Alpha Vantage API error: {msg}"));
+                }
+                if let Some(note) = error.note {
+                    return Err(anyhow!("Alpha Vantage rate limit: {note}"));
+                }
+            }
+            if error.information.is_some() {
+                return Err(anyhow!(
+                    "Alpha Vantage returned no time series for {symbol}"
+                ));
+            }
+        }
+
+        serde_json::from_str(&text).map_err(Into::into)
+    }
 }
 
 #[async_trait::async_trait]
@@ -123,62 +176,55 @@ impl EquityPriceSource for AlphaVantagePriceSource {
             _ => return Ok(None),
         };
 
-        let symbol = self.format_symbol(ticker, exchange);
-        let outputsize = if date < (Utc::now().date_naive() - Duration::days(120)) {
-            "full"
-        } else {
-            "compact"
-        };
-
-        let response = self
-            .client
-            .get(BASE_URL)
-            .query(&[
-                ("function", "TIME_SERIES_DAILY"),
-                ("symbol", &symbol),
-                ("outputsize", outputsize), // compact = last 100 data points
-                ("apikey", &self.api_key),
-            ])
-            .send()
-            .await?;
-
-        if !response.status().is_success() {
-            return Err(anyhow!(
-                "Alpha Vantage API request failed with status: {}",
-                response.status()
-            ));
-        }
-
-        let text = response.text().await?;
-
-        // Check for API error responses
-        if let Ok(error) = serde_json::from_str::<ErrorResponse>(&text) {
-            if error.error_message.is_some() || error.note.is_some() {
-                // Rate limit or invalid API key - these are errors
-                if let Some(msg) = error.error_message {
-                    return Err(anyhow!("Alpha Vantage API error: {msg}"));
-                }
-                if let Some(note) = error.note {
-                    // Rate limit note
-                    return Err(anyhow!("Alpha Vantage rate limit: {note}"));
-                }
-            }
-            if error.information.is_some() {
-                // Demo/info message - likely invalid symbol, return None
-                return Ok(None);
-            }
-        }
-
-        // Parse successful response
-        let time_series: TimeSeriesResponse = match serde_json::from_str(&text) {
+        let time_series = match self.fetch_time_series(ticker, exchange, date).await {
             Ok(ts) => ts,
-            Err(_) => {
-                // Could not parse as time series - symbol not found or other issue
-                return Ok(None);
-            }
+            Err(e) if e.to_string().contains("no time series") => return Ok(None),
+            Err(e) => return Err(e),
         };
 
         Ok(self.parse_response(&time_series, asset_id, date))
+    }
+
+    async fn fetch_closes(
+        &self,
+        asset: &Asset,
+        asset_id: &AssetId,
+        start: NaiveDate,
+        end: NaiveDate,
+    ) -> Result<Vec<PricePoint>> {
+        let (ticker, exchange) = match asset {
+            Asset::Equity { ticker, exchange } => (ticker, exchange.as_deref()),
+            _ => return Ok(Vec::new()),
+        };
+
+        let time_series = match self.fetch_time_series(ticker, exchange, start).await {
+            Ok(ts) => ts,
+            Err(e) if e.to_string().contains("no time series") => return Ok(Vec::new()),
+            Err(e) => return Err(e),
+        };
+
+        let mut prices = Vec::new();
+        let now = Utc::now();
+        for (date_str, daily_data) in time_series.time_series {
+            let Ok(as_of_date) = NaiveDate::parse_from_str(&date_str, "%Y-%m-%d") else {
+                continue;
+            };
+            if as_of_date < start || as_of_date > end {
+                continue;
+            }
+            prices.push(PricePoint {
+                asset_id: asset_id.clone(),
+                as_of_date,
+                timestamp: now,
+                price: daily_data.close,
+                quote_currency: "USD".to_string(),
+                kind: PriceKind::Close,
+                source: self.name().to_string(),
+            });
+        }
+
+        prices.sort_by_key(|p| p.as_of_date);
+        Ok(prices)
     }
 
     fn name(&self) -> &str {

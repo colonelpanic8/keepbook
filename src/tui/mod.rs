@@ -1912,7 +1912,7 @@ fn spending_windows_from_config(config: &ResolvedConfig) -> Vec<u32> {
         .filter(|days| *days > 0)
         .collect();
     if windows.is_empty() {
-        windows.extend([7, 30, 90]);
+        windows.extend([7, 30, 90, 365]);
     }
     windows.sort_unstable();
     windows.dedup();
@@ -2149,7 +2149,8 @@ mod tests {
     use super::*;
     use crate::app::TransactionAnnotationOutput;
     use crate::config::{
-        DisplayConfig, GitConfig, IgnoreConfig, RefreshConfig, SpendingConfig, TrayConfig,
+        DisplayConfig, GitConfig, HistoryConfig, IgnoreConfig, RefreshConfig, SpendingConfig,
+        TrayConfig,
     };
     use serde_json::json;
     use std::path::PathBuf;
@@ -2175,6 +2176,7 @@ mod tests {
             reporting_currency: "USD".to_string(),
             display: DisplayConfig::default(),
             refresh: RefreshConfig::default(),
+            history: HistoryConfig::default(),
             tray: TrayConfig::default(),
             spending: SpendingConfig::default(),
             ignore: IgnoreConfig::default(),
@@ -2411,7 +2413,7 @@ mod tests {
         assert_eq!(spending_windows_from_config(&config), vec![7, 30]);
 
         config.tray.spending_windows_days.clear();
-        assert_eq!(spending_windows_from_config(&config), vec![7, 30, 90]);
+        assert_eq!(spending_windows_from_config(&config), vec![7, 30, 90, 365]);
     }
 
     #[test]

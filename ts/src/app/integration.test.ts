@@ -18,7 +18,7 @@ import { addConnection, addAccount, removeConnection, setBalance } from './mutat
 import { listConnections, listAccounts, listBalances, listAll } from './list.js';
 import { portfolioSnapshot, portfolioHistory, portfolioChangePoints } from './portfolio.js';
 import { configOutput } from './config.js';
-import type { ResolvedConfig } from '../config.js';
+import { DEFAULT_HISTORY_CONFIG, DEFAULT_TRAY_CONFIG, type ResolvedConfig } from '../config.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -41,7 +41,12 @@ function makeConfig(overrides?: Partial<ResolvedConfig>): ResolvedConfig {
       balance_staleness: 14 * 86400000,
       price_staleness: 86400000,
     },
-    tray: { history_points: 8, spending_windows_days: [7, 30, 90] },
+    history: { ...DEFAULT_HISTORY_CONFIG },
+    tray: {
+      ...DEFAULT_TRAY_CONFIG,
+      history_spec: [...DEFAULT_TRAY_CONFIG.history_spec],
+      spending_windows_days: [...DEFAULT_TRAY_CONFIG.spending_windows_days],
+    },
     spending: { ignore_accounts: [], ignore_connections: [], ignore_tags: [] },
     ignore: { transaction_rules: [] },
     git: { auto_commit: false, auto_push: false, merge_master_before_command: false },

@@ -20,3 +20,6 @@ Thumbs.db
 
 # Browser automation artifacts
 .playwright-cli/
+
+# Generated ad-hoc graph/report outputs
+/artifacts/

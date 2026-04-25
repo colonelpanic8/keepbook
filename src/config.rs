@@ -41,8 +41,11 @@ pub struct DisplayConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TrayConfig {
-    /// Number of recent portfolio history points shown in tray menu.
+    /// Maximum number of recent portfolio history rows shown in the tray menu.
     pub history_points: usize,
+
+    /// Relative-date DSL entries expanded into portfolio history rows in the tray menu.
+    pub history_spec: Vec<String>,
 
     /// Spending lookback windows (days) shown in tray menu.
     pub spending_windows_days: Vec<u32>,
@@ -54,8 +57,14 @@ pub struct TrayConfig {
 impl Default for TrayConfig {
     fn default() -> Self {
         Self {
-            history_points: 8,
-            spending_windows_days: vec![7, 30, 90],
+            history_points: 17,
+            history_spec: vec![
+                "last 4 days".to_string(),
+                "1 week ago".to_string(),
+                "2 weeks ago".to_string(),
+                "last 12 months".to_string(),
+            ],
+            spending_windows_days: vec![7, 30, 90, 365],
             transaction_count: 30,
         }
     }
@@ -142,6 +151,19 @@ impl Default for RefreshConfig {
     }
 }
 
+/// Historical valuation configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct HistoryConfig {
+    /// When true, historical portfolio valuation may project a later cached
+    /// price or FX rate backward when no acceptable earlier reading exists.
+    pub allow_future_projection: bool,
+
+    /// Optional bound for older cached history lookups before future
+    /// projection is considered. When unset, older lookup remains unbounded.
+    pub lookback_days: Option<u32>,
+}
+
 /// Git-related configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
@@ -176,6 +198,10 @@ pub struct Config {
     #[serde(default)]
     pub refresh: RefreshConfig,
 
+    /// Historical valuation settings.
+    #[serde(default)]
+    pub history: HistoryConfig,
+
     /// Tray UI settings.
     #[serde(default)]
     pub tray: TrayConfig,
@@ -200,6 +226,7 @@ impl Default for Config {
             reporting_currency: default_reporting_currency(),
             display: DisplayConfig::default(),
             refresh: RefreshConfig::default(),
+            history: HistoryConfig::default(),
             tray: TrayConfig::default(),
             spending: SpendingConfig::default(),
             ignore: IgnoreConfig::default(),
@@ -257,6 +284,9 @@ pub struct ResolvedConfig {
     /// Refresh/staleness settings.
     pub refresh: RefreshConfig,
 
+    /// Historical valuation settings.
+    pub history: HistoryConfig,
+
     /// Tray UI settings.
     pub tray: TrayConfig,
 
@@ -311,6 +341,7 @@ impl ResolvedConfig {
             reporting_currency: config.reporting_currency,
             display: config.display,
             refresh: config.refresh,
+            history: config.history,
             tray: config.tray,
             spending: config.spending,
             ignore: config.ignore,
@@ -345,6 +376,7 @@ impl ResolvedConfig {
                 reporting_currency: default_reporting_currency(),
                 display: DisplayConfig::default(),
                 refresh: RefreshConfig::default(),
+                history: HistoryConfig::default(),
                 tray: TrayConfig::default(),
                 spending: SpendingConfig::default(),
                 ignore: IgnoreConfig::default(),
@@ -524,11 +556,33 @@ mod tests {
         let mut file = std::fs::File::create(&config_path)?;
         writeln!(file, "[tray]")?;
         writeln!(file, "history_points = 5")?;
+        writeln!(file, "history_spec = [\"last 3 days\", \"1 month ago\"]")?;
         writeln!(file, "spending_windows_days = [3, 14, 60]")?;
 
         let config = Config::load(&config_path)?;
         assert_eq!(config.tray.history_points, 5);
+        assert_eq!(
+            config.tray.history_spec,
+            vec!["last 3 days".to_string(), "1 month ago".to_string()]
+        );
         assert_eq!(config.tray.spending_windows_days, vec![3, 14, 60]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_load_history_config() -> Result<()> {
+        let dir = TempDir::new()?;
+        let config_path = dir.path().join("keepbook.toml");
+
+        let mut file = std::fs::File::create(&config_path)?;
+        writeln!(file, "[history]")?;
+        writeln!(file, "allow_future_projection = true")?;
+        writeln!(file, "lookback_days = 7")?;
+
+        let config = Config::load(&config_path)?;
+        assert!(config.history.allow_future_projection);
+        assert_eq!(config.history.lookback_days, Some(7));
 
         Ok(())
     }
@@ -557,8 +611,24 @@ mod tests {
     #[test]
     fn test_default_tray_config() {
         let config = Config::default();
-        assert_eq!(config.tray.history_points, 8);
-        assert_eq!(config.tray.spending_windows_days, vec![7, 30, 90]);
+        assert_eq!(config.tray.history_points, 17);
+        assert_eq!(
+            config.tray.history_spec,
+            vec![
+                "last 4 days".to_string(),
+                "1 week ago".to_string(),
+                "2 weeks ago".to_string(),
+                "last 12 months".to_string(),
+            ]
+        );
+        assert_eq!(config.tray.spending_windows_days, vec![7, 30, 90, 365]);
+    }
+
+    #[test]
+    fn test_default_history_config() {
+        let config = Config::default();
+        assert!(!config.history.allow_future_projection);
+        assert_eq!(config.history.lookback_days, None);
     }
 
     #[test]

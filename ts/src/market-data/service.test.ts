@@ -55,15 +55,18 @@ class StubEquitySource implements EquityPriceSource {
   readonly #name: string;
   closeResult: PricePoint | null;
   quoteResult: PricePoint | null;
+  rangeResult: PricePoint[];
 
   constructor(
     name: string,
     closeResult: PricePoint | null = null,
     quoteResult: PricePoint | null = null,
+    rangeResult: PricePoint[] = [],
   ) {
     this.#name = name;
     this.closeResult = closeResult;
     this.quoteResult = quoteResult;
+    this.rangeResult = rangeResult;
   }
 
   async fetchClose(
@@ -76,6 +79,15 @@ class StubEquitySource implements EquityPriceSource {
 
   async fetchQuote(_asset: AssetType, _assetId: AssetId): Promise<PricePoint | null> {
     return this.quoteResult;
+  }
+
+  async fetchCloses(
+    _asset: AssetType,
+    _assetId: AssetId,
+    _start: string,
+    _end: string,
+  ): Promise<PricePoint[]> {
+    return this.rangeResult;
   }
 
   name(): string {
@@ -88,15 +100,18 @@ class StubCryptoSource implements CryptoPriceSource {
   readonly #name: string;
   closeResult: PricePoint | null;
   quoteResult: PricePoint | null;
+  rangeResult: PricePoint[];
 
   constructor(
     name: string,
     closeResult: PricePoint | null = null,
     quoteResult: PricePoint | null = null,
+    rangeResult: PricePoint[] = [],
   ) {
     this.#name = name;
     this.closeResult = closeResult;
     this.quoteResult = quoteResult;
+    this.rangeResult = rangeResult;
   }
 
   async fetchClose(
@@ -109,6 +124,15 @@ class StubCryptoSource implements CryptoPriceSource {
 
   async fetchQuote(_asset: AssetType, _assetId: AssetId): Promise<PricePoint | null> {
     return this.quoteResult;
+  }
+
+  async fetchCloses(
+    _asset: AssetType,
+    _assetId: AssetId,
+    _start: string,
+    _end: string,
+  ): Promise<PricePoint[]> {
+    return this.rangeResult;
   }
 
   name(): string {
@@ -290,6 +314,21 @@ describe('MarketDataService', () => {
       expect(result).not.toBeNull();
       expect(result!.as_of_date).toBe('2024-01-05');
     });
+
+    it('projects from the earliest later price when enabled and bounded lookback misses', async () => {
+      await store.put_prices([
+        makePrice({ as_of_date: '2024-01-01', price: '180.00', kind: 'close' }),
+        makePrice({ as_of_date: '2024-01-20', price: '190.00', kind: 'close' }),
+      ]);
+
+      service = new MarketDataService(store);
+      service.withLookbackDays(7).withFutureProjection(true);
+      const result = await service.priceFromStore(AAPL, '2024-01-15');
+
+      expect(result).not.toBeNull();
+      expect(result!.as_of_date).toBe('2024-01-20');
+      expect(result!.price).toBe('190.00');
+    });
   });
 
   describe('valuationPriceFromStore', () => {
@@ -350,6 +389,20 @@ describe('MarketDataService', () => {
 
       expect(result.rate).toBe('0.9150');
       expect(result.as_of_date).toBe('2024-01-13');
+    });
+
+    it('projects from the earliest later FX rate when enabled and bounded lookback misses', async () => {
+      await store.put_fx_rates([
+        makeFxRate({ as_of_date: '2024-01-01', rate: '0.9100' }),
+        makeFxRate({ as_of_date: '2024-01-20', rate: '0.9300' }),
+      ]);
+
+      service = new MarketDataService(store);
+      service.withLookbackDays(7).withFutureProjection(true);
+      const result = await service.fxClose('USD', 'EUR', '2024-01-15');
+
+      expect(result.rate).toBe('0.9300');
+      expect(result.as_of_date).toBe('2024-01-20');
     });
 
     it('throws when not found after lookback', async () => {
@@ -446,6 +499,29 @@ describe('MarketDataService', () => {
       const result = await service.priceClose(AAPL, '2024-01-15');
 
       expect(result.price).toBe('187.00');
+    });
+  });
+
+  // -- priceClosesRange -----------------------------------------------------
+
+  describe('priceClosesRange', () => {
+    it('fetches and stores multiple prices from the equity router range path', async () => {
+      const rangePrices = [
+        makePrice({ as_of_date: '2024-01-15', price: '186.00', source: 'range' }),
+        makePrice({ as_of_date: '2024-01-16', price: '187.25', source: 'range' }),
+      ];
+      const equitySource = new StubEquitySource('range', null, null, rangePrices);
+      const equityRouter = new EquityPriceRouter([equitySource]);
+
+      service = new MarketDataService(store);
+      service.withEquityRouter(equityRouter).withClock(clock);
+
+      const result = await service.priceClosesRange(AAPL, '2024-01-15', '2024-01-20');
+
+      expect(result).toHaveLength(2);
+      const stored = await store.get_price(AAPL_ID, '2024-01-16', 'close');
+      expect(stored).not.toBeNull();
+      expect(stored!.price).toBe('187.25');
     });
   });
 

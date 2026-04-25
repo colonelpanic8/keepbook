@@ -169,6 +169,13 @@ export {
   filterByDateRange,
   collectChangePoints,
 } from './portfolio/change-points.js';
+export {
+  portfolioGraph,
+  renderNetWorthSvg,
+  type PortfolioGraphOptions,
+  type PortfolioGraphOutput,
+  type ResolvedGraphOptions,
+} from './app/graph.js';
 
 // ---------------------------------------------------------------------------
 // Sync

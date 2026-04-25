@@ -215,6 +215,7 @@ type AssetPriceCache = {
   asset: AssetType;
   asset_id: AssetId;
   prices: Map<string, PricePoint>;
+  fetched_dates: Set<string>;
 };
 
 type FxCache = Map<string, Map<string, FxRatePoint>>;
@@ -395,11 +396,13 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-function upsertPriceCache(cache: Map<string, PricePoint>, point: PricePoint): void {
+function upsertPriceCache(cache: Map<string, PricePoint>, point: PricePoint): boolean {
   const existing = cache.get(point.as_of_date);
   if (existing === undefined || existing.timestamp.getTime() < point.timestamp.getTime()) {
     cache.set(point.as_of_date, point);
+    return true;
   }
+  return false;
 }
 
 function upsertFxCache(cache: Map<string, FxRatePoint>, point: FxRatePoint): void {
@@ -685,10 +688,67 @@ export async function fetchHistoricalPrices(
       asset,
       asset_id: assetId,
       prices: await loadPriceCache(store, assetId),
+      fetched_dates: new Set<string>(),
     });
   }
 
   assetCaches.sort((a, b) => a.asset_id.asStr().localeCompare(b.asset_id.asStr()));
+
+  const prices = emptyPriceHistoryStats();
+  const fx = emptyPriceHistoryStats();
+  const failures: PriceHistoryFailure[] = [];
+  const failureCount: FailureCounter = { count: 0 };
+  const failureLimit = 50;
+  const shouldDelayRequests = requestDelayMs > 0;
+
+  const fetchStart = addDaysYmd(alignedStart, -lookbackDays);
+  for (const assetCache of assetCaches) {
+    if (assetCache.asset.type !== 'equity' && assetCache.asset.type !== 'crypto') {
+      continue;
+    }
+
+    let needsFetch = false;
+    for (
+      let sampleDate = alignedStart;
+      compareYmd(sampleDate, endDate) <= 0;
+      sampleDate = advanceIntervalDate(sampleDate, interval)
+    ) {
+      if (resolveCachedPrice(assetCache.prices, sampleDate, lookbackDays) === null) {
+        needsFetch = true;
+        break;
+      }
+    }
+
+    if (!needsFetch) {
+      continue;
+    }
+
+    try {
+      const fetchedPrices = await marketData.priceClosesRange(assetCache.asset, fetchStart, endDate);
+      for (const fetched of fetchedPrices) {
+        if (upsertPriceCache(assetCache.prices, fetched)) {
+          assetCache.fetched_dates.add(fetched.as_of_date);
+        }
+      }
+    } catch (err) {
+      failureCount.count += 1;
+      if (failures.length < failureLimit) {
+        failures.push({
+          kind: 'price_range',
+          date: `${fetchStart}/${endDate}`,
+          error: errorMessage(err),
+          asset_id: assetCache.asset_id.asStr(),
+          asset: assetCache.asset,
+        });
+      }
+    }
+
+    if (shouldDelayRequests) {
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, requestDelayMs);
+      });
+    }
+  }
 
   const fxCache: FxCache = new Map();
   if (includeFx) {
@@ -702,13 +762,6 @@ export async function fetchHistoricalPrices(
       }
     }
   }
-
-  const prices = emptyPriceHistoryStats();
-  const fx = emptyPriceHistoryStats();
-  const failures: PriceHistoryFailure[] = [];
-  const failureCount: FailureCounter = { count: 0 };
-  const failureLimit = 50;
-  const shouldDelayRequests = requestDelayMs > 0;
 
   const fxCtx: FxRateContext = {
     marketData,
@@ -727,8 +780,6 @@ export async function fetchHistoricalPrices(
     points += 1;
 
     for (const assetCache of assetCaches) {
-      let shouldDelay = false;
-
       switch (assetCache.asset.type) {
         case 'currency': {
           if (includeFx) {
@@ -746,7 +797,11 @@ export async function fetchHistoricalPrices(
           const cached = resolveCachedPrice(assetCache.prices, current, lookbackDays);
           if (cached !== null) {
             if (cached.exact) {
-              prices.existing += 1;
+              if (assetCache.fetched_dates.has(cached.point.as_of_date)) {
+                prices.fetched += 1;
+              } else {
+                prices.existing += 1;
+              }
             } else {
               prices.lookback += 1;
             }
@@ -762,47 +817,20 @@ export async function fetchHistoricalPrices(
             break;
           }
 
-          try {
-            const fetched = await marketData.priceClose(assetCache.asset, current);
-            if (fetched.as_of_date === current) {
-              prices.fetched += 1;
-            } else {
-              prices.lookback += 1;
-            }
-            upsertPriceCache(assetCache.prices, fetched);
-            shouldDelay = shouldDelayRequests;
-
-            if (includeFx && fetched.quote_currency.toUpperCase() !== targetCurrencyUpper) {
-              await ensureFxRate(
-                fxCtx,
-                fetched.quote_currency.toUpperCase(),
-                targetCurrencyUpper,
-                current,
-              );
-            }
-          } catch (err) {
-            prices.missing += 1;
-            failureCount.count += 1;
-            if (failures.length < failureLimit) {
-              failures.push({
-                kind: 'price',
-                date: current,
-                error: errorMessage(err),
-                asset_id: assetCache.asset_id.asStr(),
-                asset: assetCache.asset,
-              });
-            }
-            shouldDelay = shouldDelayRequests;
+          prices.missing += 1;
+          failureCount.count += 1;
+          if (failures.length < failureLimit) {
+            failures.push({
+              kind: 'price',
+              date: current,
+              error: `No close price found for asset ${assetCache.asset_id.asStr()} on or before ${current}`,
+              asset_id: assetCache.asset_id.asStr(),
+              asset: assetCache.asset,
+            });
           }
 
           break;
         }
-      }
-
-      if (shouldDelay) {
-        await new Promise<void>((resolve) => {
-          setTimeout(resolve, requestDelayMs);
-        });
       }
     }
 
@@ -832,6 +860,32 @@ export async function fetchHistoricalPrices(
     failure_count: failureCount.count,
     failures: failures.length > 0 ? failures : undefined,
   };
+}
+
+export async function fillPricesAtDate(
+  storage: Storage,
+  config: ResolvedConfig,
+  options: Omit<PriceHistoryOptions, 'start' | 'end' | 'interval'> & { date: string },
+  clock?: Clock,
+): Promise<PriceHistoryOutput> {
+  const lookbackDays = options.lookback_days ?? 0;
+
+  return fetchHistoricalPrices(
+    storage,
+    config,
+    {
+      account: options.account,
+      connection: options.connection,
+      start: options.date,
+      end: options.date,
+      interval: 'daily',
+      lookback_days: lookbackDays,
+      request_delay_ms: options.request_delay_ms,
+      currency: options.currency,
+      include_fx: options.include_fx,
+    },
+    clock,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -916,6 +970,10 @@ export async function portfolioHistory(
   const granularity = parseGranularity(options.granularity ?? 'none');
 
   const marketDataService = new MarketDataService(marketDataStore);
+  if (typeof config.history.lookback_days === 'number') {
+    marketDataService.withLookbackDays(config.history.lookback_days);
+  }
+  marketDataService.withFutureProjection(config.history.allow_future_projection);
 
   // Collect change points
   const allPoints = await collectChangePoints(storage, marketDataStore, {

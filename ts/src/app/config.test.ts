@@ -5,7 +5,7 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 
 import { defaultConfigPath, loadConfig, configOutput } from './config.js';
-import { DEFAULT_REFRESH_CONFIG, DEFAULT_TRAY_CONFIG } from '../config.js';
+import { DEFAULT_HISTORY_CONFIG, DEFAULT_REFRESH_CONFIG, DEFAULT_TRAY_CONFIG } from '../config.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -202,6 +202,7 @@ describe('configOutput', () => {
       reporting_currency: 'USD',
       display: {},
       refresh: { ...DEFAULT_REFRESH_CONFIG },
+      history: { ...DEFAULT_HISTORY_CONFIG },
       tray: { ...DEFAULT_TRAY_CONFIG, spending_windows_days: [...DEFAULT_TRAY_CONFIG.spending_windows_days] },
       spending: { ignore_accounts: [], ignore_connections: [], ignore_tags: [] },
       ignore: { transaction_rules: [] },
@@ -225,6 +226,7 @@ describe('configOutput', () => {
       reporting_currency: 'EUR',
       display: {},
       refresh: { ...DEFAULT_REFRESH_CONFIG },
+      history: { ...DEFAULT_HISTORY_CONFIG },
       tray: { ...DEFAULT_TRAY_CONFIG, spending_windows_days: [...DEFAULT_TRAY_CONFIG.spending_windows_days] },
       spending: { ignore_accounts: [], ignore_connections: [], ignore_tags: [] },
       ignore: { transaction_rules: [] },
@@ -248,6 +250,7 @@ describe('configOutput', () => {
       reporting_currency: 'GBP',
       display: {},
       refresh: { balance_staleness: 1, price_staleness: 2 },
+      history: { ...DEFAULT_HISTORY_CONFIG },
       tray: { ...DEFAULT_TRAY_CONFIG, spending_windows_days: [...DEFAULT_TRAY_CONFIG.spending_windows_days] },
       spending: { ignore_accounts: [], ignore_connections: [], ignore_tags: [] },
       ignore: { transaction_rules: [] },

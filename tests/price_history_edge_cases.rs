@@ -6,8 +6,8 @@ use anyhow::Result;
 use chrono::{NaiveDate, TimeZone, Utc};
 use keepbook::app::{fetch_historical_prices, PriceHistoryRequest};
 use keepbook::config::{
-    DisplayConfig, GitConfig, IgnoreConfig, RefreshConfig, ResolvedConfig, SpendingConfig,
-    TrayConfig,
+    DisplayConfig, GitConfig, HistoryConfig, IgnoreConfig, RefreshConfig, ResolvedConfig,
+    SpendingConfig, TrayConfig,
 };
 use keepbook::market_data::{JsonlMarketDataStore, MarketDataStore, PriceKind};
 use keepbook::models::{Account, Asset, AssetBalance, BalanceSnapshot, Id};
@@ -21,6 +21,7 @@ fn resolved_config(data_dir: &Path) -> ResolvedConfig {
         reporting_currency: "USD".to_string(),
         display: DisplayConfig::default(),
         refresh: RefreshConfig::default(),
+        history: HistoryConfig::default(),
         tray: TrayConfig::default(),
         spending: SpendingConfig::default(),
         ignore: IgnoreConfig::default(),

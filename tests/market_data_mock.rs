@@ -5,10 +5,42 @@ use std::sync::Arc;
 use anyhow::Result;
 use chrono::{Duration, NaiveDate, Utc};
 use keepbook::market_data::{
-    AssetId, FxRateKind, MarketDataService, MarketDataStore, MemoryMarketDataStore, PriceKind,
+    AssetId, EquityPriceRouter, EquityPriceSource, FxRateKind, MarketDataService, MarketDataStore,
+    MemoryMarketDataStore, PriceKind, PricePoint,
 };
 use keepbook::models::Asset;
 use support::{fx_rate_point, price_point, price_point_with_timestamp, MockMarketDataSource};
+
+#[derive(Debug)]
+struct RangeEquitySource {
+    prices: Vec<PricePoint>,
+}
+
+#[async_trait::async_trait]
+impl EquityPriceSource for RangeEquitySource {
+    async fn fetch_close(
+        &self,
+        _asset: &Asset,
+        _asset_id: &AssetId,
+        _date: NaiveDate,
+    ) -> Result<Option<PricePoint>> {
+        anyhow::bail!("single-date fetch should not be used for range test");
+    }
+
+    async fn fetch_closes(
+        &self,
+        _asset: &Asset,
+        _asset_id: &AssetId,
+        _start: NaiveDate,
+        _end: NaiveDate,
+    ) -> Result<Vec<PricePoint>> {
+        Ok(self.prices.clone())
+    }
+
+    fn name(&self) -> &str {
+        "range-equity"
+    }
+}
 
 #[tokio::test]
 async fn test_price_close_fetches_and_caches() -> Result<()> {
@@ -32,6 +64,36 @@ async fn test_price_close_fetches_and_caches() -> Result<()> {
     let service_cached = MarketDataService::new(store.clone(), None);
     let cached_fetch = service_cached.price_close(&asset, date).await?;
     assert_eq!(cached_fetch.price, "189.50");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_price_closes_range_fetches_and_caches_multiple_prices() -> Result<()> {
+    let store = Arc::new(MemoryMarketDataStore::new());
+    let asset = Asset::equity("AAPL");
+    let start = NaiveDate::from_ymd_opt(2024, 1, 1).unwrap();
+    let end = NaiveDate::from_ymd_opt(2024, 1, 5).unwrap();
+    let jan2 = NaiveDate::from_ymd_opt(2024, 1, 2).unwrap();
+    let jan3 = NaiveDate::from_ymd_opt(2024, 1, 3).unwrap();
+
+    let source = RangeEquitySource {
+        prices: vec![
+            price_point(&asset, jan2, "189.50", "USD", PriceKind::Close),
+            price_point(&asset, jan3, "190.25", "USD", PriceKind::Close),
+        ],
+    };
+    let router = Arc::new(EquityPriceRouter::new(vec![Arc::new(source)]));
+    let service = MarketDataService::new(store.clone(), None).with_equity_router(router);
+
+    let fetched = service.price_closes_range(&asset, start, end).await?;
+
+    assert_eq!(fetched.len(), 2);
+    let stored = store
+        .get_price(&AssetId::from_asset(&asset), jan3, PriceKind::Close)
+        .await?
+        .expect("range price should be cached");
+    assert_eq!(stored.price, "190.25");
 
     Ok(())
 }

@@ -42,6 +42,7 @@ import {
 function buildAccountsByConnection(accounts: AccountType[]): Map<string, Set<string>> {
   const accountsByConnection = new Map<string, Set<string>>();
   for (const account of accounts) {
+    if (!account.active) continue;
     const connectionId = account.connection_id.asStr();
     const set = accountsByConnection.get(connectionId);
     if (set !== undefined) {
@@ -131,6 +132,7 @@ function resolveConnectionAccountIds(
   }
 
   for (const account of accounts) {
+    if (!account.active) continue;
     if (!account.connection_id.equals(connection.state.id)) continue;
     const accountIdStr = account.id.asStr();
     if (!validIds.has(accountIdStr)) continue;

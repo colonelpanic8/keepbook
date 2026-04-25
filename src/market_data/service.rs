@@ -23,6 +23,9 @@ pub struct MarketDataService {
     store_lookback_days: Option<u32>,
     // Bounds external fetch attempts when an exact close is unavailable.
     fetch_lookback_days: u32,
+    // When true, historical store lookups may project the earliest later cached
+    // reading backward when no acceptable earlier reading exists.
+    allow_future_projection: bool,
     /// How old a quote can be before we fetch a new one. None means always fetch.
     quote_staleness: Option<std::time::Duration>,
     clock: Arc<dyn Clock>,
@@ -41,6 +44,7 @@ impl MarketDataService {
             fx_router: None,
             store_lookback_days: None,
             fetch_lookback_days: 7,
+            allow_future_projection: false,
             quote_staleness: None,
             clock: Arc::new(SystemClock),
         }
@@ -69,6 +73,11 @@ impl MarketDataService {
 
     pub fn with_quote_staleness(mut self, staleness: std::time::Duration) -> Self {
         self.quote_staleness = Some(staleness);
+        self
+    }
+
+    pub fn with_future_projection(mut self, enabled: bool) -> Self {
+        self.allow_future_projection = enabled;
         self
     }
 
@@ -109,11 +118,24 @@ impl MarketDataService {
                     return Ok(Some(price));
                 }
             }
-            return Ok(None);
+            if !self.allow_future_projection {
+                return Ok(None);
+            }
+
+            let prices = self.store.get_all_prices(&asset_id).await?;
+            return Ok(select_earliest_price_on_or_after(prices, date));
         }
 
         let prices = self.store.get_all_prices(&asset_id).await?;
-        Ok(select_latest_price_on_or_before(prices, date))
+        if let Some(price) = select_latest_price_on_or_before(prices.clone(), date) {
+            return Ok(Some(price));
+        }
+
+        if self.allow_future_projection {
+            return Ok(select_earliest_price_on_or_after(prices, date));
+        }
+
+        Ok(None)
     }
 
     /// Get a valuation price from store only, no external fetching.
@@ -159,11 +181,24 @@ impl MarketDataService {
                     return Ok(Some(price));
                 }
             }
-            return Ok(None);
+            if !self.allow_future_projection {
+                return Ok(None);
+            }
+
+            let prices = self.store.get_all_prices(&asset_id).await?;
+            return Ok(select_earliest_price_on_or_after(prices, date));
         }
 
         let prices = self.store.get_all_prices(&asset_id).await?;
-        Ok(select_latest_price_on_or_before(prices, date))
+        if let Some(price) = select_latest_price_on_or_before(prices.clone(), date) {
+            return Ok(Some(price));
+        }
+
+        if self.allow_future_projection {
+            return Ok(select_earliest_price_on_or_after(prices, date));
+        }
+
+        Ok(None)
     }
 
     pub async fn price_close(&self, asset: &Asset, date: NaiveDate) -> Result<PricePoint> {
@@ -231,6 +266,33 @@ impl MarketDataService {
 
         let price = self.price_close(&asset, date).await?;
         Ok((price, !had_cached))
+    }
+
+    /// Fetch and store close prices for an asset over a date range.
+    ///
+    /// This bypasses per-date lookback loops and lets providers use native
+    /// historical range endpoints when available.
+    pub async fn price_closes_range(
+        &self,
+        asset: &Asset,
+        start: NaiveDate,
+        end: NaiveDate,
+    ) -> Result<Vec<PricePoint>> {
+        if start > end {
+            return Ok(Vec::new());
+        }
+
+        let asset = asset.normalized();
+        let asset_id = AssetId::from_asset(&asset);
+        let prices = self
+            .fetch_price_range_from_sources(&asset, &asset_id, start, end)
+            .await?;
+
+        if !prices.is_empty() {
+            self.store.put_prices(&prices).await?;
+        }
+
+        Ok(prices)
     }
 
     /// Get the latest available price for an asset.
@@ -462,11 +524,24 @@ impl MarketDataService {
                     return Ok(Some(rate));
                 }
             }
-            return Ok(None);
+            if !self.allow_future_projection {
+                return Ok(None);
+            }
+
+            let rates = self.store.get_all_fx_rates(&base, &quote).await?;
+            return Ok(select_earliest_fx_rate_on_or_after(rates, date));
         }
 
         let rates = self.store.get_all_fx_rates(&base, &quote).await?;
-        Ok(select_latest_fx_rate_on_or_before(rates, date))
+        if let Some(rate) = select_latest_fx_rate_on_or_before(rates.clone(), date) {
+            return Ok(Some(rate));
+        }
+
+        if self.allow_future_projection {
+            return Ok(select_earliest_fx_rate_on_or_after(rates, date));
+        }
+
+        Ok(None)
     }
 
     pub async fn register_asset(&self, asset: &Asset) -> Result<()> {
@@ -559,6 +634,36 @@ impl MarketDataService {
         Ok(None)
     }
 
+    async fn fetch_price_range_from_sources(
+        &self,
+        asset: &Asset,
+        asset_id: &AssetId,
+        start: NaiveDate,
+        end: NaiveDate,
+    ) -> Result<Vec<PricePoint>> {
+        match asset {
+            Asset::Equity { .. } => {
+                if let Some(router) = &self.equity_router {
+                    let prices = router.fetch_closes(asset, asset_id, start, end).await?;
+                    if !prices.is_empty() {
+                        return Ok(prices);
+                    }
+                }
+            }
+            Asset::Crypto { .. } => {
+                if let Some(router) = &self.crypto_router {
+                    let prices = router.fetch_closes(asset, asset_id, start, end).await?;
+                    if !prices.is_empty() {
+                        return Ok(prices);
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        Ok(Vec::new())
+    }
+
     async fn fetch_fx_from_sources(
         &self,
         base: &str,
@@ -593,6 +698,20 @@ fn select_latest_price_on_or_before(
         })
 }
 
+fn select_earliest_price_on_or_after(
+    prices: Vec<PricePoint>,
+    date: NaiveDate,
+) -> Option<PricePoint> {
+    prices
+        .into_iter()
+        .filter(|p| p.kind == PriceKind::Close && p.as_of_date >= date)
+        .min_by(|a, b| {
+            a.as_of_date
+                .cmp(&b.as_of_date)
+                .then_with(|| a.timestamp.cmp(&b.timestamp))
+        })
+}
+
 fn select_latest_fx_rate_on_or_before(
     rates: Vec<FxRatePoint>,
     date: NaiveDate,
@@ -601,6 +720,20 @@ fn select_latest_fx_rate_on_or_before(
         .into_iter()
         .filter(|r| r.kind == FxRateKind::Close && r.as_of_date <= date)
         .max_by(|a, b| {
+            a.as_of_date
+                .cmp(&b.as_of_date)
+                .then_with(|| a.timestamp.cmp(&b.timestamp))
+        })
+}
+
+fn select_earliest_fx_rate_on_or_after(
+    rates: Vec<FxRatePoint>,
+    date: NaiveDate,
+) -> Option<FxRatePoint> {
+    rates
+        .into_iter()
+        .filter(|r| r.kind == FxRateKind::Close && r.as_of_date >= date)
+        .min_by(|a, b| {
             a.as_of_date
                 .cmp(&b.as_of_date)
                 .then_with(|| a.timestamp.cmp(&b.timestamp))
@@ -846,6 +979,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn future_projection_uses_earliest_later_price_when_bounded_lookback_misses() -> Result<()>
+    {
+        let store = Arc::new(MemoryMarketDataStore::default());
+        let svc = MarketDataService::new(store.clone(), None)
+            .with_lookback_days(7)
+            .with_future_projection(true);
+        let asset = Asset::equity("AAPL");
+        let asset_id = AssetId::from_asset(&asset);
+        let query_date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+
+        store
+            .put_prices(&[
+                make_close(
+                    &asset_id,
+                    NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
+                    Utc.with_ymd_and_hms(2024, 1, 1, 23, 59, 59).unwrap(),
+                    "100",
+                ),
+                make_close(
+                    &asset_id,
+                    NaiveDate::from_ymd_opt(2024, 1, 20).unwrap(),
+                    Utc.with_ymd_and_hms(2024, 1, 20, 23, 59, 59).unwrap(),
+                    "110",
+                ),
+            ])
+            .await?;
+
+        let found = svc.price_from_store(&asset, query_date).await?;
+        assert!(found.is_some());
+        assert_eq!(
+            found.unwrap().as_of_date,
+            NaiveDate::from_ymd_opt(2024, 1, 20).unwrap()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn valuation_price_from_store_prefers_same_day_quote_over_older_close() -> Result<()> {
         let store = Arc::new(MemoryMarketDataStore::default());
         let svc = MarketDataService::new(store.clone(), None);
@@ -902,6 +1072,43 @@ mod tests {
         assert_eq!(
             found.unwrap().as_of_date,
             NaiveDate::from_ymd_opt(2024, 1, 1).unwrap()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn future_projection_uses_earliest_later_fx_rate_when_bounded_lookback_misses(
+    ) -> Result<()> {
+        let store = Arc::new(MemoryMarketDataStore::default());
+        let svc = MarketDataService::new(store.clone(), None)
+            .with_lookback_days(7)
+            .with_future_projection(true);
+        let query_date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+
+        store
+            .put_fx_rates(&[
+                make_fx_close(
+                    "USD",
+                    "EUR",
+                    NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
+                    Utc.with_ymd_and_hms(2024, 1, 1, 23, 59, 59).unwrap(),
+                    "0.91",
+                ),
+                make_fx_close(
+                    "USD",
+                    "EUR",
+                    NaiveDate::from_ymd_opt(2024, 1, 20).unwrap(),
+                    Utc.with_ymd_and_hms(2024, 1, 20, 23, 59, 59).unwrap(),
+                    "0.93",
+                ),
+            ])
+            .await?;
+
+        let found = svc.fx_from_store("USD", "EUR", query_date).await?;
+        assert!(found.is_some());
+        assert_eq!(
+            found.unwrap().as_of_date,
+            NaiveDate::from_ymd_opt(2024, 1, 20).unwrap()
         );
         Ok(())
     }

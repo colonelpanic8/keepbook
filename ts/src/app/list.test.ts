@@ -14,7 +14,7 @@ import { FixedIdGenerator } from '../models/id-generator.js';
 import { Asset } from '../models/asset.js';
 import { AssetId } from '../market-data/asset-id.js';
 import { MemoryMarketDataStore } from '../market-data/store.js';
-import type { ResolvedConfig } from '../config.js';
+import { DEFAULT_HISTORY_CONFIG, DEFAULT_TRAY_CONFIG, type ResolvedConfig } from '../config.js';
 import {
   listConnections,
   listAccounts,
@@ -45,7 +45,12 @@ function makeConfig(overrides?: Partial<ResolvedConfig>): ResolvedConfig {
       balance_staleness: 14 * 86400000,
       price_staleness: 24 * 60 * 60 * 1000,
     },
-    tray: { history_points: 8, spending_windows_days: [7, 30, 90] },
+    history: { ...DEFAULT_HISTORY_CONFIG },
+    tray: {
+      ...DEFAULT_TRAY_CONFIG,
+      history_spec: [...DEFAULT_TRAY_CONFIG.history_spec],
+      spending_windows_days: [...DEFAULT_TRAY_CONFIG.spending_windows_days],
+    },
     spending: { ignore_accounts: [], ignore_connections: [], ignore_tags: [] },
     ignore: { transaction_rules: [] },
     git: { auto_commit: false, auto_push: false, merge_master_before_command: false },
@@ -430,7 +435,11 @@ describe('listBalances', () => {
       },
     ]);
 
-    const result = await listBalances(storage, makeConfig({ reporting_currency: 'usd' }), marketDataStore);
+    const result = await listBalances(
+      storage,
+      makeConfig({ reporting_currency: 'usd' }),
+      marketDataStore,
+    );
     expect(result).toHaveLength(1);
     expect(result[0].reporting_currency).toBe('USD');
     expect(result[0].value_in_reporting_currency).toBe('250');
@@ -624,7 +633,11 @@ describe('listTransactions', () => {
     const storage = new MemoryStorage();
     const clock = makeClock('2026-02-05T14:30:00Z');
 
-    const conn = Connection.new({ name: 'Schwab', synchronizer: 'schwab' }, makeIdGen('conn-1'), clock);
+    const conn = Connection.new(
+      { name: 'Schwab', synchronizer: 'schwab' },
+      makeIdGen('conn-1'),
+      clock,
+    );
     await storage.saveConnection(conn);
 
     const acct = Account.newWithGenerator(
@@ -652,17 +665,22 @@ describe('listTransactions', () => {
     );
     await storage.appendTransactions(acct.id, [txCc, txRent]);
 
-    const result = await listTransactions(storage, '2000-01-01', '2099-12-31', makeConfig({
-      ignore: {
-        transaction_rules: [
-          {
-            account_name: '(?i)^Investor Checking$',
-            synchronizer: '(?i)^schwab$',
-            description: '(?i)credit\\s+crd\\s+(?:e?pay|autopay)',
-          },
-        ],
-      },
-    }));
+    const result = await listTransactions(
+      storage,
+      '2000-01-01',
+      '2099-12-31',
+      makeConfig({
+        ignore: {
+          transaction_rules: [
+            {
+              account_name: '(?i)^Investor Checking$',
+              synchronizer: '(?i)^schwab$',
+              description: '(?i)credit\\s+crd\\s+(?:e?pay|autopay)',
+            },
+          ],
+        },
+      }),
+    );
 
     expect(result).toHaveLength(1);
     expect(result[0].id).toBe('tx-rent');
@@ -673,7 +691,11 @@ describe('listTransactions', () => {
     const storage = new MemoryStorage();
     const clock = makeClock('2026-02-05T14:30:00Z');
 
-    const conn = Connection.new({ name: 'Schwab', synchronizer: 'schwab' }, makeIdGen('conn-1'), clock);
+    const conn = Connection.new(
+      { name: 'Schwab', synchronizer: 'schwab' },
+      makeIdGen('conn-1'),
+      clock,
+    );
     await storage.saveConnection(conn);
 
     const acct = Account.newWithGenerator(
@@ -717,7 +739,14 @@ describe('listTransactions', () => {
     expect(skipped).toHaveLength(1);
     expect(skipped[0].id).toBe('tx-rent');
 
-    const included = await listTransactions(storage, '2000-01-01', '2099-12-31', config, false, false);
+    const included = await listTransactions(
+      storage,
+      '2000-01-01',
+      '2099-12-31',
+      config,
+      false,
+      false,
+    );
     expect(included).toHaveLength(2);
   });
 
@@ -753,7 +782,14 @@ describe('listTransactions', () => {
     const skipped = await listTransactions(storage, '2000-01-01', '2099-12-31', config);
     expect(skipped).toHaveLength(0);
 
-    const included = await listTransactions(storage, '2000-01-01', '2099-12-31', config, false, false);
+    const included = await listTransactions(
+      storage,
+      '2000-01-01',
+      '2099-12-31',
+      config,
+      false,
+      false,
+    );
     expect(included).toHaveLength(1);
   });
 
@@ -790,7 +826,14 @@ describe('listTransactions', () => {
     const skipped = await listTransactions(storage, '2000-01-01', '2099-12-31', config);
     expect(skipped).toHaveLength(0);
 
-    const included = await listTransactions(storage, '2000-01-01', '2099-12-31', config, false, false);
+    const included = await listTransactions(
+      storage,
+      '2000-01-01',
+      '2099-12-31',
+      config,
+      false,
+      false,
+    );
     expect(included).toHaveLength(1);
   });
 
@@ -827,7 +870,14 @@ describe('listTransactions', () => {
     const skipped = await listTransactions(storage, '2000-01-01', '2099-12-31', config);
     expect(skipped).toHaveLength(0);
 
-    const included = await listTransactions(storage, '2000-01-01', '2099-12-31', config, false, false);
+    const included = await listTransactions(
+      storage,
+      '2000-01-01',
+      '2099-12-31',
+      config,
+      false,
+      false,
+    );
     expect(included).toHaveLength(1);
   });
 
@@ -996,7 +1046,11 @@ describe('listPriceSources', () => {
       'type = "coingecko"\nenabled = false\npriority = 1\n',
       'utf8',
     );
-    await writeFile(path.join(sourcesDir, 'invalid', 'source.toml'), 'type = [not valid toml', 'utf8');
+    await writeFile(
+      path.join(sourcesDir, 'invalid', 'source.toml'),
+      'type = [not valid toml',
+      'utf8',
+    );
 
     try {
       const result = await listPriceSources(dir);
@@ -1030,7 +1084,6 @@ describe('listPriceSources', () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
-
 });
 
 // ---------------------------------------------------------------------------

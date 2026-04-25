@@ -184,6 +184,61 @@ impl EquityPriceSource for MarketstackPriceSource {
         }
     }
 
+    async fn fetch_closes(
+        &self,
+        asset: &Asset,
+        asset_id: &AssetId,
+        start: NaiveDate,
+        end: NaiveDate,
+    ) -> Result<Vec<PricePoint>> {
+        let (ticker, exchange) = match asset {
+            Asset::Equity { ticker, exchange } => (ticker.as_str(), exchange.as_deref()),
+            _ => return Ok(Vec::new()),
+        };
+
+        let symbol = Self::format_symbol(ticker, exchange);
+        let url = format!(
+            "{}/eod?access_key={}&symbols={}&date_from={}&date_to={}&limit=1000",
+            MARKETSTACK_BASE_URL,
+            self.api_key,
+            symbol,
+            start.format("%Y-%m-%d"),
+            end.format("%Y-%m-%d")
+        );
+
+        let response = self.client.get(&url).send().await?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            if status.as_u16() == 404 {
+                return Ok(Vec::new());
+            }
+            return Err(anyhow!("Marketstack API error: {status} - {body}"));
+        }
+
+        let eod_response: EodResponse = response.json().await?;
+        let now = Utc::now();
+        let mut prices = Vec::new();
+        for data in eod_response.data {
+            let parsed_date = Self::parse_date(&data.date)?;
+            if parsed_date < start || parsed_date > end {
+                continue;
+            }
+            prices.push(PricePoint {
+                asset_id: asset_id.clone(),
+                as_of_date: parsed_date,
+                timestamp: now,
+                price: data.close.to_string(),
+                quote_currency: "USD".to_string(),
+                kind: PriceKind::Close,
+                source: self.name().to_string(),
+            });
+        }
+
+        prices.sort_by_key(|p| p.as_of_date);
+        Ok(prices)
+    }
+
     fn name(&self) -> &str {
         "marketstack"
     }

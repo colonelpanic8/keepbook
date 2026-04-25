@@ -1,4 +1,5 @@
 mod config;
+mod graph;
 mod ignore_rules;
 mod import;
 mod list;
@@ -14,6 +15,7 @@ use crate::config::ResolvedConfig;
 use crate::sync::{AutoCommitter, GitAutoCommitter};
 
 pub use config::config_output;
+pub use graph::{portfolio_graph, PortfolioGraphOptions, PortfolioGraphOutput};
 pub use import::import_schwab_transactions;
 pub use list::{
     list_accounts, list_all, list_balances, list_connections, list_price_sources, list_transactions,
@@ -23,8 +25,8 @@ pub use mutations::{
     remove_connection, set_account_config, set_balance, set_transaction_annotation,
 };
 pub use portfolio::{
-    fetch_historical_prices, portfolio_change_points, portfolio_history, portfolio_snapshot,
-    PriceHistoryRequest,
+    fetch_historical_prices, fill_prices_at_date, portfolio_change_points, portfolio_history,
+    portfolio_recent_history, portfolio_snapshot, PriceHistoryRequest,
 };
 pub use preflight::{run_preflight, PreflightOptions};
 pub use spending::{spending_report, SpendingReportOptions};

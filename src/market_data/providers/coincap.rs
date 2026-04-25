@@ -158,12 +158,17 @@ impl CoinCapPriceSource {
         Ok(Some(asset_id))
     }
 
-    async fn fetch_history(&self, asset_id: &str, date: NaiveDate) -> Result<Option<HistoryPoint>> {
+    async fn fetch_history_range(
+        &self,
+        asset_id: &str,
+        start_date: NaiveDate,
+        end_date: NaiveDate,
+    ) -> Result<Vec<HistoryPoint>> {
         let start = Utc
-            .from_utc_datetime(&date.and_hms_opt(0, 0, 0).unwrap())
+            .from_utc_datetime(&start_date.and_hms_opt(0, 0, 0).unwrap())
             .timestamp_millis();
         let end = Utc
-            .from_utc_datetime(&(date + Duration::days(1)).and_hms_opt(0, 0, 0).unwrap())
+            .from_utc_datetime(&(end_date + Duration::days(1)).and_hms_opt(0, 0, 0).unwrap())
             .timestamp_millis();
 
         let url = format!(
@@ -175,7 +180,15 @@ impl CoinCapPriceSource {
             .await
             .context("Failed to parse CoinCap history response")?;
 
-        Ok(data.data.into_iter().last())
+        Ok(data.data)
+    }
+
+    async fn fetch_history(&self, asset_id: &str, date: NaiveDate) -> Result<Option<HistoryPoint>> {
+        Ok(self
+            .fetch_history_range(asset_id, date, date)
+            .await?
+            .into_iter()
+            .last())
     }
 }
 
@@ -227,6 +240,54 @@ impl CryptoPriceSource for CoinCapPriceSource {
             kind: PriceKind::Close,
             source: self.name().to_string(),
         }))
+    }
+
+    async fn fetch_closes(
+        &self,
+        asset: &Asset,
+        asset_id: &AssetId,
+        start: NaiveDate,
+        end: NaiveDate,
+    ) -> Result<Vec<PricePoint>> {
+        let symbol = match asset {
+            Asset::Crypto { symbol, .. } => symbol,
+            _ => return Ok(Vec::new()),
+        };
+
+        let Some(coincap_id) = self.resolve_asset_id(symbol).await? else {
+            return Ok(Vec::new());
+        };
+
+        let points = self.fetch_history_range(&coincap_id, start, end).await?;
+        let now = Utc::now();
+        let mut prices = Vec::new();
+        for point in points {
+            let price = match point.price_usd {
+                serde_json::Value::String(s) => s,
+                serde_json::Value::Number(n) => n.to_string(),
+                _ => continue,
+            };
+            let as_of_date = Utc
+                .timestamp_millis_opt(point.time)
+                .single()
+                .unwrap_or_else(Utc::now)
+                .date_naive();
+            if as_of_date < start || as_of_date > end {
+                continue;
+            }
+            prices.push(PricePoint {
+                asset_id: asset_id.clone(),
+                as_of_date,
+                timestamp: now,
+                price,
+                quote_currency: "USD".to_string(),
+                kind: PriceKind::Close,
+                source: self.name().to_string(),
+            });
+        }
+
+        prices.sort_by_key(|p| p.as_of_date);
+        Ok(prices)
     }
 
     fn name(&self) -> &str {

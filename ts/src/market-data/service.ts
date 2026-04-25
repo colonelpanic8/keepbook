@@ -42,6 +42,20 @@ function selectLatestPriceOnOrBefore(prices: PricePoint[], date: string): PriceP
   return candidates[candidates.length - 1];
 }
 
+function selectEarliestPriceOnOrAfter(prices: PricePoint[], date: string): PricePoint | null {
+  const candidates = prices.filter((p) => p.kind === 'close' && p.as_of_date >= date);
+  if (candidates.length === 0) {
+    return null;
+  }
+  candidates.sort((a, b) => {
+    if (a.as_of_date !== b.as_of_date) {
+      return a.as_of_date.localeCompare(b.as_of_date);
+    }
+    return a.timestamp.getTime() - b.timestamp.getTime();
+  });
+  return candidates[0];
+}
+
 function selectLatestFxRateOnOrBefore(rates: FxRatePoint[], date: string): FxRatePoint | null {
   const candidates = rates.filter((r) => r.kind === 'close' && r.as_of_date <= date);
   if (candidates.length === 0) {
@@ -56,6 +70,20 @@ function selectLatestFxRateOnOrBefore(rates: FxRatePoint[], date: string): FxRat
   return candidates[candidates.length - 1];
 }
 
+function selectEarliestFxRateOnOrAfter(rates: FxRatePoint[], date: string): FxRatePoint | null {
+  const candidates = rates.filter((r) => r.kind === 'close' && r.as_of_date >= date);
+  if (candidates.length === 0) {
+    return null;
+  }
+  candidates.sort((a, b) => {
+    if (a.as_of_date !== b.as_of_date) {
+      return a.as_of_date.localeCompare(b.as_of_date);
+    }
+    return a.timestamp.getTime() - b.timestamp.getTime();
+  });
+  return candidates[0];
+}
+
 // ---------------------------------------------------------------------------
 // MarketDataService
 // ---------------------------------------------------------------------------
@@ -67,6 +95,9 @@ export class MarketDataService {
   private storeLookbackDays_: number | null = null;
   // Bounds external fetch attempts when exact-date close is unavailable.
   private fetchLookbackDays_: number = 7;
+  // When true, historical store lookups may project the earliest later cached
+  // reading backward when no acceptable earlier reading exists.
+  private allowFutureProjection_: boolean = false;
   private quoteStaleness_: number = 300_000; // 5 minutes in ms
   private clock_: Clock = new SystemClock();
   private equityRouter_: EquityPriceRouter | null = null;
@@ -106,6 +137,11 @@ export class MarketDataService {
     return this;
   }
 
+  withFutureProjection(enabled: boolean): this {
+    this.allowFutureProjection_ = enabled;
+    return this;
+  }
+
   withClock(clock: Clock): this {
     this.clock_ = clock;
     return this;
@@ -132,11 +168,22 @@ export class MarketDataService {
           return price;
         }
       }
-      return null;
+      if (!this.allowFutureProjection_) {
+        return null;
+      }
+      const all = await this.store.get_all_prices(assetId);
+      return selectEarliestPriceOnOrAfter(all, date);
     }
 
     const all = await this.store.get_all_prices(assetId);
-    return selectLatestPriceOnOrBefore(all, date);
+    const older = selectLatestPriceOnOrBefore(all, date);
+    if (older !== null) {
+      return older;
+    }
+    if (this.allowFutureProjection_) {
+      return selectEarliestPriceOnOrAfter(all, date);
+    }
+    return null;
   }
 
   /**
@@ -174,11 +221,22 @@ export class MarketDataService {
           return fallback;
         }
       }
-      return null;
+      if (!this.allowFutureProjection_) {
+        return null;
+      }
+      const all = await this.store.get_all_prices(assetId);
+      return selectEarliestPriceOnOrAfter(all, date);
     }
 
     const all = await this.store.get_all_prices(assetId);
-    return selectLatestPriceOnOrBefore(all, date);
+    const older = selectLatestPriceOnOrBefore(all, date);
+    if (older !== null) {
+      return older;
+    }
+    if (this.allowFutureProjection_) {
+      return selectEarliestPriceOnOrAfter(all, date);
+    }
+    return null;
   }
 
   /**
@@ -200,11 +258,22 @@ export class MarketDataService {
           return rate;
         }
       }
-      return null;
+      if (!this.allowFutureProjection_) {
+        return null;
+      }
+      const all = await this.store.get_all_fx_rates(baseNorm, quoteNorm);
+      return selectEarliestFxRateOnOrAfter(all, date);
     }
 
     const all = await this.store.get_all_fx_rates(baseNorm, quoteNorm);
-    return selectLatestFxRateOnOrBefore(all, date);
+    const older = selectLatestFxRateOnOrBefore(all, date);
+    if (older !== null) {
+      return older;
+    }
+    if (this.allowFutureProjection_) {
+      return selectEarliestFxRateOnOrAfter(all, date);
+    }
+    return null;
   }
 
   // -- Price lookups with external fetching ---------------------------------
@@ -258,6 +327,27 @@ export class MarketDataService {
 
     const assetId = AssetId.fromAsset(Asset.normalized(asset));
     throw new Error(`No close price found for asset ${assetId.asStr()} on or before ${date}`);
+  }
+
+  /**
+   * Fetch and store close prices for an asset over a date range.
+   * Providers/routers with native range endpoints can satisfy this with one
+   * request instead of one request per sampled date.
+   */
+  async priceClosesRange(asset: AssetType, start: string, end: string): Promise<PricePoint[]> {
+    if (start > end) {
+      return [];
+    }
+
+    const normalized = Asset.normalized(asset);
+    const assetId = AssetId.fromAsset(normalized);
+    const prices = await this.fetchClosePriceRange(normalized, assetId, start, end);
+
+    if (prices.length > 0) {
+      await this.store.put_prices(prices);
+    }
+
+    return prices;
   }
 
   /**
@@ -478,6 +568,41 @@ export class MarketDataService {
     }
 
     return null;
+  }
+
+  /**
+   * Try to fetch a close price range from asset-specific routers.
+   * Generic providers only expose single-date fetches, so they are omitted to
+   * keep historical backfills from degenerating into per-date request loops.
+   */
+  private async fetchClosePriceRange(
+    asset: AssetType,
+    assetId: AssetId,
+    start: string,
+    end: string,
+  ): Promise<PricePoint[]> {
+    switch (asset.type) {
+      case 'equity':
+        if (this.equityRouter_ !== null) {
+          const prices = await this.equityRouter_.fetchCloses(asset, assetId, start, end);
+          if (prices.length > 0) {
+            return prices;
+          }
+        }
+        break;
+      case 'crypto':
+        if (this.cryptoRouter_ !== null) {
+          const prices = await this.cryptoRouter_.fetchCloses(asset, assetId, start, end);
+          if (prices.length > 0) {
+            return prices;
+          }
+        }
+        break;
+      case 'currency':
+        break;
+    }
+
+    return [];
   }
 
   /**

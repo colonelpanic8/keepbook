@@ -3,8 +3,8 @@ use std::path::Path;
 use anyhow::Result;
 use keepbook::app::remove_connection;
 use keepbook::config::{
-    DisplayConfig, GitConfig, IgnoreConfig, RefreshConfig, ResolvedConfig, SpendingConfig,
-    TrayConfig,
+    DisplayConfig, GitConfig, HistoryConfig, IgnoreConfig, RefreshConfig, ResolvedConfig,
+    SpendingConfig, TrayConfig,
 };
 use keepbook::models::{Account, Connection, ConnectionConfig};
 use keepbook::storage::{JsonFileStorage, Storage};
@@ -16,6 +16,7 @@ fn resolved_config(data_dir: &Path) -> ResolvedConfig {
         reporting_currency: "USD".to_string(),
         display: DisplayConfig::default(),
         refresh: RefreshConfig::default(),
+        history: HistoryConfig::default(),
         tray: TrayConfig::default(),
         spending: SpendingConfig::default(),
         ignore: IgnoreConfig::default(),

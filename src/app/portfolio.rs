@@ -134,10 +134,99 @@ fn compute_history_total_value_with_carry_forward(
     Some(total_value)
 }
 
+fn history_total_value_from_snapshot(
+    snapshot: &crate::portfolio::PortfolioSnapshot,
+    config: &ResolvedConfig,
+    carry_forward_unit_values: &mut HashMap<String, Decimal>,
+) -> String {
+    snapshot
+        .by_asset
+        .as_ref()
+        .and_then(|assets| {
+            compute_history_total_value_with_carry_forward(assets, carry_forward_unit_values)
+        })
+        .map(|value| format_base_currency_value(value, config.display.currency_decimals))
+        .unwrap_or_else(|| snapshot.total_value.clone())
+}
+
+fn configure_history_market_data(
+    mut market_data: MarketDataService,
+    config: &ResolvedConfig,
+) -> MarketDataService {
+    if let Some(days) = config.history.lookback_days {
+        market_data = market_data.with_lookback_days(days);
+    }
+
+    market_data.with_future_projection(config.history.allow_future_projection)
+}
+
+fn calculate_history_summary(history_points: &[HistoryPoint]) -> Option<HistorySummary> {
+    if history_points.len() < 2 {
+        return None;
+    }
+
+    let initial = Decimal::from_str(&history_points[0].total_value).unwrap_or(Decimal::ZERO);
+    let final_val = Decimal::from_str(&history_points[history_points.len() - 1].total_value)
+        .unwrap_or(Decimal::ZERO);
+    let absolute_change = final_val - initial;
+    let percentage_change = if initial != Decimal::ZERO {
+        ((final_val - initial) / initial * Decimal::from(100))
+            .round_dp(2)
+            .to_string()
+    } else {
+        "N/A".to_string()
+    };
+
+    Some(HistorySummary {
+        initial_value: initial.normalize().to_string(),
+        final_value: final_val.normalize().to_string(),
+        absolute_change: absolute_change.normalize().to_string(),
+        percentage_change,
+    })
+}
+
+async fn build_history_point_for_date(
+    service: &PortfolioService,
+    config: &ResolvedConfig,
+    target_currency: &str,
+    as_of_date: NaiveDate,
+    timestamp: String,
+    change_triggers: Option<Vec<String>>,
+    previous_total_value: Option<Decimal>,
+    carry_forward_unit_values: &mut HashMap<String, Decimal>,
+) -> Result<(HistoryPoint, Option<Decimal>)> {
+    let query = PortfolioQuery {
+        as_of_date,
+        currency: target_currency.to_string(),
+        currency_decimals: config.display.currency_decimals,
+        grouping: Grouping::Asset,
+        include_detail: false,
+    };
+
+    let snapshot = service.calculate(&query).await?;
+    let history_total_value =
+        history_total_value_from_snapshot(&snapshot, config, carry_forward_unit_values);
+    let current_total_value = Decimal::from_str(&history_total_value).ok();
+    let percentage_change_from_previous =
+        compute_percentage_change_from_previous(previous_total_value, current_total_value);
+
+    Ok((
+        HistoryPoint {
+            timestamp,
+            date: as_of_date.to_string(),
+            total_value: history_total_value,
+            percentage_change_from_previous,
+            change_triggers,
+        },
+        current_total_value,
+    ))
+}
+
 struct AssetPriceCache {
     asset: Asset,
     asset_id: AssetId,
     prices: HashMap<NaiveDate, PricePoint>,
+    fetched_dates: HashSet<NaiveDate>,
 }
 
 pub async fn fetch_historical_prices(
@@ -216,10 +305,74 @@ pub async fn fetch_historical_prices(
             asset,
             asset_id,
             prices,
+            fetched_dates: HashSet::new(),
         });
     }
 
     asset_caches.sort_by(|a, b| a.asset_id.to_string().cmp(&b.asset_id.to_string()));
+
+    let mut failures = Vec::new();
+    let mut failure_count = 0usize;
+    let failure_limit = 50usize;
+    let fetch_start = aligned_start - Duration::days(lookback_days as i64);
+    let request_delay = if request_delay_ms > 0 {
+        Some(std::time::Duration::from_millis(request_delay_ms))
+    } else {
+        None
+    };
+
+    for asset_cache in asset_caches.iter_mut() {
+        match &asset_cache.asset {
+            Asset::Equity { .. } | Asset::Crypto { .. } => {
+                let mut needs_fetch = false;
+                let mut current = aligned_start;
+                while current <= end_date {
+                    if resolve_cached_price(&asset_cache.prices, current, lookback_days).is_none() {
+                        needs_fetch = true;
+                        break;
+                    }
+                    current = advance_interval_date(current, interval);
+                }
+
+                if !needs_fetch {
+                    continue;
+                }
+
+                match market_data
+                    .price_closes_range(&asset_cache.asset, fetch_start, end_date)
+                    .await
+                {
+                    Ok(fetched_prices) => {
+                        for price in fetched_prices {
+                            let as_of_date = price.as_of_date;
+                            if upsert_price_cache(&mut asset_cache.prices, price) {
+                                asset_cache.fetched_dates.insert(as_of_date);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        failure_count += 1;
+                        if failures.len() < failure_limit {
+                            failures.push(PriceHistoryFailure {
+                                kind: "price_range".to_string(),
+                                date: format!("{fetch_start}/{end_date}"),
+                                error: e.to_string(),
+                                asset_id: Some(asset_cache.asset_id.to_string()),
+                                asset: Some(asset_cache.asset.clone()),
+                                base: None,
+                                quote: None,
+                            });
+                        }
+                    }
+                }
+
+                if let Some(delay) = request_delay {
+                    tokio::time::sleep(delay).await;
+                }
+            }
+            Asset::Currency { .. } => {}
+        }
+    }
 
     let mut fx_cache: HashMap<(String, String), HashMap<NaiveDate, FxRatePoint>> = HashMap::new();
 
@@ -240,14 +393,6 @@ pub async fn fetch_historical_prices(
 
     let mut price_stats = PriceHistoryStats::default();
     let mut fx_stats = PriceHistoryStats::default();
-    let mut failures = Vec::new();
-    let mut failure_count = 0usize;
-    let failure_limit = 50usize;
-    let request_delay = if request_delay_ms > 0 {
-        Some(std::time::Duration::from_millis(request_delay_ms))
-    } else {
-        None
-    };
 
     let mut current = aligned_start;
     let mut points = 0usize;
@@ -283,7 +428,11 @@ pub async fn fetch_historical_prices(
                             resolve_cached_price(&asset_cache.prices, current, lookback_days)
                         {
                             if exact {
-                                price_stats.existing += 1;
+                                if asset_cache.fetched_dates.contains(&price.as_of_date) {
+                                    price_stats.fetched += 1;
+                                } else {
+                                    price_stats.existing += 1;
+                                }
                             } else {
                                 price_stats.lookback += 1;
                             }
@@ -302,47 +451,23 @@ pub async fn fetch_historical_prices(
                             continue;
                         }
 
-                        match market_data.price_close(&asset_cache.asset, current).await {
-                            Ok(price) => {
-                                let exact = price.as_of_date == current;
-                                if exact {
-                                    price_stats.fetched += 1;
-                                } else {
-                                    price_stats.lookback += 1;
-                                }
-
-                                upsert_price_cache(&mut asset_cache.prices, price.clone());
-                                should_delay = request_delay.is_some();
-
-                                if include_fx
-                                    && price.quote_currency.to_uppercase() != target_currency_upper
-                                {
-                                    ensure_fx_rate(
-                                        &mut fx_ctx,
-                                        &price.quote_currency.to_uppercase(),
-                                        &target_currency_upper,
-                                        current,
-                                    )
-                                    .await?;
-                                }
-                            }
-                            Err(e) => {
-                                price_stats.missing += 1;
-                                *fx_ctx.failure_count += 1;
-                                if fx_ctx.failures.len() < fx_ctx.failure_limit {
-                                    fx_ctx.failures.push(PriceHistoryFailure {
-                                        kind: "price".to_string(),
-                                        date: current.to_string(),
-                                        error: e.to_string(),
-                                        asset_id: Some(asset_cache.asset_id.to_string()),
-                                        asset: Some(asset_cache.asset.clone()),
-                                        base: None,
-                                        quote: None,
-                                    });
-                                }
-                                should_delay = request_delay.is_some();
-                            }
+                        price_stats.missing += 1;
+                        *fx_ctx.failure_count += 1;
+                        if fx_ctx.failures.len() < fx_ctx.failure_limit {
+                            fx_ctx.failures.push(PriceHistoryFailure {
+                                kind: "price".to_string(),
+                                date: current.to_string(),
+                                error: format!(
+                                    "No close price found for asset {} on or before {}",
+                                    asset_cache.asset_id, current
+                                ),
+                                asset_id: Some(asset_cache.asset_id.to_string()),
+                                asset: Some(asset_cache.asset.clone()),
+                                base: None,
+                                quote: None,
+                            });
                         }
+                        should_delay = request_delay.is_some();
                     }
                 }
 
@@ -386,6 +511,26 @@ pub async fn fetch_historical_prices(
     maybe_auto_commit(config, "market data fetch");
 
     Ok(output)
+}
+
+pub async fn fill_prices_at_date(request: PriceHistoryRequest<'_>) -> Result<PriceHistoryOutput> {
+    let date = request
+        .start
+        .context("fill_prices_at_date requires a start date")?;
+    if let Some(end) = request.end {
+        anyhow::ensure!(
+            end == date,
+            "fill_prices_at_date requires start and end to match"
+        );
+    }
+
+    fetch_historical_prices(PriceHistoryRequest {
+        start: Some(date),
+        end: Some(date),
+        interval: "daily",
+        ..request
+    })
+    .await
 }
 
 fn advance_interval_date(date: NaiveDate, interval: PriceHistoryInterval) -> NaiveDate {
@@ -437,6 +582,107 @@ fn days_in_month(year: i32, month: u32) -> u32 {
     let first_next = NaiveDate::from_ymd_opt(next_year, next_month, 1).expect("valid next month");
     let last = first_next - Duration::days(1);
     last.day()
+}
+
+fn shift_months_clamped(date: NaiveDate, months: i32) -> NaiveDate {
+    let month_index = date.year() * 12 + date.month0() as i32 + months;
+    let year = month_index.div_euclid(12);
+    let month0 = month_index.rem_euclid(12) as u32;
+    let month = month0 + 1;
+    let day = date.day().min(days_in_month(year, month));
+    NaiveDate::from_ymd_opt(year, month, day).expect("valid shifted month")
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RelativeDateUnit {
+    Day,
+    Week,
+    Month,
+    Year,
+}
+
+impl RelativeDateUnit {
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "d" | "day" | "days" => Some(Self::Day),
+            "w" | "week" | "weeks" => Some(Self::Week),
+            "m" | "mo" | "mon" | "month" | "months" => Some(Self::Month),
+            "y" | "yr" | "year" | "years" => Some(Self::Year),
+            _ => None,
+        }
+    }
+
+    fn shift(self, anchor_date: NaiveDate, count: i32) -> NaiveDate {
+        match self {
+            Self::Day => anchor_date + Duration::days(count as i64),
+            Self::Week => anchor_date + Duration::days((count * 7) as i64),
+            Self::Month => shift_months_clamped(anchor_date, count),
+            Self::Year => shift_months_clamped(anchor_date, count * 12),
+        }
+    }
+}
+
+fn parse_count_and_unit(value: &str) -> Option<(usize, RelativeDateUnit)> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let digit_count = trimmed.chars().take_while(|c| c.is_ascii_digit()).count();
+    if digit_count > 0 {
+        let count = trimmed[..digit_count].parse::<usize>().ok()?;
+        let unit = RelativeDateUnit::parse(trimmed[digit_count..].trim())?;
+        return Some((count, unit));
+    }
+
+    let mut parts = trimmed.split_whitespace();
+    let count = parts.next()?.parse::<usize>().ok()?;
+    let unit = RelativeDateUnit::parse(parts.next()?)?;
+    if parts.next().is_some() {
+        return None;
+    }
+    Some((count, unit))
+}
+
+fn parse_history_spec_entry(anchor_date: NaiveDate, spec: &str) -> Result<Vec<NaiveDate>> {
+    let normalized = spec.trim().to_lowercase();
+    if normalized.is_empty() {
+        anyhow::bail!("history spec entry must not be empty");
+    }
+    if normalized == "today" {
+        return Ok(vec![anchor_date]);
+    }
+
+    for prefix in ["each of the last ", "last "] {
+        if let Some(rest) = normalized.strip_prefix(prefix) {
+            let (count, unit) = parse_count_and_unit(rest)
+                .with_context(|| format!("Invalid history spec entry: {spec}"))?;
+            if count == 0 {
+                anyhow::bail!("history spec entry must use a positive count: {spec}");
+            }
+            return Ok((0..count)
+                .map(|offset| unit.shift(anchor_date, -(offset as i32)))
+                .collect());
+        }
+    }
+
+    let rest = normalized.strip_suffix(" ago").unwrap_or(&normalized);
+    let (count, unit) = parse_count_and_unit(rest)
+        .with_context(|| format!("Invalid history spec entry: {spec}"))?;
+    if count == 0 {
+        anyhow::bail!("history spec entry must use a positive count: {spec}");
+    }
+    Ok(vec![unit.shift(anchor_date, -(count as i32))])
+}
+
+fn history_spec_dates(anchor_date: NaiveDate, history_spec: &[String]) -> Result<Vec<NaiveDate>> {
+    let mut dates = Vec::new();
+    for spec in history_spec {
+        dates.extend(parse_history_spec_entry(anchor_date, spec)?);
+    }
+    dates.sort_unstable();
+    dates.dedup();
+    Ok(dates)
 }
 
 async fn resolve_price_history_scope(
@@ -956,13 +1202,14 @@ pub async fn portfolio_history(
     }
 
     // Setup market data service (offline mode - use cached data only)
-    let market_data = Arc::new(
+    let market_data = Arc::new(configure_history_market_data(
         MarketDataServiceBuilder::new(store, config.data_dir.clone())
             .with_quote_staleness(config.refresh.price_staleness)
             .offline_only()
             .build()
             .await,
-    );
+        config,
+    ));
 
     // Create portfolio service
     let service = PortfolioService::new(storage_arc, market_data);
@@ -977,26 +1224,6 @@ pub async fn portfolio_history(
 
     for change_point in &filtered {
         let as_of_date = change_point.timestamp.date_naive();
-        let query = PortfolioQuery {
-            as_of_date,
-            currency: target_currency.clone(),
-            currency_decimals: config.display.currency_decimals,
-            grouping: Grouping::Asset,
-            include_detail: false,
-        };
-
-        let snapshot = service.calculate(&query).await?;
-        let history_total_value = snapshot
-            .by_asset
-            .as_ref()
-            .and_then(|assets| {
-                compute_history_total_value_with_carry_forward(
-                    assets,
-                    &mut carry_forward_unit_values,
-                )
-            })
-            .map(|value| format_base_currency_value(value, config.display.currency_decimals))
-            .unwrap_or_else(|| snapshot.total_value.clone());
 
         // Format trigger descriptions
         let trigger_descriptions: Vec<String> = change_point
@@ -1019,48 +1246,26 @@ pub async fn portfolio_history(
             })
             .collect();
 
-        let current_total_value = Decimal::from_str(&history_total_value).ok();
-        let percentage_change_from_previous =
-            compute_percentage_change_from_previous(previous_total_value, current_total_value);
-
-        history_points.push(HistoryPoint {
-            timestamp: change_point.timestamp.to_rfc3339(),
-            date: as_of_date.to_string(),
-            total_value: history_total_value,
-            percentage_change_from_previous,
-            change_triggers: if trigger_descriptions.is_empty() {
+        let (history_point, current_total_value) = build_history_point_for_date(
+            &service,
+            config,
+            &target_currency,
+            as_of_date,
+            change_point.timestamp.to_rfc3339(),
+            if trigger_descriptions.is_empty() {
                 None
             } else {
                 Some(trigger_descriptions)
             },
-        });
-
+            previous_total_value,
+            &mut carry_forward_unit_values,
+        )
+        .await?;
+        history_points.push(history_point);
         previous_total_value = current_total_value;
     }
 
-    // Calculate summary if we have points
-    let summary = if history_points.len() >= 2 {
-        let initial = Decimal::from_str(&history_points[0].total_value).unwrap_or(Decimal::ZERO);
-        let final_val = Decimal::from_str(&history_points[history_points.len() - 1].total_value)
-            .unwrap_or(Decimal::ZERO);
-        let absolute_change = final_val - initial;
-        let percentage_change = if initial != Decimal::ZERO {
-            ((final_val - initial) / initial * Decimal::from(100))
-                .round_dp(2)
-                .to_string()
-        } else {
-            "N/A".to_string()
-        };
-
-        Some(HistorySummary {
-            initial_value: initial.normalize().to_string(),
-            final_value: final_val.normalize().to_string(),
-            absolute_change: absolute_change.normalize().to_string(),
-            percentage_change,
-        })
-    } else {
-        None
-    };
+    let summary = calculate_history_summary(&history_points);
 
     Ok(HistoryOutput {
         currency: target_currency,
@@ -1070,6 +1275,78 @@ pub async fn portfolio_history(
         points: history_points,
         summary,
     })
+}
+
+pub async fn portfolio_recent_history(
+    storage: Arc<dyn Storage>,
+    config: &ResolvedConfig,
+    currency: Option<String>,
+    include_prices: bool,
+    anchor_date: NaiveDate,
+) -> Result<Vec<HistoryPoint>> {
+    let store: Arc<dyn MarketDataStore> = Arc::new(JsonlMarketDataStore::new(&config.data_dir));
+    let storage_arc: Arc<dyn Storage> = storage;
+
+    let options = CollectOptions {
+        account_ids: Vec::new(),
+        include_prices,
+        include_fx: false,
+        target_currency: currency.clone(),
+    };
+    let change_points = collect_change_points(&storage_arc, &store, &options).await?;
+    let Some(earliest_date) = change_points
+        .iter()
+        .map(|point| point.timestamp.date_naive())
+        .min()
+    else {
+        return Ok(Vec::new());
+    };
+
+    let sample_dates: Vec<NaiveDate> = history_spec_dates(anchor_date, &config.tray.history_spec)?
+        .into_iter()
+        .filter(|date| *date >= earliest_date)
+        .collect();
+    if sample_dates.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let market_data = Arc::new(configure_history_market_data(
+        MarketDataServiceBuilder::new(store, config.data_dir.clone())
+            .with_quote_staleness(config.refresh.price_staleness)
+            .offline_only()
+            .build()
+            .await,
+        config,
+    ));
+    let service = PortfolioService::new(storage_arc, market_data);
+    let target_currency = currency.unwrap_or_else(|| config.reporting_currency.clone());
+
+    let mut history_points = Vec::with_capacity(sample_dates.len());
+    let mut previous_total_value: Option<Decimal> = None;
+    let mut carry_forward_unit_values: HashMap<String, Decimal> = HashMap::new();
+
+    for as_of_date in sample_dates {
+        let timestamp = as_of_date
+            .and_hms_opt(0, 0, 0)
+            .expect("valid start of day")
+            .and_utc()
+            .to_rfc3339();
+        let (history_point, current_total_value) = build_history_point_for_date(
+            &service,
+            config,
+            &target_currency,
+            as_of_date,
+            timestamp,
+            None,
+            previous_total_value,
+            &mut carry_forward_unit_values,
+        )
+        .await?;
+        history_points.push(history_point);
+        previous_total_value = current_total_value;
+    }
+
+    Ok(history_points)
 }
 
 pub async fn portfolio_change_points(
@@ -1145,7 +1422,8 @@ mod tests {
     use crate::app::*;
     use crate::clock::{Clock, FixedClock};
     use crate::config::{
-        DisplayConfig, GitConfig, RefreshConfig, ResolvedConfig, SpendingConfig, TrayConfig,
+        DisplayConfig, GitConfig, HistoryConfig, RefreshConfig, ResolvedConfig, SpendingConfig,
+        TrayConfig,
     };
     use crate::models::FixedIdGenerator;
     use crate::models::{Account, AssetBalance, BalanceSnapshot, Connection, ConnectionConfig};
@@ -1228,6 +1506,151 @@ mod tests {
         );
     }
 
+    #[test]
+    fn history_spec_dates_expand_default_recent_history_layout() -> anyhow::Result<()> {
+        let dates = history_spec_dates(
+            NaiveDate::from_ymd_opt(2025, 4, 19).unwrap(),
+            &[
+                "last 4 days".to_string(),
+                "1 week ago".to_string(),
+                "2 weeks ago".to_string(),
+                "last 12 months".to_string(),
+            ],
+        )?;
+        assert_eq!(
+            dates,
+            vec![
+                NaiveDate::from_ymd_opt(2024, 5, 19).unwrap(),
+                NaiveDate::from_ymd_opt(2024, 6, 19).unwrap(),
+                NaiveDate::from_ymd_opt(2024, 7, 19).unwrap(),
+                NaiveDate::from_ymd_opt(2024, 8, 19).unwrap(),
+                NaiveDate::from_ymd_opt(2024, 9, 19).unwrap(),
+                NaiveDate::from_ymd_opt(2024, 10, 19).unwrap(),
+                NaiveDate::from_ymd_opt(2024, 11, 19).unwrap(),
+                NaiveDate::from_ymd_opt(2024, 12, 19).unwrap(),
+                NaiveDate::from_ymd_opt(2025, 1, 19).unwrap(),
+                NaiveDate::from_ymd_opt(2025, 2, 19).unwrap(),
+                NaiveDate::from_ymd_opt(2025, 3, 19).unwrap(),
+                NaiveDate::from_ymd_opt(2025, 4, 5).unwrap(),
+                NaiveDate::from_ymd_opt(2025, 4, 12).unwrap(),
+                NaiveDate::from_ymd_opt(2025, 4, 16).unwrap(),
+                NaiveDate::from_ymd_opt(2025, 4, 17).unwrap(),
+                NaiveDate::from_ymd_opt(2025, 4, 18).unwrap(),
+                NaiveDate::from_ymd_opt(2025, 4, 19).unwrap(),
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn history_spec_dates_support_each_of_the_last_ranges() -> anyhow::Result<()> {
+        let dates = history_spec_dates(
+            NaiveDate::from_ymd_opt(2024, 2, 29).unwrap(),
+            &["each of the last 3 months".to_string()],
+        )?;
+        assert_eq!(
+            dates,
+            vec![
+                NaiveDate::from_ymd_opt(2023, 12, 29).unwrap(),
+                NaiveDate::from_ymd_opt(2024, 1, 29).unwrap(),
+                NaiveDate::from_ymd_opt(2024, 2, 29).unwrap(),
+            ]
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn portfolio_recent_history_uses_configured_history_spec() -> anyhow::Result<()> {
+        let dir = TempDir::new()?;
+        let mut tray = TrayConfig::default();
+        tray.history_spec = vec![
+            "last 4 days".to_string(),
+            "1 week ago".to_string(),
+            "2 weeks ago".to_string(),
+            "last 12 months".to_string(),
+        ];
+        let config = ResolvedConfig {
+            data_dir: dir.path().to_path_buf(),
+            reporting_currency: "USD".to_string(),
+            display: DisplayConfig::default(),
+            refresh: RefreshConfig::default(),
+            history: HistoryConfig::default(),
+            tray,
+            spending: SpendingConfig::default(),
+            ignore: crate::config::IgnoreConfig::default(),
+            git: GitConfig::default(),
+        };
+
+        let storage = Arc::new(MemoryStorage::new());
+        let connection = Connection::new(connection_config("Cash"));
+        storage.save_connection(&connection).await?;
+
+        let account = Account::new("Checking", connection.id().clone());
+        storage.save_account(&account).await?;
+
+        storage
+            .append_balance_snapshot(
+                &account.id,
+                &BalanceSnapshot::new(
+                    Utc.with_ymd_and_hms(2024, 1, 1, 12, 0, 0).unwrap(),
+                    vec![AssetBalance::new(Asset::currency("USD"), "100")],
+                ),
+            )
+            .await?;
+        storage
+            .append_balance_snapshot(
+                &account.id,
+                &BalanceSnapshot::new(
+                    Utc.with_ymd_and_hms(2025, 4, 15, 12, 0, 0).unwrap(),
+                    vec![AssetBalance::new(Asset::currency("USD"), "200")],
+                ),
+            )
+            .await?;
+
+        let output = portfolio_recent_history(
+            storage,
+            &config,
+            None,
+            false,
+            NaiveDate::from_ymd_opt(2025, 4, 19).unwrap(),
+        )
+        .await?;
+
+        assert_eq!(
+            output
+                .iter()
+                .map(|point| point.date.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "2024-05-19",
+                "2024-06-19",
+                "2024-07-19",
+                "2024-08-19",
+                "2024-09-19",
+                "2024-10-19",
+                "2024-11-19",
+                "2024-12-19",
+                "2025-01-19",
+                "2025-02-19",
+                "2025-03-19",
+                "2025-04-05",
+                "2025-04-12",
+                "2025-04-16",
+                "2025-04-17",
+                "2025-04-18",
+                "2025-04-19",
+            ]
+        );
+        assert_eq!(output[12].total_value, "100");
+        assert_eq!(output[13].total_value, "200");
+        assert_eq!(
+            output[13].percentage_change_from_previous.as_deref(),
+            Some("100")
+        );
+
+        Ok(())
+    }
+
     #[tokio::test]
     async fn portfolio_history_carries_forward_previous_valuation_when_price_missing(
     ) -> anyhow::Result<()> {
@@ -1237,6 +1660,7 @@ mod tests {
             reporting_currency: "USD".to_string(),
             display: DisplayConfig::default(),
             refresh: RefreshConfig::default(),
+            history: HistoryConfig::default(),
             tray: TrayConfig::default(),
             spending: SpendingConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
@@ -1307,6 +1731,153 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn portfolio_history_projects_future_prices_when_configured() -> anyhow::Result<()> {
+        let dir = TempDir::new()?;
+        let config = ResolvedConfig {
+            data_dir: dir.path().to_path_buf(),
+            reporting_currency: "USD".to_string(),
+            display: DisplayConfig::default(),
+            refresh: RefreshConfig::default(),
+            history: HistoryConfig {
+                allow_future_projection: true,
+                lookback_days: Some(7),
+            },
+            tray: TrayConfig::default(),
+            spending: SpendingConfig::default(),
+            ignore: crate::config::IgnoreConfig::default(),
+            git: GitConfig::default(),
+        };
+
+        let storage = Arc::new(MemoryStorage::new());
+        let connection = Connection::new(connection_config("Test Broker"));
+        storage.save_connection(&connection).await?;
+
+        let account = Account::new("Trading", connection.id().clone());
+        storage.save_account(&account).await?;
+
+        let asset = Asset::equity("AAPL");
+        storage
+            .append_balance_snapshot(
+                &account.id,
+                &BalanceSnapshot::new(
+                    Utc.with_ymd_and_hms(2024, 1, 15, 12, 0, 0).unwrap(),
+                    vec![AssetBalance::new(asset.clone(), "10")],
+                ),
+            )
+            .await?;
+
+        let store = JsonlMarketDataStore::new(&config.data_dir);
+        store
+            .put_prices(&[
+                PricePoint {
+                    asset_id: AssetId::from_asset(&asset),
+                    as_of_date: NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
+                    timestamp: Utc.with_ymd_and_hms(2024, 1, 1, 23, 59, 59).unwrap(),
+                    price: "100".to_string(),
+                    quote_currency: "USD".to_string(),
+                    kind: PriceKind::Close,
+                    source: "test".to_string(),
+                },
+                PricePoint {
+                    asset_id: AssetId::from_asset(&asset),
+                    as_of_date: NaiveDate::from_ymd_opt(2024, 1, 20).unwrap(),
+                    timestamp: Utc.with_ymd_and_hms(2024, 1, 20, 23, 59, 59).unwrap(),
+                    price: "120".to_string(),
+                    quote_currency: "USD".to_string(),
+                    kind: PriceKind::Close,
+                    source: "test".to_string(),
+                },
+            ])
+            .await?;
+
+        let output = portfolio_history(
+            storage,
+            &config,
+            None,
+            Some("2024-01-15".to_string()),
+            Some("2024-01-15".to_string()),
+            "none".to_string(),
+            false,
+        )
+        .await?;
+
+        assert_eq!(output.points.len(), 1);
+        assert_eq!(output.points[0].total_value, "1200");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn fill_prices_at_date_wraps_daily_history_fetch() -> anyhow::Result<()> {
+        let dir = TempDir::new()?;
+        let config = ResolvedConfig {
+            data_dir: dir.path().to_path_buf(),
+            reporting_currency: "USD".to_string(),
+            display: DisplayConfig::default(),
+            refresh: RefreshConfig::default(),
+            history: HistoryConfig::default(),
+            tray: TrayConfig::default(),
+            spending: SpendingConfig::default(),
+            ignore: crate::config::IgnoreConfig::default(),
+            git: GitConfig::default(),
+        };
+
+        let storage = Arc::new(MemoryStorage::new());
+        let connection = Connection::new(connection_config("Brokerage"));
+        storage.save_connection(&connection).await?;
+
+        let account = Account::new("Main", connection.id().clone());
+        storage.save_account(&account).await?;
+
+        let asset = Asset::equity("AAPL");
+        storage
+            .append_balance_snapshot(
+                &account.id,
+                &BalanceSnapshot::new(
+                    Utc.with_ymd_and_hms(2024, 1, 15, 12, 0, 0).unwrap(),
+                    vec![AssetBalance::new(asset.clone(), "10")],
+                ),
+            )
+            .await?;
+
+        let store = JsonlMarketDataStore::new(&config.data_dir);
+        store
+            .put_prices(&[PricePoint {
+                asset_id: AssetId::from_asset(&asset),
+                as_of_date: NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
+                timestamp: Utc.with_ymd_and_hms(2024, 1, 15, 23, 59, 59).unwrap(),
+                price: "182.5".to_string(),
+                quote_currency: "USD".to_string(),
+                kind: PriceKind::Close,
+                source: "test".to_string(),
+            }])
+            .await?;
+
+        let output = fill_prices_at_date(PriceHistoryRequest {
+            storage: storage.as_ref(),
+            config: &config,
+            account: None,
+            connection: None,
+            start: Some("2024-01-15"),
+            end: Some("2024-01-15"),
+            interval: "monthly",
+            lookback_days: 7,
+            request_delay_ms: 0,
+            currency: None,
+            include_fx: false,
+        })
+        .await?;
+
+        assert_eq!(output.interval, "daily");
+        assert_eq!(output.start_date, "2024-01-15");
+        assert_eq!(output.end_date, "2024-01-15");
+        assert_eq!(output.points, 1);
+        assert_eq!(output.prices.existing, 1);
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn portfolio_history_prefers_same_day_quotes_over_older_closes() -> anyhow::Result<()> {
         let dir = TempDir::new()?;
         let config = ResolvedConfig {
@@ -1314,6 +1885,7 @@ mod tests {
             reporting_currency: "USD".to_string(),
             display: DisplayConfig::default(),
             refresh: RefreshConfig::default(),
+            history: HistoryConfig::default(),
             tray: TrayConfig::default(),
             spending: SpendingConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
@@ -1406,6 +1978,7 @@ mod tests {
             reporting_currency: "USD".to_string(),
             display: DisplayConfig::default(),
             refresh: RefreshConfig::default(),
+            history: HistoryConfig::default(),
             tray: TrayConfig::default(),
             spending: SpendingConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
@@ -1512,6 +2085,7 @@ mod tests {
             reporting_currency: "USD".to_string(),
             display: DisplayConfig::default(),
             refresh: RefreshConfig::default(),
+            history: HistoryConfig::default(),
             tray: TrayConfig::default(),
             spending: SpendingConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
@@ -1694,6 +2268,7 @@ mod tests {
             reporting_currency: "USD".to_string(),
             display: DisplayConfig::default(),
             refresh: RefreshConfig::default(),
+            history: HistoryConfig::default(),
             tray: TrayConfig::default(),
             spending: SpendingConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
@@ -1719,6 +2294,7 @@ mod tests {
             reporting_currency: "USD".to_string(),
             display: DisplayConfig::default(),
             refresh: RefreshConfig::default(),
+            history: HistoryConfig::default(),
             tray: TrayConfig::default(),
             spending: SpendingConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
@@ -1769,6 +2345,7 @@ mod tests {
             reporting_currency: "USD".to_string(),
             display: DisplayConfig::default(),
             refresh: RefreshConfig::default(),
+            history: HistoryConfig::default(),
             tray: TrayConfig::default(),
             spending: SpendingConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
@@ -1803,6 +2380,7 @@ mod tests {
             reporting_currency: "USD".to_string(),
             display: DisplayConfig::default(),
             refresh: RefreshConfig::default(),
+            history: HistoryConfig::default(),
             tray: TrayConfig::default(),
             spending: SpendingConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
@@ -1838,6 +2416,7 @@ mod tests {
             reporting_currency: "USD".to_string(),
             display: DisplayConfig::default(),
             refresh: RefreshConfig::default(),
+            history: HistoryConfig::default(),
             tray: TrayConfig::default(),
             spending: SpendingConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
@@ -1881,6 +2460,7 @@ mod tests {
             reporting_currency: "USD".to_string(),
             display: DisplayConfig::default(),
             refresh: RefreshConfig::default(),
+            history: HistoryConfig::default(),
             tray: TrayConfig::default(),
             spending: SpendingConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),

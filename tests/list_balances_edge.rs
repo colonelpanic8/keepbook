@@ -3,8 +3,8 @@ use std::path::Path;
 use anyhow::Result;
 use keepbook::app::list_balances;
 use keepbook::config::{
-    DisplayConfig, GitConfig, IgnoreConfig, RefreshConfig, ResolvedConfig, SpendingConfig,
-    TrayConfig,
+    DisplayConfig, GitConfig, HistoryConfig, IgnoreConfig, RefreshConfig, ResolvedConfig,
+    SpendingConfig, TrayConfig,
 };
 use keepbook::models::{
     Account, Asset, AssetBalance, BalanceSnapshot, Connection, ConnectionConfig,
@@ -18,6 +18,7 @@ fn resolved_config(data_dir: &Path) -> ResolvedConfig {
         reporting_currency: "USD".to_string(),
         display: DisplayConfig::default(),
         refresh: RefreshConfig::default(),
+        history: HistoryConfig::default(),
         tray: TrayConfig::default(),
         spending: SpendingConfig::default(),
         ignore: IgnoreConfig::default(),

@@ -12,6 +12,29 @@ import type { AssetType } from '../models/asset.js';
 import type { AssetId } from './asset-id.js';
 import type { PricePoint, FxRatePoint } from './models.js';
 
+function addDaysYmd(dateStr: string, days: number): string {
+  const d = new Date(dateStr + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+async function fetchCloseRangeFallback(
+  source: EquityPriceSource | CryptoPriceSource,
+  asset: AssetType,
+  assetId: AssetId,
+  start: string,
+  end: string,
+): Promise<PricePoint[]> {
+  const prices: PricePoint[] = [];
+  for (let current = start; current <= end; current = addDaysYmd(current, 1)) {
+    const price = await source.fetchClose(asset, assetId, current);
+    if (price !== null) {
+      prices.push(price);
+    }
+  }
+  return prices;
+}
+
 // ---------------------------------------------------------------------------
 // Generic provider interface
 // ---------------------------------------------------------------------------
@@ -33,6 +56,13 @@ export interface MarketDataSource {
 export interface EquityPriceSource {
   fetchClose(asset: AssetType, assetId: AssetId, date: string): Promise<PricePoint | null>;
 
+  fetchCloses?(
+    asset: AssetType,
+    assetId: AssetId,
+    start: string,
+    end: string,
+  ): Promise<PricePoint[]>;
+
   fetchQuote(asset: AssetType, assetId: AssetId): Promise<PricePoint | null>;
 
   name(): string;
@@ -41,6 +71,13 @@ export interface EquityPriceSource {
 /** Source for cryptocurrency price data. */
 export interface CryptoPriceSource {
   fetchClose(asset: AssetType, assetId: AssetId, date: string): Promise<PricePoint | null>;
+
+  fetchCloses?(
+    asset: AssetType,
+    assetId: AssetId,
+    start: string,
+    end: string,
+  ): Promise<PricePoint[]>;
 
   fetchQuote(asset: AssetType, assetId: AssetId): Promise<PricePoint | null>;
 
@@ -79,6 +116,24 @@ export class EquityPriceRouter {
     return null;
   }
 
+  async fetchCloses(
+    asset: AssetType,
+    assetId: AssetId,
+    start: string,
+    end: string,
+  ): Promise<PricePoint[]> {
+    for (const source of this.#sources) {
+      const result =
+        source.fetchCloses !== undefined
+          ? await source.fetchCloses(asset, assetId, start, end)
+          : await fetchCloseRangeFallback(source, asset, assetId, start, end);
+      if (result.length > 0) {
+        return result;
+      }
+    }
+    return [];
+  }
+
   async fetchQuote(asset: AssetType, assetId: AssetId): Promise<PricePoint | null> {
     for (const source of this.#sources) {
       const result = await source.fetchQuote(asset, assetId);
@@ -109,6 +164,24 @@ export class CryptoPriceRouter {
       }
     }
     return null;
+  }
+
+  async fetchCloses(
+    asset: AssetType,
+    assetId: AssetId,
+    start: string,
+    end: string,
+  ): Promise<PricePoint[]> {
+    for (const source of this.#sources) {
+      const result =
+        source.fetchCloses !== undefined
+          ? await source.fetchCloses(asset, assetId, start, end)
+          : await fetchCloseRangeFallback(source, asset, assetId, start, end);
+      if (result.length > 0) {
+        return result;
+      }
+    }
+    return [];
   }
 
   async fetchQuote(asset: AssetType, assetId: AssetId): Promise<PricePoint | null> {

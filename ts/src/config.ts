@@ -21,6 +21,20 @@ export interface RefreshConfig {
   price_staleness: number;
 }
 
+export interface HistoryConfig {
+  /**
+   * When true, historical valuation may project a later cached price or FX
+   * rate backward when no acceptable earlier reading exists.
+   */
+  allow_future_projection: boolean;
+
+  /**
+   * Optional bound for older cached history lookups before future projection
+   * is considered. When omitted, older lookup remains unbounded.
+   */
+  lookback_days?: number;
+}
+
 export interface GitConfig {
   /** Whether to auto-commit data changes. */
   auto_commit: boolean;
@@ -53,8 +67,10 @@ export interface DisplayConfig {
 }
 
 export interface TrayConfig {
-  /** Number of recent portfolio history points shown in tray menu. */
+  /** Maximum number of recent portfolio history rows shown in the tray menu. */
   history_points: number;
+  /** Relative-date DSL entries expanded into tray history rows. */
+  history_spec: string[];
   /** Spending lookback windows (days) shown in tray menu. */
   spending_windows_days: number[];
 }
@@ -104,6 +120,8 @@ export interface Config {
   display: DisplayConfig;
   /** Refresh / staleness settings. */
   refresh: RefreshConfig;
+  /** Historical valuation settings. */
+  history: HistoryConfig;
   /** Tray UI settings. */
   tray: TrayConfig;
   /** Spending report settings. */
@@ -123,6 +141,8 @@ export interface ResolvedConfig {
   display: DisplayConfig;
   /** Refresh / staleness settings. */
   refresh: RefreshConfig;
+  /** Historical valuation settings. */
+  history: HistoryConfig;
   /** Tray UI settings. */
   tray: TrayConfig;
   /** Spending report settings. */
@@ -145,6 +165,10 @@ export const DEFAULT_REFRESH_CONFIG: RefreshConfig = {
   price_staleness: 24 * MS_PER_HOUR,
 };
 
+export const DEFAULT_HISTORY_CONFIG: HistoryConfig = {
+  allow_future_projection: false,
+};
+
 export const DEFAULT_GIT_CONFIG: GitConfig = {
   auto_commit: false,
   auto_push: false,
@@ -152,8 +176,9 @@ export const DEFAULT_GIT_CONFIG: GitConfig = {
 };
 
 export const DEFAULT_TRAY_CONFIG: TrayConfig = {
-  history_points: 8,
-  spending_windows_days: [7, 30, 90],
+  history_points: 17,
+  history_spec: ['last 4 days', '1 week ago', '2 weeks ago', 'last 12 months'],
+  spending_windows_days: [7, 30, 90, 365],
 };
 
 export const DEFAULT_SPENDING_CONFIG: SpendingConfig = {
@@ -171,7 +196,12 @@ export const DEFAULT_CONFIG: Config = {
   reporting_currency: 'USD',
   display: {},
   refresh: { ...DEFAULT_REFRESH_CONFIG },
-  tray: { ...DEFAULT_TRAY_CONFIG, spending_windows_days: [...DEFAULT_TRAY_CONFIG.spending_windows_days] },
+  history: { ...DEFAULT_HISTORY_CONFIG },
+  tray: {
+    ...DEFAULT_TRAY_CONFIG,
+    history_spec: [...DEFAULT_TRAY_CONFIG.history_spec],
+    spending_windows_days: [...DEFAULT_TRAY_CONFIG.spending_windows_days],
+  },
   spending: {
     ignore_accounts: [...DEFAULT_SPENDING_CONFIG.ignore_accounts],
     ignore_connections: [...DEFAULT_SPENDING_CONFIG.ignore_connections],
@@ -201,6 +231,7 @@ export function parseConfig(tomlStr: string): Config {
 
   const refreshRaw = (raw.refresh ?? {}) as Record<string, unknown>;
   const trayRaw = (raw.tray ?? {}) as Record<string, unknown>;
+  const historyRaw = (raw.history ?? {}) as Record<string, unknown>;
   const spendingRaw = (raw.spending ?? {}) as Record<string, unknown>;
   const ignoreRaw = (raw.ignore ?? {}) as Record<string, unknown>;
   const gitRaw = (raw.git ?? {}) as Record<string, unknown>;
@@ -228,6 +259,21 @@ export function parseConfig(tomlStr: string): Config {
         : DEFAULT_GIT_CONFIG.merge_master_before_command,
   };
 
+  const history: HistoryConfig = {
+    allow_future_projection:
+      typeof historyRaw.allow_future_projection === 'boolean'
+        ? historyRaw.allow_future_projection
+        : DEFAULT_HISTORY_CONFIG.allow_future_projection,
+  };
+  if (
+    typeof historyRaw.lookback_days === 'number' &&
+    Number.isInteger(historyRaw.lookback_days) &&
+    Number.isFinite(historyRaw.lookback_days) &&
+    historyRaw.lookback_days >= 0
+  ) {
+    history.lookback_days = historyRaw.lookback_days;
+  }
+
   const tray: TrayConfig = {
     history_points:
       typeof trayRaw.history_points === 'number' &&
@@ -235,8 +281,15 @@ export function parseConfig(tomlStr: string): Config {
       trayRaw.history_points >= 0
         ? trayRaw.history_points
         : DEFAULT_TRAY_CONFIG.history_points,
+    history_spec: [...DEFAULT_TRAY_CONFIG.history_spec],
     spending_windows_days: [...DEFAULT_TRAY_CONFIG.spending_windows_days],
   };
+  if (Array.isArray(trayRaw.history_spec)) {
+    tray.history_spec = trayRaw.history_spec
+      .filter((v): v is string => typeof v === 'string')
+      .map((v) => v.trim())
+      .filter((v) => v.length > 0);
+  }
   if (Array.isArray(trayRaw.spending_windows_days)) {
     tray.spending_windows_days = trayRaw.spending_windows_days
       .filter(
@@ -304,6 +357,7 @@ export function parseConfig(tomlStr: string): Config {
         : DEFAULT_CONFIG.reporting_currency,
     display: {},
     refresh,
+    history,
     tray,
     spending,
     ignore,
@@ -335,7 +389,8 @@ export function parseConfig(tomlStr: string): Config {
     }
   }
 
-  const currencyFixed = (displayRaw as { currency_fixed_decimals?: unknown }).currency_fixed_decimals;
+  const currencyFixed = (displayRaw as { currency_fixed_decimals?: unknown })
+    .currency_fixed_decimals;
   if (typeof currencyFixed === 'boolean') {
     config.display.currency_fixed_decimals = currencyFixed;
   }

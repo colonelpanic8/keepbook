@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
-use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
+use clap::{ArgAction, Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use keepbook::app;
 use keepbook::config::{default_config_path, ResolvedConfig};
 use keepbook::storage::{JsonFileStorage, Storage};
@@ -626,6 +626,37 @@ enum MarketDataCommand {
         #[arg(long)]
         no_fx: bool,
     },
+
+    /// Fill sparse prices for assets in scope at a single date
+    FillDate {
+        /// Account ID or name (mutually exclusive with --connection)
+        #[arg(long)]
+        account: Option<String>,
+
+        /// Connection ID or name (mutually exclusive with --account)
+        #[arg(long)]
+        connection: Option<String>,
+
+        /// Date to fill (YYYY-MM-DD)
+        #[arg(long)]
+        date: String,
+
+        /// Look back this many days when a close price is missing (default: 0)
+        #[arg(long, default_value_t = 0)]
+        lookback_days: u32,
+
+        /// Delay (ms) between price fetches to avoid rate limits (default: 0)
+        #[arg(long, default_value_t = 0)]
+        request_delay_ms: u64,
+
+        /// Base currency for FX rates (default: from config)
+        #[arg(long)]
+        currency: Option<String>,
+
+        /// Disable FX rate fetching
+        #[arg(long)]
+        no_fx: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -713,6 +744,69 @@ enum PortfolioCommand {
         /// Disable price changes as change points (faster, less detailed)
         #[arg(long, conflicts_with = "include_prices")]
         no_include_prices: bool,
+    },
+
+    /// Build a static HTML/SVG net-worth graph from portfolio history
+    Graph {
+        /// Optional TOML graph config file; CLI flags override file values.
+        #[arg(long)]
+        graph_config: Option<PathBuf>,
+
+        /// Base currency for valuations (default: from config)
+        #[arg(long)]
+        currency: Option<String>,
+
+        /// Start date for graph (YYYY-MM-DD, default: earliest data)
+        #[arg(long)]
+        start: Option<String>,
+
+        /// End date for graph (YYYY-MM-DD, default: today)
+        #[arg(long)]
+        end: Option<String>,
+
+        /// Time granularity: none/full, hourly, daily, weekly, monthly, yearly (default: daily)
+        #[arg(long)]
+        granularity: Option<String>,
+
+        /// Include price changes as change points.
+        #[arg(long, action = ArgAction::SetTrue, conflicts_with = "no_include_prices")]
+        include_prices: bool,
+
+        /// Disable price changes as change points (faster, less detailed).
+        #[arg(long, action = ArgAction::SetTrue, conflicts_with = "include_prices")]
+        no_include_prices: bool,
+
+        /// HTML output path (default: artifacts/net-worth-*.html)
+        #[arg(long)]
+        output: Option<PathBuf>,
+
+        /// SVG output path (default: same as --output with .svg extension)
+        #[arg(long)]
+        svg_output: Option<PathBuf>,
+
+        /// Graph title
+        #[arg(long)]
+        title: Option<String>,
+
+        /// Graph subtitle
+        #[arg(long)]
+        subtitle: Option<String>,
+
+        /// SVG width in pixels
+        #[arg(long)]
+        width: Option<u32>,
+
+        /// SVG height in pixels
+        #[arg(long)]
+        height: Option<u32>,
+
+        /// Lower bound for the value axis
+        #[arg(long)]
+        min_value: Option<f64>,
+
+        /// Upper bound for the value axis
+        #[arg(long)]
+        max_value: Option<f64>,
     },
 }
 
@@ -977,6 +1071,31 @@ async fn main() -> Result<()> {
                 .await?;
                 println!("{}", serde_json::to_string_pretty(&output)?);
             }
+            MarketDataCommand::FillDate {
+                account,
+                connection,
+                date,
+                lookback_days,
+                request_delay_ms,
+                currency,
+                no_fx,
+            } => {
+                let output = app::fill_prices_at_date(app::PriceHistoryRequest {
+                    storage: storage_arc.as_ref(),
+                    config: &config,
+                    account: account.as_deref(),
+                    connection: connection.as_deref(),
+                    start: Some(date.as_str()),
+                    end: Some(date.as_str()),
+                    interval: "daily",
+                    lookback_days,
+                    request_delay_ms,
+                    currency,
+                    include_fx: !no_fx,
+                })
+                .await?;
+                println!("{}", serde_json::to_string_pretty(&output)?);
+            }
         },
 
         Some(Command::List(list_cmd)) => match list_cmd {
@@ -1101,6 +1220,53 @@ async fn main() -> Result<()> {
                     end,
                     granularity,
                     include_prices && !no_include_prices,
+                )
+                .await?;
+                println!("{}", serde_json::to_string_pretty(&output)?);
+            }
+
+            PortfolioCommand::Graph {
+                graph_config,
+                currency,
+                start,
+                end,
+                granularity,
+                include_prices,
+                no_include_prices,
+                output,
+                svg_output,
+                title,
+                subtitle,
+                width,
+                height,
+                min_value,
+                max_value,
+            } => {
+                let output = app::portfolio_graph(
+                    storage_arc.clone(),
+                    &config,
+                    app::PortfolioGraphOptions {
+                        graph_config,
+                        start,
+                        end,
+                        currency,
+                        granularity,
+                        include_prices: if include_prices {
+                            Some(true)
+                        } else if no_include_prices {
+                            Some(false)
+                        } else {
+                            None
+                        },
+                        output,
+                        svg_output,
+                        title,
+                        subtitle,
+                        width,
+                        height,
+                        min_value,
+                        max_value,
+                    },
                 )
                 .await?;
                 println!("{}", serde_json::to_string_pretty(&output)?);

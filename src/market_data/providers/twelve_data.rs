@@ -63,22 +63,19 @@ impl TwelveDataPriceSource {
         }
     }
 
-    /// Fetches time series data for a symbol on a specific date.
+    /// Fetches time series data for a symbol over a date range.
     async fn fetch_time_series(
         &self,
         symbol: &str,
-        date: NaiveDate,
+        start_date: NaiveDate,
+        end_date: NaiveDate,
     ) -> Result<Option<TimeSeriesResponse>> {
-        // Twelve Data's time_series endpoint returns data up to and including end_date.
-        // We request a small window around the target date to handle weekends/holidays.
-        let start_date = date - chrono::Duration::days(7);
-
         let url = format!(
             "{}/time_series?symbol={}&interval=1day&start_date={}&end_date={}&apikey={}",
             BASE_URL,
             symbol,
             start_date.format("%Y-%m-%d"),
-            date.format("%Y-%m-%d"),
+            end_date.format("%Y-%m-%d"),
             self.api_key
         );
 
@@ -133,7 +130,9 @@ impl EquityPriceSource for TwelveDataPriceSource {
         };
 
         let symbol = Self::build_symbol(ticker, exchange);
-        let response = self.fetch_time_series(&symbol, date).await?;
+        let response = self
+            .fetch_time_series(&symbol, date - chrono::Duration::days(7), date)
+            .await?;
 
         let Some(data) = response else {
             return Ok(None);
@@ -179,6 +178,47 @@ impl EquityPriceSource for TwelveDataPriceSource {
             kind: PriceKind::Close,
             source: self.name().to_string(),
         }))
+    }
+
+    async fn fetch_closes(
+        &self,
+        asset: &Asset,
+        asset_id: &AssetId,
+        start: NaiveDate,
+        end: NaiveDate,
+    ) -> Result<Vec<PricePoint>> {
+        let (ticker, exchange) = match asset {
+            Asset::Equity { ticker, exchange } => (ticker.as_str(), exchange.as_deref()),
+            _ => return Ok(Vec::new()),
+        };
+
+        let symbol = Self::build_symbol(ticker, exchange);
+        let Some(data) = self.fetch_time_series(&symbol, start, end).await? else {
+            return Ok(Vec::new());
+        };
+
+        let quote_currency = data.meta.currency.unwrap_or_else(|| "USD".to_string());
+        let now = Utc::now();
+        let mut prices = Vec::new();
+        for value in data.values {
+            let as_of_date = NaiveDate::parse_from_str(&value.datetime, "%Y-%m-%d")
+                .context("Failed to parse date from Twelve Data response")?;
+            if as_of_date < start || as_of_date > end {
+                continue;
+            }
+            prices.push(PricePoint {
+                asset_id: asset_id.clone(),
+                as_of_date,
+                timestamp: now,
+                price: value.close,
+                quote_currency: quote_currency.clone(),
+                kind: PriceKind::Close,
+                source: self.name().to_string(),
+            });
+        }
+
+        prices.sort_by_key(|p| p.as_of_date);
+        Ok(prices)
     }
 
     async fn fetch_quote(&self, asset: &Asset, asset_id: &AssetId) -> Result<Option<PricePoint>> {

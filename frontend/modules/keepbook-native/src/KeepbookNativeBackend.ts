@@ -233,7 +233,7 @@ function buildConfig(dataDir: string) {
     },
     tray: {
       history_points: 8,
-      spending_windows_days: [7, 30, 90],
+      spending_windows_days: [7, 30, 90, 365],
     },
     spending: {
       ignore_accounts: [] as string[],

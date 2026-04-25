@@ -240,6 +240,54 @@ impl EquityPriceSource for EodhdPriceSource {
         Ok(None)
     }
 
+    async fn fetch_closes(
+        &self,
+        asset: &Asset,
+        asset_id: &AssetId,
+        start: NaiveDate,
+        end: NaiveDate,
+    ) -> Result<Vec<PricePoint>> {
+        let (ticker, exchange) = match asset {
+            Asset::Equity { ticker, exchange } => (ticker.as_str(), exchange.as_deref()),
+            _ => return Ok(Vec::new()),
+        };
+
+        let symbol = Self::build_symbol(ticker, exchange);
+        let url = format!(
+            "{}/{}?api_token={}&from={}&to={}&fmt=json",
+            EODHD_BASE_URL,
+            symbol,
+            self.api_key,
+            start.format("%Y-%m-%d"),
+            end.format("%Y-%m-%d")
+        );
+
+        let response = self.client.get(&url).send().await?;
+        if !response.status().is_success() {
+            if response.status().as_u16() == 404 {
+                return Ok(Vec::new());
+            }
+            return Err(anyhow!(
+                "EODHD API returned status {}: {}",
+                response.status(),
+                response.text().await.unwrap_or_default()
+            ));
+        }
+
+        let data: Vec<EodhdEodResponse> = response.json().await?;
+        let mut prices = Vec::new();
+        for entry in &data {
+            if let Some(price) = Self::parse_response(entry, asset_id, exchange)? {
+                if price.as_of_date >= start && price.as_of_date <= end {
+                    prices.push(price);
+                }
+            }
+        }
+
+        prices.sort_by_key(|p| p.as_of_date);
+        Ok(prices)
+    }
+
     fn name(&self) -> &str {
         "eodhd"
     }

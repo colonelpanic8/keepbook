@@ -22,7 +22,7 @@ pub async fn list_connections(storage: &dyn Storage) -> Result<Vec<ConnectionOut
     let connections = storage.list_connections().await?;
     let accounts = storage.list_accounts().await?;
     let mut accounts_by_connection: HashMap<Id, HashSet<Id>> = HashMap::new();
-    for account in accounts {
+    for account in accounts.into_iter().filter(|account| account.active) {
         accounts_by_connection
             .entry(account.connection_id.clone())
             .or_default()
@@ -106,7 +106,7 @@ pub async fn list_balances(
     let connections = storage.list_connections().await?;
     let accounts = storage.list_accounts().await?;
     let mut accounts_by_connection: HashMap<Id, HashSet<Id>> = HashMap::new();
-    for account in accounts {
+    for account in accounts.into_iter().filter(|account| account.active) {
         accounts_by_connection
             .entry(account.connection_id.clone())
             .or_default()
@@ -388,6 +388,7 @@ mod tests {
                 reporting_currency: "USD".to_string(),
                 display: crate::config::DisplayConfig::default(),
                 refresh: crate::config::RefreshConfig::default(),
+                history: crate::config::HistoryConfig::default(),
                 tray: crate::config::TrayConfig::default(),
                 spending: crate::config::SpendingConfig::default(),
                 ignore: crate::config::IgnoreConfig::default(),
@@ -447,6 +448,7 @@ mod tests {
                 reporting_currency: "USD".to_string(),
                 display: crate::config::DisplayConfig::default(),
                 refresh: crate::config::RefreshConfig::default(),
+                history: crate::config::HistoryConfig::default(),
                 tray: crate::config::TrayConfig::default(),
                 spending: crate::config::SpendingConfig::default(),
                 ignore: crate::config::IgnoreConfig::default(),
@@ -500,6 +502,7 @@ mod tests {
             reporting_currency: "USD".to_string(),
             display: crate::config::DisplayConfig::default(),
             refresh: crate::config::RefreshConfig::default(),
+            history: crate::config::HistoryConfig::default(),
             tray: crate::config::TrayConfig::default(),
             spending: crate::config::SpendingConfig::default(),
             ignore: crate::config::IgnoreConfig {
@@ -571,6 +574,7 @@ mod tests {
             reporting_currency: "USD".to_string(),
             display: crate::config::DisplayConfig::default(),
             refresh: crate::config::RefreshConfig::default(),
+            history: crate::config::HistoryConfig::default(),
             tray: crate::config::TrayConfig::default(),
             spending: crate::config::SpendingConfig {
                 ignore_accounts: vec!["Investor Checking".to_string()],
@@ -635,6 +639,7 @@ mod tests {
             reporting_currency: "USD".to_string(),
             display: crate::config::DisplayConfig::default(),
             refresh: crate::config::RefreshConfig::default(),
+            history: crate::config::HistoryConfig::default(),
             tray: crate::config::TrayConfig::default(),
             spending: crate::config::SpendingConfig {
                 ignore_accounts: vec![],
@@ -704,6 +709,7 @@ mod tests {
             reporting_currency: "USD".to_string(),
             display: crate::config::DisplayConfig::default(),
             refresh: crate::config::RefreshConfig::default(),
+            history: crate::config::HistoryConfig::default(),
             tray: crate::config::TrayConfig::default(),
             spending: crate::config::SpendingConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
