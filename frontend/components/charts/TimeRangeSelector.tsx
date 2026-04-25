@@ -2,6 +2,7 @@ import React from "react";
 import { Pressable, StyleSheet, View as RNView } from "react-native";
 
 import { Text } from "@/components/Themed";
+import { useColorScheme } from "@/components/useColorScheme";
 
 export enum TimeRange {
   WEEK = "WEEK",
@@ -62,6 +63,14 @@ export function TimeRangeSelector({
   selected,
   onSelect,
 }: TimeRangeSelectorProps) {
+  const isDark = useColorScheme() === "dark";
+  const inactiveStyle = {
+    backgroundColor: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(17, 24, 39, 0.08)",
+  };
+  const inactiveTextStyle = {
+    color: isDark ? "rgba(255, 255, 255, 0.58)" : "rgba(17, 24, 39, 0.62)",
+  };
+
   return (
     <RNView style={styles.container}>
       {RANGES.map((range) => {
@@ -70,10 +79,14 @@ export function TimeRangeSelector({
           <Pressable
             key={range}
             onPress={() => onSelect(range)}
-            style={[styles.pill, isActive && styles.pillActive]}
+            style={[styles.pill, inactiveStyle, isActive && styles.pillActive]}
           >
             <Text
-              style={[styles.pillText, isActive && styles.pillTextActive]}
+              style={[
+                styles.pillText,
+                inactiveTextStyle,
+                isActive && styles.pillTextActive,
+              ]}
             >
               {RANGE_LABELS[range]}
             </Text>
@@ -99,7 +112,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 6,
     borderRadius: 16,
-    backgroundColor: "rgba(255, 255, 255, 0.08)",
   },
   pillActive: {
     backgroundColor: ACTIVE_BG,
@@ -107,7 +119,6 @@ const styles = StyleSheet.create({
   pillText: {
     fontSize: 13,
     fontWeight: "600",
-    color: "rgba(255, 255, 255, 0.5)",
   },
   pillTextActive: {
     color: "#fff",

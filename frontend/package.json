@@ -3,6 +3,8 @@
   "main": "expo-router/entry",
   "version": "1.0.1",
   "scripts": {
+    "postinstall": "setup-skia-web",
+    "setup-skia-web": "setup-skia-web",
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
