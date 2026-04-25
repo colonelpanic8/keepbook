@@ -59,6 +59,13 @@ export interface TrayConfig {
   spending_windows_days: number[];
 }
 
+export interface HistoryConfig {
+  /** Allow projecting the earliest later cached price/rate backward. */
+  allow_future_projection: boolean;
+  /** Bound historical cached price/rate lookups before projection; undefined means unbounded. */
+  lookback_days?: number;
+}
+
 export interface SpendingConfig {
   /**
    * Ignore matching account IDs or names.
@@ -120,6 +127,8 @@ export interface Config {
   refresh: RefreshConfig;
   /** Tray UI settings. */
   tray: TrayConfig;
+  /** Historical valuation settings. */
+  history: HistoryConfig;
   /** Spending report settings. */
   spending: SpendingConfig;
   /** Portfolio reporting settings. */
@@ -141,6 +150,8 @@ export interface ResolvedConfig {
   refresh: RefreshConfig;
   /** Tray UI settings. */
   tray: TrayConfig;
+  /** Historical valuation settings. */
+  history: HistoryConfig;
   /** Spending report settings. */
   spending: SpendingConfig;
   /** Portfolio reporting settings. */
@@ -174,6 +185,10 @@ export const DEFAULT_TRAY_CONFIG: TrayConfig = {
   spending_windows_days: [7, 30, 90],
 };
 
+export const DEFAULT_HISTORY_CONFIG: HistoryConfig = {
+  allow_future_projection: false,
+};
+
 export const DEFAULT_SPENDING_CONFIG: SpendingConfig = {
   ignore_accounts: [],
   ignore_connections: [],
@@ -200,6 +215,7 @@ export const DEFAULT_CONFIG: Config = {
     ...DEFAULT_TRAY_CONFIG,
     spending_windows_days: [...DEFAULT_TRAY_CONFIG.spending_windows_days],
   },
+  history: { ...DEFAULT_HISTORY_CONFIG },
   spending: {
     ignore_accounts: [...DEFAULT_SPENDING_CONFIG.ignore_accounts],
     ignore_connections: [...DEFAULT_SPENDING_CONFIG.ignore_connections],
@@ -232,6 +248,7 @@ export function parseConfig(tomlStr: string): Config {
 
   const refreshRaw = (raw.refresh ?? {}) as Record<string, unknown>;
   const trayRaw = (raw.tray ?? {}) as Record<string, unknown>;
+  const historyRaw = (raw.history ?? {}) as Record<string, unknown>;
   const spendingRaw = (raw.spending ?? {}) as Record<string, unknown>;
   const portfolioRaw = (raw.portfolio ?? {}) as Record<string, unknown>;
   const ignoreRaw = (raw.ignore ?? {}) as Record<string, unknown>;
@@ -276,6 +293,21 @@ export function parseConfig(tomlStr: string): Config {
           typeof v === 'number' && Number.isInteger(v) && Number.isFinite(v) && v >= 0,
       )
       .map((v) => v);
+  }
+
+  const history: HistoryConfig = {
+    allow_future_projection:
+      typeof historyRaw.allow_future_projection === 'boolean'
+        ? historyRaw.allow_future_projection
+        : DEFAULT_HISTORY_CONFIG.allow_future_projection,
+  };
+  if (
+    typeof historyRaw.lookback_days === 'number' &&
+    Number.isInteger(historyRaw.lookback_days) &&
+    Number.isFinite(historyRaw.lookback_days) &&
+    historyRaw.lookback_days >= 0
+  ) {
+    history.lookback_days = historyRaw.lookback_days;
   }
 
   const parseStringArray = (value: unknown): string[] => {
@@ -355,6 +387,7 @@ export function parseConfig(tomlStr: string): Config {
     display: {},
     refresh,
     tray,
+    history,
     spending,
     portfolio,
     ignore,

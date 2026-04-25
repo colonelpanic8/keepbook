@@ -1003,6 +1003,10 @@ export async function portfolioHistory(
   const granularity = parseGranularity(options.granularity ?? 'none');
 
   const marketDataService = new MarketDataService(marketDataStore);
+  if (config.history.lookback_days !== undefined) {
+    marketDataService.withLookbackDays(config.history.lookback_days);
+  }
+  marketDataService.withFutureProjection(config.history.allow_future_projection);
 
   // Collect change points
   const allPoints = await collectChangePoints(storage, marketDataStore, {

@@ -17,6 +17,7 @@ import {
   resolveDataDir,
   DEFAULT_CONFIG,
   DEFAULT_GIT_CONFIG,
+  DEFAULT_HISTORY_CONFIG,
   DEFAULT_REFRESH_CONFIG,
   DEFAULT_SPENDING_CONFIG,
   DEFAULT_PORTFOLIO_CONFIG,
@@ -85,6 +86,7 @@ export async function loadConfig(
       reporting_currency: parsed.reporting_currency,
       display: parsed.display,
       refresh: parsed.refresh,
+      history: parsed.history,
       tray: parsed.tray,
       spending: parsed.spending,
       portfolio: parsed.portfolio,
@@ -104,6 +106,7 @@ export async function loadConfig(
     reporting_currency: DEFAULT_CONFIG.reporting_currency,
     display: DEFAULT_CONFIG.display,
     refresh: { ...DEFAULT_REFRESH_CONFIG },
+    history: { ...DEFAULT_HISTORY_CONFIG },
     tray: {
       ...DEFAULT_TRAY_CONFIG,
       spending_windows_days: [...DEFAULT_TRAY_CONFIG.spending_windows_days],

@@ -14,12 +14,14 @@ export {
   Config,
   RefreshConfig,
   GitConfig,
+  HistoryConfig,
   SpendingConfig,
   parseConfig,
   resolveDataDir,
   DEFAULT_CONFIG,
   DEFAULT_REFRESH_CONFIG,
   DEFAULT_GIT_CONFIG,
+  DEFAULT_HISTORY_CONFIG,
   DEFAULT_SPENDING_CONFIG,
 } from './config.js';
 export {

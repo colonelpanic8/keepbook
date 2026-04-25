@@ -41,6 +41,7 @@ function makeConfig(overrides?: Partial<ResolvedConfig>): ResolvedConfig {
       balance_staleness: 14 * 86400000,
       price_staleness: 86400000,
     },
+    history: { allow_future_projection: false },
     tray: { history_points: 8, spending_windows_days: [7, 30, 90] },
     spending: { ignore_accounts: [], ignore_connections: [], ignore_tags: [] },
     portfolio: {

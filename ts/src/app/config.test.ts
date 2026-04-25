@@ -5,7 +5,7 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 
 import { defaultConfigPath, loadConfig, configOutput } from './config.js';
-import { DEFAULT_REFRESH_CONFIG, DEFAULT_TRAY_CONFIG } from '../config.js';
+import { DEFAULT_HISTORY_CONFIG, DEFAULT_REFRESH_CONFIG, DEFAULT_TRAY_CONFIG } from '../config.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -128,6 +128,10 @@ describe('loadConfig', () => {
       '[refresh]',
       'balance_staleness = "7d"',
       'price_staleness = "12h"',
+      '',
+      '[history]',
+      'allow_future_projection = true',
+      'lookback_days = 7',
     ].join('\n');
 
     const configFile = path.join(tmpDir, 'keepbook.toml');
@@ -142,6 +146,7 @@ describe('loadConfig', () => {
     expect(config.git.merge_master_before_command).toBe(true);
     expect(config.refresh.balance_staleness).toBe(7 * 24 * 60 * 60 * 1000);
     expect(config.refresh.price_staleness).toBe(12 * 60 * 60 * 1000);
+    expect(config.history).toEqual({ allow_future_projection: true, lookback_days: 7 });
   });
 
   it('defaults auto_push to true when auto_commit is enabled', async () => {
@@ -198,6 +203,7 @@ describe('loadConfig', () => {
     expect(config.git.merge_master_before_command).toBe(false);
     expect(config.refresh.balance_staleness).toBe(DEFAULT_REFRESH_CONFIG.balance_staleness);
     expect(config.refresh.price_staleness).toBe(DEFAULT_REFRESH_CONFIG.price_staleness);
+    expect(config.history).toEqual(DEFAULT_HISTORY_CONFIG);
     // data_dir falls back to the intended config directory
     expect(config.data_dir).toBe(path.dirname(nonExistent));
   });
@@ -226,6 +232,7 @@ describe('configOutput', () => {
       reporting_currency: 'USD',
       display: {},
       refresh: { ...DEFAULT_REFRESH_CONFIG },
+      history: { ...DEFAULT_HISTORY_CONFIG },
       tray: {
         ...DEFAULT_TRAY_CONFIG,
         spending_windows_days: [...DEFAULT_TRAY_CONFIG.spending_windows_days],
@@ -261,6 +268,7 @@ describe('configOutput', () => {
       reporting_currency: 'EUR',
       display: {},
       refresh: { ...DEFAULT_REFRESH_CONFIG },
+      history: { ...DEFAULT_HISTORY_CONFIG },
       tray: {
         ...DEFAULT_TRAY_CONFIG,
         spending_windows_days: [...DEFAULT_TRAY_CONFIG.spending_windows_days],
@@ -296,6 +304,7 @@ describe('configOutput', () => {
       reporting_currency: 'GBP',
       display: {},
       refresh: { balance_staleness: 1, price_staleness: 2 },
+      history: { ...DEFAULT_HISTORY_CONFIG },
       tray: {
         ...DEFAULT_TRAY_CONFIG,
         spending_windows_days: [...DEFAULT_TRAY_CONFIG.spending_windows_days],

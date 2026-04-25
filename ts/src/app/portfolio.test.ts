@@ -47,6 +47,7 @@ function makeConfig(overrides?: Partial<ResolvedConfig>): ResolvedConfig {
       balance_staleness: 14 * 86400000,
       price_staleness: 86400000,
     },
+    history: { allow_future_projection: false },
     tray: { history_points: 8, spending_windows_days: [7, 30, 90] },
     spending: { ignore_accounts: [], ignore_connections: [], ignore_tags: [] },
     portfolio: {
@@ -1374,6 +1375,61 @@ describe('portfolioHistory', () => {
       clock,
     );
     expect(noPriceResult.points).toHaveLength(0);
+  });
+
+  it('projects future prices in history when configured', async () => {
+    const clock = makeClock('2025-01-10T12:00:00Z');
+    const storage = new MemoryStorage();
+    const connIdGen = makeIdGen('conn-1');
+    const conn = Connection.new({ name: 'Broker', synchronizer: 'manual' }, connIdGen, clock);
+    await storage.saveConnection(conn);
+
+    const acctIdGen = makeIdGen('acct-1');
+    const acct = Account.newWithGenerator(acctIdGen, clock, 'Trading', Id.fromString('conn-1'));
+    await storage.saveAccount(acct);
+
+    await storage.appendBalanceSnapshot(
+      acct.id,
+      BalanceSnapshot.new(new Date('2024-09-20T12:00:00Z'), [
+        AssetBalance.new(Asset.equity('QQQ'), '10'),
+      ]),
+    );
+
+    const store = new MemoryMarketDataStore();
+    await store.put_prices([
+      {
+        asset_id: AssetId.fromAsset(Asset.equity('QQQ')),
+        as_of_date: '2024-09-27',
+        timestamp: new Date('2024-09-27T23:59:59Z'),
+        price: '500',
+        quote_currency: 'USD',
+        kind: 'close',
+        source: 'test',
+      },
+    ]);
+
+    const config = makeConfig({
+      history: { allow_future_projection: true, lookback_days: 7 },
+    });
+    const result = await portfolioHistory(
+      storage,
+      store,
+      config,
+      {
+        start: '2024-09-20',
+        end: '2024-09-27',
+        granularity: 'none',
+        includePrices: true,
+      },
+      clock,
+    );
+
+    expect(result.points).toHaveLength(2);
+    expect(result.points[0].date).toBe('2024-09-20');
+    expect(result.points[0].total_value).toBe('5000');
+    expect(result.points[1].date).toBe('2024-09-27');
+    expect(result.points[1].total_value).toBe('5000');
+    expect(result.points[1].percentage_change_from_previous).toBe('0.00');
   });
 
   // -------------------------------------------------------------------------
