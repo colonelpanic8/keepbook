@@ -30,6 +30,7 @@ export interface AccountOutput {
   connection_id: string;
   tags: string[];
   active: boolean;
+  exclude_from_portfolio: boolean;
 }
 
 // ---------------------------------------------------------------------------

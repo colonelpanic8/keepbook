@@ -258,7 +258,21 @@ describe('listAccounts', () => {
       connection_id: 'conn-1',
       tags: ['bank', 'primary'],
       active: false,
+      exclude_from_portfolio: false,
     });
+  });
+
+  it('marks accounts excluded from portfolio', async () => {
+    const storage = new MemoryStorage();
+    const clock = makeClock('2024-06-01T12:00:00Z');
+    const idGen = makeIdGen('acct-1');
+    const acct = Account.newWithGenerator(idGen, clock, 'Mortgage', Id.fromString('conn-1'));
+    await storage.saveAccount(acct);
+    await storage.saveAccountConfig(acct.id, { exclude_from_portfolio: true });
+
+    const result = await listAccounts(storage);
+
+    expect(result[0].exclude_from_portfolio).toBe(true);
   });
 
   it('returns a copy of tags (not the original array)', async () => {

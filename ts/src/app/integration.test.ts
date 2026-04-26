@@ -227,6 +227,7 @@ describe('Integration: JSON snapshot tests', () => {
       connection_id: 'conn-1',
       tags: ['tag1'],
       active: true,
+      exclude_from_portfolio: false,
     });
   });
 
