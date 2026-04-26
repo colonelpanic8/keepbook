@@ -216,6 +216,42 @@ small,
   margin: 0;
 }
 
+.backend-activity {
+  align-items: center;
+  background: #eef7f4;
+  border: 1px solid #cfe2dc;
+  border-radius: 6px;
+  color: #24443d;
+  display: inline-flex;
+  font-size: 0.82rem;
+  font-weight: 800;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  width: fit-content;
+}
+
+.activity-spinner {
+  animation: activity-spin 0.8s linear infinite;
+  border: 2px solid #b8d3cb;
+  border-top-color: #1f6f8b;
+  border-radius: 999px;
+  display: inline-block;
+  height: 14px;
+  width: 14px;
+}
+
+.activity-spinner.large {
+  height: 24px;
+  width: 24px;
+}
+
+@keyframes activity-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .chart-controls {
   display: flex;
   flex-direction: column;
@@ -379,8 +415,60 @@ small,
 
 .chart-point {
   fill: #ffffff;
+  pointer-events: none;
   stroke: #1f6f8b;
   stroke-width: 2;
+}
+
+.chart-hover-point {
+  display: none;
+  fill: #1f6f8b;
+  pointer-events: none;
+  stroke: #ffffff;
+  stroke-width: 2.5;
+}
+
+.chart-hit-zone {
+  fill: transparent;
+  pointer-events: all;
+}
+
+.chart-point-group:hover .chart-hover-point {
+  display: block;
+}
+
+.chart-hover-detail {
+  display: none;
+  pointer-events: none;
+}
+
+.chart-point-group:hover .chart-hover-detail {
+  display: block;
+}
+
+.chart-hover-line {
+  stroke: #1f6f8b;
+  stroke-dasharray: 4 4;
+  stroke-width: 1.5;
+}
+
+.chart-tooltip {
+  fill: #17202a;
+  opacity: 0.94;
+  stroke: #ffffff;
+  stroke-width: 1;
+}
+
+.chart-tooltip-date {
+  fill: #d8e4e0;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.chart-tooltip-value {
+  fill: #ffffff;
+  font-size: 13px;
+  font-weight: 800;
 }
 
 .chart-empty {
@@ -395,6 +483,26 @@ small,
   justify-content: center;
   margin-bottom: 12px;
   text-align: center;
+}
+
+.chart-loading {
+  align-items: center;
+  aspect-ratio: 720 / 260;
+  background: #f8faf9;
+  border: 1px dashed #cbd7d3;
+  border-radius: 8px;
+  color: #62727f;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  justify-content: center;
+  margin-bottom: 12px;
+  text-align: center;
+}
+
+.chart-loading strong {
+  color: #17202a;
+  font-size: 1rem;
 }
 
 .chart-stats {
@@ -538,6 +646,19 @@ small,
 .tree-group .data-table {
   border: 0;
   border-radius: 0;
+}
+
+.virtual-group .tree-parent {
+  background: #fbf8f5;
+}
+
+.virtual-account-row {
+  background: #fffdfb;
+}
+
+.status.liability-status {
+  background: #f4e7dd;
+  color: #8a4d20;
 }
 
 .status {

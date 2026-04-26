@@ -75,6 +75,16 @@ struct PortfolioSnapshot {
     as_of_date: String,
     currency: String,
     total_value: String,
+    #[serde(default)]
+    by_account: Vec<AccountSummary>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+struct AccountSummary {
+    account_id: String,
+    account_name: String,
+    connection_name: String,
+    value_in_base: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -89,6 +99,13 @@ struct ChartPoint {
     value: f64,
     x: f64,
     y: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct ChartHoverPoint {
+    point: ChartPoint,
+    hit_x: f64,
+    hit_width: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -374,6 +391,7 @@ fn Dashboard(overview: Overview, onrefresh: EventHandler<MouseEvent>) -> Element
                             accounts: overview.accounts.clone(),
                             connections: overview.connections.clone(),
                             balances: overview.balances.clone(),
+                            snapshot: overview.snapshot.clone(),
                             currency: overview.reporting_currency.clone(),
                         }
                     },
@@ -501,6 +519,7 @@ fn NetWorthPanel(currency: String) -> Element {
     let start_text = start_override();
     let end_text = end_override();
     let history_state = history.cloned();
+    let is_history_loading = history_state.is_none();
     let loaded_history = match &history_state {
         Some(Ok(history)) => Some(history),
         _ => None,
@@ -575,6 +594,9 @@ fn NetWorthPanel(currency: String) -> Element {
         div { class: "panel-header",
             h2 { "Net Worth Over Time" }
             span { "{header_currency}" }
+        }
+        if is_history_loading {
+            BackendActivity { message: "Waiting on backend graph data" }
         }
         div { class: "chart-controls",
             div { class: "preset-row",
@@ -701,7 +723,10 @@ fn NetWorthPanel(currency: String) -> Element {
         }
         match history_state {
             None => rsx! {
-                InlineStatus { title: "Net Worth Over Time", message: "Loading graph data..." }
+                GraphLoadingPanel {
+                    range: range_summary_text(&start_date, &end_date),
+                    sampling: selected_sampling.label()
+                }
             },
             Some(Err(error)) => rsx! {
                 InlineStatus { title: "Net Worth Over Time", message: error }
@@ -721,6 +746,33 @@ fn NetWorthPanel(currency: String) -> Element {
                     }
                 }
             }
+        }
+    }
+}
+
+#[component]
+fn BackendActivity(message: &'static str) -> Element {
+    rsx! {
+        div {
+            class: "backend-activity",
+            role: "status",
+            aria_live: "polite",
+            span { class: "activity-spinner" }
+            span { "{message}" }
+        }
+    }
+}
+
+#[component]
+fn GraphLoadingPanel(range: String, sampling: &'static str) -> Element {
+    rsx! {
+        div {
+            class: "chart-loading",
+            role: "status",
+            aria_live: "polite",
+            span { class: "activity-spinner large" }
+            strong { "Updating graph" }
+            span { "{range} / {sampling}" }
         }
     }
 }
@@ -874,6 +926,27 @@ fn NetWorthChart(
         ),
         _ => String::new(),
     };
+    let hover_points = chart_points
+        .iter()
+        .enumerate()
+        .map(|(index, point)| {
+            let previous_x = if index == 0 {
+                padding_left
+            } else {
+                (chart_points[index - 1].x + point.x) / 2.0
+            };
+            let next_x = if index + 1 == chart_points.len() {
+                width - padding_right
+            } else {
+                (point.x + chart_points[index + 1].x) / 2.0
+            };
+            ChartHoverPoint {
+                point: point.clone(),
+                hit_x: previous_x,
+                hit_width: (next_x - previous_x).max(1.0),
+            }
+        })
+        .collect::<Vec<_>>();
     let latest = chart_points.last().expect("values is non-empty");
     let first = chart_points.first().expect("values is non-empty");
     let y_mid = y_min + y_range / 2.0;
@@ -979,6 +1052,91 @@ fn NetWorthChart(
                         title { "{point.date}: {format_full_money(point.value, &currency)}" }
                     }
                 }
+                for hover_point in hover_points {
+                    g { class: "chart-point-group",
+                        rect {
+                            class: "chart-hit-zone",
+                            x: "{hover_point.hit_x}",
+                            y: "{padding_top}",
+                            width: "{hover_point.hit_width}",
+                            height: "{plot_height}"
+                        }
+                        circle {
+                            class: "chart-hover-point",
+                            cx: "{hover_point.point.x}",
+                            cy: "{hover_point.point.y}",
+                            r: "6",
+                            title { "{hover_point.point.date}: {format_full_money(hover_point.point.value, &currency)}" }
+                        }
+                        ChartHoverDetail {
+                            point: hover_point.point.clone(),
+                            currency: currency.clone(),
+                            chart_width: width,
+                            padding_right,
+                            padding_top
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn ChartHoverDetail(
+    point: ChartPoint,
+    currency: String,
+    chart_width: f64,
+    padding_right: f64,
+    padding_top: f64,
+) -> Element {
+    let tooltip_width = 184.0;
+    let tooltip_height = 50.0;
+    let tooltip_x = if point.x + tooltip_width + 12.0 > chart_width - padding_right {
+        point.x - tooltip_width - 12.0
+    } else {
+        point.x + 12.0
+    }
+    .max(8.0);
+    let tooltip_y = if point.y - tooltip_height - 10.0 < padding_top {
+        point.y + 12.0
+    } else {
+        point.y - tooltip_height - 10.0
+    }
+    .max(8.0);
+    let date_y = tooltip_y + 20.0;
+    let value_y = tooltip_y + 38.0;
+    let text_x = tooltip_x + 10.0;
+    let value_text = format_full_money(point.value, &currency);
+
+    rsx! {
+        g { class: "chart-hover-detail",
+            line {
+                class: "chart-hover-line",
+                x1: "{point.x}",
+                x2: "{point.x}",
+                y1: "{padding_top}",
+                y2: "{point.y}"
+            }
+            rect {
+                class: "chart-tooltip",
+                x: "{tooltip_x}",
+                y: "{tooltip_y}",
+                width: "{tooltip_width}",
+                height: "{tooltip_height}",
+                rx: "6"
+            }
+            text {
+                class: "chart-tooltip-date",
+                x: "{text_x}",
+                y: "{date_y}",
+                "{point.date}"
+            }
+            text {
+                class: "chart-tooltip-value",
+                x: "{text_x}",
+                y: "{value_y}",
+                "{value_text}"
             }
         }
     }
@@ -989,15 +1147,25 @@ fn AccountsView(
     accounts: Vec<Account>,
     connections: Vec<Connection>,
     balances: Vec<Balance>,
+    snapshot: PortfolioSnapshot,
     currency: String,
 ) -> Element {
+    let virtual_accounts = virtual_account_summaries(&snapshot);
+    let account_count = accounts.len() + virtual_accounts.len();
+
     rsx! {
         section { class: "panel",
             div { class: "panel-header",
                 h2 { "Accounts" }
-                span { "{accounts.len()}" }
+                span { "{account_count}" }
             }
             div { class: "group-list",
+                if !virtual_accounts.is_empty() {
+                    VirtualAccountGroup {
+                        accounts: virtual_accounts,
+                        currency: currency.clone(),
+                    }
+                }
                 for connection in connections {
                     AccountGroup {
                         connection: connection.clone(),
@@ -1011,6 +1179,54 @@ fn AccountsView(
                     }
                 }
             }
+        }
+    }
+}
+
+#[component]
+fn VirtualAccountGroup(accounts: Vec<AccountSummary>, currency: String) -> Element {
+    rsx! {
+        section { class: "tree-group virtual-group",
+            div { class: "tree-parent",
+                div {
+                    strong { "Virtual" }
+                    small { "Portfolio adjustments" }
+                }
+                span { class: "status liability-status", "{accounts.len()} active" }
+            }
+            div { class: "data-table account-table",
+                div { class: "table-head",
+                    span { "Account" }
+                    span { "Balance ({currency})" }
+                    span { "Status" }
+                    span { "Tags" }
+                }
+                for account in accounts {
+                    VirtualAccountRow {
+                        account,
+                        currency: currency.clone(),
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn VirtualAccountRow(account: AccountSummary, currency: String) -> Element {
+    let value = account
+        .value_in_base
+        .as_deref()
+        .and_then(parse_money_input)
+        .map(|value| format_full_money(value, &currency))
+        .unwrap_or_else(|| "N/A".to_string());
+
+    rsx! {
+        div { class: "table-row virtual-account-row",
+            strong { "{account.account_name}" }
+            span { "{value}" }
+            span { "Virtual" }
+            small { "{account.connection_name}" }
         }
     }
 }
@@ -1342,6 +1558,15 @@ fn non_empty_string(value: &str) -> Option<String> {
     }
 }
 
+fn range_summary_text(start: &str, end: &str) -> String {
+    match (start.is_empty(), end.is_empty()) {
+        (false, false) => format!("{start} to {end}"),
+        (false, true) => format!("{start} onward"),
+        (true, false) => format!("through {end}"),
+        (true, true) => "All available dates".to_string(),
+    }
+}
+
 fn history_request_granularity(
     selected: SamplingGranularity,
     start: Option<&str>,
@@ -1614,6 +1839,15 @@ fn account_base_value(account_id: &str, balances: &[Balance]) -> Option<f64> {
     })
 }
 
+fn virtual_account_summaries(snapshot: &PortfolioSnapshot) -> Vec<AccountSummary> {
+    snapshot
+        .by_account
+        .iter()
+        .filter(|account| account.account_id.starts_with("virtual:"))
+        .cloned()
+        .collect()
+}
+
 fn parse_y_domain(min: &str, max: &str) -> Option<(f64, f64)> {
     if min.is_empty() && max.is_empty() {
         return None;
@@ -1854,8 +2088,42 @@ mod tests {
             as_of_date: "2026-04-25".to_string(),
             currency: "USD".to_string(),
             total_value: "1234.56".to_string(),
+            by_account: Vec::new(),
         };
 
         assert_eq!(current_net_worth_from_snapshot(&snapshot), 1234.56);
+    }
+
+    #[test]
+    fn portfolio_snapshot_deserializes_virtual_accounts() {
+        let snapshot: PortfolioSnapshot = serde_json::from_value(serde_json::json!({
+            "as_of_date": "2026-04-26",
+            "currency": "USD",
+            "total_value": "1882543.57",
+            "by_account": [
+                {
+                    "account_id": "acct-1",
+                    "account_name": "Brokerage",
+                    "connection_name": "Schwab",
+                    "value_in_base": "2052806.85"
+                },
+                {
+                    "account_id": "virtual:latent_capital_gains_tax",
+                    "account_name": "Latent Capital Gains Tax",
+                    "connection_name": "Virtual",
+                    "value_in_base": "-170263.28"
+                }
+            ]
+        }))
+        .expect("snapshot should deserialize");
+
+        let virtual_accounts = virtual_account_summaries(&snapshot);
+
+        assert_eq!(virtual_accounts.len(), 1);
+        assert_eq!(virtual_accounts[0].account_name, "Latent Capital Gains Tax");
+        assert_eq!(
+            virtual_accounts[0].value_in_base.as_deref(),
+            Some("-170263.28")
+        );
     }
 }
