@@ -1,0 +1,6 @@
+[application]
+name = "KeepbookDioxus"
+
+[bundle]
+identifier = "org.colonelpanic.keepbook.dioxus"
+publisher = "Ivan Malison"
