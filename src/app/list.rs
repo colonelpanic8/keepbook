@@ -79,12 +79,18 @@ pub async fn list_accounts(storage: &dyn Storage) -> Result<Vec<AccountOutput>> 
     let mut output = Vec::new();
 
     for a in accounts {
+        let exclude_from_portfolio = storage
+            .get_account_config(&a.id)?
+            .and_then(|config| config.exclude_from_portfolio)
+            .unwrap_or(false);
+
         output.push(AccountOutput {
             id: a.id.to_string(),
             name: a.name.clone(),
             connection_id: a.connection_id.to_string(),
             tags: a.tags.clone(),
             active: a.active,
+            exclude_from_portfolio,
         });
     }
 
@@ -368,11 +374,39 @@ mod tests {
     use super::*;
     use crate::clock::{Clock, FixedClock};
     use crate::models::{
-        Account, Asset, FixedIdGenerator, Transaction, TransactionAnnotationPatch,
+        Account, AccountConfig, Asset, FixedIdGenerator, Transaction, TransactionAnnotationPatch,
         TransactionStandardizedMetadata,
     };
     use crate::storage::MemoryStorage;
     use chrono::{TimeZone, Utc};
+
+    #[tokio::test]
+    async fn list_accounts_marks_portfolio_excluded_accounts() -> Result<()> {
+        let storage = MemoryStorage::new();
+        let account_id = Id::from_string("acct-1");
+        let account = Account::new_with(
+            account_id.clone(),
+            Utc.with_ymd_and_hms(2026, 2, 5, 12, 0, 0).unwrap(),
+            "Mortgage",
+            Id::from_string("conn-1"),
+        );
+        storage.save_account(&account).await?;
+        storage
+            .save_account_config(
+                &account_id,
+                &AccountConfig {
+                    exclude_from_portfolio: Some(true),
+                    ..AccountConfig::default()
+                },
+            )
+            .await?;
+
+        let accounts = list_accounts(&storage).await?;
+
+        assert_eq!(accounts.len(), 1);
+        assert!(accounts[0].exclude_from_portfolio);
+        Ok(())
+    }
 
     #[tokio::test]
     async fn list_transactions_includes_annotation_when_present() -> Result<()> {

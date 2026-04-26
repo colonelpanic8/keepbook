@@ -186,7 +186,33 @@ impl Default for RefreshConfig {
 }
 
 /// Historical valuation configuration.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub const DEFAULT_HISTORY_PORTFOLIO_GRANULARITY: &str = "daily";
+pub const DEFAULT_HISTORY_CHANGE_POINTS_GRANULARITY: &str = "none";
+pub const DEFAULT_HISTORY_INCLUDE_PRICES: bool = true;
+pub const DEFAULT_HISTORY_GRAPH_RANGE: &str = "1y";
+pub const DEFAULT_HISTORY_GRAPH_GRANULARITY: &str = "weekly";
+
+pub fn default_history_portfolio_granularity() -> String {
+    DEFAULT_HISTORY_PORTFOLIO_GRANULARITY.to_string()
+}
+
+pub fn default_history_change_points_granularity() -> String {
+    DEFAULT_HISTORY_CHANGE_POINTS_GRANULARITY.to_string()
+}
+
+pub fn default_history_include_prices() -> bool {
+    DEFAULT_HISTORY_INCLUDE_PRICES
+}
+
+pub fn default_history_graph_range() -> String {
+    DEFAULT_HISTORY_GRAPH_RANGE.to_string()
+}
+
+pub fn default_history_graph_granularity() -> String {
+    DEFAULT_HISTORY_GRAPH_GRANULARITY.to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct HistoryConfig {
     /// When true, historical portfolio valuation may project a later cached
@@ -196,6 +222,40 @@ pub struct HistoryConfig {
     /// Optional bound for older cached history lookups before future
     /// projection is considered. When unset, older lookup remains unbounded.
     pub lookback_days: Option<u32>,
+
+    /// Default granularity for portfolio history when no CLI/API override is supplied.
+    #[serde(default = "default_history_portfolio_granularity")]
+    pub portfolio_granularity: String,
+
+    /// Default granularity for portfolio change-points when no CLI/API override is supplied.
+    #[serde(default = "default_history_change_points_granularity")]
+    pub change_points_granularity: String,
+
+    /// Whether history/change-point commands include price changes by default.
+    #[serde(default = "default_history_include_prices")]
+    pub include_prices: bool,
+
+    /// Default range preset for graphing clients.
+    #[serde(default = "default_history_graph_range")]
+    pub graph_range: String,
+
+    /// Default sampling preset for graphing clients.
+    #[serde(default = "default_history_graph_granularity")]
+    pub graph_granularity: String,
+}
+
+impl Default for HistoryConfig {
+    fn default() -> Self {
+        Self {
+            allow_future_projection: false,
+            lookback_days: None,
+            portfolio_granularity: default_history_portfolio_granularity(),
+            change_points_granularity: default_history_change_points_granularity(),
+            include_prices: default_history_include_prices(),
+            graph_range: default_history_graph_range(),
+            graph_granularity: default_history_graph_granularity(),
+        }
+    }
 }
 
 /// Git-related configuration.
@@ -678,6 +738,29 @@ mod tests {
     }
 
     #[test]
+    fn test_load_history_defaults_config() -> Result<()> {
+        let dir = TempDir::new()?;
+        let config_path = dir.path().join("keepbook.toml");
+
+        let mut file = std::fs::File::create(&config_path)?;
+        writeln!(file, "[history]")?;
+        writeln!(file, "portfolio_granularity = \"weekly\"")?;
+        writeln!(file, "change_points_granularity = \"daily\"")?;
+        writeln!(file, "include_prices = false")?;
+        writeln!(file, "graph_range = \"2y\"")?;
+        writeln!(file, "graph_granularity = \"monthly\"")?;
+
+        let config = Config::load(&config_path)?;
+        assert_eq!(config.history.portfolio_granularity, "weekly");
+        assert_eq!(config.history.change_points_granularity, "daily");
+        assert!(!config.history.include_prices);
+        assert_eq!(config.history.graph_range, "2y");
+        assert_eq!(config.history.graph_granularity, "monthly");
+
+        Ok(())
+    }
+
+    #[test]
     fn test_default_refresh_config() {
         let config = Config::default();
         assert_eq!(
@@ -712,6 +795,16 @@ mod tests {
             ]
         );
         assert_eq!(config.tray.spending_windows_days, vec![7, 30, 90, 365]);
+    }
+
+    #[test]
+    fn test_default_history_config() {
+        let config = Config::default();
+        assert_eq!(config.history.portfolio_granularity, "daily");
+        assert_eq!(config.history.change_points_granularity, "none");
+        assert!(config.history.include_prices);
+        assert_eq!(config.history.graph_range, "1y");
+        assert_eq!(config.history.graph_granularity, "weekly");
     }
 
     #[test]

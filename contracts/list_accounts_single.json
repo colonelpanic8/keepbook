@@ -4,7 +4,7 @@
     "name": "Checking",
     "connection_id": "conn-1",
     "tags": [],
-    "active": true
+    "active": true,
+    "exclude_from_portfolio": false
   }
 ]
-

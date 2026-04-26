@@ -8,7 +8,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use chrono::{Duration, Utc};
+use chrono::Utc;
 use keepbook::config::{default_config_path, ResolvedConfig};
 use keepbook::storage::{JsonFileStorage, Storage};
 use serde::{Deserialize, Serialize};
@@ -47,6 +47,16 @@ pub struct ConfigOutput {
     pub config_path: String,
     pub data_dir: String,
     pub reporting_currency: String,
+    pub history_defaults: HistoryDefaultsOutput,
+}
+
+#[derive(Debug, Serialize)]
+pub struct HistoryDefaultsOutput {
+    pub portfolio_granularity: String,
+    pub change_points_granularity: String,
+    pub include_prices: bool,
+    pub graph_range: String,
+    pub graph_granularity: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -54,10 +64,13 @@ pub struct OverviewOutput {
     pub config_path: String,
     pub data_dir: String,
     pub reporting_currency: String,
+    pub history_defaults: HistoryDefaultsOutput,
     pub connections: serde_json::Value,
     pub accounts: serde_json::Value,
     pub balances: serde_json::Value,
-    pub history: serde_json::Value,
+    pub snapshot: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub history: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -75,20 +88,18 @@ pub struct HistoryQuery {
     pub currency: Option<String>,
     pub start: Option<String>,
     pub end: Option<String>,
-    #[serde(default = "default_history_granularity")]
-    pub granularity: String,
-    #[serde(default)]
-    pub include_prices: bool,
+    pub granularity: Option<String>,
+    pub include_prices: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct OverviewQuery {
     pub history_start: Option<String>,
     pub history_end: Option<String>,
-    #[serde(default = "default_history_granularity")]
-    pub history_granularity: String,
+    pub history_granularity: Option<String>,
+    pub include_prices: Option<bool>,
     #[serde(default)]
-    pub include_prices: bool,
+    pub include_history: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -113,20 +124,22 @@ impl IntoResponse for ApiError {
     }
 }
 
-fn default_history_granularity() -> String {
-    "monthly".to_string()
-}
-
-fn default_history_start() -> String {
-    (Utc::now().date_naive() - Duration::days(365)).to_string()
-}
-
 fn default_history_end() -> String {
     Utc::now().date_naive().to_string()
 }
 
 fn json_value<T: Serialize>(value: T) -> Result<serde_json::Value> {
     serde_json::to_value(value).context("failed to encode keepbook API output")
+}
+
+fn history_defaults(config: &ResolvedConfig) -> HistoryDefaultsOutput {
+    HistoryDefaultsOutput {
+        portfolio_granularity: config.history.portfolio_granularity.clone(),
+        change_points_granularity: config.history.change_points_granularity.clone(),
+        include_prices: config.history.include_prices,
+        graph_range: config.history.graph_range.clone(),
+        graph_granularity: config.history.graph_granularity.clone(),
+    }
 }
 
 pub fn router(state: ApiState) -> Router {
@@ -168,6 +181,7 @@ async fn config(State(state): State<ApiState>) -> Json<ConfigOutput> {
         config_path: state.config_path.display().to_string(),
         data_dir: state.config.data_dir.display().to_string(),
         reporting_currency: state.config.reporting_currency.clone(),
+        history_defaults: history_defaults(&state.config),
     })
 }
 
@@ -175,33 +189,58 @@ async fn overview(
     State(state): State<ApiState>,
     Query(query): Query<OverviewQuery>,
 ) -> Result<Json<OverviewOutput>, ApiError> {
-    let history_start = query
-        .history_start
-        .or_else(|| Some(default_history_start()));
-    let history_end = query.history_end.or_else(|| Some(default_history_end()));
-
     let connections = keepbook::app::list_connections(state.storage.as_ref()).await?;
     let accounts = keepbook::app::list_accounts(state.storage.as_ref()).await?;
     let balances = keepbook::app::list_balances(state.storage.as_ref(), &state.config).await?;
-    let history = keepbook::app::portfolio_history(
+    let snapshot = keepbook::app::portfolio_snapshot(
         state.storage.clone(),
         &state.config,
         None,
-        history_start,
-        history_end,
-        query.history_granularity,
-        query.include_prices,
+        None,
+        "both".to_string(),
+        false,
+        None,
+        false,
+        true,
+        false,
+        false,
     )
     .await?;
+    let history = if query.include_history {
+        let history_start = query.history_start;
+        let history_end = query.history_end.or_else(|| Some(default_history_end()));
+        let history_granularity = query
+            .history_granularity
+            .unwrap_or_else(|| state.config.history.portfolio_granularity.clone());
+        let include_prices = query
+            .include_prices
+            .unwrap_or(state.config.history.include_prices);
+        Some(json_value(
+            keepbook::app::portfolio_history(
+                state.storage.clone(),
+                &state.config,
+                None,
+                history_start,
+                history_end,
+                history_granularity,
+                include_prices,
+            )
+            .await?,
+        )?)
+    } else {
+        None
+    };
 
     Ok(Json(OverviewOutput {
         config_path: state.config_path.display().to_string(),
         data_dir: state.config.data_dir.display().to_string(),
         reporting_currency: state.config.reporting_currency.clone(),
+        history_defaults: history_defaults(&state.config),
         connections: json_value(connections)?,
         accounts: json_value(accounts)?,
         balances: json_value(balances)?,
-        history: json_value(history)?,
+        snapshot: json_value(snapshot)?,
+        history,
     }))
 }
 
@@ -240,14 +279,20 @@ async fn portfolio_history(
     State(state): State<ApiState>,
     Query(query): Query<HistoryQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    let granularity = query
+        .granularity
+        .unwrap_or_else(|| state.config.history.portfolio_granularity.clone());
+    let include_prices = query
+        .include_prices
+        .unwrap_or(state.config.history.include_prices);
     let output = keepbook::app::portfolio_history(
         state.storage.clone(),
         &state.config,
         query.currency,
         query.start,
         query.end,
-        query.granularity,
-        query.include_prices,
+        granularity,
+        include_prices,
     )
     .await?;
     Ok(Json(json_value(output)?))

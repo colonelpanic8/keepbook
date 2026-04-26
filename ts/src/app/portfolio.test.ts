@@ -13,7 +13,7 @@ import { Account } from '../models/account.js';
 import { BalanceSnapshot, AssetBalance } from '../models/balance.js';
 import { Asset, type AssetType } from '../models/asset.js';
 import { AssetId } from '../market-data/asset-id.js';
-import type { ResolvedConfig } from '../config.js';
+import { DEFAULT_HISTORY_CONFIG, type ResolvedConfig } from '../config.js';
 import type { PortfolioSnapshot, AssetSummary } from '../portfolio/models.js';
 import {
   serializeSnapshot,
@@ -47,7 +47,7 @@ function makeConfig(overrides?: Partial<ResolvedConfig>): ResolvedConfig {
       balance_staleness: 14 * 86400000,
       price_staleness: 86400000,
     },
-    history: { allow_future_projection: false },
+    history: { ...DEFAULT_HISTORY_CONFIG },
     tray: { history_points: 8, spending_windows_days: [7, 30, 90] },
     spending: { ignore_accounts: [], ignore_connections: [], ignore_tags: [] },
     portfolio: {
@@ -1409,7 +1409,7 @@ describe('portfolioHistory', () => {
     ]);
 
     const config = makeConfig({
-      history: { allow_future_projection: true, lookback_days: 7 },
+      history: { ...DEFAULT_HISTORY_CONFIG, allow_future_projection: true, lookback_days: 7 },
     });
     const result = await portfolioHistory(
       storage,

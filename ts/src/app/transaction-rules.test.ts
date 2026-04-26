@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import { describe, it, expect } from 'vitest';
 
-import type { ResolvedConfig } from '../config.js';
+import { DEFAULT_HISTORY_CONFIG, type ResolvedConfig } from '../config.js';
 import { FixedClock } from '../clock.js';
 import { Asset } from '../models/asset.js';
 import { Account } from '../models/account.js';
@@ -27,7 +27,7 @@ function makeConfig(overrides?: Partial<ResolvedConfig>): ResolvedConfig {
       balance_staleness: 14 * 86400000,
       price_staleness: 86400000,
     },
-    history: { allow_future_projection: false },
+    history: { ...DEFAULT_HISTORY_CONFIG },
     tray: { history_points: 8, spending_windows_days: [7, 30, 90] },
     spending: { ignore_accounts: [], ignore_connections: [], ignore_tags: [] },
     portfolio: {
