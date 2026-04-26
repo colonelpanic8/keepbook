@@ -377,6 +377,12 @@ small,
   margin-bottom: 12px;
 }
 
+.settings-meta-grid {
+  border-top: 1px solid #eef2f1;
+  margin: 12px 0;
+  padding-top: 10px;
+}
+
 .settings-status {
   background: #f7faf9;
   border: 1px solid #d7dfdd;
@@ -565,10 +571,6 @@ small,
   font-size: 1.55rem;
 }
 
-.filters-panel {
-  max-width: 920px;
-}
-
 .settings-list,
 .settings-actions,
 .settings-source {
@@ -643,13 +645,6 @@ small,
 
 .switch-control input:checked + .switch-track .switch-thumb {
   transform: translateX(24px);
-}
-
-.filter-metadata {
-  display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  margin: 14px 0;
 }
 
 .settings-source {
@@ -878,9 +873,6 @@ small,
     grid-template-columns: 1fr;
   }
 
-  .filter-metadata {
-    grid-template-columns: 1fr;
-  }
 }
 
 @media (max-width: 520px) {

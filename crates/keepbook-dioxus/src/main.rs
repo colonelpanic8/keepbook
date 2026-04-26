@@ -283,7 +283,6 @@ fn normalize_config_key(value: &str) -> String {
 enum ActiveView {
     Summary,
     Graphs,
-    Filters,
     Accounts,
     Connections,
     Balances,
@@ -292,10 +291,9 @@ enum ActiveView {
 }
 
 impl ActiveView {
-    const ALL: [Self; 8] = [
+    const ALL: [Self; 7] = [
         Self::Summary,
         Self::Graphs,
-        Self::Filters,
         Self::Accounts,
         Self::Connections,
         Self::Balances,
@@ -307,7 +305,6 @@ impl ActiveView {
         match self {
             Self::Summary => "Summary",
             Self::Graphs => "Graphs",
-            Self::Filters => "Filters",
             Self::Accounts => "Accounts",
             Self::Connections => "Connections",
             Self::Balances => "Balances",
@@ -656,15 +653,6 @@ fn Dashboard(
                             filter_overrides,
                         }
                     },
-                    ActiveView::Filters => rsx! {
-                        FiltersView {
-                            filtering: overview.filtering.clone(),
-                            filter_overrides,
-                            config_path: overview.config_path.clone(),
-                            data_dir: overview.data_dir.clone(),
-                            onfilterchange,
-                        }
-                    },
                     ActiveView::Accounts => rsx! {
                         AccountsView {
                             accounts: overview.accounts.clone(),
@@ -689,6 +677,11 @@ fn Dashboard(
                     },
                     ActiveView::Settings => rsx! {
                         SettingsView {
+                            filtering: overview.filtering.clone(),
+                            filter_overrides,
+                            config_path: overview.config_path.clone(),
+                            data_dir: overview.data_dir.clone(),
+                            onfilterchange,
                             onrefresh: move |_| onrefresh.call(())
                         }
                     },
@@ -759,7 +752,7 @@ fn GraphsView(
 }
 
 #[component]
-fn FiltersView(
+fn PortfolioSettingsPanel(
     filtering: FilteringSettings,
     filter_overrides: FilterOverrides,
     config_path: String,
@@ -782,16 +775,16 @@ fn FiltersView(
     };
 
     rsx! {
-        section { class: "panel filters-panel",
+        section { class: "panel settings-panel",
             div { class: "panel-header",
-                h2 { "Filtering" }
+                h2 { "Portfolio" }
                 span { "{source}" }
             }
             div { class: "settings-list",
                 article { class: "setting-row",
                     div { class: "setting-copy",
                         strong { "Latent capital gains tax" }
-                        small { "{latent_tax.account_name}" }
+                        small { "Include {latent_tax.account_name} in net worth and history" }
                     }
                     label { class: "switch-control",
                         input {
@@ -809,22 +802,10 @@ fn FiltersView(
                     }
                 }
             }
-            div { class: "filter-metadata",
-                MetricCard {
-                    label: "Configured",
-                    value: configured_state.to_string(),
-                    detail: "From keepbook.toml".to_string()
-                }
-                MetricCard {
-                    label: "Effective",
-                    value: effective_state.to_string(),
-                    detail: source.to_string()
-                }
-                MetricCard {
-                    label: "Tax rate",
-                    value: rate_state.to_string(),
-                    detail: "Required when enabled".to_string()
-                }
+            div { class: "settings-meta settings-meta-grid",
+                span { "Default {configured_state}" }
+                span { "Current {effective_state}" }
+                span { "Tax rate {rate_state}" }
             }
             div { class: "settings-actions",
                 button {
@@ -847,10 +828,17 @@ fn FiltersView(
 }
 
 #[component]
-fn SettingsView(onrefresh: EventHandler<()>) -> Element {
+fn SettingsView(
+    filtering: FilteringSettings,
+    filter_overrides: FilterOverrides,
+    config_path: String,
+    data_dir: String,
+    onfilterchange: EventHandler<FilterOverrides>,
+    onrefresh: EventHandler<()>,
+) -> Element {
     let settings = use_resource(fetch_git_settings);
     let mut loaded_key = use_signal(String::new);
-    let mut data_dir = use_signal(String::new);
+    let mut git_data_dir = use_signal(String::new);
     let mut host = use_signal(|| "github.com".to_string());
     let mut repo = use_signal(|| "colonelpanic8/keepbook-data".to_string());
     let mut branch = use_signal(|| "master".to_string());
@@ -869,7 +857,7 @@ fn SettingsView(onrefresh: EventHandler<()>) -> Element {
             current.git.ssh_user
         );
         if loaded_key() != key {
-            data_dir.set(current.data_dir);
+            git_data_dir.set(current.data_dir);
             host.set(current.git.host);
             repo.set(current.git.repo);
             branch.set(current.git.branch);
@@ -883,6 +871,13 @@ fn SettingsView(onrefresh: EventHandler<()>) -> Element {
     let status_text = status();
 
     rsx! {
+        PortfolioSettingsPanel {
+            filtering,
+            filter_overrides,
+            config_path,
+            data_dir,
+            onfilterchange,
+        }
         section { class: "panel settings-panel",
             div { class: "panel-header",
                 h2 { "Git Sync" }
@@ -898,9 +893,9 @@ fn SettingsView(onrefresh: EventHandler<()>) -> Element {
                     div { class: "settings-grid",
                         TextInput {
                             label: "Data directory",
-                            value: data_dir(),
+                            value: git_data_dir(),
                             placeholder: "/path/to/keepbook-data",
-                            oninput: move |value| data_dir.set(value)
+                            oninput: move |value| git_data_dir.set(value)
                         }
                         TextInput {
                             label: "Git host",
@@ -942,7 +937,7 @@ fn SettingsView(onrefresh: EventHandler<()>) -> Element {
                             disabled: is_busy,
                             onclick: move |_| {
                                 let input = GitSettingsInput {
-                                    data_dir: data_dir(),
+                                    data_dir: git_data_dir(),
                                     host: host(),
                                     repo: repo(),
                                     branch: branch(),
@@ -968,7 +963,7 @@ fn SettingsView(onrefresh: EventHandler<()>) -> Element {
                             disabled: is_busy,
                             onclick: move |_| {
                                 let input = GitSyncInput {
-                                    data_dir: data_dir(),
+                                    data_dir: git_data_dir(),
                                     host: host(),
                                     repo: repo(),
                                     branch: branch(),
