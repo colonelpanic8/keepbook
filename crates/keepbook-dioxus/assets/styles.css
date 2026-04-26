@@ -263,6 +263,13 @@ small,
   margin-bottom: 14px;
 }
 
+.chart-bottom-controls {
+  border-top: 1px solid #eef2f1;
+  margin-bottom: 0;
+  margin-top: 14px;
+  padding-top: 12px;
+}
+
 .preset-row,
 .sampling-row,
 .range-summary {
@@ -302,6 +309,11 @@ small,
   background: #1f6f8b;
   border-color: #1f6f8b;
   color: #ffffff;
+}
+
+.control-button:disabled {
+  cursor: default;
+  opacity: 0.48;
 }
 
 .control-grid {
@@ -553,6 +565,99 @@ small,
   font-size: 1.55rem;
 }
 
+.filters-panel {
+  max-width: 920px;
+}
+
+.settings-list,
+.settings-actions,
+.settings-source {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.setting-row {
+  align-items: center;
+  border: 1px solid #e1e8e6;
+  border-radius: 8px;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 14px;
+}
+
+.setting-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.setting-copy strong,
+.setting-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.switch-control {
+  cursor: pointer;
+  flex: 0 0 auto;
+  position: relative;
+}
+
+.switch-control input {
+  height: 1px;
+  opacity: 0;
+  position: absolute;
+  width: 1px;
+}
+
+.switch-track {
+  align-items: center;
+  background: #c8d4d0;
+  border-radius: 999px;
+  display: flex;
+  height: 30px;
+  padding: 3px;
+  transition: background 120ms ease;
+  width: 54px;
+}
+
+.switch-thumb {
+  background: #ffffff;
+  border-radius: 999px;
+  box-shadow: 0 1px 3px rgb(23 32 42 / 18%);
+  display: block;
+  height: 24px;
+  transform: translateX(0);
+  transition: transform 120ms ease;
+  width: 24px;
+}
+
+.switch-control input:checked + .switch-track {
+  background: #1f6f8b;
+}
+
+.switch-control input:checked + .switch-track .switch-thumb {
+  transform: translateX(24px);
+}
+
+.filter-metadata {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 14px 0;
+}
+
+.settings-source {
+  border-top: 1px solid #eef2f1;
+  margin-top: 14px;
+  padding-top: 12px;
+}
+
 .change-positive {
   color: #238a57;
   font-weight: 800;
@@ -770,6 +875,10 @@ small,
   }
 
   .settings-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .filter-metadata {
     grid-template-columns: 1fr;
   }
 }

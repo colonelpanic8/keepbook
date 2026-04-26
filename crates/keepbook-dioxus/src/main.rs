@@ -11,9 +11,12 @@ const DEFAULT_SAMPLING_GRANULARITY: SamplingGranularity = SamplingGranularity::W
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 struct Overview {
+    config_path: String,
     data_dir: String,
     reporting_currency: String,
     history_defaults: HistoryDefaults,
+    #[serde(default)]
+    filtering: FilteringSettings,
     connections: Vec<Connection>,
     accounts: Vec<Account>,
     balances: Vec<Balance>,
@@ -27,6 +30,37 @@ struct HistoryDefaults {
     include_prices: bool,
     graph_range: String,
     graph_granularity: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Default)]
+struct FilteringSettings {
+    latent_capital_gains_tax: LatentCapitalGainsTaxFilter,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+struct LatentCapitalGainsTaxFilter {
+    configured_enabled: bool,
+    effective_enabled: bool,
+    override_enabled: Option<bool>,
+    rate_configured: bool,
+    account_name: String,
+}
+
+impl Default for LatentCapitalGainsTaxFilter {
+    fn default() -> Self {
+        Self {
+            configured_enabled: false,
+            effective_enabled: false,
+            override_enabled: None,
+            rate_configured: false,
+            account_name: "Latent Capital Gains Tax".to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct FilterOverrides {
+    include_latent_capital_gains_tax: Option<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -249,6 +283,7 @@ fn normalize_config_key(value: &str) -> String {
 enum ActiveView {
     Summary,
     Graphs,
+    Filters,
     Accounts,
     Connections,
     Balances,
@@ -257,9 +292,10 @@ enum ActiveView {
 }
 
 impl ActiveView {
-    const ALL: [Self; 7] = [
+    const ALL: [Self; 8] = [
         Self::Summary,
         Self::Graphs,
+        Self::Filters,
         Self::Accounts,
         Self::Connections,
         Self::Balances,
@@ -271,6 +307,7 @@ impl ActiveView {
         match self {
             Self::Summary => "Summary",
             Self::Graphs => "Graphs",
+            Self::Filters => "Filters",
             Self::Accounts => "Accounts",
             Self::Connections => "Connections",
             Self::Balances => "Balances",
@@ -292,7 +329,11 @@ fn main() {
 
 #[component]
 fn App() -> Element {
-    let mut overview = use_resource(fetch_overview);
+    let mut filter_overrides = use_signal(FilterOverrides::default);
+    let mut overview = use_resource(move || {
+        let overrides = filter_overrides();
+        async move { fetch_overview(overrides).await }
+    });
 
     rsx! {
         document::Title { "Keepbook" }
@@ -304,6 +345,8 @@ fn App() -> Element {
                 Some(Ok(data)) => rsx! {
                     Dashboard {
                         overview: data,
+                        filter_overrides: filter_overrides(),
+                        onfilterchange: move |overrides| filter_overrides.set(overrides),
                         onrefresh: move |_| overview.restart()
                     }
                 },
@@ -315,13 +358,19 @@ fn App() -> Element {
     }
 }
 
-async fn fetch_overview() -> Result<Overview, String> {
-    fetch_overview_impl().await
+async fn fetch_overview(overrides: FilterOverrides) -> Result<Overview, String> {
+    fetch_overview_impl(overrides).await
 }
 
 #[cfg(target_arch = "wasm32")]
-async fn fetch_overview_impl() -> Result<Overview, String> {
-    let response = Request::get(&format!("{API_BASE}/api/overview"))
+async fn fetch_overview_impl(overrides: FilterOverrides) -> Result<Overview, String> {
+    let query = filter_override_query_string(overrides);
+    let url = if query.is_empty() {
+        format!("{API_BASE}/api/overview")
+    } else {
+        format!("{API_BASE}/api/overview?{query}")
+    };
+    let response = Request::get(&url)
         .send()
         .await
         .map_err(|error| format!("Could not reach keepbook-server at {API_BASE}: {error}"))?;
@@ -341,8 +390,14 @@ async fn fetch_overview_impl() -> Result<Overview, String> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-async fn fetch_overview_impl() -> Result<Overview, String> {
-    reqwest::get(format!("{API_BASE}/api/overview"))
+async fn fetch_overview_impl(overrides: FilterOverrides) -> Result<Overview, String> {
+    let query = filter_override_query_string(overrides);
+    let url = if query.is_empty() {
+        format!("{API_BASE}/api/overview")
+    } else {
+        format!("{API_BASE}/api/overview?{query}")
+    };
+    reqwest::get(url)
         .await
         .map_err(|error| format!("Could not reach keepbook-server at {API_BASE}: {error}"))?
         .error_for_status()
@@ -521,7 +576,12 @@ fn StatusPanel(state: LoadState) -> Element {
 }
 
 #[component]
-fn Dashboard(overview: Overview, onrefresh: EventHandler<()>) -> Element {
+fn Dashboard(
+    overview: Overview,
+    filter_overrides: FilterOverrides,
+    onfilterchange: EventHandler<FilterOverrides>,
+    onrefresh: EventHandler<()>,
+) -> Element {
     let mut active_view = use_signal(|| ActiveView::Summary);
     let mut nav_open = use_signal(|| false);
     let active = active_view();
@@ -593,6 +653,16 @@ fn Dashboard(overview: Overview, onrefresh: EventHandler<()>) -> Element {
                         GraphsView {
                             currency: overview.reporting_currency.clone(),
                             defaults: overview.history_defaults.clone(),
+                            filter_overrides,
+                        }
+                    },
+                    ActiveView::Filters => rsx! {
+                        FiltersView {
+                            filtering: overview.filtering.clone(),
+                            filter_overrides,
+                            config_path: overview.config_path.clone(),
+                            data_dir: overview.data_dir.clone(),
+                            onfilterchange,
                         }
                     },
                     ActiveView::Accounts => rsx! {
@@ -614,6 +684,7 @@ fn Dashboard(overview: Overview, onrefresh: EventHandler<()>) -> Element {
                         HistoryView {
                             currency: overview.reporting_currency.clone(),
                             defaults: overview.history_defaults.clone(),
+                            filter_overrides,
                         }
                     },
                     ActiveView::Settings => rsx! {
@@ -675,10 +746,102 @@ fn SummaryView(
 }
 
 #[component]
-fn GraphsView(currency: String, defaults: HistoryDefaults) -> Element {
+fn GraphsView(
+    currency: String,
+    defaults: HistoryDefaults,
+    filter_overrides: FilterOverrides,
+) -> Element {
     rsx! {
         section { class: "panel graph-panel",
-            NetWorthPanel { currency, defaults }
+            NetWorthPanel { currency, defaults, filter_overrides }
+        }
+    }
+}
+
+#[component]
+fn FiltersView(
+    filtering: FilteringSettings,
+    filter_overrides: FilterOverrides,
+    config_path: String,
+    data_dir: String,
+    onfilterchange: EventHandler<FilterOverrides>,
+) -> Element {
+    let latent_tax = filtering.latent_capital_gains_tax;
+    let override_active = filter_overrides.include_latent_capital_gains_tax.is_some();
+    let source = if override_active {
+        "Dioxus override"
+    } else {
+        "TOML default"
+    };
+    let configured_state = enabled_label(latent_tax.configured_enabled);
+    let effective_state = enabled_label(latent_tax.effective_enabled);
+    let rate_state = if latent_tax.rate_configured {
+        "Configured"
+    } else {
+        "Missing"
+    };
+
+    rsx! {
+        section { class: "panel filters-panel",
+            div { class: "panel-header",
+                h2 { "Filtering" }
+                span { "{source}" }
+            }
+            div { class: "settings-list",
+                article { class: "setting-row",
+                    div { class: "setting-copy",
+                        strong { "Latent capital gains tax" }
+                        small { "{latent_tax.account_name}" }
+                    }
+                    label { class: "switch-control",
+                        input {
+                            r#type: "checkbox",
+                            checked: latent_tax.effective_enabled,
+                            onchange: move |event| {
+                                let mut next = filter_overrides;
+                                next.include_latent_capital_gains_tax = Some(event.checked());
+                                onfilterchange.call(next);
+                            }
+                        }
+                        span { class: "switch-track",
+                            span { class: "switch-thumb" }
+                        }
+                    }
+                }
+            }
+            div { class: "filter-metadata",
+                MetricCard {
+                    label: "Configured",
+                    value: configured_state.to_string(),
+                    detail: "From keepbook.toml".to_string()
+                }
+                MetricCard {
+                    label: "Effective",
+                    value: effective_state.to_string(),
+                    detail: source.to_string()
+                }
+                MetricCard {
+                    label: "Tax rate",
+                    value: rate_state.to_string(),
+                    detail: "Required when enabled".to_string()
+                }
+            }
+            div { class: "settings-actions",
+                button {
+                    class: "control-button",
+                    disabled: !override_active,
+                    onclick: move |_| {
+                        let mut next = filter_overrides;
+                        next.include_latent_capital_gains_tax = None;
+                        onfilterchange.call(next);
+                    },
+                    "Reset"
+                }
+            }
+            div { class: "settings-source",
+                small { "{config_path}" }
+                small { "{data_dir}" }
+            }
         }
     }
 }
@@ -860,7 +1023,11 @@ fn MetricCard(label: String, value: String, detail: String) -> Element {
 }
 
 #[component]
-fn NetWorthPanel(currency: String, defaults: HistoryDefaults) -> Element {
+fn NetWorthPanel(
+    currency: String,
+    defaults: HistoryDefaults,
+    filter_overrides: FilterOverrides,
+) -> Element {
     let initial_range_preset = range_preset_from_config(&defaults.graph_range);
     let initial_sampling_granularity =
         sampling_granularity_from_config(&defaults.graph_granularity);
@@ -882,6 +1049,7 @@ fn NetWorthPanel(currency: String, defaults: HistoryDefaults) -> Element {
                 &end_text,
                 selected_sampling,
                 &current_date_string(),
+                filter_overrides,
             ))
             .await
         }
@@ -1049,6 +1217,34 @@ fn NetWorthPanel(currency: String, defaults: HistoryDefaults) -> Element {
                     }
                 }
             }
+        }
+        match history_state {
+            None => rsx! {
+                GraphLoadingPanel {
+                    range: range_summary_text(&start_date, &end_date),
+                    sampling: selected_sampling.label()
+                }
+            },
+            Some(Err(error)) => rsx! {
+                InlineStatus { title: "Net Worth Over Time", message: error }
+            },
+            Some(Ok(_)) => rsx! {
+                NetWorthChart {
+                    data: sampled_data.clone(),
+                    currency: currency.clone(),
+                    y_domain
+                }
+                if !sampled_data.is_empty() {
+                    div { class: "chart-stats",
+                        strong { "{format_full_money(current_value, &currency)}" }
+                        span { class: "{change_class}",
+                            "{format_signed_money(absolute_change, &currency)} ({percent_text})"
+                        }
+                    }
+                }
+            }
+        }
+        div { class: "chart-controls chart-bottom-controls",
             div { class: "control-grid",
                 DateInput {
                     label: "Start",
@@ -1092,32 +1288,6 @@ fn NetWorthPanel(currency: String, defaults: HistoryDefaults) -> Element {
                 span { "Data range {data_y_range}" }
                 span { "Axis range {axis_y_range}" }
                 span { "Sampling {sampling_label} / {sampled_point_count} points" }
-            }
-        }
-        match history_state {
-            None => rsx! {
-                GraphLoadingPanel {
-                    range: range_summary_text(&start_date, &end_date),
-                    sampling: selected_sampling.label()
-                }
-            },
-            Some(Err(error)) => rsx! {
-                InlineStatus { title: "Net Worth Over Time", message: error }
-            },
-            Some(Ok(_)) => rsx! {
-                NetWorthChart {
-                    data: sampled_data.clone(),
-                    currency: currency.clone(),
-                    y_domain
-                }
-                if !sampled_data.is_empty() {
-                    div { class: "chart-stats",
-                        strong { "{format_full_money(current_value, &currency)}" }
-                        span { class: "{change_class}",
-                            "{format_signed_money(absolute_change, &currency)} ({percent_text})"
-                        }
-                    }
-                }
             }
         }
     }
@@ -1786,7 +1956,11 @@ fn BalancesView(balances: Vec<Balance>) -> Element {
 }
 
 #[component]
-fn HistoryView(currency: String, defaults: HistoryDefaults) -> Element {
+fn HistoryView(
+    currency: String,
+    defaults: HistoryDefaults,
+    filter_overrides: FilterOverrides,
+) -> Element {
     let initial_range_preset = range_preset_from_config(&defaults.graph_range);
     let initial_sampling_granularity =
         sampling_granularity_from_config(&defaults.graph_granularity);
@@ -1797,6 +1971,7 @@ fn HistoryView(currency: String, defaults: HistoryDefaults) -> Element {
             "",
             initial_sampling_granularity,
             &current_date_string(),
+            filter_overrides,
         ))
         .await
     });
@@ -1944,6 +2119,7 @@ fn history_query_string(
     end_override: &str,
     selected_sampling: SamplingGranularity,
     today: &str,
+    filter_overrides: FilterOverrides,
 ) -> String {
     let (start, end) = requested_history_date_range(preset, start_override, end_override, today);
     let granularity =
@@ -1956,8 +2132,32 @@ fn history_query_string(
     if let Some(end) = end {
         params.push(format!("end={end}"));
     }
+    append_filter_override_params(&mut params, filter_overrides);
 
     params.join("&")
+}
+
+fn filter_override_query_string(overrides: FilterOverrides) -> String {
+    let mut params = Vec::new();
+    append_filter_override_params(&mut params, overrides);
+    params.join("&")
+}
+
+fn append_filter_override_params(params: &mut Vec<String>, overrides: FilterOverrides) {
+    if let Some(enabled) = overrides.include_latent_capital_gains_tax {
+        params.push(format!(
+            "include_latent_capital_gains_tax={}",
+            bool_query_value(enabled)
+        ));
+    }
+}
+
+fn bool_query_value(value: bool) -> &'static str {
+    if value {
+        "true"
+    } else {
+        "false"
+    }
 }
 
 fn requested_history_date_range(
@@ -2369,6 +2569,14 @@ fn format_number(value: f64, decimals: usize) -> String {
     formatted
 }
 
+fn enabled_label(value: bool) -> &'static str {
+    if value {
+        "Included"
+    } else {
+        "Excluded"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2440,7 +2648,8 @@ mod tests {
                 "",
                 "",
                 DEFAULT_SAMPLING_GRANULARITY,
-                "2026-04-25"
+                "2026-04-25",
+                FilterOverrides::default()
             ),
             "granularity=weekly&start=2025-04-25&end=2026-04-25"
         );
@@ -2468,7 +2677,8 @@ mod tests {
                 "",
                 "",
                 SamplingGranularity::Auto,
-                "2026-04-25"
+                "2026-04-25",
+                FilterOverrides::default()
             ),
             "granularity=daily&start=2026-01-25&end=2026-04-25"
         );
@@ -2482,9 +2692,20 @@ mod tests {
                 "",
                 "",
                 SamplingGranularity::Auto,
-                "2026-04-25"
+                "2026-04-25",
+                FilterOverrides::default()
             ),
             "granularity=monthly"
+        );
+    }
+
+    #[test]
+    fn filter_override_query_includes_latent_tax_override() {
+        assert_eq!(
+            filter_override_query_string(FilterOverrides {
+                include_latent_capital_gains_tax: Some(false),
+            }),
+            "include_latent_capital_gains_tax=false"
         );
     }
 
