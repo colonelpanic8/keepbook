@@ -13,10 +13,20 @@ const DEFAULT_SAMPLING_GRANULARITY: SamplingGranularity = SamplingGranularity::W
 struct Overview {
     data_dir: String,
     reporting_currency: String,
+    history_defaults: HistoryDefaults,
     connections: Vec<Connection>,
     accounts: Vec<Account>,
     balances: Vec<Balance>,
     snapshot: PortfolioSnapshot,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+struct HistoryDefaults {
+    portfolio_granularity: String,
+    change_points_granularity: String,
+    include_prices: bool,
+    graph_range: String,
+    graph_granularity: String,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -36,6 +46,8 @@ struct Account {
     connection_id: String,
     tags: Vec<String>,
     active: bool,
+    #[serde(default)]
+    exclude_from_portfolio: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -146,6 +158,7 @@ struct ChartPoint {
 
 #[derive(Clone, Debug, PartialEq)]
 struct ChartHoverPoint {
+    index: usize,
     point: ChartPoint,
     hit_x: f64,
     hit_width: f64,
@@ -199,6 +212,37 @@ impl SamplingGranularity {
             Self::Yearly => "yearly",
         }
     }
+}
+
+fn range_preset_from_config(value: &str) -> RangePreset {
+    match normalize_config_key(value).as_str() {
+        "1m" | "1month" | "month" | "onemonth" => RangePreset::OneMonth,
+        "90d" | "90days" | "ninetydays" => RangePreset::NinetyDays,
+        "6m" | "6months" | "sixmonths" => RangePreset::SixMonths,
+        "1y" | "1year" | "year" | "oneyear" => RangePreset::OneYear,
+        "2y" | "2years" | "twoyears" => RangePreset::TwoYears,
+        "max" | "all" => RangePreset::Max,
+        _ => DEFAULT_RANGE_PRESET,
+    }
+}
+
+fn sampling_granularity_from_config(value: &str) -> SamplingGranularity {
+    match normalize_config_key(value).as_str() {
+        "auto" => SamplingGranularity::Auto,
+        "daily" | "day" => SamplingGranularity::Daily,
+        "weekly" | "week" => SamplingGranularity::Weekly,
+        "monthly" | "month" => SamplingGranularity::Monthly,
+        "yearly" | "annual" | "annually" | "year" => SamplingGranularity::Yearly,
+        _ => DEFAULT_SAMPLING_GRANULARITY,
+    }
+}
+
+fn normalize_config_key(value: &str) -> String {
+    value
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .flat_map(|ch| ch.to_lowercase())
+        .collect()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -548,6 +592,7 @@ fn Dashboard(overview: Overview, onrefresh: EventHandler<()>) -> Element {
                     ActiveView::Graphs => rsx! {
                         GraphsView {
                             currency: overview.reporting_currency.clone(),
+                            defaults: overview.history_defaults.clone(),
                         }
                     },
                     ActiveView::Accounts => rsx! {
@@ -567,7 +612,8 @@ fn Dashboard(overview: Overview, onrefresh: EventHandler<()>) -> Element {
                     },
                     ActiveView::History => rsx! {
                         HistoryView {
-                            currency: overview.reporting_currency.clone()
+                            currency: overview.reporting_currency.clone(),
+                            defaults: overview.history_defaults.clone(),
                         }
                     },
                     ActiveView::Settings => rsx! {
@@ -629,10 +675,10 @@ fn SummaryView(
 }
 
 #[component]
-fn GraphsView(currency: String) -> Element {
+fn GraphsView(currency: String, defaults: HistoryDefaults) -> Element {
     rsx! {
         section { class: "panel graph-panel",
-            NetWorthPanel { currency }
+            NetWorthPanel { currency, defaults }
         }
     }
 }
@@ -814,13 +860,16 @@ fn MetricCard(label: String, value: String, detail: String) -> Element {
 }
 
 #[component]
-fn NetWorthPanel(currency: String) -> Element {
-    let mut range_preset = use_signal(|| DEFAULT_RANGE_PRESET);
+fn NetWorthPanel(currency: String, defaults: HistoryDefaults) -> Element {
+    let initial_range_preset = range_preset_from_config(&defaults.graph_range);
+    let initial_sampling_granularity =
+        sampling_granularity_from_config(&defaults.graph_granularity);
+    let mut range_preset = use_signal(move || initial_range_preset);
     let mut start_override = use_signal(String::new);
     let mut end_override = use_signal(String::new);
     let mut y_min_input = use_signal(String::new);
     let mut y_max_input = use_signal(String::new);
-    let mut sampling_granularity = use_signal(|| DEFAULT_SAMPLING_GRANULARITY);
+    let mut sampling_granularity = use_signal(move || initial_sampling_granularity);
     let history = use_resource(move || {
         let selected_range = range_preset();
         let start_text = start_override();
@@ -1265,12 +1314,23 @@ fn NetWorthChart(
                 (point.x + chart_points[index + 1].x) / 2.0
             };
             ChartHoverPoint {
+                index,
                 point: point.clone(),
                 hit_x: previous_x,
                 hit_width: (next_x - previous_x).max(1.0),
             }
         })
         .collect::<Vec<_>>();
+    let hover_rules = hover_points
+        .iter()
+        .map(|hover_point| {
+            format!(
+                ".chart-hit-zone-{0}:hover ~ .chart-hover-detail-{0} {{ display: block; }}",
+                hover_point.index
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
     let latest = chart_points.last().expect("values is non-empty");
     let first = chart_points.first().expect("values is non-empty");
     let y_mid = y_min + y_range / 2.0;
@@ -1312,6 +1372,7 @@ fn NetWorthChart(
                 class: "net-worth-chart",
                 view_box: "0 0 720 260",
                 role: "img",
+                style { "{hover_rules}" }
                 line {
                     class: "chart-grid",
                     x1: "{padding_left}",
@@ -1376,23 +1437,19 @@ fn NetWorthChart(
                         title { "{point.date}: {format_full_money(point.value, &currency)}" }
                     }
                 }
-                for hover_point in hover_points {
-                    g { class: "chart-point-group",
+                g { class: "chart-hover-layer",
+                    for hover_point in hover_points.iter() {
                         rect {
-                            class: "chart-hit-zone",
+                            class: "chart-hit-zone chart-hit-zone-{hover_point.index}",
                             x: "{hover_point.hit_x}",
                             y: "{padding_top}",
                             width: "{hover_point.hit_width}",
                             height: "{plot_height}"
                         }
-                        circle {
-                            class: "chart-hover-point",
-                            cx: "{hover_point.point.x}",
-                            cy: "{hover_point.point.y}",
-                            r: "6",
-                            title { "{hover_point.point.date}: {format_full_money(hover_point.point.value, &currency)}" }
-                        }
+                    }
+                    for hover_point in hover_points {
                         ChartHoverDetail {
+                            index: hover_point.index,
                             point: hover_point.point.clone(),
                             currency: currency.clone(),
                             chart_width: width,
@@ -1408,6 +1465,7 @@ fn NetWorthChart(
 
 #[component]
 fn ChartHoverDetail(
+    index: usize,
     point: ChartPoint,
     currency: String,
     chart_width: f64,
@@ -1434,13 +1492,19 @@ fn ChartHoverDetail(
     let value_text = format_full_money(point.value, &currency);
 
     rsx! {
-        g { class: "chart-hover-detail",
+        g { class: "chart-hover-detail chart-hover-detail-{index}",
             line {
                 class: "chart-hover-line",
                 x1: "{point.x}",
                 x2: "{point.x}",
                 y1: "{padding_top}",
                 y2: "{point.y}"
+            }
+            circle {
+                class: "chart-hover-point",
+                cx: "{point.x}",
+                cy: "{point.y}",
+                r: "6"
             }
             rect {
                 class: "chart-tooltip",
@@ -1570,7 +1634,7 @@ fn VirtualAccountRow(account: AccountSummary, currency: String) -> Element {
         div { class: "table-row virtual-account-row",
             strong { "{account.account_name}" }
             span { "{value}" }
-            span { "Virtual" }
+            span { class: "status liability-status", "Virtual" }
             small { "{account.connection_name}" }
         }
     }
@@ -1584,6 +1648,18 @@ fn AccountGroup(
     currency: String,
 ) -> Element {
     let active_count = accounts.iter().filter(|account| account.active).count();
+    let ignored_count = accounts
+        .iter()
+        .filter(|account| account.exclude_from_portfolio)
+        .count();
+    let status_text = if ignored_count == 0 {
+        format!("{active_count}/{} active", accounts.len())
+    } else {
+        format!(
+            "{active_count}/{} active, {ignored_count} ignored",
+            accounts.len()
+        )
+    };
 
     rsx! {
         section { class: "tree-group",
@@ -1592,7 +1668,7 @@ fn AccountGroup(
                     strong { "{connection.name}" }
                     small { "{connection.synchronizer}" }
                 }
-                span { class: "status", "{active_count}/{accounts.len()} active" }
+                span { class: "status", "{status_text}" }
             }
             div { class: "data-table account-table",
                 div { class: "table-head",
@@ -1615,17 +1691,33 @@ fn AccountGroup(
 
 #[component]
 fn AccountRow(account: Account, balances: Vec<Balance>, currency: String) -> Element {
-    let status = if account.active { "Active" } else { "Inactive" };
+    let status = if account.exclude_from_portfolio {
+        "Ignored"
+    } else if account.active {
+        "Active"
+    } else {
+        "Inactive"
+    };
+    let row_class = if account.exclude_from_portfolio {
+        "table-row ignored-account-row"
+    } else {
+        "table-row"
+    };
+    let status_class = if account.exclude_from_portfolio {
+        "status ignored-status"
+    } else {
+        "status"
+    };
     let tags = account.tags.join(", ");
     let balance = account_base_value(&account.id, &balances)
         .map(|value| format_full_money(value, &currency))
         .unwrap_or_else(|| "N/A".to_string());
 
     rsx! {
-        div { class: "table-row",
+        div { class: "{row_class}",
             strong { "{account.name}" }
             span { "{balance}" }
-            span { "{status}" }
+            span { class: "{status_class}", "{status}" }
             small { "{tags}" }
         }
     }
@@ -1694,13 +1786,16 @@ fn BalancesView(balances: Vec<Balance>) -> Element {
 }
 
 #[component]
-fn HistoryView(currency: String) -> Element {
-    let history = use_resource(|| async {
+fn HistoryView(currency: String, defaults: HistoryDefaults) -> Element {
+    let initial_range_preset = range_preset_from_config(&defaults.graph_range);
+    let initial_sampling_granularity =
+        sampling_granularity_from_config(&defaults.graph_granularity);
+    let history = use_resource(move || async move {
         fetch_history(history_query_string(
-            DEFAULT_RANGE_PRESET,
+            initial_range_preset,
             "",
             "",
-            DEFAULT_SAMPLING_GRANULARITY,
+            initial_sampling_granularity,
             &current_date_string(),
         ))
         .await
@@ -2348,6 +2443,20 @@ mod tests {
                 "2026-04-25"
             ),
             "granularity=weekly&start=2025-04-25&end=2026-04-25"
+        );
+    }
+
+    #[test]
+    fn graph_defaults_parse_config_values() {
+        assert_eq!(range_preset_from_config("2y"), RangePreset::TwoYears);
+        assert_eq!(range_preset_from_config("one_month"), RangePreset::OneMonth);
+        assert_eq!(
+            sampling_granularity_from_config("monthly"),
+            SamplingGranularity::Monthly
+        );
+        assert_eq!(
+            sampling_granularity_from_config("not-a-real-value"),
+            DEFAULT_SAMPLING_GRANULARITY
         );
     }
 

@@ -21,6 +21,7 @@ pub struct AccountOutput {
     pub connection_id: String,
     pub tags: Vec<String>,
     pub active: bool,
+    pub exclude_from_portfolio: bool,
 }
 
 /// JSON output for price sources

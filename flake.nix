@@ -66,6 +66,7 @@
           fenixPkgs.stable.rustfmt
           fenixPkgs.stable.rust-analyzer
           fenixPkgs.targets.wasm32-unknown-unknown.stable.rust-std
+          fenixPkgs.targets.aarch64-apple-ios-sim.stable.rust-std
         ]);
         rustPlatform = pkgs.makeRustPlatform {
           cargo = toolchain;

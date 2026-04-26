@@ -10,7 +10,6 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::Utc;
-use keepbook::app::{default_portfolio_history_granularity, default_portfolio_include_prices};
 use keepbook::config::{default_config_path, ResolvedConfig};
 use keepbook::storage::{JsonFileStorage, Storage};
 use serde::{Deserialize, Serialize};
@@ -88,6 +87,16 @@ pub struct ConfigOutput {
     pub config_path: String,
     pub data_dir: String,
     pub reporting_currency: String,
+    pub history_defaults: HistoryDefaultsOutput,
+}
+
+#[derive(Debug, Serialize)]
+pub struct HistoryDefaultsOutput {
+    pub portfolio_granularity: String,
+    pub change_points_granularity: String,
+    pub include_prices: bool,
+    pub graph_range: String,
+    pub graph_granularity: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -150,6 +159,7 @@ pub struct OverviewOutput {
     pub config_path: String,
     pub data_dir: String,
     pub reporting_currency: String,
+    pub history_defaults: HistoryDefaultsOutput,
     pub connections: serde_json::Value,
     pub accounts: serde_json::Value,
     pub balances: serde_json::Value,
@@ -173,20 +183,16 @@ pub struct HistoryQuery {
     pub currency: Option<String>,
     pub start: Option<String>,
     pub end: Option<String>,
-    #[serde(default = "default_portfolio_history_granularity")]
-    pub granularity: String,
-    #[serde(default = "default_portfolio_include_prices")]
-    pub include_prices: bool,
+    pub granularity: Option<String>,
+    pub include_prices: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct OverviewQuery {
     pub history_start: Option<String>,
     pub history_end: Option<String>,
-    #[serde(default = "default_portfolio_history_granularity")]
-    pub history_granularity: String,
-    #[serde(default = "default_portfolio_include_prices")]
-    pub include_prices: bool,
+    pub history_granularity: Option<String>,
+    pub include_prices: Option<bool>,
     #[serde(default)]
     pub include_history: bool,
 }
@@ -219,6 +225,16 @@ fn default_history_end() -> String {
 
 fn json_value<T: Serialize>(value: T) -> Result<serde_json::Value> {
     serde_json::to_value(value).context("failed to encode keepbook API output")
+}
+
+fn history_defaults(config: &ResolvedConfig) -> HistoryDefaultsOutput {
+    HistoryDefaultsOutput {
+        portfolio_granularity: config.history.portfolio_granularity.clone(),
+        change_points_granularity: config.history.change_points_granularity.clone(),
+        include_prices: config.history.include_prices,
+        graph_range: config.history.graph_range.clone(),
+        graph_granularity: config.history.graph_granularity.clone(),
+    }
 }
 
 pub fn router(state: ApiState) -> Router {
@@ -266,6 +282,7 @@ async fn config(State(state): State<ApiState>) -> Json<ConfigOutput> {
         config_path: state.config_path.display().to_string(),
         data_dir: state.config.data_dir.display().to_string(),
         reporting_currency: state.config.reporting_currency.clone(),
+        history_defaults: history_defaults(&state.config),
     })
 }
 
@@ -285,8 +302,6 @@ async fn overview(
         "both".to_string(),
         false,
         None,
-        None,
-        None,
         false,
         true,
         false,
@@ -296,6 +311,12 @@ async fn overview(
     let history = if query.include_history {
         let history_start = query.history_start;
         let history_end = query.history_end.or_else(|| Some(default_history_end()));
+        let history_granularity = query
+            .history_granularity
+            .unwrap_or_else(|| state.config.history.portfolio_granularity.clone());
+        let include_prices = query
+            .include_prices
+            .unwrap_or(state.config.history.include_prices);
         Some(json_value(
             keepbook::app::portfolio_history(
                 state.storage.clone(),
@@ -303,8 +324,8 @@ async fn overview(
                 None,
                 history_start,
                 history_end,
-                query.history_granularity,
-                query.include_prices,
+                history_granularity,
+                include_prices,
             )
             .await?,
         )?)
@@ -316,6 +337,7 @@ async fn overview(
         config_path: state.config_path.display().to_string(),
         data_dir: state.config.data_dir.display().to_string(),
         reporting_currency: state.config.reporting_currency.clone(),
+        history_defaults: history_defaults(&state.config),
         connections: json_value(connections)?,
         accounts: json_value(accounts)?,
         balances: json_value(balances)?,
@@ -364,14 +386,20 @@ async fn portfolio_history(
     Query(query): Query<HistoryQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let state = state.snapshot().await;
+    let granularity = query
+        .granularity
+        .unwrap_or_else(|| state.config.history.portfolio_granularity.clone());
+    let include_prices = query
+        .include_prices
+        .unwrap_or(state.config.history.include_prices);
     let output = keepbook::app::portfolio_history(
         state.storage.clone(),
         &state.config,
         query.currency,
         query.start,
         query.end,
-        query.granularity,
-        query.include_prices,
+        granularity,
+        include_prices,
     )
     .await?;
     Ok(Json(json_value(output)?))

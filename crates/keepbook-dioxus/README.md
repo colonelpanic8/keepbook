@@ -20,3 +20,15 @@ Then serve the Dioxus web client:
 ```sh
 direnv exec . dx serve --web --package keepbook-dioxus --addr 127.0.0.1 --port 8800 --open false
 ```
+
+Build an iOS simulator app bundle:
+
+```sh
+direnv exec . just dioxus-ios-build
+```
+
+The bundle is written to:
+
+```sh
+target/dx/keepbook-dioxus/debug/ios/KeepbookDioxus.app
+```

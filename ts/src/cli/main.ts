@@ -824,9 +824,9 @@ portfolio
   .option('--end <date>', 'end date (YYYY-MM-DD, YYYY-MM, YYYY, today, or relative e.g. -1y)')
   .option(
     '--granularity <granularity>',
-    'granularity: none, daily, weekly, monthly (default: daily)',
+    'granularity: none, daily, weekly, monthly (default: from config)',
   )
-  .option('--include-prices', 'include price change points', true)
+  .option('--include-prices', 'include price change points')
   .option('--no-include-prices', 'exclude price change points')
   .action(
     async (opts: {
@@ -855,8 +855,11 @@ portfolio
   .description('Portfolio change points')
   .option('--start <date>', 'start date (YYYY-MM-DD, YYYY-MM, YYYY, today, or relative e.g. -1y)')
   .option('--end <date>', 'end date (YYYY-MM-DD, YYYY-MM, YYYY, today, or relative e.g. -1y)')
-  .option('--granularity <granularity>', 'granularity: none, daily, weekly, monthly')
-  .option('--include-prices', 'include price change points', true)
+  .option(
+    '--granularity <granularity>',
+    'granularity: none, daily, weekly, monthly (default: from config)',
+  )
+  .option('--include-prices', 'include price change points')
   .option('--no-include-prices', 'exclude price change points')
   .action(
     async (opts: {

@@ -1079,7 +1079,8 @@ export async function portfolioHistory(
 ): Promise<HistoryOutput> {
   const effectiveClock = clock ?? new SystemClock();
   const currency = options.currency ?? config.reporting_currency;
-  const granularity = parseGranularity(options.granularity ?? 'daily');
+  const resolvedGranularity = options.granularity ?? config.history.portfolio_granularity;
+  const granularity = parseGranularity(resolvedGranularity);
   const today = effectiveClock.today();
   const startDate =
     options.start !== undefined ? parseDateBoundOrThrow(options.start, 'start', today) : undefined;
@@ -1094,7 +1095,7 @@ export async function portfolioHistory(
 
   // Collect change points
   const allPoints = await collectChangePoints(storage, marketDataStore, {
-    includePrices: options.includePrices ?? true,
+    includePrices: options.includePrices ?? config.history.include_prices,
   });
 
   // Filter by date range
@@ -1187,7 +1188,7 @@ export async function portfolioHistory(
     currency,
     start_date: startDate ?? null,
     end_date: endDate ?? null,
-    granularity: options.granularity ?? 'daily',
+    granularity: resolvedGranularity,
     points: historyPoints,
     summary,
   };
@@ -1247,12 +1248,13 @@ export interface PortfolioChangePointsOptions {
 export async function portfolioChangePoints(
   storage: Storage,
   marketDataStore: MarketDataStore,
-  _config: ResolvedConfig,
+  config: ResolvedConfig,
   options: PortfolioChangePointsOptions,
   clock?: Clock,
 ): Promise<ChangePointsOutput> {
   const effectiveClock = clock ?? new SystemClock();
-  const granularity = parseGranularity(options.granularity ?? 'none');
+  const resolvedGranularity = options.granularity ?? config.history.change_points_granularity;
+  const granularity = parseGranularity(resolvedGranularity);
   const today = effectiveClock.today();
   const startDate =
     options.start !== undefined ? parseDateBoundOrThrow(options.start, 'start', today) : undefined;
@@ -1261,7 +1263,7 @@ export async function portfolioChangePoints(
 
   // Collect change points
   const allPoints = await collectChangePoints(storage, marketDataStore, {
-    includePrices: options.includePrices ?? true,
+    includePrices: options.includePrices ?? config.history.include_prices,
   });
 
   // Filter by date range
@@ -1276,8 +1278,8 @@ export async function portfolioChangePoints(
   return {
     start_date: startDate ?? null,
     end_date: endDate ?? null,
-    granularity: options.granularity ?? 'none',
-    include_prices: options.includePrices ?? true,
+    granularity: resolvedGranularity,
+    include_prices: options.includePrices ?? config.history.include_prices,
     points: serialized,
   };
 }

@@ -83,7 +83,7 @@ pub async fn portfolio_graph(
     config: &ResolvedConfig,
     options: PortfolioGraphOptions,
 ) -> Result<PortfolioGraphOutput> {
-    let resolved = resolve_graph_options(options)?;
+    let resolved = resolve_graph_options(options, config)?;
     let history = portfolio_history(
         storage,
         config,
@@ -140,7 +140,10 @@ pub async fn portfolio_graph(
     })
 }
 
-fn resolve_graph_options(options: PortfolioGraphOptions) -> Result<ResolvedGraphOptions> {
+fn resolve_graph_options(
+    options: PortfolioGraphOptions,
+    config: &ResolvedConfig,
+) -> Result<ResolvedGraphOptions> {
     let file_options = match &options.graph_config {
         Some(path) => {
             let raw = fs::read_to_string(path)
@@ -157,11 +160,11 @@ fn resolve_graph_options(options: PortfolioGraphOptions) -> Result<ResolvedGraph
     let granularity = options
         .granularity
         .or(file_options.granularity)
-        .unwrap_or_else(|| "daily".to_string());
+        .unwrap_or_else(|| config.history.portfolio_granularity.clone());
     let include_prices = options
         .include_prices
         .or(file_options.include_prices)
-        .unwrap_or(true);
+        .unwrap_or(config.history.include_prices);
     let title = options
         .title
         .or(file_options.title)

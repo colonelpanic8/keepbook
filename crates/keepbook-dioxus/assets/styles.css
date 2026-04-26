@@ -9,6 +9,10 @@
   box-sizing: border-box;
 }
 
+#__dx-toast {
+  display: none !important;
+}
+
 body {
   margin: 0;
 }
@@ -461,7 +465,6 @@ small,
 }
 
 .chart-hover-point {
-  display: none;
   fill: #1f6f8b;
   pointer-events: none;
   stroke: #ffffff;
@@ -473,17 +476,9 @@ small,
   pointer-events: all;
 }
 
-.chart-point-group:hover .chart-hover-point {
-  display: block;
-}
-
 .chart-hover-detail {
   display: none;
   pointer-events: none;
-}
-
-.chart-point-group:hover .chart-hover-detail {
-  display: block;
 }
 
 .chart-hover-line {
@@ -696,9 +691,19 @@ small,
   background: #fffdfb;
 }
 
+.ignored-account-row {
+  background: #f8faf9;
+  color: #62727f;
+}
+
 .status.liability-status {
   background: #f4e7dd;
   color: #8a4d20;
+}
+
+.status.ignored-status {
+  background: #eef0f2;
+  color: #596670;
 }
 
 .status {

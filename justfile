@@ -25,6 +25,24 @@ kb *args:
 run-tray *args:
     {{keepbook_tray_cmd}} "$@"
 
+# Build the Dioxus client as an iOS simulator app bundle.
+dioxus-ios-build *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    unset SDKROOT DEVELOPER_DIR
+    ios_sdk="$(/usr/bin/xcrun --sdk iphonesimulator --show-sdk-path)"
+    ios_clang="$(/usr/bin/xcrun --sdk iphonesimulator --find clang)"
+
+    export PATH="/usr/bin:$PATH"
+    export CC_aarch64_apple_ios_sim="$ios_clang"
+    export CFLAGS_aarch64_apple_ios_sim="-isysroot $ios_sdk -mios-simulator-version-min=13.0"
+    export CXXFLAGS_aarch64_apple_ios_sim="-isysroot $ios_sdk -mios-simulator-version-min=13.0"
+    export CARGO_TARGET_AARCH64_APPLE_IOS_SIM_LINKER="$ios_clang"
+    export IPHONEOS_DEPLOYMENT_TARGET=13.0
+
+    dx build --ios --package keepbook-dioxus --no-default-features --features mobile "$@"
+
 # Portfolio history distilled to daily date/balance JSON objects.
 # Extra CLI args can be passed through, e.g.:
 #   just history-daily-balance -- --start 2026-01-01 --end 2026-02-01

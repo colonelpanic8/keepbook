@@ -197,6 +197,7 @@ export async function listAccounts(storage: Storage): Promise<AccountOutput[]> {
     connection_id: a.connection_id.asStr(),
     tags: [...a.tags],
     active: a.active,
+    exclude_from_portfolio: storage.getAccountConfig(a.id)?.exclude_from_portfolio === true,
   }));
 }
 
