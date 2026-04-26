@@ -703,12 +703,12 @@ enum PortfolioCommand {
         #[arg(long, allow_hyphen_values = true)]
         end: Option<String>,
 
-        /// Time granularity: none/full, hourly, daily, weekly, monthly, yearly (default: daily)
-        #[arg(long, default_value = app::DEFAULT_PORTFOLIO_HISTORY_GRANULARITY)]
-        granularity: String,
+        /// Time granularity: none/full, hourly, daily, weekly, monthly, yearly (default: from config)
+        #[arg(long)]
+        granularity: Option<String>,
 
-        /// Include price changes as change points (default: enabled)
-        #[arg(long, default_value_t = app::DEFAULT_PORTFOLIO_INCLUDE_PRICES)]
+        /// Include price changes as change points (default: from config)
+        #[arg(long, conflicts_with = "no_include_prices")]
         include_prices: bool,
 
         /// Disable price changes as change points (faster, less detailed)
@@ -726,12 +726,12 @@ enum PortfolioCommand {
         #[arg(long, allow_hyphen_values = true)]
         end: Option<String>,
 
-        /// Time granularity: none/full, hourly, daily, weekly, monthly, yearly (default: none)
-        #[arg(long, default_value = app::DEFAULT_PORTFOLIO_CHANGE_POINTS_GRANULARITY)]
-        granularity: String,
+        /// Time granularity: none/full, hourly, daily, weekly, monthly, yearly (default: from config)
+        #[arg(long)]
+        granularity: Option<String>,
 
-        /// Include price changes as change points (default: enabled)
-        #[arg(long, default_value_t = app::DEFAULT_PORTFOLIO_INCLUDE_PRICES)]
+        /// Include price changes as change points (default: from config)
+        #[arg(long, conflicts_with = "no_include_prices")]
         include_prices: bool,
 
         /// Disable price changes as change points (faster, less detailed)
@@ -1111,6 +1111,15 @@ async fn main() -> Result<()> {
                 include_prices,
                 no_include_prices,
             } => {
+                let granularity =
+                    granularity.unwrap_or_else(|| config.history.portfolio_granularity.clone());
+                let include_prices = if no_include_prices {
+                    false
+                } else if include_prices {
+                    true
+                } else {
+                    config.history.include_prices
+                };
                 let output = app::portfolio_history(
                     storage_arc.clone(),
                     &config,
@@ -1118,7 +1127,7 @@ async fn main() -> Result<()> {
                     start,
                     end,
                     granularity,
-                    include_prices && !no_include_prices,
+                    include_prices,
                 )
                 .await?;
                 println!("{}", serde_json::to_string_pretty(&output)?);
@@ -1131,13 +1140,22 @@ async fn main() -> Result<()> {
                 include_prices,
                 no_include_prices,
             } => {
+                let granularity =
+                    granularity.unwrap_or_else(|| config.history.change_points_granularity.clone());
+                let include_prices = if no_include_prices {
+                    false
+                } else if include_prices {
+                    true
+                } else {
+                    config.history.include_prices
+                };
                 let output = app::portfolio_change_points(
                     storage_arc.clone(),
                     &config,
                     start,
                     end,
                     granularity,
-                    include_prices && !no_include_prices,
+                    include_prices,
                 )
                 .await?;
                 println!("{}", serde_json::to_string_pretty(&output)?);

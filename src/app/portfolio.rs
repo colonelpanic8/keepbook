@@ -45,20 +45,22 @@ pub struct PriceHistoryRequest<'a> {
     pub include_fx: bool,
 }
 
-pub const DEFAULT_PORTFOLIO_HISTORY_GRANULARITY: &str = "daily";
-pub const DEFAULT_PORTFOLIO_CHANGE_POINTS_GRANULARITY: &str = "none";
-pub const DEFAULT_PORTFOLIO_INCLUDE_PRICES: bool = true;
+pub const DEFAULT_PORTFOLIO_HISTORY_GRANULARITY: &str =
+    crate::config::DEFAULT_HISTORY_PORTFOLIO_GRANULARITY;
+pub const DEFAULT_PORTFOLIO_CHANGE_POINTS_GRANULARITY: &str =
+    crate::config::DEFAULT_HISTORY_CHANGE_POINTS_GRANULARITY;
+pub const DEFAULT_PORTFOLIO_INCLUDE_PRICES: bool = crate::config::DEFAULT_HISTORY_INCLUDE_PRICES;
 
 pub fn default_portfolio_history_granularity() -> String {
-    DEFAULT_PORTFOLIO_HISTORY_GRANULARITY.to_string()
+    crate::config::default_history_portfolio_granularity()
 }
 
 pub fn default_portfolio_change_points_granularity() -> String {
-    DEFAULT_PORTFOLIO_CHANGE_POINTS_GRANULARITY.to_string()
+    crate::config::default_history_change_points_granularity()
 }
 
 pub fn default_portfolio_include_prices() -> bool {
-    DEFAULT_PORTFOLIO_INCLUDE_PRICES
+    crate::config::default_history_include_prices()
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1983,6 +1985,7 @@ mod tests {
             history: HistoryConfig {
                 allow_future_projection: true,
                 lookback_days: Some(7),
+                ..Default::default()
             },
             tray: TrayConfig::default(),
             spending: SpendingConfig::default(),

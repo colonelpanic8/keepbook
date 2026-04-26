@@ -76,7 +76,7 @@ export async function portfolioGraph(
   config: ResolvedConfig,
   options: PortfolioGraphOptions,
 ): Promise<PortfolioGraphOutput> {
-  const resolved = await resolveGraphOptions(options);
+  const resolved = await resolveGraphOptions(options, config);
   const historyOptions: PortfolioHistoryOptions = {
     currency: resolved.currency,
     start: resolved.start,
@@ -105,14 +105,19 @@ export async function portfolioGraph(
   };
 }
 
-async function resolveGraphOptions(options: PortfolioGraphOptions): Promise<ResolvedGraphOptions> {
+async function resolveGraphOptions(
+  options: PortfolioGraphOptions,
+  config: ResolvedConfig,
+): Promise<ResolvedGraphOptions> {
   const fileOptions = options.graphConfig ? await readGraphConfig(options.graphConfig) : {};
 
   const start = options.start ?? fileOptions.start;
   const end = options.end ?? fileOptions.end;
   const currency = options.currency ?? fileOptions.currency;
-  const granularity = options.granularity ?? fileOptions.granularity ?? 'daily';
-  const includePrices = options.includePrices ?? fileOptions.include_prices ?? true;
+  const granularity =
+    options.granularity ?? fileOptions.granularity ?? config.history.portfolio_granularity;
+  const includePrices =
+    options.includePrices ?? fileOptions.include_prices ?? config.history.include_prices;
   const title = options.title ?? fileOptions.title ?? 'Keepbook Net Worth';
   const subtitle = options.subtitle ?? fileOptions.subtitle;
   const width = options.width ?? fileOptions.width ?? DEFAULT_WIDTH;
@@ -261,7 +266,8 @@ export function renderNetWorthSvg(history: HistoryOutput, options: ResolvedGraph
   }
 
   const minDay = dates[0] !== undefined ? dateDays(dates[0]) : 0;
-  const maxDay = dates[dates.length - 1] !== undefined ? dateDays(dates[dates.length - 1]) : minDay + 1;
+  const maxDay =
+    dates[dates.length - 1] !== undefined ? dateDays(dates[dates.length - 1]) : minDay + 1;
   const daySpan = Math.max(maxDay - minDay, 1);
 
   const points = values.map((value, index): [number, number] => {

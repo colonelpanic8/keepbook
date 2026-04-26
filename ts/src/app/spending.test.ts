@@ -9,7 +9,7 @@ import { Account } from '../models/account.js';
 import { Asset } from '../models/asset.js';
 import { Transaction, withStandardizedMetadata, withTimestamp } from '../models/transaction.js';
 import { AssetId } from '../market-data/asset-id.js';
-import type { ResolvedConfig } from '../config.js';
+import { DEFAULT_HISTORY_CONFIG, type ResolvedConfig } from '../config.js';
 import { spendingReport } from './spending.js';
 
 function makeConfig(overrides?: Partial<ResolvedConfig>): ResolvedConfig {
@@ -21,7 +21,7 @@ function makeConfig(overrides?: Partial<ResolvedConfig>): ResolvedConfig {
       balance_staleness: 14 * 86400000,
       price_staleness: 86400000,
     },
-    history: { allow_future_projection: false },
+    history: { ...DEFAULT_HISTORY_CONFIG },
     tray: { history_points: 8, spending_windows_days: [7, 30, 90] },
     spending: { ignore_accounts: [], ignore_connections: [], ignore_tags: [] },
     portfolio: {
@@ -84,7 +84,9 @@ describe('spendingReport', () => {
     });
 
     expect(out.period_alignment).toBe('end-bound');
-    expect(out.periods.map((p) => [p.start_date, p.end_date, p.total, p.transaction_count])).toEqual([
+    expect(
+      out.periods.map((p) => [p.start_date, p.end_date, p.total, p.transaction_count]),
+    ).toEqual([
       ['2026-01-10', '2026-01-25', '10', 1],
       ['2026-01-26', '2026-02-25', '50', 2],
       ['2026-02-26', '2026-03-25', '90', 2],

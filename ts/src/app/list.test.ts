@@ -14,7 +14,7 @@ import { FixedIdGenerator } from '../models/id-generator.js';
 import { Asset } from '../models/asset.js';
 import { AssetId } from '../market-data/asset-id.js';
 import { MemoryMarketDataStore } from '../market-data/store.js';
-import type { ResolvedConfig } from '../config.js';
+import { DEFAULT_HISTORY_CONFIG, type ResolvedConfig } from '../config.js';
 import {
   listConnections,
   listAccounts,
@@ -45,7 +45,7 @@ function makeConfig(overrides?: Partial<ResolvedConfig>): ResolvedConfig {
       balance_staleness: 14 * 86400000,
       price_staleness: 24 * 60 * 60 * 1000,
     },
-    history: { allow_future_projection: false },
+    history: { ...DEFAULT_HISTORY_CONFIG },
     tray: { history_points: 8, spending_windows_days: [7, 30, 90] },
     spending: { ignore_accounts: [], ignore_connections: [], ignore_tags: [] },
     portfolio: {

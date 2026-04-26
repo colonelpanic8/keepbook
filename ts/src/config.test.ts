@@ -140,11 +140,22 @@ spending_windows_days = [3, 14, 60]
 [history]
 allow_future_projection = true
 lookback_days = 7
+portfolio_granularity = "weekly"
+change_points_granularity = "daily"
+include_prices = false
+graph_range = "2y"
+graph_granularity = "monthly"
 `;
     const config = parseConfig(toml);
     expect(config.history).toEqual({
+      ...DEFAULT_HISTORY_CONFIG,
       allow_future_projection: true,
       lookback_days: 7,
+      portfolio_granularity: 'weekly',
+      change_points_granularity: 'daily',
+      include_prices: false,
+      graph_range: '2y',
+      graph_granularity: 'monthly',
     });
   });
 

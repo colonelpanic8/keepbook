@@ -64,6 +64,16 @@ export interface HistoryConfig {
   allow_future_projection: boolean;
   /** Bound historical cached price/rate lookups before projection; undefined means unbounded. */
   lookback_days?: number;
+  /** Default portfolio history granularity when no CLI/API override is supplied. */
+  portfolio_granularity: string;
+  /** Default portfolio change-points granularity when no CLI/API override is supplied. */
+  change_points_granularity: string;
+  /** Whether history/change-point commands include price changes by default. */
+  include_prices: boolean;
+  /** Default range preset for graphing clients. */
+  graph_range: string;
+  /** Default sampling preset for graphing clients. */
+  graph_granularity: string;
 }
 
 export interface SpendingConfig {
@@ -187,6 +197,11 @@ export const DEFAULT_TRAY_CONFIG: TrayConfig = {
 
 export const DEFAULT_HISTORY_CONFIG: HistoryConfig = {
   allow_future_projection: false,
+  portfolio_granularity: 'daily',
+  change_points_granularity: 'none',
+  include_prices: true,
+  graph_range: '1y',
+  graph_granularity: 'weekly',
 };
 
 export const DEFAULT_SPENDING_CONFIG: SpendingConfig = {
@@ -300,6 +315,29 @@ export function parseConfig(tomlStr: string): Config {
       typeof historyRaw.allow_future_projection === 'boolean'
         ? historyRaw.allow_future_projection
         : DEFAULT_HISTORY_CONFIG.allow_future_projection,
+    portfolio_granularity:
+      typeof historyRaw.portfolio_granularity === 'string' &&
+      historyRaw.portfolio_granularity.trim().length > 0
+        ? historyRaw.portfolio_granularity.trim()
+        : DEFAULT_HISTORY_CONFIG.portfolio_granularity,
+    change_points_granularity:
+      typeof historyRaw.change_points_granularity === 'string' &&
+      historyRaw.change_points_granularity.trim().length > 0
+        ? historyRaw.change_points_granularity.trim()
+        : DEFAULT_HISTORY_CONFIG.change_points_granularity,
+    include_prices:
+      typeof historyRaw.include_prices === 'boolean'
+        ? historyRaw.include_prices
+        : DEFAULT_HISTORY_CONFIG.include_prices,
+    graph_range:
+      typeof historyRaw.graph_range === 'string' && historyRaw.graph_range.trim().length > 0
+        ? historyRaw.graph_range.trim()
+        : DEFAULT_HISTORY_CONFIG.graph_range,
+    graph_granularity:
+      typeof historyRaw.graph_granularity === 'string' &&
+      historyRaw.graph_granularity.trim().length > 0
+        ? historyRaw.graph_granularity.trim()
+        : DEFAULT_HISTORY_CONFIG.graph_granularity,
   };
   if (
     typeof historyRaw.lookback_days === 'number' &&

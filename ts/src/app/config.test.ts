@@ -18,6 +18,10 @@ function makeTmpDir(): string {
   return dir;
 }
 
+function realPath(filePath: string): string {
+  return fs.realpathSync(filePath);
+}
+
 // ---------------------------------------------------------------------------
 // defaultConfigPath
 // ---------------------------------------------------------------------------
@@ -61,7 +65,7 @@ describe('defaultConfigPath', () => {
     process.chdir(cwd);
     process.env.XDG_DATA_HOME = xdgDataHome;
 
-    expect(defaultConfigPath()).toBe(path.join(cwd, 'keepbook.toml'));
+    expect(defaultConfigPath()).toBe(path.join(realPath(cwd), 'keepbook.toml'));
   });
 
   it('uses XDG data keepbook.toml when local file is absent', () => {
@@ -96,7 +100,7 @@ describe('defaultConfigPath', () => {
     process.env.XDG_DATA_HOME = 'relative-xdg-data';
 
     expect(defaultConfigPath()).toBe(
-      path.join(cwd, 'relative-xdg-data', 'keepbook', 'keepbook.toml'),
+      path.join(realPath(cwd), 'relative-xdg-data', 'keepbook', 'keepbook.toml'),
     );
   });
 });
@@ -146,7 +150,11 @@ describe('loadConfig', () => {
     expect(config.git.merge_master_before_command).toBe(true);
     expect(config.refresh.balance_staleness).toBe(7 * 24 * 60 * 60 * 1000);
     expect(config.refresh.price_staleness).toBe(12 * 60 * 60 * 1000);
-    expect(config.history).toEqual({ allow_future_projection: true, lookback_days: 7 });
+    expect(config.history).toEqual({
+      ...DEFAULT_HISTORY_CONFIG,
+      allow_future_projection: true,
+      lookback_days: 7,
+    });
   });
 
   it('defaults auto_push to true when auto_commit is enabled', async () => {
