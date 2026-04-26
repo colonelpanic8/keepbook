@@ -52,7 +52,7 @@ dioxus-android-build *args:
 dioxus-android-release *args:
     nix develop .#android --command dx bundle --android --release --package keepbook-dioxus --no-default-features --features mobile "$@"
     nix develop .#android --command bash -lc 'cd target/dx/keepbook-dioxus/release/android/app && ./gradlew :app:assembleRelease --no-daemon --console plain'
-    find target/dx/keepbook-dioxus/release/android \( -path '*/build/outputs/apk/*.apk' -o -path '*/build/outputs/bundle/*.aab' \) -print
+    find target/dx/keepbook-dioxus/release/android \( -path '*/build/outputs/apk/release/*.apk' -o -path '*/build/outputs/bundle/release/*.aab' \) -print
 
 # Portfolio history distilled to daily date/balance JSON objects.
 # Extra CLI args can be passed through, e.g.:

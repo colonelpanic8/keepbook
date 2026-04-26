@@ -8,9 +8,14 @@
     flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs = { self, nixpkgs, fenix, flake-utils }:
-    flake-utils.lib.eachDefaultSystem (system:
-      let
+  outputs = {
+    self,
+    nixpkgs,
+    fenix,
+    flake-utils,
+  }:
+    flake-utils.lib.eachDefaultSystem (
+      system: let
         pkgs = import nixpkgs {
           inherit system;
           config = {
@@ -23,17 +28,15 @@
         sourceRoot = ./.;
         cleanSrc = pkgs.lib.cleanSourceWith {
           src = sourceRoot;
-          filter = path: type:
-            let
-              pathStr = toString path;
-              rootStr = toString sourceRoot;
-              rel =
-                if pathStr == rootStr then
-                  ""
-                else
-                  pkgs.lib.removePrefix "${rootStr}/" pathStr;
-              base = builtins.baseNameOf pathStr;
-            in
+          filter = path: type: let
+            pathStr = toString path;
+            rootStr = toString sourceRoot;
+            rel =
+              if pathStr == rootStr
+              then ""
+              else pkgs.lib.removePrefix "${rootStr}/" pathStr;
+            base = builtins.baseNameOf pathStr;
+          in
             !(builtins.elem base [
               ".git"
               ".github"
@@ -69,21 +72,22 @@
           ]
           ++ androidRustTargets;
         addDarwinInstallNameTool = tool:
-          if isDarwin then
+          if isDarwin
+          then
             tool.overrideAttrs (old: {
               nativeBuildInputs =
-                (old.nativeBuildInputs or [ ]) ++ [ pkgs.darwin.cctools ];
+                (old.nativeBuildInputs or []) ++ [pkgs.darwin.cctools];
             })
-          else
-            tool;
+          else tool;
         toolchain = fenixPkgs.combine (map addDarwinInstallNameTool [
-          fenixPkgs.stable.cargo
-          fenixPkgs.stable.clippy
-          fenixPkgs.stable.rust-src
-          fenixPkgs.stable.rustc
-          fenixPkgs.stable.rustfmt
-          fenixPkgs.stable.rust-analyzer
-        ] ++ rustTargets);
+            fenixPkgs.stable.cargo
+            fenixPkgs.stable.clippy
+            fenixPkgs.stable.rust-src
+            fenixPkgs.stable.rustc
+            fenixPkgs.stable.rustfmt
+            fenixPkgs.stable.rust-analyzer
+          ]
+          ++ rustTargets);
         rustPlatform = pkgs.makeRustPlatform {
           cargo = toolchain;
           rustc = toolchain;
@@ -95,16 +99,16 @@
           cmdLineToolsVersion = androidCmdLineToolsVersion;
           toolsVersion = "26.1.1";
           platformToolsVersion = "35.0.2";
-          buildToolsVersions = [ androidBuildToolsVersion ];
+          buildToolsVersions = [androidBuildToolsVersion];
           includeEmulator = true;
-          platformVersions = [ "33" "34" ];
+          platformVersions = ["33" "34"];
           includeSources = false;
           includeSystemImages = true;
-          systemImageTypes = [ "google_apis_playstore" ];
-          abiVersions = [ "x86_64" ];
+          systemImageTypes = ["google_apis_playstore"];
+          abiVersions = ["x86_64"];
           includeNDK = true;
-          ndkVersions = [ androidNdkVersion ];
-          cmakeVersions = [ "3.22.1" ];
+          ndkVersions = [androidNdkVersion];
+          cmakeVersions = ["3.22.1"];
           useGoogleAPIs = true;
           useGoogleTVAddOns = false;
         };
@@ -122,7 +126,11 @@
         };
         dioxusAndroidBuildScript = release:
           pkgs.writeShellApplication {
-            name = "keepbook-dioxus-android-${if release then "release" else "debug"}";
+            name = "keepbook-dioxus-android-${
+              if release
+              then "release"
+              else "debug"
+            }";
             runtimeInputs = [
               pkgs.findutils
               pkgs.jq
@@ -135,35 +143,61 @@
               cd "$repo"
 
               args=(
-                dx ${if release then "bundle" else "build"} --android
+                dx ${
+                if release
+                then "bundle"
+                else "build"
+              } --android
                 --package keepbook-dioxus
                 --no-default-features
                 --features mobile
               )
 
-              if ${if release then "true" else "false"}; then
+              if ${
+                if release
+                then "true"
+                else "false"
+              }; then
                 args+=(--release)
               fi
 
               nix develop "$repo#android" --command "''${args[@]}" "$@"
 
-              profile=${if release then "release" else "debug"}
-              if ${if release then "true" else "false"}; then
+              profile=${
+                if release
+                then "release"
+                else "debug"
+              }
+              if ${
+                if release
+                then "true"
+                else "false"
+              }; then
                 nix develop "$repo#android" --command bash -lc \
                   'cd target/dx/keepbook-dioxus/release/android/app && ./gradlew :app:assembleRelease --no-daemon --console plain'
               fi
 
-              find "$repo/target/dx/keepbook-dioxus/$profile/android" \
-                \( -path '*/build/outputs/apk/*.apk' -o -path '*/build/outputs/bundle/*.aab' \) \
-                -print
+              if ${
+                if release
+                then "true"
+                else "false"
+              }; then
+                find "$repo/target/dx/keepbook-dioxus/release/android" \
+                  \( -path '*/build/outputs/apk/release/*.apk' -o -path '*/build/outputs/bundle/release/*.aab' \) \
+                  -print
+              else
+                find "$repo/target/dx/keepbook-dioxus/$profile/android" \
+                  -path '*/build/outputs/apk/debug/*.apk' \
+                  -print
+              fi
             '';
           };
         mkKeepbookPackage = {
           pname,
           cargoPackage ? "keepbook",
-          buildFeatures ? [ ],
-          extraBuildInputs ? [ ],
-          extraNativeBuildInputs ? [ ],
+          buildFeatures ? [],
+          extraBuildInputs ? [],
+          extraNativeBuildInputs ? [],
         }:
           rustPlatform.buildRustPackage {
             inherit pname buildFeatures;
@@ -172,26 +206,27 @@
             cargoLock = {
               lockFile = ./Cargo.lock;
             };
-            cargoBuildFlags = [ "-p" cargoPackage ];
-            cargoTestFlags = [ "-p" cargoPackage ];
-            checkFlags = [ "--skip" "contracts_match_both_clis" ];
-            nativeBuildInputs = [ pkgs.pkg-config ] ++ extraNativeBuildInputs;
+            cargoBuildFlags = ["-p" cargoPackage];
+            cargoTestFlags = ["-p" cargoPackage];
+            checkFlags = ["--skip" "contracts_match_both_clis"];
+            nativeBuildInputs = [pkgs.pkg-config] ++ extraNativeBuildInputs;
             buildInputs = extraBuildInputs;
           };
-      in
-      {
-        packages = {
-          default = mkKeepbookPackage { pname = "keepbook"; };
-          keepbook = mkKeepbookPackage { pname = "keepbook"; };
-        } // lib.optionalAttrs isLinux {
-          keepbook-tray = mkKeepbookPackage {
-            pname = "keepbook-tray";
-            buildFeatures = [ "tray" ];
-            extraBuildInputs = [ pkgs.dbus ];
+      in {
+        packages =
+          {
+            default = mkKeepbookPackage {pname = "keepbook";};
+            keepbook = mkKeepbookPackage {pname = "keepbook";};
+          }
+          // lib.optionalAttrs isLinux {
+            keepbook-tray = mkKeepbookPackage {
+              pname = "keepbook-tray";
+              buildFeatures = ["tray"];
+              extraBuildInputs = [pkgs.dbus];
+            };
+            keepbook-dioxus-android-debug-runner = dioxusAndroidBuildScript false;
+            keepbook-dioxus-android-release-runner = dioxusAndroidBuildScript true;
           };
-          keepbook-dioxus-android-debug-runner = dioxusAndroidBuildScript false;
-          keepbook-dioxus-android-release-runner = dioxusAndroidBuildScript true;
-        };
 
         apps = lib.optionalAttrs isLinux {
           dioxus-android-debug = {
@@ -214,23 +249,25 @@
 
         devShells = {
           default = pkgs.mkShell {
-            buildInputs = [
-              toolchain
-              pkgs.pkg-config
-              pkgs.binaryen
-              pkgs.dioxus-cli
-              pkgs.openssl
-              pkgs.just
-              pkgs.jq
-              pkgs.nodejs_22
-              pkgs.yarn
-            ] ++ lib.optionals isLinux [
-              pkgs.dbus
-              pkgs.glib
-              pkgs.gtk3
-              pkgs.webkitgtk_4_1
-              pkgs.xdotool
-            ];
+            buildInputs =
+              [
+                toolchain
+                pkgs.pkg-config
+                pkgs.binaryen
+                pkgs.dioxus-cli
+                pkgs.openssl
+                pkgs.just
+                pkgs.jq
+                pkgs.nodejs_22
+                pkgs.yarn
+              ]
+              ++ lib.optionals isLinux [
+                pkgs.dbus
+                pkgs.glib
+                pkgs.gtk3
+                pkgs.webkitgtk_4_1
+                pkgs.xdotool
+              ];
 
             LD_LIBRARY_PATH = lib.optionalString isLinux (lib.makeLibraryPath [
               pkgs.cairo
@@ -248,32 +285,33 @@
             OPENSSL_NO_VENDOR = "1";
           };
 
-          android = pkgs.mkShell (dioxusAndroidEnv // {
-            buildInputs = [
-              toolchain
-              pkgs.dioxus-cli
-              pkgs.jdk17
-              pkgs.pkg-config
-              pkgs.binaryen
-              pkgs.openssl
-              pkgs.just
-              pkgs.jq
-              pkgs.gradle_9
-            ];
+          android = pkgs.mkShell (dioxusAndroidEnv
+            // {
+              buildInputs = [
+                toolchain
+                pkgs.dioxus-cli
+                pkgs.jdk17
+                pkgs.pkg-config
+                pkgs.binaryen
+                pkgs.openssl
+                pkgs.just
+                pkgs.jq
+                pkgs.gradle_9
+              ];
 
-            shellHook = ''
-              export PATH=${androidHome}/emulator:${androidHome}/platform-tools:${androidHome}/cmdline-tools/${androidCmdLineToolsVersion}/bin:$PATH
+              shellHook = ''
+                export PATH=${androidHome}/emulator:${androidHome}/platform-tools:${androidHome}/cmdline-tools/${androidCmdLineToolsVersion}/bin:$PATH
 
-              echo "keepbook Dioxus Android dev shell"
-              echo "  dx: $(dx --version)"
-              echo "  ANDROID_HOME: $ANDROID_HOME"
-              echo ""
-              echo "Commands:"
-              echo "  just dioxus-android-build"
-              echo "  just dioxus-android-release"
-              echo "  nix run .#dioxus-android-release"
-            '';
-          });
+                echo "keepbook Dioxus Android dev shell"
+                echo "  dx: $(dx --version)"
+                echo "  ANDROID_HOME: $ANDROID_HOME"
+                echo ""
+                echo "Commands:"
+                echo "  just dioxus-android-build"
+                echo "  just dioxus-android-release"
+                echo "  nix run .#dioxus-android-release"
+              '';
+            });
         };
       }
     );
