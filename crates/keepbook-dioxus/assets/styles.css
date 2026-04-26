@@ -263,6 +263,13 @@ small,
   margin-bottom: 14px;
 }
 
+.chart-bottom-controls {
+  border-top: 1px solid #eef2f1;
+  margin-bottom: 0;
+  margin-top: 14px;
+  padding-top: 12px;
+}
+
 .preset-row,
 .sampling-row,
 .range-summary {

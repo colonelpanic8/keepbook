@@ -725,6 +725,34 @@ fn NetWorthPanel(currency: String, defaults: HistoryDefaults) -> Element {
                     }
                 }
             }
+        }
+        match history_state {
+            None => rsx! {
+                GraphLoadingPanel {
+                    range: range_summary_text(&start_date, &end_date),
+                    sampling: selected_sampling.label()
+                }
+            },
+            Some(Err(error)) => rsx! {
+                InlineStatus { title: "Net Worth Over Time", message: error }
+            },
+            Some(Ok(_)) => rsx! {
+                NetWorthChart {
+                    data: sampled_data.clone(),
+                    currency: currency.clone(),
+                    y_domain
+                }
+                if !sampled_data.is_empty() {
+                    div { class: "chart-stats",
+                        strong { "{format_full_money(current_value, &currency)}" }
+                        span { class: "{change_class}",
+                            "{format_signed_money(absolute_change, &currency)} ({percent_text})"
+                        }
+                    }
+                }
+            }
+        }
+        div { class: "chart-controls chart-bottom-controls",
             div { class: "control-grid",
                 DateInput {
                     label: "Start",
@@ -768,32 +796,6 @@ fn NetWorthPanel(currency: String, defaults: HistoryDefaults) -> Element {
                 span { "Data range {data_y_range}" }
                 span { "Axis range {axis_y_range}" }
                 span { "Sampling {sampling_label} / {sampled_point_count} points" }
-            }
-        }
-        match history_state {
-            None => rsx! {
-                GraphLoadingPanel {
-                    range: range_summary_text(&start_date, &end_date),
-                    sampling: selected_sampling.label()
-                }
-            },
-            Some(Err(error)) => rsx! {
-                InlineStatus { title: "Net Worth Over Time", message: error }
-            },
-            Some(Ok(_)) => rsx! {
-                NetWorthChart {
-                    data: sampled_data.clone(),
-                    currency: currency.clone(),
-                    y_domain
-                }
-                if !sampled_data.is_empty() {
-                    div { class: "chart-stats",
-                        strong { "{format_full_money(current_value, &currency)}" }
-                        span { class: "{change_class}",
-                            "{format_signed_money(absolute_change, &currency)} ({percent_text})"
-                        }
-                    }
-                }
             }
         }
     }
