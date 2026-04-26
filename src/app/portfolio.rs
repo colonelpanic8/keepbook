@@ -27,6 +27,7 @@ use crate::staleness::{
 };
 use crate::storage::{find_account, find_connection, Storage};
 
+#[cfg(feature = "sync")]
 use super::sync::build_sync_service;
 use super::{
     maybe_auto_commit, AssetInfoOutput, ChangePointsOutput, HistoryOutput, HistoryPoint,
@@ -1481,10 +1482,19 @@ pub async fn portfolio_snapshot(
 
     // Sync stale connections
     if !connections_to_sync.is_empty() {
-        let sync_service = build_sync_service(storage.clone(), config).await;
-        for connection in &connections_to_sync {
-            let _ = sync_service.sync_connection(connection.id().as_ref()).await;
+        #[cfg(feature = "sync")]
+        {
+            let sync_service = build_sync_service(storage.clone(), config).await;
+            for connection in &connections_to_sync {
+                let _ = sync_service.sync_connection(connection.id().as_ref()).await;
+            }
         }
+
+        #[cfg(not(feature = "sync"))]
+        warn!(
+            count = connections_to_sync.len(),
+            "Skipping stale connection sync because keepbook was built without sync support"
+        );
     }
 
     // Setup market data service with or without configured providers.

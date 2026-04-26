@@ -12,12 +12,27 @@ path = "src/lib.rs"
 [[bin]]
 name = "keepbook-server"
 path = "src/main.rs"
+required-features = ["http"]
+
+[features]
+default = ["http"]
+http = [
+  "dep:axum",
+  "dep:clap",
+  "dep:tower-http",
+  "dep:tracing-subscriber",
+  "tokio/macros",
+  "tokio/net",
+  "tokio/rt-multi-thread",
+  "tokio/signal",
+]
 
 [dependencies]
 anyhow = "1"
-axum = "0.8"
+axum = { version = "0.8", optional = true }
 chrono = "0.4"
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive"], optional = true }
+git2 = { version = "0.20", default-features = false, features = ["vendored-libgit2", "vendored-openssl", "ssh"] }
 keepbook = { path = "../..", default-features = false, features = [
   "app",
   "config",
@@ -26,13 +41,11 @@ keepbook = { path = "../..", default-features = false, features = [
   "market_data",
   "portfolio",
   "staleness",
-  "sync",
 ] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tempfile = "3"
-tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "sync"] }
+tokio = { version = "1", features = ["sync"] }
 toml_edit = "0.22"
-tower-http = { version = "0.6", features = ["cors", "trace"] }
+tower-http = { version = "0.6", features = ["cors", "trace"], optional = true }
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"], optional = true }

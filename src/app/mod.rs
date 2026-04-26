@@ -1,21 +1,23 @@
 mod config;
 mod graph;
 mod ignore_rules;
+#[cfg(feature = "sync")]
 mod import;
 mod list;
 mod mutations;
 mod portfolio;
 mod preflight;
 mod spending;
+#[cfg(feature = "sync")]
 mod sync;
 mod types;
 mod value;
 
 use crate::config::ResolvedConfig;
-use crate::sync::{AutoCommitter, GitAutoCommitter};
 
 pub use config::config_output;
 pub use graph::{portfolio_graph, PortfolioGraphOptions, PortfolioGraphOutput};
+#[cfg(feature = "sync")]
 pub use import::import_schwab_transactions;
 pub use list::{
     list_accounts, list_all, list_balances, list_connections, list_price_sources, list_transactions,
@@ -33,6 +35,7 @@ pub use portfolio::{
 };
 pub use preflight::{run_preflight, PreflightOptions};
 pub use spending::{spending_report, SpendingReportOptions};
+#[cfg(feature = "sync")]
 pub use sync::{
     chase_login, schwab_login, sync_all, sync_all_if_stale, sync_backfill_metadata,
     sync_connection, sync_connection_if_stale, sync_prices, sync_recompact, sync_symlinks,
@@ -47,10 +50,29 @@ pub use types::{
 };
 
 fn maybe_auto_commit(config: &ResolvedConfig, action: &str) {
-    let committer = GitAutoCommitter::new(
-        config.data_dir.clone(),
-        config.git.auto_commit,
-        config.git.auto_push,
-    );
-    committer.maybe_commit(action);
+    if !config.git.auto_commit {
+        return;
+    }
+
+    #[cfg(feature = "git")]
+    match crate::git::try_auto_commit(&config.data_dir, action, config.git.auto_push) {
+        Ok(crate::git::AutoCommitOutcome::Committed) => {
+            tracing::info!("Git auto-commit completed");
+        }
+        Ok(crate::git::AutoCommitOutcome::SkippedNoChanges) => {
+            tracing::debug!("Git auto-commit skipped: no changes");
+        }
+        Ok(crate::git::AutoCommitOutcome::SkippedNotRepo { reason }) => {
+            tracing::warn!("Git auto-commit skipped: {reason}");
+        }
+        Err(error) => {
+            tracing::warn!("Git auto-commit failed: {error:#}");
+        }
+    }
+
+    #[cfg(not(feature = "git"))]
+    {
+        let _ = action;
+        tracing::warn!("Git auto-commit skipped: keepbook was built without git support");
+    }
 }
