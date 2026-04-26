@@ -25,8 +25,10 @@ pub use mutations::{
     remove_connection, set_account_config, set_balance, set_transaction_annotation,
 };
 pub use portfolio::{
+    default_portfolio_history_granularity, default_portfolio_include_prices,
     fetch_historical_prices, fill_prices_at_date, portfolio_change_points, portfolio_history,
     portfolio_recent_history, portfolio_snapshot, PriceHistoryRequest,
+    DEFAULT_PORTFOLIO_HISTORY_GRANULARITY, DEFAULT_PORTFOLIO_INCLUDE_PRICES,
 };
 pub use preflight::{run_preflight, PreflightOptions};
 pub use spending::{spending_report, SpendingReportOptions};

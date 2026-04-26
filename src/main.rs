@@ -704,11 +704,11 @@ enum PortfolioCommand {
         end: Option<String>,
 
         /// Time granularity: none/full, hourly, daily, weekly, monthly, yearly (default: none)
-        #[arg(long, default_value = "none")]
+        #[arg(long, default_value = app::DEFAULT_PORTFOLIO_HISTORY_GRANULARITY)]
         granularity: String,
 
         /// Include price changes as change points (default: enabled)
-        #[arg(long, default_value_t = true)]
+        #[arg(long, default_value_t = app::DEFAULT_PORTFOLIO_INCLUDE_PRICES)]
         include_prices: bool,
 
         /// Disable price changes as change points (faster, less detailed)
@@ -727,11 +727,11 @@ enum PortfolioCommand {
         end: Option<String>,
 
         /// Time granularity: none/full, hourly, daily, weekly, monthly, yearly (default: none)
-        #[arg(long, default_value = "none")]
+        #[arg(long, default_value = app::DEFAULT_PORTFOLIO_HISTORY_GRANULARITY)]
         granularity: String,
 
         /// Include price changes as change points (default: enabled)
-        #[arg(long, default_value_t = true)]
+        #[arg(long, default_value_t = app::DEFAULT_PORTFOLIO_INCLUDE_PRICES)]
         include_prices: bool,
 
         /// Disable price changes as change points (faster, less detailed)

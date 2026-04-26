@@ -45,6 +45,17 @@ pub struct PriceHistoryRequest<'a> {
     pub include_fx: bool,
 }
 
+pub const DEFAULT_PORTFOLIO_HISTORY_GRANULARITY: &str = "none";
+pub const DEFAULT_PORTFOLIO_INCLUDE_PRICES: bool = true;
+
+pub fn default_portfolio_history_granularity() -> String {
+    DEFAULT_PORTFOLIO_HISTORY_GRANULARITY.to_string()
+}
+
+pub fn default_portfolio_include_prices() -> bool {
+    DEFAULT_PORTFOLIO_INCLUDE_PRICES
+}
+
 #[derive(Debug, Clone, Copy)]
 enum PriceHistoryInterval {
     Daily,

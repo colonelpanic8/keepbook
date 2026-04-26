@@ -8,7 +8,8 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use chrono::{Duration, Utc};
+use chrono::Utc;
+use keepbook::app::{default_portfolio_history_granularity, default_portfolio_include_prices};
 use keepbook::config::{default_config_path, ResolvedConfig};
 use keepbook::storage::{JsonFileStorage, Storage};
 use serde::{Deserialize, Serialize};
@@ -75,9 +76,9 @@ pub struct HistoryQuery {
     pub currency: Option<String>,
     pub start: Option<String>,
     pub end: Option<String>,
-    #[serde(default = "default_history_granularity")]
+    #[serde(default = "default_portfolio_history_granularity")]
     pub granularity: String,
-    #[serde(default)]
+    #[serde(default = "default_portfolio_include_prices")]
     pub include_prices: bool,
 }
 
@@ -85,9 +86,9 @@ pub struct HistoryQuery {
 pub struct OverviewQuery {
     pub history_start: Option<String>,
     pub history_end: Option<String>,
-    #[serde(default = "default_history_granularity")]
+    #[serde(default = "default_portfolio_history_granularity")]
     pub history_granularity: String,
-    #[serde(default)]
+    #[serde(default = "default_portfolio_include_prices")]
     pub include_prices: bool,
 }
 
@@ -111,14 +112,6 @@ impl IntoResponse for ApiError {
         });
         (StatusCode::INTERNAL_SERVER_ERROR, body).into_response()
     }
-}
-
-fn default_history_granularity() -> String {
-    "monthly".to_string()
-}
-
-fn default_history_start() -> String {
-    (Utc::now().date_naive() - Duration::days(365)).to_string()
 }
 
 fn default_history_end() -> String {
@@ -175,9 +168,7 @@ async fn overview(
     State(state): State<ApiState>,
     Query(query): Query<OverviewQuery>,
 ) -> Result<Json<OverviewOutput>, ApiError> {
-    let history_start = query
-        .history_start
-        .or_else(|| Some(default_history_start()));
+    let history_start = query.history_start;
     let history_end = query.history_end.or_else(|| Some(default_history_end()));
 
     let connections = keepbook::app::list_connections(state.storage.as_ref()).await?;
