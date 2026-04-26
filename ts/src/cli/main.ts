@@ -820,9 +820,12 @@ portfolio
   .command('history')
   .description('Portfolio history')
   .option('--currency <code>', 'reporting currency')
-  .option('--start <date>', 'start date (YYYY-MM-DD)')
-  .option('--end <date>', 'end date (YYYY-MM-DD)')
-  .option('--granularity <granularity>', 'granularity: none, daily, weekly, monthly (default: daily)')
+  .option('--start <date>', 'start date (YYYY-MM-DD, YYYY-MM, YYYY, today, or relative e.g. -1y)')
+  .option('--end <date>', 'end date (YYYY-MM-DD, YYYY-MM, YYYY, today, or relative e.g. -1y)')
+  .option(
+    '--granularity <granularity>',
+    'granularity: none, daily, weekly, monthly (default: daily)',
+  )
   .option('--include-prices', 'include price change points', true)
   .option('--no-include-prices', 'exclude price change points')
   .action(
@@ -850,8 +853,8 @@ portfolio
 portfolio
   .command('change-points')
   .description('Portfolio change points')
-  .option('--start <date>', 'start date (YYYY-MM-DD)')
-  .option('--end <date>', 'end date (YYYY-MM-DD)')
+  .option('--start <date>', 'start date (YYYY-MM-DD, YYYY-MM, YYYY, today, or relative e.g. -1y)')
+  .option('--end <date>', 'end date (YYYY-MM-DD, YYYY-MM, YYYY, today, or relative e.g. -1y)')
   .option('--granularity <granularity>', 'granularity: none, daily, weekly, monthly')
   .option('--include-prices', 'include price change points', true)
   .option('--no-include-prices', 'exclude price change points')
