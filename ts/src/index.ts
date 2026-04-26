@@ -178,6 +178,20 @@ export {
   type PortfolioGraphOutput,
   type ResolvedGraphOptions,
 } from './app/graph.js';
+export {
+  TRANSACTION_RULES_FILE,
+  TransactionAnnotationRuleMatcher,
+  appendTransactionAnnotationRule,
+  applyTransactionAnnotationRules,
+  exactCaseInsensitivePattern,
+  loadTransactionAnnotationRules,
+  transactionRulesPath,
+  type AppliedTransactionRuleChange,
+  type ApplyTransactionAnnotationRulesOptions,
+  type TransactionAnnotationRule,
+  type TransactionAnnotationRuleAction,
+  type TransactionAnnotationRuleInput,
+} from './app/transaction-rules.js';
 
 // ---------------------------------------------------------------------------
 // Sync

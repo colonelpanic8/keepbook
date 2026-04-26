@@ -27,6 +27,7 @@ import {
   portfolioChangePoints,
 } from '../app/portfolio.js';
 import { spendingReport } from '../app/spending.js';
+import { applyTransactionAnnotationRules } from '../app/transaction-rules.js';
 import {
   syncConnectionWithOptions,
   syncConnectionIfStaleWithOptions,
@@ -499,6 +500,48 @@ importSchwab
         await tryAutoCommit(
           cfg.config.data_dir,
           `import schwab transactions (account ${result.account_id})`,
+          cfg.config.git.auto_push,
+        );
+      }
+      return result;
+    });
+  });
+
+// ---------------------------------------------------------------------------
+// apply
+// ---------------------------------------------------------------------------
+
+const apply = program.command('apply').description('Apply stored rules to existing data');
+
+apply
+  .command('transaction-rules')
+  .description('Apply transaction annotation rules to existing transactions')
+  .option(
+    '--rules-file <path>',
+    'rules JSONL file (default: data_dir/transaction_category_rules.jsonl)',
+  )
+  .option('--dry-run', 'show changes without writing annotation patches', false)
+  .option(
+    '--overwrite',
+    'replace existing annotation fields instead of only filling missing fields',
+    false,
+  )
+  .action(async (opts: { rulesFile?: string; dryRun?: boolean; overwrite?: boolean }) => {
+    await runWithConfig(async (cfg) => {
+      const storage = new JsonFileStorage(cfg.config.data_dir);
+      const result = await applyTransactionAnnotationRules(storage, cfg.config, {
+        rules_path: opts.rulesFile,
+        dry_run: opts.dryRun,
+        overwrite: opts.overwrite,
+      });
+      if (
+        (result as { success?: boolean; annotations_written?: number }).success &&
+        (result as { annotations_written?: number }).annotations_written !== 0 &&
+        cfg.config.git.auto_commit
+      ) {
+        await tryAutoCommit(
+          cfg.config.data_dir,
+          `apply transaction annotation rules`,
           cfg.config.git.auto_push,
         );
       }

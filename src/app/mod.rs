@@ -8,6 +8,7 @@ mod portfolio;
 mod preflight;
 mod spending;
 mod sync;
+mod transaction_rules;
 mod types;
 mod value;
 
@@ -34,6 +35,14 @@ pub use sync::{
     chase_login, schwab_login, sync_all, sync_all_if_stale, sync_backfill_metadata,
     sync_connection, sync_connection_if_stale, sync_prices, sync_recompact, sync_symlinks,
     SyncPricesScopeArg,
+};
+pub use transaction_rules::{
+    append_transaction_annotation_rule, apply_transaction_annotation_rules,
+    apply_transaction_annotation_rules_with_clock, exact_ci_regex_pattern,
+    load_transaction_annotation_rules, transaction_rules_path,
+    ApplyTransactionAnnotationRulesOptions, ApplyTransactionAnnotationRulesOutput,
+    CompiledTransactionAnnotationRule, TransactionAnnotationRule, TransactionAnnotationRuleInput,
+    TransactionAnnotationRuleLoad, TransactionAnnotationRuleMatcher, TRANSACTION_RULES_FILE,
 };
 pub use types::{
     AccountOutput, AllOutput, AssetInfoOutput, BalanceOutput, ChangePointsOutput, ConnectionOutput,
