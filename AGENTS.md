@@ -37,6 +37,27 @@ See `ts/src/app/types.ts` for the complete mapping.
 4. Run both test suites: `cargo test` (Rust) and `cd ts && yarn test` (TS)
 5. Diff JSON output of both CLIs against the same data directory to verify compatibility
 
+## UI Value Sourcing
+
+UI code must not reimplement keepbook business calculations from raw storage data.
+When a UI needs derived financial values such as net worth, portfolio totals,
+account counts, balance aggregation, spending totals, history points, or change
+summaries, source those values from the primary headless keepbook APIs/services
+that already encode the canonical business logic.
+
+Examples:
+- Use portfolio snapshot/history outputs for net worth and chart values instead
+  of summing raw balances in a UI component.
+- Use list/spending/portfolio app-layer outputs when ignore rules,
+  `exclude_from_portfolio`, price lookup, formatting, or account validity rules
+  can affect the answer.
+- If the current API does not expose the needed derived value, extend the
+  headless Rust/TypeScript app-layer output first, then consume that output in
+  the UI.
+
+This applies to all UI surfaces, including Dioxus, Expo/React Native, web
+components, tray/menu views, and any future frontend.
+
 ## TypeScript Package Manager
 
 - Prefer `yarn` for TypeScript workflows in `ts/` (install, build, test, and CLI execution).
