@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::io::{self, Write};
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 use crate::config::ResolvedConfig;
 use crate::market_data::{JsonlMarketDataStore, MarketDataServiceBuilder};
@@ -135,6 +135,7 @@ fn prompt_select_index(prompt: &str, options: &[String]) -> Result<Option<usize>
 
 #[cfg(feature = "tui")]
 fn prompt_select_index_impl(prompt: &str, options: &[String]) -> Result<Option<usize>> {
+    use anyhow::Context;
     use dialoguer::console::Term;
     use dialoguer::{theme::ColorfulTheme, Select};
 

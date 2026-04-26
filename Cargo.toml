@@ -7,8 +7,11 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/colonelpanic8/keepbook"
 
 [workspace]
+resolver = "2"
 members = [
+  "crates/keepbook-dioxus",
   "crates/keepbook-ffi",
+  "crates/keepbook-server",
 ]
 
 [lib]
