@@ -306,6 +306,13 @@ small,
   grid-template-columns: repeat(4, minmax(120px, 1fr));
 }
 
+.settings-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
+  margin-bottom: 12px;
+}
+
 .control-field {
   display: flex;
   flex-direction: column;
@@ -328,6 +335,39 @@ small,
   min-height: 38px;
   min-width: 0;
   padding: 7px 9px;
+}
+
+.secret-field {
+  margin-bottom: 12px;
+}
+
+.secret-input {
+  min-height: 180px;
+  resize: vertical;
+}
+
+.settings-actions,
+.settings-meta {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.settings-meta {
+  color: #62727f;
+  font-size: 0.82rem;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.settings-status {
+  background: #f7faf9;
+  border: 1px solid #d7dfdd;
+  border-radius: 6px;
+  color: #31424e;
+  margin: 12px 0 0;
+  padding: 10px;
 }
 
 .range-summary {
@@ -722,6 +762,10 @@ small,
 
   .control-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .settings-grid {
+    grid-template-columns: 1fr;
   }
 }
 

@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[cfg(target_arch = "wasm32")]
 use gloo_net::http::Request;
@@ -87,6 +87,49 @@ struct AccountSummary {
     value_in_base: Option<String>,
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+struct GitRemoteSettings {
+    host: String,
+    repo: String,
+    branch: String,
+    ssh_user: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+struct GitSettingsOutput {
+    config_path: String,
+    data_dir: String,
+    git: GitRemoteSettings,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq)]
+struct GitSettingsInput {
+    data_dir: String,
+    host: String,
+    repo: String,
+    branch: String,
+    ssh_user: String,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq)]
+struct GitSyncInput {
+    data_dir: String,
+    host: String,
+    repo: String,
+    branch: String,
+    ssh_user: String,
+    private_key_pem: String,
+    save_settings: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+struct GitSyncOutput {
+    ok: bool,
+    data_dir: String,
+    remote_url: String,
+    branch: String,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 struct NetWorthDataPoint {
     date: String,
@@ -166,16 +209,18 @@ enum ActiveView {
     Connections,
     Balances,
     History,
+    Settings,
 }
 
 impl ActiveView {
-    const ALL: [Self; 6] = [
+    const ALL: [Self; 7] = [
         Self::Summary,
         Self::Graphs,
         Self::Accounts,
         Self::Connections,
         Self::Balances,
         Self::History,
+        Self::Settings,
     ];
 
     fn label(self) -> &'static str {
@@ -186,6 +231,7 @@ impl ActiveView {
             Self::Connections => "Connections",
             Self::Balances => "Balances",
             Self::History => "History",
+            Self::Settings => "Settings",
         }
     }
 }
@@ -266,6 +312,18 @@ async fn fetch_history(query: String) -> Result<History, String> {
     fetch_history_impl(query).await
 }
 
+async fn fetch_git_settings() -> Result<GitSettingsOutput, String> {
+    fetch_git_settings_impl().await
+}
+
+async fn save_git_settings(input: GitSettingsInput) -> Result<GitSettingsOutput, String> {
+    save_git_settings_impl(input).await
+}
+
+async fn sync_git_repo(input: GitSyncInput) -> Result<GitSyncOutput, String> {
+    sync_git_repo_impl(input).await
+}
+
 #[cfg(target_arch = "wasm32")]
 async fn fetch_history_impl(query: String) -> Result<History, String> {
     let response = Request::get(&format!("{API_BASE}/api/portfolio/history?{query}"))
@@ -287,6 +345,69 @@ async fn fetch_history_impl(query: String) -> Result<History, String> {
         .map_err(|error| format!("Could not decode net worth history: {error}"))
 }
 
+#[cfg(target_arch = "wasm32")]
+async fn fetch_git_settings_impl() -> Result<GitSettingsOutput, String> {
+    let response = Request::get(&format!("{API_BASE}/api/git/settings"))
+        .send()
+        .await
+        .map_err(|error| format!("Could not reach keepbook-server at {API_BASE}: {error}"))?;
+
+    if !response.ok() {
+        return Err(format!(
+            "keepbook-server returned HTTP {} {}",
+            response.status(),
+            response.status_text()
+        ));
+    }
+
+    response
+        .json::<GitSettingsOutput>()
+        .await
+        .map_err(|error| format!("Could not decode Git settings: {error}"))
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn save_git_settings_impl(input: GitSettingsInput) -> Result<GitSettingsOutput, String> {
+    let response = Request::put(&format!("{API_BASE}/api/git/settings"))
+        .json(&input)
+        .map_err(|error| format!("Could not encode Git settings: {error}"))?
+        .send()
+        .await
+        .map_err(|error| format!("Could not reach keepbook-server at {API_BASE}: {error}"))?;
+
+    if !response.ok() {
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+        return Err(format!("keepbook-server returned HTTP {status}: {text}"));
+    }
+
+    response
+        .json::<GitSettingsOutput>()
+        .await
+        .map_err(|error| format!("Could not decode Git settings: {error}"))
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn sync_git_repo_impl(input: GitSyncInput) -> Result<GitSyncOutput, String> {
+    let response = Request::post(&format!("{API_BASE}/api/git/sync"))
+        .json(&input)
+        .map_err(|error| format!("Could not encode Git sync request: {error}"))?
+        .send()
+        .await
+        .map_err(|error| format!("Could not reach keepbook-server at {API_BASE}: {error}"))?;
+
+    if !response.ok() {
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+        return Err(format!("keepbook-server returned HTTP {status}: {text}"));
+    }
+
+    response
+        .json::<GitSyncOutput>()
+        .await
+        .map_err(|error| format!("Could not decode Git sync result: {error}"))
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 async fn fetch_history_impl(query: String) -> Result<History, String> {
     reqwest::get(format!("{API_BASE}/api/portfolio/history?{query}"))
@@ -297,6 +418,48 @@ async fn fetch_history_impl(query: String) -> Result<History, String> {
         .json::<History>()
         .await
         .map_err(|error| format!("Could not decode net worth history: {error}"))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn fetch_git_settings_impl() -> Result<GitSettingsOutput, String> {
+    reqwest::get(format!("{API_BASE}/api/git/settings"))
+        .await
+        .map_err(|error| format!("Could not reach keepbook-server at {API_BASE}: {error}"))?
+        .error_for_status()
+        .map_err(|error| format!("keepbook-server returned an error: {error}"))?
+        .json::<GitSettingsOutput>()
+        .await
+        .map_err(|error| format!("Could not decode Git settings: {error}"))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn save_git_settings_impl(input: GitSettingsInput) -> Result<GitSettingsOutput, String> {
+    reqwest::Client::new()
+        .put(format!("{API_BASE}/api/git/settings"))
+        .json(&input)
+        .send()
+        .await
+        .map_err(|error| format!("Could not reach keepbook-server at {API_BASE}: {error}"))?
+        .error_for_status()
+        .map_err(|error| format!("keepbook-server returned an error: {error}"))?
+        .json::<GitSettingsOutput>()
+        .await
+        .map_err(|error| format!("Could not decode Git settings: {error}"))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn sync_git_repo_impl(input: GitSyncInput) -> Result<GitSyncOutput, String> {
+    reqwest::Client::new()
+        .post(format!("{API_BASE}/api/git/sync"))
+        .json(&input)
+        .send()
+        .await
+        .map_err(|error| format!("Could not reach keepbook-server at {API_BASE}: {error}"))?
+        .error_for_status()
+        .map_err(|error| format!("keepbook-server returned an error: {error}"))?
+        .json::<GitSyncOutput>()
+        .await
+        .map_err(|error| format!("Could not decode Git sync result: {error}"))
 }
 #[component]
 fn StatusPanel(state: LoadState) -> Element {
@@ -314,7 +477,7 @@ fn StatusPanel(state: LoadState) -> Element {
 }
 
 #[component]
-fn Dashboard(overview: Overview, onrefresh: EventHandler<MouseEvent>) -> Element {
+fn Dashboard(overview: Overview, onrefresh: EventHandler<()>) -> Element {
     let mut active_view = use_signal(|| ActiveView::Summary);
     let mut nav_open = use_signal(|| false);
     let active = active_view();
@@ -367,7 +530,7 @@ fn Dashboard(overview: Overview, onrefresh: EventHandler<MouseEvent>) -> Element
                     button {
                         class: "icon-button",
                         title: "Refresh",
-                        onclick: move |event| onrefresh.call(event),
+                        onclick: move |_| onrefresh.call(()),
                         "Refresh"
                     }
                 }
@@ -405,6 +568,11 @@ fn Dashboard(overview: Overview, onrefresh: EventHandler<MouseEvent>) -> Element
                     ActiveView::History => rsx! {
                         HistoryView {
                             currency: overview.reporting_currency.clone()
+                        }
+                    },
+                    ActiveView::Settings => rsx! {
+                        SettingsView {
+                            onrefresh: move |_| onrefresh.call(())
                         }
                     },
                 }
@@ -465,6 +633,161 @@ fn GraphsView(currency: String) -> Element {
     rsx! {
         section { class: "panel graph-panel",
             NetWorthPanel { currency }
+        }
+    }
+}
+
+#[component]
+fn SettingsView(onrefresh: EventHandler<()>) -> Element {
+    let settings = use_resource(fetch_git_settings);
+    let mut loaded_key = use_signal(String::new);
+    let mut data_dir = use_signal(String::new);
+    let mut host = use_signal(|| "github.com".to_string());
+    let mut repo = use_signal(|| "colonelpanic8/keepbook-data".to_string());
+    let mut branch = use_signal(|| "master".to_string());
+    let mut ssh_user = use_signal(|| "git".to_string());
+    let mut private_key = use_signal(String::new);
+    let mut status = use_signal(String::new);
+    let mut busy = use_signal(|| false);
+
+    if let Some(Ok(current)) = settings.cloned() {
+        let key = format!(
+            "{}\n{}\n{}\n{}\n{}",
+            current.data_dir,
+            current.git.host,
+            current.git.repo,
+            current.git.branch,
+            current.git.ssh_user
+        );
+        if loaded_key() != key {
+            data_dir.set(current.data_dir);
+            host.set(current.git.host);
+            repo.set(current.git.repo);
+            branch.set(current.git.branch);
+            ssh_user.set(current.git.ssh_user);
+            loaded_key.set(key);
+        }
+    }
+
+    let current_settings = settings.cloned();
+    let is_busy = busy();
+    let status_text = status();
+
+    rsx! {
+        section { class: "panel settings-panel",
+            div { class: "panel-header",
+                h2 { "Git Sync" }
+                span { "Server-backed" }
+            }
+            match current_settings {
+                None => rsx! { BackendActivity { message: "Loading Git settings" } },
+                Some(Err(error)) => rsx! { p { class: "validation", "{error}" } },
+                Some(Ok(current)) => rsx! {
+                    div { class: "settings-meta",
+                        span { "Config {current.config_path}" }
+                    }
+                    div { class: "settings-grid",
+                        TextInput {
+                            label: "Data directory",
+                            value: data_dir(),
+                            placeholder: "/path/to/keepbook-data",
+                            oninput: move |value| data_dir.set(value)
+                        }
+                        TextInput {
+                            label: "Git host",
+                            value: host(),
+                            placeholder: "github.com",
+                            oninput: move |value| host.set(value)
+                        }
+                        TextInput {
+                            label: "Repository",
+                            value: repo(),
+                            placeholder: "owner/keepbook-data",
+                            oninput: move |value| repo.set(value)
+                        }
+                        TextInput {
+                            label: "Branch",
+                            value: branch(),
+                            placeholder: "master",
+                            oninput: move |value| branch.set(value)
+                        }
+                        TextInput {
+                            label: "SSH user",
+                            value: ssh_user(),
+                            placeholder: "git",
+                            oninput: move |value| ssh_user.set(value)
+                        }
+                    }
+                    label { class: "control-field secret-field",
+                        span { "SSH private key" }
+                        textarea {
+                            class: "control-input secret-input",
+                            value: "{private_key()}",
+                            placeholder: "-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----",
+                            oninput: move |event| private_key.set(event.value())
+                        }
+                    }
+                    div { class: "settings-actions",
+                        button {
+                            class: "control-button",
+                            disabled: is_busy,
+                            onclick: move |_| {
+                                let input = GitSettingsInput {
+                                    data_dir: data_dir(),
+                                    host: host(),
+                                    repo: repo(),
+                                    branch: branch(),
+                                    ssh_user: ssh_user(),
+                                };
+                                busy.set(true);
+                                status.set("Saving settings...".to_string());
+                                spawn(async move {
+                                    match save_git_settings(input).await {
+                                        Ok(saved) => {
+                                            status.set(format!("Saved. Data directory is {}", saved.data_dir));
+                                            onrefresh.call(());
+                                        }
+                                        Err(error) => status.set(format!("Save failed: {error}")),
+                                    }
+                                    busy.set(false);
+                                });
+                            },
+                            "Save"
+                        }
+                        button {
+                            class: "control-button selected",
+                            disabled: is_busy,
+                            onclick: move |_| {
+                                let input = GitSyncInput {
+                                    data_dir: data_dir(),
+                                    host: host(),
+                                    repo: repo(),
+                                    branch: branch(),
+                                    ssh_user: ssh_user(),
+                                    private_key_pem: private_key(),
+                                    save_settings: true,
+                                };
+                                busy.set(true);
+                                status.set("Syncing repository...".to_string());
+                                spawn(async move {
+                                    match sync_git_repo(input).await {
+                                        Ok(result) => {
+                                            status.set(format!("Synced {} from {} {}", result.data_dir, result.remote_url, result.branch));
+                                            onrefresh.call(());
+                                        }
+                                        Err(error) => status.set(format!("Sync failed: {error}")),
+                                    }
+                                    busy.set(false);
+                                });
+                            },
+                            "Save and Sync"
+                        }
+                    }
+                    if !status_text.is_empty() {
+                        p { class: "settings-status", "{status_text}" }
+                    }
+                },
+            }
         }
     }
 }
@@ -1138,6 +1461,27 @@ fn ChartHoverDetail(
                 x: "{text_x}",
                 y: "{value_y}",
                 "{value_text}"
+            }
+        }
+    }
+}
+
+#[component]
+fn TextInput(
+    label: &'static str,
+    value: String,
+    placeholder: &'static str,
+    oninput: EventHandler<String>,
+) -> Element {
+    rsx! {
+        label { class: "control-field",
+            span { "{label}" }
+            input {
+                class: "control-input",
+                r#type: "text",
+                value: "{value}",
+                placeholder: "{placeholder}",
+                oninput: move |event| oninput.call(event.value())
             }
         }
     }
