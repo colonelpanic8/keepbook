@@ -871,6 +871,7 @@ fn SettingsView(
     let mut branch = use_signal(|| "master".to_string());
     let mut ssh_user = use_signal(|| "git".to_string());
     let mut private_key = use_signal(String::new);
+    let mut private_key_name = use_signal(String::new);
     let mut status = use_signal(String::new);
     let mut busy = use_signal(|| false);
 
@@ -949,13 +950,56 @@ fn SettingsView(
                             oninput: move |value| ssh_user.set(value)
                         }
                     }
-                    label { class: "control-field secret-field",
+                    div { class: "control-field secret-field",
                         span { "SSH private key" }
-                        textarea {
-                            class: "control-input secret-input",
-                            value: "{private_key()}",
-                            placeholder: "-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----",
-                            oninput: move |event| private_key.set(event.value())
+                        div { class: "key-file-picker",
+                            input {
+                                class: "control-input key-file-input",
+                                r#type: "file",
+                                accept: ".pem,.key,.txt,application/x-pem-file,text/plain",
+                                onchange: move |event| {
+                                    let Some(file) = event.files().into_iter().next() else {
+                                        status.set("No SSH key file selected.".to_string());
+                                        return;
+                                    };
+                                    let name = file.name();
+                                    status.set(format!("Reading SSH key file {name}..."));
+                                    spawn(async move {
+                                        match file.read_string().await {
+                                            Ok(contents) if contents.trim().is_empty() => {
+                                                status.set("Selected SSH key file is empty.".to_string());
+                                            }
+                                            Ok(contents) => {
+                                                private_key.set(contents);
+                                                private_key_name.set(name.clone());
+                                                status.set(format!("Selected SSH key file: {name}."));
+                                            }
+                                            Err(error) => status.set(format!("Key file read failed: {error}")),
+                                        }
+                                    });
+                                }
+                            }
+                            small { class: "key-file-status",
+                                if private_key().trim().is_empty() {
+                                    "No private key selected"
+                                } else if private_key_name().is_empty() {
+                                    "Private key loaded"
+                                } else {
+                                    "{private_key_name()} loaded"
+                                }
+                            }
+                            if !private_key().trim().is_empty() {
+                                button {
+                                    class: "control-button",
+                                    disabled: is_busy,
+                                    onclick: move |_| {
+                                        private_key.set(String::new());
+                                        private_key_name.set(String::new());
+                                        status.set("SSH key cleared.".to_string());
+                                    },
+                                    "Clear key"
+                                }
+                            }
                         }
                     }
                     div { class: "settings-actions",

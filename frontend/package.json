@@ -19,6 +19,8 @@
     "decimal.js": "^10.6.0",
     "expo": "~54.0.33",
     "expo-constants": "~18.0.13",
+    "expo-document-picker": "~14.0.8",
+    "expo-file-system": "~19.0.21",
     "expo-font": "~14.0.11",
     "expo-linking": "~8.0.11",
     "expo-router": "~6.0.23",

@@ -357,9 +357,21 @@ small,
   margin-bottom: 12px;
 }
 
-.secret-input {
-  min-height: 180px;
-  resize: vertical;
+.key-file-picker {
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.key-file-input {
+  align-self: stretch;
+}
+
+.key-file-status {
+  color: #62727f;
+  font-size: 0.82rem;
+  font-weight: 600;
 }
 
 .settings-actions,

@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Button, Platform, ScrollView, StyleSheet, TextInput } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as DocumentPicker from 'expo-document-picker';
+import { File as ExpoFile } from 'expo-file-system';
 import * as SecureStore from 'expo-secure-store';
 
 import { Text, View } from '@/components/Themed';
@@ -60,6 +62,7 @@ export default function SettingsScreen() {
   const [gitBranch, setGitBranch] = useState('master');
   const [sshUser, setSshUser] = useState('git');
   const [sshPrivateKey, setSshPrivateKey] = useState('');
+  const [sshPrivateKeyFileName, setSshPrivateKeyFileName] = useState<string | null>(null);
   const [githubToken, setGithubToken] = useState('');
   const [status, setStatus] = useState<string>('');
   const repoDir = KeepbookNative.gitRepoDir();
@@ -88,9 +91,13 @@ export default function SettingsScreen() {
           ]);
           if (key) {
             setSshPrivateKey(key);
+            setSshPrivateKeyFileName('Saved key');
           } else if (Platform.OS === 'web') {
             const fallback = await AsyncStorage.getItem('keepbook.git.ssh_private_key');
-            if (fallback) setSshPrivateKey(fallback);
+            if (fallback) {
+              setSshPrivateKey(fallback);
+              setSshPrivateKeyFileName('Saved key');
+            }
           }
           if (token) {
             setGithubToken(token);
@@ -104,7 +111,10 @@ export default function SettingsScreen() {
               AsyncStorage.getItem('keepbook.git.ssh_private_key'),
               AsyncStorage.getItem('keepbook.git.github_token'),
             ]);
-            if (keyFallback) setSshPrivateKey(keyFallback);
+            if (keyFallback) {
+              setSshPrivateKey(keyFallback);
+              setSshPrivateKeyFileName('Saved key');
+            }
             if (tokenFallback) setGithubToken(tokenFallback);
           }
         }
@@ -159,8 +169,39 @@ export default function SettingsScreen() {
     }
   };
 
+  const selectKeyFile = async () => {
+    setStatus('');
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        copyToCacheDirectory: true,
+        multiple: false,
+        type: '*/*',
+      });
+      if (result.canceled) return;
+
+      const asset = result.assets[0];
+      if (!asset) {
+        setStatus('No SSH key file selected.');
+        return;
+      }
+
+      const contents = asset.file ? await asset.file.text() : await new ExpoFile(asset.uri).text();
+      if (!contents.trim()) {
+        setStatus('Selected SSH key file is empty.');
+        return;
+      }
+
+      setSshPrivateKey(contents);
+      setSshPrivateKeyFileName(asset.name || 'Selected key file');
+      setStatus(`Selected SSH key file: ${asset.name || 'key file'}.`);
+    } catch (e) {
+      setStatus(`Key file selection failed: ${String(e)}`);
+    }
+  };
+
   const clearKey = async () => {
     setSshPrivateKey('');
+    setSshPrivateKeyFileName(null);
     setStatus('');
     try {
       await SecureStore.deleteItemAsync('keepbook.git.ssh_private_key');
@@ -260,18 +301,17 @@ export default function SettingsScreen() {
       />
 
       <Text style={styles.label}>SSH private key (PEM)</Text>
-      <TextInput
-        style={[styles.input, styles.multiline]}
-        autoCapitalize="none"
-        autoCorrect={false}
-        value={sshPrivateKey}
-        onChangeText={setSshPrivateKey}
-        placeholder={'-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----'}
-        multiline
-      />
+      <View style={styles.keyPicker}>
+        <Text style={styles.keyStatus}>
+          {sshPrivateKey.trim()
+            ? `${sshPrivateKeyFileName ?? 'Private key'} loaded (${sshPrivateKey.length} characters)`
+            : 'No private key selected'}
+        </Text>
+        <Button title={sshPrivateKey.trim() ? 'Replace key file' : 'Select key file'} onPress={() => void selectKeyFile()} />
+      </View>
       <Text style={styles.note}>
-        TS sync is read-only and uses GitHub HTTP (tree via api.github.com + content via raw.githubusercontent.com). SSH
-        key is currently ignored.
+        Select an OpenSSH private key file for native SSH sync. Web sync uses GitHub HTTP, so private repositories need a
+        GitHub token.
       </Text>
 
       <Text style={styles.label}>GitHub token (for private repos, web sync)</Text>
@@ -327,12 +367,17 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 10,
   },
-  multiline: {
-    minHeight: 140,
-    textAlignVertical: 'top',
+  keyPicker: {
+    alignSelf: 'stretch',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  keyStatus: {
+    color: '#555',
   },
   buttonRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 12,
   },
   status: {
