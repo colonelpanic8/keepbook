@@ -1,4 +1,6 @@
 use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -16,7 +18,8 @@ use crate::market_data::{
 use crate::models::{Account, Asset, Id};
 use crate::portfolio::{
     collect_change_points, filter_by_date_range, filter_by_granularity, AccountSummary,
-    CoalesceStrategy, CollectOptions, Granularity, Grouping, PortfolioQuery, PortfolioService,
+    CoalesceStrategy, CollectOptions, EquityValuationAdjustment, Granularity, Grouping,
+    PortfolioQuery, PortfolioService,
 };
 use crate::staleness::{
     check_balance_staleness, check_price_staleness, log_balance_staleness, log_price_staleness,
@@ -28,7 +31,7 @@ use super::sync::build_sync_service;
 use super::{
     maybe_auto_commit, AssetInfoOutput, ChangePointsOutput, HistoryOutput, HistoryPoint,
     HistorySummary, PriceHistoryFailure, PriceHistoryOutput, PriceHistoryScopeOutput,
-    PriceHistoryStats,
+    PriceHistoryStats, TaxImpactGraphOutput, TaxImpactOutput, TaxImpactPoint,
 };
 
 pub struct PriceHistoryRequest<'a> {
@@ -328,6 +331,7 @@ async fn build_history_point_for_date(
         grouping: Grouping::Asset,
         include_detail: false,
         capital_gains_tax_rate: None,
+        equity_valuation_adjustment: None,
     };
 
     let snapshot = service.calculate(&query).await?;
@@ -353,6 +357,28 @@ fn parse_tax_rate_fraction(rate: &str, context: &str) -> Result<Decimal> {
     Decimal::from_str(rate)
         .with_context(|| format!("Invalid {context}: {rate}"))
         .map(|rate| rate / Decimal::from(100))
+}
+
+fn parse_decimal_arg(value: &str, context: &str) -> Result<Decimal> {
+    Decimal::from_str(value).with_context(|| format!("Invalid {context}: {value}"))
+}
+
+fn resolve_equity_valuation_adjustment(
+    equity_change_percent: Option<String>,
+    target_pre_tax_total_value: Option<String>,
+) -> Result<Option<EquityValuationAdjustment>> {
+    match (equity_change_percent, target_pre_tax_total_value) {
+        (Some(_), Some(_)) => anyhow::bail!(
+            "--equity-change-percent and --target-pre-tax-total-value cannot be used together"
+        ),
+        (Some(percent), None) => Ok(Some(EquityValuationAdjustment::PercentChange(
+            parse_decimal_arg(&percent, "equity change percent")?,
+        ))),
+        (None, Some(target)) => Ok(Some(EquityValuationAdjustment::TargetPreTaxTotalValue(
+            parse_decimal_arg(&target, "target pre-tax total value")?,
+        ))),
+        (None, None) => Ok(None),
+    }
 }
 
 fn decimal_from_f64(value: f64, context: &str) -> Result<Decimal> {
@@ -1177,6 +1203,8 @@ pub async fn portfolio_snapshot(
     group_by: String,
     detail: bool,
     capital_gains_tax_rate: Option<String>,
+    equity_change_percent: Option<String>,
+    target_pre_tax_total_value: Option<String>,
     auto: bool,
     offline: bool,
     dry_run: bool,
@@ -1199,6 +1227,8 @@ pub async fn portfolio_snapshot(
 
     let (capital_gains_tax_rate, include_latent_tax_virtual_account) =
         resolve_capital_gains_tax_rate(config, capital_gains_tax_rate)?;
+    let equity_valuation_adjustment =
+        resolve_equity_valuation_adjustment(equity_change_percent, target_pre_tax_total_value)?;
 
     // Determine what to refresh based on flags
     // Default (no flags or --auto): auto-refresh stale data
@@ -1220,6 +1250,7 @@ pub async fn portfolio_snapshot(
         grouping,
         include_detail: detail,
         capital_gains_tax_rate,
+        equity_valuation_adjustment,
     };
 
     // Setup market data store
@@ -1339,6 +1370,431 @@ pub async fn portfolio_snapshot(
     maybe_auto_commit(config, "portfolio snapshot");
 
     Ok(snapshot)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn portfolio_tax_impact(
+    storage: Arc<dyn Storage>,
+    config: &ResolvedConfig,
+    currency: Option<String>,
+    date: Option<String>,
+    capital_gains_tax_rate: Option<String>,
+    min: Option<String>,
+    max: Option<String>,
+    points: usize,
+    graph: bool,
+    output: Option<PathBuf>,
+    svg_output: Option<PathBuf>,
+    title: Option<String>,
+    width: u32,
+    height: u32,
+) -> Result<TaxImpactOutput> {
+    let as_of_date = match date {
+        Some(d) => NaiveDate::parse_from_str(&d, "%Y-%m-%d")
+            .with_context(|| format!("Invalid date format: {d}"))?,
+        None => Utc::now().date_naive(),
+    };
+    let currency = currency.unwrap_or_else(|| config.reporting_currency.clone());
+    let (rate, _) = resolve_capital_gains_tax_rate(config, capital_gains_tax_rate)?;
+    let rate = rate.context(
+        "portfolio tax-impact requires --capital-gains-tax-rate or enabled portfolio.latent_capital_gains_tax.rate",
+    )?;
+    if points == 0 {
+        anyhow::bail!("points must be at least 1");
+    }
+
+    let market_data = Arc::new(
+        MarketDataServiceBuilder::new(
+            Arc::new(JsonlMarketDataStore::new(&config.data_dir)),
+            config.data_dir.clone(),
+        )
+        .with_quote_staleness(config.refresh.price_staleness)
+        .offline_only()
+        .build()
+        .await,
+    );
+    let service = PortfolioService::new(storage, market_data);
+    let base_query = PortfolioQuery {
+        as_of_date,
+        currency: currency.clone(),
+        currency_decimals: config.display.currency_decimals,
+        grouping: Grouping::Asset,
+        include_detail: false,
+        capital_gains_tax_rate: Some(rate),
+        equity_valuation_adjustment: None,
+    };
+    let base = service.calculate(&base_query).await?;
+    let current_nominal = parse_decimal_arg(&base.total_value, "current nominal net worth")?;
+    let current_tax = base
+        .prospective_capital_gains_tax
+        .as_deref()
+        .map(|value| parse_decimal_arg(value, "current tax liability"))
+        .transpose()?
+        .unwrap_or(Decimal::ZERO);
+    let current_after_tax = current_nominal - current_tax;
+
+    let min_value = match min {
+        Some(value) => parse_decimal_arg(&value, "minimum nominal net worth")?,
+        None => current_nominal * Decimal::new(5, 1),
+    };
+    let max_value = match max {
+        Some(value) => parse_decimal_arg(&value, "maximum nominal net worth")?,
+        None => current_nominal,
+    };
+    if min_value > max_value {
+        anyhow::bail!("min must be less than or equal to max");
+    }
+
+    let steps = if points <= 1 {
+        vec![min_value]
+    } else {
+        let step = (max_value - min_value) / Decimal::from((points - 1) as u64);
+        (0..points)
+            .map(|idx| min_value + step * Decimal::from(idx as u64))
+            .collect()
+    };
+
+    let mut curve_points = Vec::with_capacity(steps.len());
+    for target in steps {
+        let query = PortfolioQuery {
+            equity_valuation_adjustment: Some(EquityValuationAdjustment::TargetPreTaxTotalValue(
+                target,
+            )),
+            ..base_query.clone()
+        };
+        let snapshot = service.calculate(&query).await?;
+        let nominal = parse_decimal_arg(&snapshot.total_value, "scenario nominal net worth")?;
+        let tax = snapshot
+            .prospective_capital_gains_tax
+            .as_deref()
+            .map(|value| parse_decimal_arg(value, "scenario tax liability"))
+            .transpose()?
+            .unwrap_or(Decimal::ZERO);
+        let scenario = snapshot
+            .valuation_scenario
+            .context("missing valuation_scenario for tax impact point")?;
+        curve_points.push(TaxImpactPoint {
+            nominal_net_worth: format_base_currency_value(
+                nominal,
+                config.display.currency_decimals,
+            ),
+            tax_liability: format_base_currency_value(tax, config.display.currency_decimals),
+            after_tax_net_worth: format_base_currency_value(
+                nominal - tax,
+                config.display.currency_decimals,
+            ),
+            equity_multiplier: scenario.equity_multiplier,
+            equity_change_percent: scenario.equity_change_percent,
+        });
+    }
+
+    let graph_output = if graph || output.is_some() || svg_output.is_some() {
+        Some(write_tax_impact_graph(
+            &curve_points,
+            &currency,
+            title.as_deref().unwrap_or("Keepbook Tax Impact"),
+            output.unwrap_or_else(|| PathBuf::from("artifacts/tax-impact.html")),
+            svg_output,
+            width,
+            height,
+        )?)
+    } else {
+        None
+    };
+
+    Ok(TaxImpactOutput {
+        currency,
+        as_of_date: as_of_date.to_string(),
+        capital_gains_tax_rate: rate.normalize().to_string(),
+        current_nominal_net_worth: format_base_currency_value(
+            current_nominal,
+            config.display.currency_decimals,
+        ),
+        current_tax_liability: format_base_currency_value(
+            current_tax,
+            config.display.currency_decimals,
+        ),
+        current_after_tax_net_worth: format_base_currency_value(
+            current_after_tax,
+            config.display.currency_decimals,
+        ),
+        points: curve_points,
+        graph: graph_output,
+    })
+}
+
+fn write_tax_impact_graph(
+    points: &[TaxImpactPoint],
+    currency: &str,
+    title: &str,
+    output: PathBuf,
+    svg_output: Option<PathBuf>,
+    width: u32,
+    height: u32,
+) -> Result<TaxImpactGraphOutput> {
+    if width < 360 || height < 240 {
+        anyhow::bail!("Graph width and height must be at least 360x240");
+    }
+    let svg_output = svg_output.unwrap_or_else(|| output.with_extension("svg"));
+    let svg = render_tax_impact_svg(points, currency, title, width, height)?;
+    let html = render_tax_impact_html(title, width, &output, &svg_output);
+
+    if let Some(parent) = svg_output.parent().filter(|p| !p.as_os_str().is_empty()) {
+        fs::create_dir_all(parent).with_context(|| {
+            format!("Failed to create SVG output directory {}", parent.display())
+        })?;
+    }
+    if let Some(parent) = output.parent().filter(|p| !p.as_os_str().is_empty()) {
+        fs::create_dir_all(parent).with_context(|| {
+            format!(
+                "Failed to create HTML output directory {}",
+                parent.display()
+            )
+        })?;
+    }
+
+    fs::write(&svg_output, svg)
+        .with_context(|| format!("Failed to write SVG graph {}", svg_output.display()))?;
+    fs::write(&output, html)
+        .with_context(|| format!("Failed to write HTML graph {}", output.display()))?;
+
+    Ok(TaxImpactGraphOutput {
+        html_path: output.display().to_string(),
+        svg_path: svg_output.display().to_string(),
+    })
+}
+
+fn render_tax_impact_html(title: &str, width: u32, html_path: &Path, svg_path: &Path) -> String {
+    let img_src = if html_path.parent() == svg_path.parent() {
+        svg_path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .map(|name| format!("./{name}"))
+            .unwrap_or_else(|| svg_path.display().to_string())
+    } else {
+        svg_path.display().to_string()
+    };
+    format!(
+        r#"<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{}</title>
+    <style>
+      body {{ margin: 0; background: #edf2f7; display: grid; place-items: center; min-height: 100vh; }}
+      img {{ width: min(96vw, {}px); height: auto; box-shadow: 0 18px 48px rgba(16,42,67,.18); border-radius: 20px; }}
+    </style>
+  </head>
+  <body>
+    <img src="{}" alt="{}" />
+  </body>
+</html>
+"#,
+        tax_graph_escape_html(title),
+        width,
+        tax_graph_escape_html(&img_src),
+        tax_graph_escape_html(title)
+    )
+}
+
+fn render_tax_impact_svg(
+    points: &[TaxImpactPoint],
+    currency: &str,
+    title: &str,
+    width: u32,
+    height: u32,
+) -> Result<String> {
+    let width_f = width as f64;
+    let height_f = height as f64;
+    let margin_left = 126.0;
+    let margin_right = 64.0;
+    let margin_top = 108.0;
+    let margin_bottom = 104.0;
+    let plot_x = margin_left;
+    let plot_y = margin_top;
+    let plot_w = width_f - margin_left - margin_right;
+    let plot_h = height_f - margin_top - margin_bottom;
+
+    let xs: Vec<f64> = points
+        .iter()
+        .map(|point| point.nominal_net_worth.parse::<f64>())
+        .collect::<Result<_, _>>()
+        .context("Invalid nominal net worth in tax impact point")?;
+    let ys: Vec<f64> = points
+        .iter()
+        .map(|point| point.after_tax_net_worth.parse::<f64>())
+        .collect::<Result<_, _>>()
+        .context("Invalid after-tax net worth in tax impact point")?;
+    if xs.is_empty() {
+        anyhow::bail!("Tax impact graph requires at least one point");
+    }
+
+    let x_min = xs.iter().copied().fold(f64::INFINITY, f64::min);
+    let x_max = xs.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let y_min_raw = ys.iter().copied().fold(f64::INFINITY, f64::min).min(x_min);
+    let y_max_raw = ys
+        .iter()
+        .copied()
+        .fold(f64::NEG_INFINITY, f64::max)
+        .max(x_max);
+    let x_span = if (x_max - x_min).abs() < f64::EPSILON {
+        x_min.abs().max(1.0) * 0.1
+    } else {
+        (x_max - x_min).abs()
+    };
+    let y_span = (y_max_raw - y_min_raw).abs().max(1.0);
+    let (x_lo, x_hi) = if (x_max - x_min).abs() < f64::EPSILON {
+        (x_min - x_span, x_max + x_span)
+    } else {
+        (x_min - x_span * 0.04, x_max + x_span * 0.04)
+    };
+    let y_lo = y_min_raw - y_span * 0.06;
+    let y_hi = y_max_raw + y_span * 0.06;
+
+    let point_xy: Vec<(f64, f64)> = xs
+        .iter()
+        .zip(ys.iter())
+        .map(|(x_value, y_value)| {
+            let x = plot_x + ((*x_value - x_lo) / (x_hi - x_lo)) * plot_w;
+            let y = plot_y + ((y_hi - *y_value) / (y_hi - y_lo)) * plot_h;
+            (x, y)
+        })
+        .collect();
+    let line_path = tax_graph_path_from_points(&point_xy);
+
+    let identity_points: Vec<(f64, f64)> = [x_min, x_max]
+        .iter()
+        .map(|value| {
+            let x = plot_x + ((*value - x_lo) / (x_hi - x_lo)) * plot_w;
+            let y = plot_y + ((y_hi - *value) / (y_hi - y_lo)) * plot_h;
+            (x, y)
+        })
+        .collect();
+
+    let mut svg = format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="{}" height="{}" viewBox="0 0 {} {}" role="img" aria-labelledby="title desc">
+  <title id="title">{}</title>
+  <desc id="desc">Tax impact graph from nominal net worth to after-tax net worth in {}</desc>
+  <rect width="100%" height="100%" fill="#f8fafc"/>
+  <text x="{}" y="54" font-size="34" fill="#102a43" font-family="ui-sans-serif, system-ui, sans-serif">{}</text>
+  <text x="{}" y="84" font-size="18" fill="#627d98" font-family="ui-sans-serif, system-ui, sans-serif">Nominal net worth to net worth after expected latent tax - {}</text>
+  <rect x="{}" y="{}" width="{}" height="{}" fill="#ffffff" stroke="#d9e2ec" rx="8"/>
+"##,
+        width,
+        height,
+        width,
+        height,
+        tax_graph_escape_html(title),
+        tax_graph_escape_html(currency),
+        margin_left,
+        tax_graph_escape_html(title),
+        margin_left,
+        tax_graph_escape_html(currency),
+        plot_x,
+        plot_y,
+        plot_w,
+        plot_h
+    );
+
+    for i in 0..=5 {
+        let ratio = i as f64 / 5.0;
+        let y = plot_y + ratio * plot_h;
+        let value = y_hi - ratio * (y_hi - y_lo);
+        svg.push_str(&format!(
+            r##"  <line x1="{}" y1="{:.2}" x2="{}" y2="{:.2}" stroke="#eef2f7"/>
+  <text x="{}" y="{:.2}" font-size="14" text-anchor="end" fill="#627d98" font-family="ui-sans-serif, system-ui, sans-serif">{}</text>
+"##,
+            plot_x,
+            y,
+            plot_x + plot_w,
+            y,
+            plot_x - 14.0,
+            y + 5.0,
+            tax_graph_escape_html(&tax_graph_format_currency_tick(value, currency))
+        ));
+    }
+    for i in 0..=5 {
+        let ratio = i as f64 / 5.0;
+        let x = plot_x + ratio * plot_w;
+        let value = x_lo + ratio * (x_hi - x_lo);
+        svg.push_str(&format!(
+            r##"  <line x1="{:.2}" y1="{}" x2="{:.2}" y2="{}" stroke="#e5eaf1"/>
+  <text x="{:.2}" y="{}" font-size="14" text-anchor="middle" fill="#627d98" font-family="ui-sans-serif, system-ui, sans-serif">{}</text>
+"##,
+            x,
+            plot_y,
+            x,
+            plot_y + plot_h + 8.0,
+            x,
+            plot_y + plot_h + 34.0,
+            tax_graph_escape_html(&tax_graph_format_currency_tick(value, currency))
+        ));
+    }
+
+    svg.push_str(&format!(
+        r##"  <path d="{}" fill="none" stroke="#94a3b8" stroke-width="2" stroke-dasharray="8 8"/>
+  <path d="{}" fill="none" stroke="#1c7ed6" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>
+"##,
+        tax_graph_path_from_points(&identity_points),
+        line_path
+    ));
+
+    for (x, y) in &point_xy {
+        svg.push_str(&format!(
+            r##"  <circle cx="{:.2}" cy="{:.2}" r="4" fill="#0b7285" stroke="#ffffff" stroke-width="2"/>
+"##,
+            x, y
+        ));
+    }
+
+    svg.push_str(&format!(
+        r##"  <text x="{}" y="{}" font-size="16" fill="#829ab1" font-family="ui-sans-serif, system-ui, sans-serif">x: nominal net worth | y: after-tax net worth | dashed: no-tax line</text>
+</svg>
+"##,
+        margin_left,
+        height_f - 28.0
+    ));
+    Ok(svg)
+}
+
+fn tax_graph_path_from_points(points: &[(f64, f64)]) -> String {
+    points
+        .iter()
+        .enumerate()
+        .map(|(idx, (x, y))| {
+            if idx == 0 {
+                format!("M {:.2} {:.2}", x, y)
+            } else {
+                format!("L {:.2} {:.2}", x, y)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn tax_graph_format_currency_tick(value: f64, currency: &str) -> String {
+    let sign = if value < 0.0 { "-" } else { "" };
+    let value = value.abs();
+    let compact = if value >= 1_000_000_000.0 {
+        format!("{:.1}B", value / 1_000_000_000.0)
+    } else if value >= 1_000_000.0 {
+        format!("{:.1}M", value / 1_000_000.0)
+    } else if value >= 1_000.0 {
+        format!("{:.1}K", value / 1_000.0)
+    } else {
+        format!("{:.0}", value)
+    };
+    format!("{sign}{compact} {currency}")
+}
+
+fn tax_graph_escape_html(input: &str) -> String {
+    input
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
 }
 
 pub async fn portfolio_history(

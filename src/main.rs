@@ -672,6 +672,14 @@ enum PortfolioCommand {
         #[arg(long)]
         capital_gains_tax_rate: Option<String>,
 
+        /// Uniform percentage change to equity assets before valuation
+        #[arg(long, conflicts_with = "target_pre_tax_total_value")]
+        equity_change_percent: Option<String>,
+
+        /// Uniformly scale equity assets so pre-tax total_value equals this amount
+        #[arg(long, conflicts_with = "equity_change_percent")]
+        target_pre_tax_total_value: Option<String>,
+
         /// Auto-refresh stale data (default behavior, explicit flag for scripts)
         #[arg(long, conflicts_with_all = ["offline", "dry_run", "force_refresh"])]
         auto: bool,
@@ -687,6 +695,57 @@ enum PortfolioCommand {
         /// Force refresh all data regardless of staleness
         #[arg(long, conflicts_with_all = ["auto", "offline", "dry_run"])]
         force_refresh: bool,
+    },
+
+    /// Map nominal net worth to after-tax net worth under latent tax scenarios
+    TaxImpact {
+        /// Base currency for valuations (default: from config)
+        #[arg(long)]
+        currency: Option<String>,
+
+        /// Calculate as of this date (YYYY-MM-DD, default: today)
+        #[arg(long)]
+        date: Option<String>,
+
+        /// Capital gains tax rate percentage for unrealized gain estimate
+        #[arg(long)]
+        capital_gains_tax_rate: Option<String>,
+
+        /// Minimum nominal pre-tax net worth for the curve
+        #[arg(long)]
+        min: Option<String>,
+
+        /// Maximum nominal pre-tax net worth for the curve
+        #[arg(long)]
+        max: Option<String>,
+
+        /// Number of curve points
+        #[arg(long, default_value_t = 25)]
+        points: usize,
+
+        /// Write an HTML/SVG graph in addition to JSON output
+        #[arg(long)]
+        graph: bool,
+
+        /// HTML output path for --graph
+        #[arg(long)]
+        output: Option<std::path::PathBuf>,
+
+        /// SVG output path for --graph
+        #[arg(long)]
+        svg_output: Option<std::path::PathBuf>,
+
+        /// Graph title
+        #[arg(long)]
+        title: Option<String>,
+
+        /// Graph width in pixels
+        #[arg(long, default_value_t = 1400)]
+        width: u32,
+
+        /// Graph height in pixels
+        #[arg(long, default_value_t = 900)]
+        height: u32,
     },
 
     /// Track net worth over time at every change point
@@ -1081,6 +1140,8 @@ async fn main() -> Result<()> {
                 group_by,
                 detail,
                 capital_gains_tax_rate,
+                equity_change_percent,
+                target_pre_tax_total_value,
                 auto,
                 offline,
                 dry_run,
@@ -1094,6 +1155,8 @@ async fn main() -> Result<()> {
                     group_by,
                     detail,
                     capital_gains_tax_rate,
+                    equity_change_percent,
+                    target_pre_tax_total_value,
                     auto,
                     offline,
                     dry_run,
@@ -1101,6 +1164,40 @@ async fn main() -> Result<()> {
                 )
                 .await?;
                 println!("{}", serde_json::to_string_pretty(&snapshot)?);
+            }
+
+            PortfolioCommand::TaxImpact {
+                currency,
+                date,
+                capital_gains_tax_rate,
+                min,
+                max,
+                points,
+                graph,
+                output,
+                svg_output,
+                title,
+                width,
+                height,
+            } => {
+                let output = app::portfolio_tax_impact(
+                    storage_arc.clone(),
+                    &config,
+                    currency,
+                    date,
+                    capital_gains_tax_rate,
+                    min,
+                    max,
+                    points,
+                    graph,
+                    output,
+                    svg_output,
+                    title,
+                    width,
+                    height,
+                )
+                .await?;
+                println!("{}", serde_json::to_string_pretty(&output)?);
             }
 
             PortfolioCommand::History {

@@ -14,7 +14,8 @@ use crate::models::{Account, Asset, BalanceBackfillPolicy, BalanceSnapshot, Conn
 use crate::storage::Storage;
 
 use super::{
-    AccountHolding, AccountSummary, AssetSummary, Grouping, PortfolioQuery, PortfolioSnapshot,
+    AccountHolding, AccountSummary, AssetSummary, EquityValuationAdjustment, Grouping,
+    PortfolioQuery, PortfolioSnapshot, PortfolioValuationScenario,
 };
 
 pub struct PortfolioService {
@@ -24,6 +25,7 @@ pub struct PortfolioService {
 }
 
 /// Valuation result for an asset.
+#[derive(Clone)]
 struct AssetValuation {
     /// The value in target currency. None if price data unavailable.
     value: Option<Decimal>,
@@ -60,6 +62,11 @@ struct GainsTotals {
     prospective_capital_gains_tax: Option<Decimal>,
 }
 
+struct ResolvedValuationScenario {
+    multiplier: Decimal,
+    output: PortfolioValuationScenario,
+}
+
 /// Context loaded from storage for portfolio calculation.
 struct CalculationContext {
     account_map: HashMap<Id, Account>,
@@ -94,10 +101,23 @@ impl PortfolioService {
             .fetch_asset_valuations(&by_asset_agg, &query.currency, query.as_of_date)
             .await?;
 
+        let valuation_scenario = Self::resolve_equity_valuation_scenario(
+            &by_asset_agg,
+            &price_cache,
+            query.equity_valuation_adjustment.as_ref(),
+            query.currency_decimals,
+        )?;
+        let effective_price_cache = match valuation_scenario.as_ref() {
+            Some(scenario) => {
+                Self::apply_equity_valuation_multiplier(&price_cache, scenario.multiplier)
+            }
+            None => price_cache.clone(),
+        };
+
         // Build asset summaries and calculate total value
         let (mut asset_summaries, total_value, gains_totals) = self.build_asset_summaries(
             &by_asset_agg,
-            &price_cache,
+            &effective_price_cache,
             &ctx.account_map,
             query.include_detail,
             query.currency_decimals,
@@ -108,7 +128,7 @@ impl PortfolioService {
         let mut account_summaries = Self::build_account_summaries(
             &ctx.filtered_snapshots,
             &ctx.zero_accounts,
-            &price_cache,
+            &effective_price_cache,
             &ctx.account_map,
             &ctx.connection_map,
             query.currency_decimals,
@@ -142,6 +162,7 @@ impl PortfolioService {
             prospective_capital_gains_tax: gains_totals
                 .prospective_capital_gains_tax
                 .map(|v| format_base_currency_value(v, query.currency_decimals)),
+            valuation_scenario: valuation_scenario.map(|s| s.output),
             by_asset,
             by_account,
         })
@@ -280,6 +301,121 @@ impl PortfolioService {
         }
 
         Ok(cache)
+    }
+
+    fn asset_value(agg: &AssetAggregate, valuation: &AssetValuation) -> Option<Decimal> {
+        valuation
+            .value
+            .map(|unit_price| unit_price * agg.total_amount)
+    }
+
+    fn equity_value_totals(
+        by_asset: &HashMap<Asset, AssetAggregate>,
+        price_cache: &HashMap<Asset, AssetValuation>,
+    ) -> Result<(Decimal, Decimal)> {
+        let mut equity_value = Decimal::ZERO;
+        let mut non_equity_value = Decimal::ZERO;
+
+        for (asset, agg) in by_asset {
+            let valuation = price_cache.get(asset).with_context(|| {
+                format!("missing valuation for asset {}", AssetId::from_asset(asset))
+            })?;
+            let Some(value) = Self::asset_value(agg, valuation) else {
+                continue;
+            };
+            match asset {
+                Asset::Equity { .. } => equity_value += value,
+                _ => non_equity_value += value,
+            }
+        }
+
+        Ok((equity_value, non_equity_value))
+    }
+
+    fn resolve_equity_valuation_scenario(
+        by_asset: &HashMap<Asset, AssetAggregate>,
+        price_cache: &HashMap<Asset, AssetValuation>,
+        adjustment: Option<&EquityValuationAdjustment>,
+        currency_decimals: Option<u32>,
+    ) -> Result<Option<ResolvedValuationScenario>> {
+        let Some(adjustment) = adjustment else {
+            return Ok(None);
+        };
+
+        let (equity_value_before, non_equity_value) =
+            Self::equity_value_totals(by_asset, price_cache)?;
+        if equity_value_before <= Decimal::ZERO {
+            anyhow::bail!("equity valuation scenario requires positive priced equity holdings");
+        }
+
+        let (multiplier, target_pre_tax_total_value) = match adjustment {
+            EquityValuationAdjustment::PercentChange(percent) => {
+                (Decimal::ONE + (*percent / Decimal::from(100)), None)
+            }
+            EquityValuationAdjustment::TargetPreTaxTotalValue(target) => {
+                let required_equity_value = *target - non_equity_value;
+                if required_equity_value < Decimal::ZERO {
+                    anyhow::bail!(
+                        "target pre-tax total value {target} is below non-equity portfolio value {non_equity_value}"
+                    );
+                }
+                (required_equity_value / equity_value_before, Some(*target))
+            }
+        };
+
+        if multiplier < Decimal::ZERO {
+            anyhow::bail!("equity valuation scenario would produce negative equity prices");
+        }
+
+        let equity_value_after = equity_value_before * multiplier;
+        let pre_tax_total_value = non_equity_value + equity_value_after;
+        let equity_change_percent = (multiplier - Decimal::ONE) * Decimal::from(100);
+
+        Ok(Some(ResolvedValuationScenario {
+            multiplier,
+            output: PortfolioValuationScenario {
+                equity_multiplier: multiplier.normalize().to_string(),
+                equity_change_percent: equity_change_percent.normalize().to_string(),
+                pre_tax_total_value: format_base_currency_value(
+                    pre_tax_total_value,
+                    currency_decimals,
+                ),
+                equity_value_before: format_base_currency_value(
+                    equity_value_before,
+                    currency_decimals,
+                ),
+                equity_value_after: format_base_currency_value(
+                    equity_value_after,
+                    currency_decimals,
+                ),
+                target_pre_tax_total_value: target_pre_tax_total_value
+                    .map(|v| format_base_currency_value(v, currency_decimals)),
+            },
+        }))
+    }
+
+    fn apply_equity_valuation_multiplier(
+        price_cache: &HashMap<Asset, AssetValuation>,
+        multiplier: Decimal,
+    ) -> HashMap<Asset, AssetValuation> {
+        price_cache
+            .iter()
+            .map(|(asset, valuation)| {
+                if !matches!(asset, Asset::Equity { .. }) {
+                    return (asset.clone(), valuation.clone());
+                }
+
+                let mut adjusted = valuation.clone();
+                adjusted.value = adjusted.value.map(|value| value * multiplier);
+                adjusted.price = adjusted
+                    .price
+                    .as_ref()
+                    .and_then(|price| Decimal::from_str(price).ok())
+                    .map(|price| (price * multiplier).normalize().to_string())
+                    .or_else(|| valuation.price.clone());
+                (asset.clone(), adjusted)
+            })
+            .collect()
     }
 
     /// Build asset summaries from aggregated data and cached valuations.
@@ -737,6 +873,7 @@ mod tests {
             grouping: Grouping::Both,
             include_detail: false,
             capital_gains_tax_rate: None,
+            equity_valuation_adjustment: None,
         };
         let result = service.calculate(&query).await?;
 
@@ -810,6 +947,7 @@ mod tests {
             grouping: Grouping::Asset,
             include_detail: false,
             capital_gains_tax_rate: None,
+            equity_valuation_adjustment: None,
         };
         let result = service.calculate(&query).await?;
 
@@ -873,6 +1011,7 @@ mod tests {
             grouping: Grouping::Asset,
             include_detail: true,
             capital_gains_tax_rate: Some(Decimal::new(238, 3)),
+            equity_valuation_adjustment: None,
         };
         let result = service.calculate(&query).await?;
 
@@ -891,6 +1030,92 @@ mod tests {
         assert_eq!(
             asset.holdings.as_ref().unwrap()[0].unrealized_gain,
             Some("500".to_string())
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn calculate_can_scale_equities_to_target_pre_tax_total_value() -> Result<()> {
+        let storage = Arc::new(MemoryStorage::new());
+        let connection = Connection::new(ConnectionConfig {
+            name: "Broker".to_string(),
+            synchronizer: "manual".to_string(),
+            credentials: None,
+            balance_staleness: None,
+        });
+        storage.save_connection(&connection).await?;
+
+        let account = Account::new("Brokerage", connection.id().clone());
+        storage.save_account(&account).await?;
+
+        let snapshot = BalanceSnapshot::new(
+            Utc.with_ymd_and_hms(2026, 2, 1, 12, 0, 0).unwrap(),
+            vec![
+                AssetBalance::new(Asset::currency("USD"), "1000"),
+                AssetBalance::new(Asset::equity("AAPL"), "10").with_cost_basis("1500"),
+            ],
+        );
+        storage
+            .append_balance_snapshot(&account.id, &snapshot)
+            .await?;
+
+        let store = Arc::new(MemoryMarketDataStore::new());
+        let as_of_date = chrono::NaiveDate::from_ymd_opt(2026, 2, 1).unwrap();
+        store
+            .put_prices(&[PricePoint {
+                asset_id: AssetId::from_asset(&Asset::equity("AAPL")),
+                as_of_date,
+                timestamp: Utc::now(),
+                price: "200".to_string(),
+                quote_currency: "USD".to_string(),
+                kind: PriceKind::Close,
+                source: "test".to_string(),
+            }])
+            .await?;
+
+        let market_data = Arc::new(MarketDataService::new(store, None));
+        let service = PortfolioService::new(storage, market_data);
+        let query = PortfolioQuery {
+            as_of_date: chrono::NaiveDate::from_ymd_opt(2026, 2, 2).unwrap(),
+            currency: "USD".to_string(),
+            currency_decimals: None,
+            grouping: Grouping::Both,
+            include_detail: true,
+            capital_gains_tax_rate: Some(Decimal::new(23, 2)),
+            equity_valuation_adjustment: Some(EquityValuationAdjustment::TargetPreTaxTotalValue(
+                Decimal::from(2600),
+            )),
+        };
+        let result = service.calculate(&query).await?;
+
+        assert_eq!(result.total_value, "2600");
+        assert_eq!(result.total_cost_basis, Some("1500".to_string()));
+        assert_eq!(result.total_unrealized_gain, Some("100".to_string()));
+        assert_eq!(result.prospective_capital_gains_tax, Some("23".to_string()));
+        assert_eq!(
+            result.valuation_scenario.as_ref().map(|s| (
+                s.equity_multiplier.as_str(),
+                s.equity_change_percent.as_str(),
+                s.pre_tax_total_value.as_str(),
+                s.equity_value_before.as_str(),
+                s.equity_value_after.as_str(),
+                s.target_pre_tax_total_value.as_deref(),
+            )),
+            Some(("0.8", "-20", "2600", "2000", "1600", Some("2600")))
+        );
+
+        let by_asset = result.by_asset.unwrap();
+        let equity = by_asset
+            .iter()
+            .find(|summary| matches!(summary.asset, Asset::Equity { .. }))
+            .expect("equity summary");
+        assert_eq!(equity.price, Some("160".to_string()));
+        assert_eq!(equity.value_in_base, Some("1600".to_string()));
+        assert_eq!(equity.unrealized_gain, Some("100".to_string()));
+        assert_eq!(
+            result.by_account.unwrap()[0].value_in_base,
+            Some("2600".to_string())
         );
 
         Ok(())
@@ -940,6 +1165,7 @@ mod tests {
             grouping: Grouping::Asset,
             include_detail: true,
             capital_gains_tax_rate: None,
+            equity_valuation_adjustment: None,
         };
         let result = service.calculate(&query).await?;
 
@@ -1009,6 +1235,7 @@ mod tests {
             grouping: Grouping::Asset,
             include_detail: false,
             capital_gains_tax_rate: None,
+            equity_valuation_adjustment: None,
         };
         let result = service.calculate(&query).await?;
 
@@ -1063,6 +1290,7 @@ mod tests {
             grouping: Grouping::Both,
             include_detail: false,
             capital_gains_tax_rate: None,
+            equity_valuation_adjustment: None,
         };
 
         let result = service.calculate(&query).await?;
@@ -1112,6 +1340,7 @@ mod tests {
             grouping: Grouping::Account,
             include_detail: false,
             capital_gains_tax_rate: None,
+            equity_valuation_adjustment: None,
         };
 
         let result = service.calculate(&query).await?;
@@ -1174,6 +1403,7 @@ mod tests {
             grouping: Grouping::Both,
             include_detail: false,
             capital_gains_tax_rate: None,
+            equity_valuation_adjustment: None,
         };
 
         let result = service.calculate(&query).await?;
@@ -1228,6 +1458,7 @@ mod tests {
             grouping: Grouping::Both,
             include_detail: false,
             capital_gains_tax_rate: None,
+            equity_valuation_adjustment: None,
         };
 
         let result = service.calculate(&query).await?;

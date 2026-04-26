@@ -26,6 +26,19 @@ pub struct PortfolioQuery {
     /// 0.238 for 23.8%). Applied only to positive unrealized gains with known
     /// cost basis.
     pub capital_gains_tax_rate: Option<rust_decimal::Decimal>,
+    /// Optional scenario that changes equity valuations before totals,
+    /// unrealized gains, and prospective tax are calculated.
+    pub equity_valuation_adjustment: Option<EquityValuationAdjustment>,
+}
+
+#[derive(Debug, Clone)]
+pub enum EquityValuationAdjustment {
+    /// Uniform percentage change to equity valuations. For example, -20 means
+    /// a 20% downturn and +10 means a 10% increase.
+    PercentChange(rust_decimal::Decimal),
+    /// Uniformly scale equity valuations so the portfolio total before any
+    /// virtual tax-liability account equals this amount.
+    TargetPreTaxTotalValue(rust_decimal::Decimal),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -40,9 +53,22 @@ pub struct PortfolioSnapshot {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prospective_capital_gains_tax: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub valuation_scenario: Option<PortfolioValuationScenario>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub by_asset: Option<Vec<AssetSummary>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub by_account: Option<Vec<AccountSummary>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PortfolioValuationScenario {
+    pub equity_multiplier: String,
+    pub equity_change_percent: String,
+    pub pre_tax_total_value: String,
+    pub equity_value_before: String,
+    pub equity_value_after: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_pre_tax_total_value: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

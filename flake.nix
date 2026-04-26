@@ -50,6 +50,13 @@
         };
         isLinux = pkgs.stdenv.hostPlatform.isLinux;
         isDarwin = pkgs.stdenv.hostPlatform.isDarwin;
+        rustTargets =
+          [
+            fenixPkgs.targets.wasm32-unknown-unknown.stable.rust-std
+          ]
+          ++ lib.optionals isDarwin [
+            fenixPkgs.targets.aarch64-apple-ios-sim.stable.rust-std
+          ];
         addDarwinInstallNameTool = tool:
           if isDarwin then
             tool.overrideAttrs (old: {
@@ -65,9 +72,7 @@
           fenixPkgs.stable.rustc
           fenixPkgs.stable.rustfmt
           fenixPkgs.stable.rust-analyzer
-          fenixPkgs.targets.wasm32-unknown-unknown.stable.rust-std
-          fenixPkgs.targets.aarch64-apple-ios-sim.stable.rust-std
-        ]);
+        ] ++ rustTargets);
         rustPlatform = pkgs.makeRustPlatform {
           cargo = toolchain;
           rustc = toolchain;

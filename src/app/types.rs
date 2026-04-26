@@ -171,6 +171,36 @@ pub struct HistorySummary {
     pub percentage_change: String,
 }
 
+/// A single point in a latent-tax impact curve.
+#[derive(Serialize)]
+pub struct TaxImpactPoint {
+    pub nominal_net_worth: String,
+    pub tax_liability: String,
+    pub after_tax_net_worth: String,
+    pub equity_multiplier: String,
+    pub equity_change_percent: String,
+}
+
+#[derive(Serialize)]
+pub struct TaxImpactGraphOutput {
+    pub html_path: String,
+    pub svg_path: String,
+}
+
+/// Output for portfolio tax-impact command.
+#[derive(Serialize)]
+pub struct TaxImpactOutput {
+    pub currency: String,
+    pub as_of_date: String,
+    pub capital_gains_tax_rate: String,
+    pub current_nominal_net_worth: String,
+    pub current_tax_liability: String,
+    pub current_after_tax_net_worth: String,
+    pub points: Vec<TaxImpactPoint>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub graph: Option<TaxImpactGraphOutput>,
+}
+
 /// Output for portfolio change-points command
 #[derive(Serialize)]
 pub struct ChangePointsOutput {

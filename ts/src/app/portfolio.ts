@@ -6,6 +6,9 @@
  * `portfolioHistory` (the top-level history command handler).
  */
 
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+
 import type { Storage } from '../storage/storage.js';
 import type { MarketDataStore } from '../market-data/store.js';
 import { MarketDataService } from '../market-data/service.js';
@@ -23,6 +26,7 @@ import type {
   AccountSummary,
   AccountHolding,
   Grouping,
+  EquityValuationAdjustment,
 } from '../portfolio/models.js';
 import { type Clock, SystemClock } from '../clock.js';
 import {
@@ -54,6 +58,9 @@ import type {
   PriceHistoryScopeOutput,
   PriceHistoryStats,
   PriceHistoryFailure,
+  TaxImpactOutput,
+  TaxImpactPoint,
+  TaxImpactGraphOutput,
 } from './types.js';
 import { Decimal } from '../decimal.js';
 import { tryAutoCommit } from '../git.js';
@@ -148,6 +155,20 @@ export function serializeSnapshot(snapshot: PortfolioSnapshot): object {
   if (snapshot.prospective_capital_gains_tax !== undefined) {
     out.prospective_capital_gains_tax = snapshot.prospective_capital_gains_tax;
   }
+  if (snapshot.valuation_scenario !== undefined) {
+    const scenario: Record<string, unknown> = {
+      equity_multiplier: snapshot.valuation_scenario.equity_multiplier,
+      equity_change_percent: snapshot.valuation_scenario.equity_change_percent,
+      pre_tax_total_value: snapshot.valuation_scenario.pre_tax_total_value,
+      equity_value_before: snapshot.valuation_scenario.equity_value_before,
+      equity_value_after: snapshot.valuation_scenario.equity_value_after,
+    };
+    if (snapshot.valuation_scenario.target_pre_tax_total_value !== undefined) {
+      scenario.target_pre_tax_total_value =
+        snapshot.valuation_scenario.target_pre_tax_total_value;
+    }
+    out.valuation_scenario = scenario;
+  }
   if (snapshot.by_asset !== undefined) {
     out.by_asset = snapshot.by_asset.map(serializeAssetSummary);
   }
@@ -182,6 +203,41 @@ function parseTaxRateFraction(rate: string, context: string): Decimal {
   } catch {
     throw new Error(`Invalid ${context}: ${rate}`);
   }
+}
+
+function parseDecimalArg(value: string, context: string): Decimal {
+  try {
+    return new Decimal(value);
+  } catch {
+    throw new Error(`Invalid ${context}: ${value}`);
+  }
+}
+
+function resolveEquityValuationAdjustment(
+  equityChangePercent: string | undefined,
+  targetPreTaxTotalValue: string | undefined,
+): EquityValuationAdjustment | undefined {
+  if (equityChangePercent !== undefined && targetPreTaxTotalValue !== undefined) {
+    throw new Error(
+      '--equity-change-percent and --target-pre-tax-total-value cannot be used together',
+    );
+  }
+
+  if (equityChangePercent !== undefined) {
+    return {
+      type: 'percent_change',
+      percent: parseDecimalArg(equityChangePercent, 'equity change percent'),
+    };
+  }
+
+  if (targetPreTaxTotalValue !== undefined) {
+    return {
+      type: 'target_pre_tax_total_value',
+      amount: parseDecimalArg(targetPreTaxTotalValue, 'target pre-tax total value'),
+    };
+  }
+
+  return undefined;
 }
 
 function resolveCapitalGainsTaxRate(
@@ -250,6 +306,8 @@ export interface PortfolioSnapshotOptions {
   groupBy?: string;
   detail?: boolean;
   capitalGainsTaxRate?: string;
+  equityChangePercent?: string;
+  targetPreTaxTotalValue?: string;
 }
 
 /**
@@ -274,6 +332,10 @@ export async function portfolioSnapshot(
     config,
     options.capitalGainsTaxRate,
   );
+  const equityValuationAdjustment = resolveEquityValuationAdjustment(
+    options.equityChangePercent,
+    options.targetPreTaxTotalValue,
+  );
 
   const marketDataService = new MarketDataService(marketDataStore);
   const portfolioService = new PortfolioService(storage, marketDataService, effectiveClock);
@@ -285,12 +347,292 @@ export async function portfolioSnapshot(
     grouping,
     include_detail: includeDetail,
     capital_gains_tax_rate: capitalGainsTaxRate,
+    equity_valuation_adjustment: equityValuationAdjustment,
   });
   if (includeLatentTaxVirtualAccount) {
     snapshot = applyLatentTaxVirtualAccount(snapshot, config);
   }
 
   return serializeSnapshot(snapshot);
+}
+
+export interface PortfolioTaxImpactOptions {
+  currency?: string;
+  date?: string;
+  capitalGainsTaxRate?: string;
+  min?: string;
+  max?: string;
+  points?: number;
+  graph?: boolean;
+  output?: string;
+  svgOutput?: string;
+  title?: string;
+  width?: number;
+  height?: number;
+}
+
+export async function portfolioTaxImpact(
+  storage: Storage,
+  marketDataStore: MarketDataStore,
+  config: ResolvedConfig,
+  options: PortfolioTaxImpactOptions,
+  clock?: Clock,
+): Promise<TaxImpactOutput> {
+  const effectiveClock = clock ?? new SystemClock();
+  const currency = options.currency ?? config.reporting_currency;
+  const asOfDate = options.date ?? effectiveClock.today();
+  const { rate } = resolveCapitalGainsTaxRate(config, options.capitalGainsTaxRate);
+  if (rate === undefined) {
+    throw new Error(
+      'portfolio tax-impact requires --capital-gains-tax-rate or enabled portfolio.latent_capital_gains_tax.rate',
+    );
+  }
+
+  const pointCount = options.points ?? 25;
+  if (pointCount < 1) throw new Error('points must be at least 1');
+
+  const marketDataService = new MarketDataService(marketDataStore);
+  const portfolioService = new PortfolioService(storage, marketDataService, effectiveClock);
+  const baseQuery = {
+    as_of_date: asOfDate,
+    currency,
+    currency_decimals: config.display.currency_decimals,
+    grouping: 'asset' as const,
+    include_detail: false,
+    capital_gains_tax_rate: rate,
+  };
+
+  const base = await portfolioService.calculate(baseQuery);
+  const currentNominal = parseDecimalArg(base.total_value, 'current nominal net worth');
+  const currentTax =
+    base.prospective_capital_gains_tax === undefined
+      ? new Decimal(0)
+      : parseDecimalArg(base.prospective_capital_gains_tax, 'current tax liability');
+  const currentAfterTax = currentNominal.minus(currentTax);
+
+  const minValue =
+    options.min === undefined
+      ? currentNominal.times('0.5')
+      : parseDecimalArg(options.min, 'minimum nominal net worth');
+  const maxValue =
+    options.max === undefined
+      ? currentNominal
+      : parseDecimalArg(options.max, 'maximum nominal net worth');
+  if (minValue.gt(maxValue)) throw new Error('min must be less than or equal to max');
+
+  const targets: Decimal[] = [];
+  if (pointCount === 1) {
+    targets.push(minValue);
+  } else {
+    const step = maxValue.minus(minValue).div(pointCount - 1);
+    for (let i = 0; i < pointCount; i += 1) {
+      targets.push(minValue.plus(step.times(i)));
+    }
+  }
+
+  const curvePoints: TaxImpactPoint[] = [];
+  for (const target of targets) {
+    const snapshot = await portfolioService.calculate({
+      ...baseQuery,
+      equity_valuation_adjustment: {
+        type: 'target_pre_tax_total_value',
+        amount: target,
+      },
+    });
+    if (snapshot.valuation_scenario === undefined) {
+      throw new Error('Missing valuation_scenario for tax impact point');
+    }
+
+    const nominal = parseDecimalArg(snapshot.total_value, 'scenario nominal net worth');
+    const tax =
+      snapshot.prospective_capital_gains_tax === undefined
+        ? new Decimal(0)
+        : parseDecimalArg(snapshot.prospective_capital_gains_tax, 'scenario tax liability');
+
+    curvePoints.push({
+      nominal_net_worth: decStrRounded(nominal, config.display.currency_decimals),
+      tax_liability: decStrRounded(tax, config.display.currency_decimals),
+      after_tax_net_worth: decStrRounded(nominal.minus(tax), config.display.currency_decimals),
+      equity_multiplier: snapshot.valuation_scenario.equity_multiplier,
+      equity_change_percent: snapshot.valuation_scenario.equity_change_percent,
+    });
+  }
+
+  const shouldWriteGraph = options.graph === true || options.output !== undefined || options.svgOutput !== undefined;
+  const graphOutput = shouldWriteGraph
+    ? await writeTaxImpactGraph(curvePoints, currency, {
+        title: options.title ?? 'Keepbook Tax Impact',
+        output: options.output ?? 'artifacts/tax-impact.html',
+        svgOutput: options.svgOutput,
+        width: options.width ?? 1400,
+        height: options.height ?? 900,
+      })
+    : undefined;
+
+  const result: TaxImpactOutput = {
+    currency,
+    as_of_date: asOfDate,
+    capital_gains_tax_rate: decStr(rate),
+    current_nominal_net_worth: decStrRounded(currentNominal, config.display.currency_decimals),
+    current_tax_liability: decStrRounded(currentTax, config.display.currency_decimals),
+    current_after_tax_net_worth: decStrRounded(currentAfterTax, config.display.currency_decimals),
+    points: curvePoints,
+  };
+  if (graphOutput !== undefined) result.graph = graphOutput;
+  return result;
+}
+
+async function writeTaxImpactGraph(
+  points: TaxImpactPoint[],
+  currency: string,
+  options: { title: string; output: string; svgOutput?: string; width: number; height: number },
+): Promise<TaxImpactGraphOutput> {
+  if (options.width < 360 || options.height < 240) {
+    throw new Error('Graph width and height must be at least 360x240');
+  }
+  const svgOutput =
+    options.svgOutput ??
+    path.join(
+      path.dirname(options.output),
+      `${path.basename(options.output, path.extname(options.output))}.svg`,
+    );
+  const svg = renderTaxImpactSvg(points, currency, options.title, options.width, options.height);
+  const html = renderTaxImpactHtml(options.title, options.width, options.output, svgOutput);
+
+  await mkdir(path.dirname(svgOutput), { recursive: true });
+  await mkdir(path.dirname(options.output), { recursive: true });
+  await writeFile(svgOutput, svg);
+  await writeFile(options.output, html);
+
+  return { html_path: options.output, svg_path: svgOutput };
+}
+
+function renderTaxImpactHtml(
+  title: string,
+  width: number,
+  htmlPath: string,
+  svgPath: string,
+): string {
+  const imgSrc =
+    path.dirname(htmlPath) === path.dirname(svgPath) ? `./${path.basename(svgPath)}` : svgPath;
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${taxGraphEscapeHtml(title)}</title>
+    <style>
+      body { margin: 0; background: #edf2f7; display: grid; place-items: center; min-height: 100vh; }
+      img { width: min(96vw, ${width}px); height: auto; box-shadow: 0 18px 48px rgba(16,42,67,.18); border-radius: 20px; }
+    </style>
+  </head>
+  <body>
+    <img src="${taxGraphEscapeHtml(imgSrc)}" alt="${taxGraphEscapeHtml(title)}" />
+  </body>
+</html>
+`;
+}
+
+function renderTaxImpactSvg(
+  points: TaxImpactPoint[],
+  currency: string,
+  title: string,
+  width: number,
+  height: number,
+): string {
+  if (points.length === 0) throw new Error('Tax impact graph requires at least one point');
+  const marginLeft = 126;
+  const marginRight = 64;
+  const marginTop = 108;
+  const marginBottom = 104;
+  const plotX = marginLeft;
+  const plotY = marginTop;
+  const plotW = width - marginLeft - marginRight;
+  const plotH = height - marginTop - marginBottom;
+
+  const xs = points.map((point) => Number.parseFloat(point.nominal_net_worth));
+  const ys = points.map((point) => Number.parseFloat(point.after_tax_net_worth));
+  const xMin = Math.min(...xs);
+  const xMax = Math.max(...xs);
+  const yMinRaw = Math.min(...ys, xMin);
+  const yMaxRaw = Math.max(...ys, xMax);
+  const xCollapsed = Math.abs(xMax - xMin) < Number.EPSILON;
+  const xSpan = xCollapsed ? Math.max(Math.abs(xMin), 1) * 0.1 : Math.abs(xMax - xMin);
+  const ySpan = Math.max(Math.abs(yMaxRaw - yMinRaw), 1);
+  const xLo = xCollapsed ? xMin - xSpan : xMin - xSpan * 0.04;
+  const xHi = xCollapsed ? xMax + xSpan : xMax + xSpan * 0.04;
+  const yLo = yMinRaw - ySpan * 0.06;
+  const yHi = yMaxRaw + ySpan * 0.06;
+
+  const scaleX = (value: number): number => plotX + ((value - xLo) / (xHi - xLo)) * plotW;
+  const scaleY = (value: number): number => plotY + ((yHi - value) / (yHi - yLo)) * plotH;
+  const curvePoints = xs.map((x, index): [number, number] => [scaleX(x), scaleY(ys[index])]);
+  const identityPoints: Array<[number, number]> = [
+    [scaleX(xMin), scaleY(xMin)],
+    [scaleX(xMax), scaleY(xMax)],
+  ];
+
+  let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-labelledby="title desc">
+  <title id="title">${taxGraphEscapeHtml(title)}</title>
+  <desc id="desc">Tax impact graph from nominal net worth to after-tax net worth in ${taxGraphEscapeHtml(currency)}</desc>
+  <rect width="100%" height="100%" fill="#f8fafc"/>
+  <text x="${marginLeft}" y="54" font-size="34" fill="#102a43" font-family="ui-sans-serif, system-ui, sans-serif">${taxGraphEscapeHtml(title)}</text>
+  <text x="${marginLeft}" y="84" font-size="18" fill="#627d98" font-family="ui-sans-serif, system-ui, sans-serif">Nominal net worth to net worth after expected latent tax - ${taxGraphEscapeHtml(currency)}</text>
+  <rect x="${plotX}" y="${plotY}" width="${plotW}" height="${plotH}" fill="#ffffff" stroke="#d9e2ec" rx="8"/>
+`;
+  for (let i = 0; i <= 5; i += 1) {
+    const ratio = i / 5;
+    const y = plotY + ratio * plotH;
+    const value = yHi - ratio * (yHi - yLo);
+    svg += `  <line x1="${plotX}" y1="${y.toFixed(2)}" x2="${plotX + plotW}" y2="${y.toFixed(2)}" stroke="#eef2f7"/>
+  <text x="${plotX - 14}" y="${(y + 5).toFixed(2)}" font-size="14" text-anchor="end" fill="#627d98" font-family="ui-sans-serif, system-ui, sans-serif">${taxGraphEscapeHtml(taxGraphFormatCurrencyTick(value, currency))}</text>
+`;
+  }
+  for (let i = 0; i <= 5; i += 1) {
+    const ratio = i / 5;
+    const x = plotX + ratio * plotW;
+    const value = xLo + ratio * (xHi - xLo);
+    svg += `  <line x1="${x.toFixed(2)}" y1="${plotY}" x2="${x.toFixed(2)}" y2="${plotY + plotH + 8}" stroke="#e5eaf1"/>
+  <text x="${x.toFixed(2)}" y="${plotY + plotH + 34}" font-size="14" text-anchor="middle" fill="#627d98" font-family="ui-sans-serif, system-ui, sans-serif">${taxGraphEscapeHtml(taxGraphFormatCurrencyTick(value, currency))}</text>
+`;
+  }
+  svg += `  <path d="${taxGraphPathFromPoints(identityPoints)}" fill="none" stroke="#94a3b8" stroke-width="2" stroke-dasharray="8 8"/>
+  <path d="${taxGraphPathFromPoints(curvePoints)}" fill="none" stroke="#1c7ed6" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>
+`;
+  for (const [x, y] of curvePoints) {
+    svg += `  <circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="4" fill="#0b7285" stroke="#ffffff" stroke-width="2"/>
+`;
+  }
+  svg += `  <text x="${marginLeft}" y="${height - 28}" font-size="16" fill="#829ab1" font-family="ui-sans-serif, system-ui, sans-serif">x: nominal net worth | y: after-tax net worth | dashed: no-tax line</text>
+</svg>
+`;
+  return svg;
+}
+
+function taxGraphPathFromPoints(points: Array<[number, number]>): string {
+  return points
+    .map(([x, y], index) => `${index === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`)
+    .join(' ');
+}
+
+function taxGraphFormatCurrencyTick(value: number, currency: string): string {
+  const sign = value < 0 ? '-' : '';
+  const abs = Math.abs(value);
+  let compact: string;
+  if (abs >= 1_000_000_000) compact = `${(abs / 1_000_000_000).toFixed(1)}B`;
+  else if (abs >= 1_000_000) compact = `${(abs / 1_000_000).toFixed(1)}M`;
+  else if (abs >= 1_000) compact = `${(abs / 1_000).toFixed(1)}K`;
+  else compact = abs.toFixed(0);
+  return `${sign}${compact} ${currency}`;
+}
+
+function taxGraphEscapeHtml(input: string): string {
+  return input
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
 }
 
 // ---------------------------------------------------------------------------

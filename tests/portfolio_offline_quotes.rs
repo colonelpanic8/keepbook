@@ -83,6 +83,8 @@ async fn portfolio_snapshot_offline_uses_cached_quote() -> Result<()> {
         "asset".to_string(),
         false,
         None,
+        None,
+        None,
         false,
         true,
         false,

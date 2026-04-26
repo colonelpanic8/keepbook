@@ -36,7 +36,16 @@ export interface PortfolioQuery {
    * 0.238 for 23.8%).
    */
   capital_gains_tax_rate?: Decimal;
+  /**
+   * Optional scenario that changes equity valuations before totals,
+   * unrealized gains, and prospective tax are calculated.
+   */
+  equity_valuation_adjustment?: EquityValuationAdjustment;
 }
+
+export type EquityValuationAdjustment =
+  | { type: 'percent_change'; percent: Decimal }
+  | { type: 'target_pre_tax_total_value'; amount: Decimal };
 
 // ---------------------------------------------------------------------------
 // Snapshot (result)
@@ -50,8 +59,18 @@ export interface PortfolioSnapshot {
   total_cost_basis?: string;
   total_unrealized_gain?: string;
   prospective_capital_gains_tax?: string;
+  valuation_scenario?: PortfolioValuationScenario;
   by_asset?: AssetSummary[];
   by_account?: AccountSummary[];
+}
+
+export interface PortfolioValuationScenario {
+  equity_multiplier: string;
+  equity_change_percent: string;
+  pre_tax_total_value: string;
+  equity_value_before: string;
+  equity_value_after: string;
+  target_pre_tax_total_value?: string;
 }
 
 // ---------------------------------------------------------------------------

@@ -207,6 +207,50 @@ describe('PortfolioService', () => {
     expect(assetSummary.holdings![0].unrealized_gain).toBe('500');
   });
 
+  it('can scale equity valuations to a target pre-tax total value', async () => {
+    const conn = await createConnection(storage, 'Broker');
+    const account = await createAccount(storage, 'Brokerage', conn);
+    await addSnapshot(storage, account.id, new Date('2026-02-01T12:00:00Z'), [
+      { asset: Asset.currency('USD'), amount: '1000' },
+      { asset: Asset.equity('AAPL'), amount: '10', cost_basis: '1500' },
+    ]);
+
+    await mdStore.put_prices([makePrice(Asset.equity('AAPL'), '2026-02-02', '200')]);
+
+    const service = buildService();
+    const result = await service.calculate(
+      makeQuery({
+        currency: 'USD',
+        grouping: 'both',
+        include_detail: true,
+        capital_gains_tax_rate: new Decimal('0.23'),
+        equity_valuation_adjustment: {
+          type: 'target_pre_tax_total_value',
+          amount: new Decimal('2600'),
+        },
+      }),
+    );
+
+    expect(result.total_value).toBe('2600');
+    expect(result.total_cost_basis).toBe('1500');
+    expect(result.total_unrealized_gain).toBe('100');
+    expect(result.prospective_capital_gains_tax).toBe('23');
+    expect(result.valuation_scenario).toEqual({
+      equity_multiplier: '0.8',
+      equity_change_percent: '-20',
+      pre_tax_total_value: '2600',
+      equity_value_before: '2000',
+      equity_value_after: '1600',
+      target_pre_tax_total_value: '2600',
+    });
+
+    const equitySummary = result.by_asset!.find((s) => s.asset.type === 'equity')!;
+    expect(equitySummary.price).toBe('160');
+    expect(equitySummary.value_in_base).toBe('1600');
+    expect(equitySummary.unrealized_gain).toBe('100');
+    expect(result.by_account![0].value_in_base).toBe('2600');
+  });
+
   it('prefers a same-day historical quote over an older close', async () => {
     const conn = await createConnection(storage, 'Broker');
     const account = await createAccount(storage, 'Brokerage', conn);

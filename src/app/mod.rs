@@ -28,7 +28,7 @@ pub use portfolio::{
     default_portfolio_change_points_granularity, default_portfolio_history_granularity,
     default_portfolio_include_prices, fetch_historical_prices, fill_prices_at_date,
     portfolio_change_points, portfolio_history, portfolio_recent_history, portfolio_snapshot,
-    PriceHistoryRequest, DEFAULT_PORTFOLIO_CHANGE_POINTS_GRANULARITY,
+    portfolio_tax_impact, PriceHistoryRequest, DEFAULT_PORTFOLIO_CHANGE_POINTS_GRANULARITY,
     DEFAULT_PORTFOLIO_HISTORY_GRANULARITY, DEFAULT_PORTFOLIO_INCLUDE_PRICES,
 };
 pub use preflight::{run_preflight, PreflightOptions};
@@ -42,8 +42,8 @@ pub use types::{
     AccountOutput, AllOutput, AssetInfoOutput, BalanceOutput, ChangePointsOutput, ConnectionOutput,
     HistoryOutput, HistoryPoint, HistorySummary, PriceHistoryFailure, PriceHistoryOutput,
     PriceHistoryScopeOutput, PriceHistoryStats, PriceSourceOutput, SpendingBreakdownEntryOutput,
-    SpendingOutput, SpendingPeriodOutput, SpendingScopeOutput, TransactionAnnotationOutput,
-    TransactionOutput,
+    SpendingOutput, SpendingPeriodOutput, SpendingScopeOutput, TaxImpactGraphOutput,
+    TaxImpactOutput, TaxImpactPoint, TransactionAnnotationOutput, TransactionOutput,
 };
 
 fn maybe_auto_commit(config: &ResolvedConfig, action: &str) {
