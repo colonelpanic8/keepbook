@@ -3,8 +3,11 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(target_arch = "wasm32")]
 use gloo_net::http::Request;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::OnceLock;
 
 const APP_CSS: &str = include_str!("../assets/styles.css");
+#[cfg(target_arch = "wasm32")]
 const API_BASE: &str = "http://127.0.0.1:8799";
 const DEFAULT_RANGE_PRESET: RangePreset = RangePreset::OneYear;
 const DEFAULT_SAMPLING_GRANULARITY: SamplingGranularity = SamplingGranularity::Weekly;
@@ -388,20 +391,18 @@ async fn fetch_overview_impl(overrides: FilterOverrides) -> Result<Overview, Str
 
 #[cfg(not(target_arch = "wasm32"))]
 async fn fetch_overview_impl(overrides: FilterOverrides) -> Result<Overview, String> {
-    let query = filter_override_query_string(overrides);
-    let url = if query.is_empty() {
-        format!("{API_BASE}/api/overview")
-    } else {
-        format!("{API_BASE}/api/overview?{query}")
-    };
-    reqwest::get(url)
+    let output = native_api_state()?
+        .overview(keepbook_server::OverviewQuery {
+            history_start: None,
+            history_end: None,
+            history_granularity: None,
+            include_prices: None,
+            include_latent_capital_gains_tax: overrides.include_latent_capital_gains_tax,
+            include_history: false,
+        })
         .await
-        .map_err(|error| format!("Could not reach keepbook-server at {API_BASE}: {error}"))?
-        .error_for_status()
-        .map_err(|error| format!("keepbook-server returned an error: {error}"))?
-        .json::<Overview>()
-        .await
-        .map_err(|error| format!("Could not decode keepbook overview: {error}"))
+        .map_err(|error| format!("Could not load keepbook overview: {error:#}"))?;
+    from_native_output(output, "keepbook overview")
 }
 
 async fn fetch_history(query: String) -> Result<History, String> {
@@ -506,56 +507,82 @@ async fn sync_git_repo_impl(input: GitSyncInput) -> Result<GitSyncOutput, String
 
 #[cfg(not(target_arch = "wasm32"))]
 async fn fetch_history_impl(query: String) -> Result<History, String> {
-    reqwest::get(format!("{API_BASE}/api/portfolio/history?{query}"))
+    let query = serde_urlencoded::from_str::<keepbook_server::HistoryQuery>(&query)
+        .map_err(|error| format!("Could not encode history query: {error}"))?;
+    let output = native_api_state()?
+        .portfolio_history(query)
         .await
-        .map_err(|error| format!("Could not reach keepbook-server at {API_BASE}: {error}"))?
-        .error_for_status()
-        .map_err(|error| format!("keepbook-server returned an error: {error}"))?
-        .json::<History>()
-        .await
-        .map_err(|error| format!("Could not decode net worth history: {error}"))
+        .map_err(|error| format!("Could not load net worth history: {error:#}"))?;
+    from_native_output(output, "net worth history")
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 async fn fetch_git_settings_impl() -> Result<GitSettingsOutput, String> {
-    reqwest::get(format!("{API_BASE}/api/git/settings"))
+    let output = native_api_state()?
+        .git_settings()
         .await
-        .map_err(|error| format!("Could not reach keepbook-server at {API_BASE}: {error}"))?
-        .error_for_status()
-        .map_err(|error| format!("keepbook-server returned an error: {error}"))?
-        .json::<GitSettingsOutput>()
-        .await
-        .map_err(|error| format!("Could not decode Git settings: {error}"))
+        .map_err(|error| format!("Could not load Git settings: {error:#}"))?;
+    from_native_output(output, "Git settings")
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 async fn save_git_settings_impl(input: GitSettingsInput) -> Result<GitSettingsOutput, String> {
-    reqwest::Client::new()
-        .put(format!("{API_BASE}/api/git/settings"))
-        .json(&input)
-        .send()
+    let output = native_api_state()?
+        .save_git_settings(keepbook_server::GitSettingsInput {
+            data_dir: input.data_dir,
+            host: input.host,
+            repo: input.repo,
+            branch: input.branch,
+            ssh_user: input.ssh_user,
+        })
         .await
-        .map_err(|error| format!("Could not reach keepbook-server at {API_BASE}: {error}"))?
-        .error_for_status()
-        .map_err(|error| format!("keepbook-server returned an error: {error}"))?
-        .json::<GitSettingsOutput>()
-        .await
-        .map_err(|error| format!("Could not decode Git settings: {error}"))
+        .map_err(|error| format!("Could not save Git settings: {error:#}"))?;
+    from_native_output(output, "Git settings")
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 async fn sync_git_repo_impl(input: GitSyncInput) -> Result<GitSyncOutput, String> {
-    reqwest::Client::new()
-        .post(format!("{API_BASE}/api/git/sync"))
-        .json(&input)
-        .send()
+    let output = native_api_state()?
+        .sync_git_repo(keepbook_server::GitSyncInput {
+            data_dir: input.data_dir,
+            host: input.host,
+            repo: input.repo,
+            branch: input.branch,
+            ssh_user: input.ssh_user,
+            private_key_pem: input.private_key_pem,
+            save_settings: input.save_settings,
+        })
         .await
-        .map_err(|error| format!("Could not reach keepbook-server at {API_BASE}: {error}"))?
-        .error_for_status()
-        .map_err(|error| format!("keepbook-server returned an error: {error}"))?
-        .json::<GitSyncOutput>()
-        .await
-        .map_err(|error| format!("Could not decode Git sync result: {error}"))
+        .map_err(|error| format!("Sync failed: {error:#}"))?;
+    from_native_output(output, "Git sync result")
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn native_api_state() -> Result<&'static keepbook_server::ApiState, String> {
+    static STATE: OnceLock<keepbook_server::ApiState> = OnceLock::new();
+    if let Some(state) = STATE.get() {
+        return Ok(state);
+    }
+
+    let state = keepbook_server::ApiState::load(keepbook_server::default_server_config_path())
+        .map_err(|error| format!("Could not initialize local keepbook API: {error:#}"))?;
+    let _ = STATE.set(state);
+    STATE
+        .get()
+        .ok_or_else(|| "Could not initialize local keepbook API".to_string())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn from_native_output<T, U>(output: U, label: &str) -> Result<T, String>
+where
+    T: for<'de> Deserialize<'de>,
+    U: Serialize,
+{
+    serde_json::from_value(
+        serde_json::to_value(output)
+            .map_err(|error| format!("Could not encode {label}: {error}"))?,
+    )
+    .map_err(|error| format!("Could not decode {label}: {error}"))
 }
 #[component]
 fn StatusPanel(state: LoadState) -> Element {
@@ -2132,6 +2159,7 @@ fn history_query_string(
     params.join("&")
 }
 
+#[cfg(target_arch = "wasm32")]
 fn filter_override_query_string(overrides: FilterOverrides) -> String {
     let mut params = Vec::new();
     append_filter_override_params(&mut params, overrides);

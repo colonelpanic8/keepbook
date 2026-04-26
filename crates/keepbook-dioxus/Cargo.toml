@@ -23,7 +23,8 @@ mobile = ["dioxus/mobile"]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+keepbook-server = { path = "../keepbook-server", default-features = false }
+serde_urlencoded = "0.7"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = "=0.3.85"

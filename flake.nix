@@ -103,9 +103,9 @@
           includeEmulator = true;
           platformVersions = ["33" "34"];
           includeSources = false;
-          includeSystemImages = true;
+          includeSystemImages = false;
           systemImageTypes = ["google_apis_playstore"];
-          abiVersions = ["x86_64"];
+          abiVersions = ["arm64-v8a" "x86_64"];
           includeNDK = true;
           ndkVersions = [androidNdkVersion];
           cmakeVersions = ["3.22.1"];
@@ -115,14 +115,18 @@
         androidHome = "${androidComposition.androidsdk}/libexec/android-sdk";
         androidNdkHome = "${androidHome}/ndk/${androidNdkVersion}";
         androidAapt2 = "${androidHome}/build-tools/${androidBuildToolsVersion}/aapt2";
+        androidLlvmBin = "${androidNdkHome}/toolchains/llvm/prebuilt/linux-x86_64/bin";
         dioxusAndroidEnv = {
           ANDROID_HOME = androidHome;
           ANDROID_SDK_ROOT = androidHome;
           ANDROID_NDK_HOME = androidNdkHome;
           NDK_HOME = androidNdkHome;
+          CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER = "${androidLlvmBin}/aarch64-linux-android24-clang";
+          CC_aarch64_linux_android = "${androidLlvmBin}/aarch64-linux-android24-clang";
+          AR_aarch64_linux_android = "${androidLlvmBin}/llvm-ar";
           GRADLE_OPTS = "-Dorg.gradle.project.android.aapt2FromMavenOverride=${androidAapt2}";
           JAVA_HOME = pkgs.jdk17.home;
-          OPENSSL_NO_VENDOR = "1";
+          OPENSSL_NO_VENDOR = "0";
         };
         dioxusAndroidBuildScript = release:
           pkgs.writeShellApplication {
@@ -148,6 +152,7 @@
                 then "bundle"
                 else "build"
               } --android
+                --target aarch64-linux-android
                 --package keepbook-dioxus
                 --no-default-features
                 --features mobile
