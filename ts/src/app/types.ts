@@ -167,6 +167,34 @@ export interface HistoryOutput {
 }
 
 // ---------------------------------------------------------------------------
+// Portfolio Tax Impact
+// ---------------------------------------------------------------------------
+
+export interface TaxImpactPoint {
+  nominal_net_worth: string;
+  tax_liability: string;
+  after_tax_net_worth: string;
+  equity_multiplier: string;
+  equity_change_percent: string;
+}
+
+export interface TaxImpactGraphOutput {
+  html_path: string;
+  svg_path: string;
+}
+
+export interface TaxImpactOutput {
+  currency: string;
+  as_of_date: string;
+  capital_gains_tax_rate: string;
+  current_nominal_net_worth: string;
+  current_tax_liability: string;
+  current_after_tax_net_worth: string;
+  points: TaxImpactPoint[];
+  graph?: TaxImpactGraphOutput;
+}
+
+// ---------------------------------------------------------------------------
 // Change Points
 // ---------------------------------------------------------------------------
 

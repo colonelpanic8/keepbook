@@ -25,6 +25,8 @@ import type {
   AssetSummary,
   AccountSummary,
   AccountHolding,
+  EquityValuationAdjustment,
+  PortfolioValuationScenario,
 } from './models.js';
 
 // ---------------------------------------------------------------------------
@@ -64,6 +66,11 @@ interface GainsTotals {
   total_cost_basis: Decimal | undefined;
   total_unrealized_gain: Decimal | undefined;
   prospective_capital_gains_tax: Decimal | undefined;
+}
+
+interface ResolvedValuationScenario {
+  multiplier: Decimal;
+  output: PortfolioValuationScenario;
 }
 
 /** Context loaded from storage for portfolio calculation. */
@@ -112,6 +119,17 @@ export class PortfolioService {
       query.as_of_date,
     );
 
+    const valuationScenario = this.resolveEquityValuationScenario(
+      byAssetAgg,
+      priceCache,
+      query.equity_valuation_adjustment,
+      query.currency_decimals,
+    );
+    const effectivePriceCache =
+      valuationScenario === undefined
+        ? new Map(priceCache)
+        : this.applyEquityValuationMultiplier(priceCache, valuationScenario.multiplier);
+
     // 4. Build asset summaries and total value
     const {
       summaries: assetSummaries,
@@ -119,7 +137,7 @@ export class PortfolioService {
       gainsTotals,
     } = this.buildAssetSummaries(
       byAssetAgg,
-      priceCache,
+      effectivePriceCache,
       ctx.account_map,
       query.include_detail,
       query.currency_decimals,
@@ -130,7 +148,7 @@ export class PortfolioService {
     const accountSummaries = this.buildAccountSummaries(
       ctx.filtered_snapshots,
       ctx.zero_accounts,
-      priceCache,
+      effectivePriceCache,
       ctx.account_map,
       ctx.connection_map,
       query.currency_decimals,
@@ -174,6 +192,9 @@ export class PortfolioService {
         gainsTotals.prospective_capital_gains_tax,
         query.currency_decimals,
       );
+    }
+    if (valuationScenario !== undefined) {
+      snapshot.valuation_scenario = valuationScenario.output;
     }
     return snapshot;
   }
@@ -352,6 +373,110 @@ export class PortfolioService {
     }
 
     return cache;
+  }
+
+  private assetValue(agg: AssetAggregate, valuation: AssetValuation): Decimal | undefined {
+    return valuation.value === undefined ? undefined : valuation.value.times(agg.total_amount);
+  }
+
+  private equityValueTotals(
+    byAsset: Map<string, { asset: AssetType; agg: AssetAggregate }>,
+    priceCache: Map<string, AssetValuation>,
+  ): { equityValue: Decimal; nonEquityValue: Decimal } {
+    let equityValue = new Decimal(0);
+    let nonEquityValue = new Decimal(0);
+
+    for (const [key, { asset, agg }] of byAsset) {
+      const valuation = priceCache.get(key);
+      if (valuation === undefined) {
+        throw new Error(`Missing valuation for asset ${AssetId.fromAsset(asset).asStr()}`);
+      }
+
+      const value = this.assetValue(agg, valuation);
+      if (value === undefined) continue;
+
+      if (asset.type === 'equity') {
+        equityValue = equityValue.plus(value);
+      } else {
+        nonEquityValue = nonEquityValue.plus(value);
+      }
+    }
+
+    return { equityValue, nonEquityValue };
+  }
+
+  private resolveEquityValuationScenario(
+    byAsset: Map<string, { asset: AssetType; agg: AssetAggregate }>,
+    priceCache: Map<string, AssetValuation>,
+    adjustment: EquityValuationAdjustment | undefined,
+    currencyDecimals: number | undefined,
+  ): ResolvedValuationScenario | undefined {
+    if (adjustment === undefined) return undefined;
+
+    const { equityValue: equityValueBefore, nonEquityValue } = this.equityValueTotals(
+      byAsset,
+      priceCache,
+    );
+    if (equityValueBefore.lte(0)) {
+      throw new Error('Equity valuation scenario requires positive priced equity holdings');
+    }
+
+    let multiplier: Decimal;
+    let targetPreTaxTotalValue: Decimal | undefined;
+    if (adjustment.type === 'percent_change') {
+      multiplier = new Decimal(1).plus(adjustment.percent.div(100));
+    } else {
+      targetPreTaxTotalValue = adjustment.amount;
+      const requiredEquityValue = targetPreTaxTotalValue.minus(nonEquityValue);
+      if (requiredEquityValue.lt(0)) {
+        throw new Error(
+          `Target pre-tax total value ${targetPreTaxTotalValue.toString()} is below non-equity portfolio value ${nonEquityValue.toString()}`,
+        );
+      }
+      multiplier = requiredEquityValue.div(equityValueBefore);
+    }
+
+    if (multiplier.lt(0)) {
+      throw new Error('Equity valuation scenario would produce negative equity prices');
+    }
+
+    const equityValueAfter = equityValueBefore.times(multiplier);
+    const preTaxTotalValue = nonEquityValue.plus(equityValueAfter);
+    const equityChangePercent = multiplier.minus(1).times(100);
+
+    return {
+      multiplier,
+      output: {
+        equity_multiplier: decStr(multiplier),
+        equity_change_percent: decStr(equityChangePercent),
+        pre_tax_total_value: decStrRounded(preTaxTotalValue, currencyDecimals),
+        equity_value_before: decStrRounded(equityValueBefore, currencyDecimals),
+        equity_value_after: decStrRounded(equityValueAfter, currencyDecimals),
+        target_pre_tax_total_value:
+          targetPreTaxTotalValue === undefined
+            ? undefined
+            : decStrRounded(targetPreTaxTotalValue, currencyDecimals),
+      },
+    };
+  }
+
+  private applyEquityValuationMultiplier(
+    priceCache: Map<string, AssetValuation>,
+    multiplier: Decimal,
+  ): Map<string, AssetValuation> {
+    const adjusted = new Map<string, AssetValuation>();
+    for (const [key, valuation] of priceCache) {
+      const next = { ...valuation };
+      const asset = key;
+      if (asset.startsWith('equity:') || asset.startsWith('equity/')) {
+        next.value = next.value?.times(multiplier);
+        if (next.price !== undefined) {
+          next.price = decStr(new Decimal(next.price).times(multiplier));
+        }
+      }
+      adjusted.set(key, next);
+    }
+    return adjusted;
   }
 
   // -----------------------------------------------------------------------

@@ -30,6 +30,8 @@
       };
 
       fenixPkgs = fenix.packages.${system};
+      lib = pkgs.lib;
+      isDarwin = pkgs.stdenv.hostPlatform.isDarwin;
       rustToolchainBase = fenixPkgs.stable.withComponents [
         "cargo"
         "clippy"
@@ -85,92 +87,98 @@
         pkg-config
       ];
     in {
-      devShells = {
-        android = pkgs.mkShell {
-          buildInputs =
-            sharedDeps
-            ++ [pkgs.jdk17]
-            ++ (
-              if system == "x86_64-linux"
-              then [pkgs.nixgl.auto.nixGLDefault pkgs.nixgl.nixGLIntel]
-              else []
-            );
+      devShells =
+        {
+          android = pkgs.mkShell {
+            buildInputs =
+              sharedDeps
+              ++ [pkgs.jdk17]
+              ++ (
+                if system == "x86_64-linux"
+                then [pkgs.nixgl.auto.nixGLDefault pkgs.nixgl.nixGLIntel]
+                else []
+              );
 
-          LC_ALL = "en_US.UTF-8";
-          LANG = "en_US.UTF-8";
+            LC_ALL = "en_US.UTF-8";
+            LANG = "en_US.UTF-8";
 
-          ANDROID_HOME = android-home;
-          ANDROID_SDK_ROOT = android-home;
-          ANDROID_NDK_HOME = "${android-home}/ndk/27.1.12297006";
-          GRADLE_OPTS = "-Dorg.gradle.project.android.aapt2FromMavenOverride=${aapt2Binary}";
+            ANDROID_HOME = android-home;
+            ANDROID_SDK_ROOT = android-home;
+            ANDROID_NDK_HOME = "${android-home}/ndk/27.1.12297006";
+            GRADLE_OPTS = "-Dorg.gradle.project.android.aapt2FromMavenOverride=${aapt2Binary}";
 
-          shellHook = ''
-            export JAVA_HOME=${pkgs.jdk17.home}
-            export PATH=${android-home}/emulator:${android-home}/cmdline-tools/${cmdLineToolsVersion}/bin:$PWD/node_modules/.bin:$PATH
-            export KEEPBOOK_ROOT="$PWD/.."
+            shellHook = ''
+              export JAVA_HOME=${pkgs.jdk17.home}
+              export PATH=${android-home}/emulator:${android-home}/cmdline-tools/${cmdLineToolsVersion}/bin:$PWD/node_modules/.bin:$PATH
+              export KEEPBOOK_ROOT="$PWD/.."
 
-            echo "keepbook frontend Android dev shell"
-            echo "  node: $(node --version)"
-            echo "  yarn: $(yarn --version)"
-            echo ""
-            echo "Commands:"
-            echo "  yarn start       - Start Expo dev server"
-            echo "  yarn android     - Build + run on Android"
-            echo "  yarn web         - Run in browser"
-            echo "  just emulator    - Start Android emulator (uses nixGLIntel)"
-            echo "  just --list      - Show all just commands"
-          '';
+              echo "keepbook frontend Android dev shell"
+              echo "  node: $(node --version)"
+              echo "  yarn: $(yarn --version)"
+              echo ""
+              echo "Commands:"
+              echo "  yarn start       - Start Expo dev server"
+              echo "  yarn android     - Build + run on Android"
+              echo "  yarn web         - Run in browser"
+              echo "  just emulator    - Start Android emulator (uses nixGLIntel)"
+              echo "  just --list      - Show all just commands"
+            '';
+          };
+
+          default = pkgs.mkShell {
+            buildInputs = sharedDeps;
+            LC_ALL = "en_US.UTF-8";
+            LANG = "en_US.UTF-8";
+
+            shellHook = ''
+              export PATH="$PWD/node_modules/.bin:$PATH"
+              export KEEPBOOK_ROOT="$PWD/.."
+
+              echo "keepbook frontend dev shell (${
+                if isDarwin
+                then "use 'nix develop .#ios' or 'nix develop .#android'"
+                else "use 'nix develop .#android'"
+              } for platform-specific shells)"
+              echo "  node: $(node --version)"
+              echo "  yarn: $(yarn --version)"
+              echo "  rustc: $(rustc --version)"
+            '';
+          };
+        }
+        // lib.optionalAttrs isDarwin {
+          ios = (pkgs.mkShell.override {stdenv = pkgs.stdenvNoCC;}) {
+            disallowedRequisites = [pkgs.xcbuild pkgs.xcbuild.xcrun];
+
+            buildInputs =
+              sharedDeps
+              ++ [
+                pkgs.cocoapods
+                pkgs.ruby
+                pkgs.bundler
+              ];
+
+            LC_ALL = "en_US.UTF-8";
+            LANG = "en_US.UTF-8";
+
+            shellHook = ''
+              unset DEVELOPER_DIR
+              export PATH="$PWD/node_modules/.bin:$PWD/vendor/bundle/bin:$PATH"
+              export BUNDLE_PATH="$PWD/vendor/bundle"
+              export GEM_HOME="$PWD/vendor/bundle"
+              export KEEPBOOK_ROOT="$PWD/.."
+
+              echo "keepbook frontend iOS dev shell"
+              echo "  node: $(node --version)"
+              echo "  yarn: $(yarn --version)"
+              echo "  ruby: $(ruby --version)"
+              echo ""
+              echo "Commands:"
+              echo "  yarn start       - Start Expo dev server"
+              echo "  yarn ios         - Build + run on iOS"
+              echo "  yarn web         - Run in browser"
+              echo "  just --list      - Show all just commands"
+            '';
+          };
         };
-
-        ios = (pkgs.mkShell.override {stdenv = pkgs.stdenvNoCC;}) {
-          disallowedRequisites = [pkgs.xcbuild pkgs.xcbuild.xcrun];
-
-          buildInputs =
-            sharedDeps
-            ++ [
-              pkgs.cocoapods
-              pkgs.ruby
-              pkgs.bundler
-            ];
-
-          LC_ALL = "en_US.UTF-8";
-          LANG = "en_US.UTF-8";
-
-          shellHook = ''
-            unset DEVELOPER_DIR
-            export PATH="$PWD/node_modules/.bin:$PWD/vendor/bundle/bin:$PATH"
-            export BUNDLE_PATH="$PWD/vendor/bundle"
-            export GEM_HOME="$PWD/vendor/bundle"
-            export KEEPBOOK_ROOT="$PWD/.."
-
-            echo "keepbook frontend iOS dev shell"
-            echo "  node: $(node --version)"
-            echo "  yarn: $(yarn --version)"
-            echo "  ruby: $(ruby --version)"
-            echo ""
-            echo "Commands:"
-            echo "  yarn start       - Start Expo dev server"
-            echo "  yarn ios         - Build + run on iOS"
-            echo "  yarn web         - Run in browser"
-            echo "  just --list      - Show all just commands"
-          '';
-        };
-
-        default = pkgs.mkShell {
-          buildInputs = sharedDeps;
-          LC_ALL = "en_US.UTF-8";
-          LANG = "en_US.UTF-8";
-
-          shellHook = ''
-            export PATH="$PWD/node_modules/.bin:$PATH"
-            export KEEPBOOK_ROOT="$PWD/.."
-
-            echo "keepbook frontend dev shell (use 'nix develop .#ios' or 'nix develop .#android' for platform-specific shells)"
-            echo "  node: $(node --version)"
-            echo "  yarn: $(yarn --version)"
-            echo "  rustc: $(rustc --version)"
-          '';
-        };
-      };
     });
 }

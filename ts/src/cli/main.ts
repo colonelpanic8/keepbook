@@ -25,6 +25,7 @@ import {
   portfolioSnapshot,
   portfolioHistory,
   portfolioChangePoints,
+  portfolioTaxImpact,
 } from '../app/portfolio.js';
 import { spendingReport } from '../app/spending.js';
 import { applyTransactionAnnotationRules } from '../app/transaction-rules.js';
@@ -833,6 +834,14 @@ portfolio
   .option('--group-by <grouping>', 'grouping: asset, account, or both')
   .option('--detail', 'include holding detail')
   .option('--capital-gains-tax-rate <percent>', 'capital gains tax rate percentage')
+  .option(
+    '--equity-change-percent <percent>',
+    'uniform percentage change to equity assets before valuation',
+  )
+  .option(
+    '--target-pre-tax-total-value <amount>',
+    'uniformly scale equity assets so pre-tax total_value equals amount',
+  )
   .option('--auto', 'auto mode')
   .option('--offline', 'offline mode')
   .option('--dry-run', 'dry run')
@@ -844,6 +853,8 @@ portfolio
       groupBy?: string;
       detail?: boolean;
       capitalGainsTaxRate?: string;
+      equityChangePercent?: string;
+      targetPreTaxTotalValue?: string;
     }) => {
       await runWithConfig(async (cfg) => {
         const storage = new JsonFileStorage(cfg.config.data_dir);
@@ -854,6 +865,59 @@ portfolio
           groupBy: opts.groupBy,
           detail: opts.detail,
           capitalGainsTaxRate: opts.capitalGainsTaxRate,
+          equityChangePercent: opts.equityChangePercent,
+          targetPreTaxTotalValue: opts.targetPreTaxTotalValue,
+        });
+      });
+    },
+  );
+
+portfolio
+  .command('tax-impact')
+  .description('Map nominal net worth to after-tax net worth under latent tax scenarios')
+  .option('--currency <code>', 'reporting currency')
+  .option('--date <date>', 'as-of date (YYYY-MM-DD)')
+  .option('--capital-gains-tax-rate <percent>', 'capital gains tax rate percentage')
+  .option('--min <amount>', 'minimum nominal pre-tax net worth')
+  .option('--max <amount>', 'maximum nominal pre-tax net worth')
+  .option('--points <count>', 'number of curve points', (value) => Number.parseInt(value, 10), 25)
+  .option('--graph', 'write an HTML/SVG graph')
+  .option('--output <path>', 'HTML output path for --graph')
+  .option('--svg-output <path>', 'SVG output path for --graph')
+  .option('--title <title>', 'graph title')
+  .option('--width <px>', 'graph width in pixels', (value) => Number.parseInt(value, 10), 1400)
+  .option('--height <px>', 'graph height in pixels', (value) => Number.parseInt(value, 10), 900)
+  .action(
+    async (opts: {
+      currency?: string;
+      date?: string;
+      capitalGainsTaxRate?: string;
+      min?: string;
+      max?: string;
+      points?: number;
+      graph?: boolean;
+      output?: string;
+      svgOutput?: string;
+      title?: string;
+      width?: number;
+      height?: number;
+    }) => {
+      await runWithConfig(async (cfg) => {
+        const storage = new JsonFileStorage(cfg.config.data_dir);
+        const marketDataStore = new JsonlMarketDataStore(cfg.config.data_dir);
+        return portfolioTaxImpact(storage, marketDataStore, cfg.config, {
+          currency: opts.currency,
+          date: opts.date,
+          capitalGainsTaxRate: opts.capitalGainsTaxRate,
+          min: opts.min,
+          max: opts.max,
+          points: opts.points,
+          graph: opts.graph,
+          output: opts.output,
+          svgOutput: opts.svgOutput,
+          title: opts.title,
+          width: opts.width,
+          height: opts.height,
         });
       });
     },

@@ -1488,6 +1488,8 @@ impl Daemon {
             "account".to_string(),
             false,
             None,
+            None,
+            None,
             false,
             true,
             false,
@@ -2021,6 +2023,10 @@ mod tests {
             as_of_date: NaiveDate::from_ymd_opt(2026, 4, 24).unwrap(),
             currency: "USD".to_string(),
             total_value: "1250".to_string(),
+            total_cost_basis: None,
+            total_unrealized_gain: None,
+            prospective_capital_gains_tax: None,
+            valuation_scenario: None,
             by_asset: None,
             by_account: Some(vec![
                 keepbook::portfolio::AccountSummary {

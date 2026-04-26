@@ -50,6 +50,13 @@
         };
         isLinux = pkgs.stdenv.hostPlatform.isLinux;
         isDarwin = pkgs.stdenv.hostPlatform.isDarwin;
+        rustTargets =
+          [
+            fenixPkgs.targets.wasm32-unknown-unknown.stable.rust-std
+          ]
+          ++ lib.optionals isDarwin [
+            fenixPkgs.targets.aarch64-apple-ios-sim.stable.rust-std
+          ];
         addDarwinInstallNameTool = tool:
           if isDarwin then
             tool.overrideAttrs (old: {
@@ -65,9 +72,7 @@
           fenixPkgs.stable.rustc
           fenixPkgs.stable.rustfmt
           fenixPkgs.stable.rust-analyzer
-          fenixPkgs.targets.wasm32-unknown-unknown.stable.rust-std
-          fenixPkgs.targets.aarch64-apple-ios-sim.stable.rust-std
-        ]);
+        ] ++ rustTargets);
         rustPlatform = pkgs.makeRustPlatform {
           cargo = toolchain;
           rustc = toolchain;
@@ -109,6 +114,7 @@
           buildInputs = [
             toolchain
             pkgs.pkg-config
+            pkgs.binaryen
             pkgs.dioxus-cli
             pkgs.openssl
             pkgs.just
@@ -117,7 +123,24 @@
             pkgs.yarn
           ] ++ lib.optionals isLinux [
             pkgs.dbus
+            pkgs.glib
+            pkgs.gtk3
+            pkgs.webkitgtk_4_1
+            pkgs.xdotool
           ];
+
+          LD_LIBRARY_PATH = lib.optionalString isLinux (lib.makeLibraryPath [
+            pkgs.cairo
+            pkgs.gdk-pixbuf
+            pkgs.glib
+            pkgs.gtk3
+            pkgs.harfbuzz
+            pkgs.libsoup_3
+            pkgs.openssl
+            pkgs.pango
+            pkgs.webkitgtk_4_1
+            pkgs.xdotool
+          ]);
 
           OPENSSL_NO_VENDOR = "1";
         };
