@@ -6,6 +6,8 @@ use gloo_net::http::Request;
 
 static CSS: Asset = asset!("/assets/styles.css");
 const API_BASE: &str = "http://127.0.0.1:8799";
+const DEFAULT_RANGE_PRESET: RangePreset = RangePreset::OneYear;
+const DEFAULT_SAMPLING_GRANULARITY: SamplingGranularity = SamplingGranularity::Weekly;
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 struct Overview {
@@ -14,7 +16,7 @@ struct Overview {
     connections: Vec<Connection>,
     accounts: Vec<Account>,
     balances: Vec<Balance>,
-    history: History,
+    snapshot: PortfolioSnapshot,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -68,6 +70,13 @@ struct HistorySummary {
     percentage_change: String,
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+struct PortfolioSnapshot {
+    as_of_date: String,
+    currency: String,
+    total_value: String,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 struct NetWorthDataPoint {
     date: String,
@@ -84,6 +93,9 @@ struct ChartPoint {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RangePreset {
+    OneMonth,
+    NinetyDays,
+    SixMonths,
     OneYear,
     TwoYears,
     Max,
@@ -115,6 +127,16 @@ impl SamplingGranularity {
             Self::Weekly => "Weekly",
             Self::Monthly => "Monthly",
             Self::Yearly => "Yearly",
+        }
+    }
+
+    fn query_value(self) -> &'static str {
+        match self {
+            Self::Auto => "daily",
+            Self::Daily => "daily",
+            Self::Weekly => "weekly",
+            Self::Monthly => "monthly",
+            Self::Yearly => "yearly",
         }
     }
 }
@@ -190,12 +212,10 @@ async fn fetch_overview() -> Result<Overview, String> {
 
 #[cfg(target_arch = "wasm32")]
 async fn fetch_overview_impl() -> Result<Overview, String> {
-    let response = Request::get(&format!(
-        "{API_BASE}/api/overview?history_granularity=daily"
-    ))
-    .send()
-    .await
-    .map_err(|error| format!("Could not reach keepbook-server at {API_BASE}: {error}"))?;
+    let response = Request::get(&format!("{API_BASE}/api/overview"))
+        .send()
+        .await
+        .map_err(|error| format!("Could not reach keepbook-server at {API_BASE}: {error}"))?;
 
     if !response.ok() {
         return Err(format!(
@@ -213,7 +233,7 @@ async fn fetch_overview_impl() -> Result<Overview, String> {
 
 #[cfg(not(target_arch = "wasm32"))]
 async fn fetch_overview_impl() -> Result<Overview, String> {
-    reqwest::get(format!("{API_BASE}/api/overview?history_granularity=daily"))
+    reqwest::get(format!("{API_BASE}/api/overview"))
         .await
         .map_err(|error| format!("Could not reach keepbook-server at {API_BASE}: {error}"))?
         .error_for_status()
@@ -221,6 +241,43 @@ async fn fetch_overview_impl() -> Result<Overview, String> {
         .json::<Overview>()
         .await
         .map_err(|error| format!("Could not decode keepbook overview: {error}"))
+}
+
+async fn fetch_history(query: String) -> Result<History, String> {
+    fetch_history_impl(query).await
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn fetch_history_impl(query: String) -> Result<History, String> {
+    let response = Request::get(&format!("{API_BASE}/api/portfolio/history?{query}"))
+        .send()
+        .await
+        .map_err(|error| format!("Could not reach keepbook-server at {API_BASE}: {error}"))?;
+
+    if !response.ok() {
+        return Err(format!(
+            "keepbook-server returned HTTP {} {}",
+            response.status(),
+            response.status_text()
+        ));
+    }
+
+    response
+        .json::<History>()
+        .await
+        .map_err(|error| format!("Could not decode net worth history: {error}"))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn fetch_history_impl(query: String) -> Result<History, String> {
+    reqwest::get(format!("{API_BASE}/api/portfolio/history?{query}"))
+        .await
+        .map_err(|error| format!("Could not reach keepbook-server at {API_BASE}: {error}"))?
+        .error_for_status()
+        .map_err(|error| format!("keepbook-server returned an error: {error}"))?
+        .json::<History>()
+        .await
+        .map_err(|error| format!("Could not decode net worth history: {error}"))
 }
 
 #[component]
@@ -240,18 +297,11 @@ fn StatusPanel(state: LoadState) -> Element {
 
 #[component]
 fn Dashboard(overview: Overview, onrefresh: EventHandler<MouseEvent>) -> Element {
-    let mut active_view = use_signal(|| ActiveView::Graphs);
+    let mut active_view = use_signal(|| ActiveView::Summary);
     let mut nav_open = use_signal(|| false);
     let active = active_view();
-    let all_points = history_data_points(&overview.history);
-    let total = all_points
-        .last()
-        .map(|point| point.value)
-        .unwrap_or_default();
-    let last_date = all_points
-        .last()
-        .map(|point| point.date.as_str())
-        .unwrap_or("No history");
+    let total = current_net_worth_from_snapshot(&overview.snapshot);
+    let last_date = overview.snapshot.as_of_date.clone();
     let active_accounts = overview
         .accounts
         .iter()
@@ -316,7 +366,6 @@ fn Dashboard(overview: Overview, onrefresh: EventHandler<MouseEvent>) -> Element
                     },
                     ActiveView::Graphs => rsx! {
                         GraphsView {
-                            history: overview.history.clone(),
                             currency: overview.reporting_currency.clone(),
                         }
                     },
@@ -336,7 +385,6 @@ fn Dashboard(overview: Overview, onrefresh: EventHandler<MouseEvent>) -> Element
                     },
                     ActiveView::History => rsx! {
                         HistoryView {
-                            history: overview.history.clone(),
                             currency: overview.reporting_currency.clone()
                         }
                     },
@@ -394,17 +442,20 @@ fn SummaryView(
 }
 
 #[component]
-fn GraphsView(history: History, currency: String) -> Element {
+fn GraphsView(currency: String) -> Element {
     rsx! {
         section { class: "panel graph-panel",
-            div { class: "panel-header",
-                h2 { "Net Worth Over Time" }
-                span { "{history.currency}" }
-            }
-            NetWorthPanel {
-                history,
-                currency
-            }
+            NetWorthPanel { currency }
+        }
+    }
+}
+
+#[component]
+fn InlineStatus(title: &'static str, message: String) -> Element {
+    rsx! {
+        div { class: "inline-status",
+            h2 { "{title}" }
+            p { "{message}" }
         }
     }
 }
@@ -421,20 +472,41 @@ fn MetricCard(label: String, value: String, detail: String) -> Element {
 }
 
 #[component]
-fn NetWorthPanel(history: History, currency: String) -> Element {
-    let data = history_data_points(&history);
-    let bounds = date_bounds(&data);
-    let mut range_preset = use_signal(|| RangePreset::OneYear);
+fn NetWorthPanel(currency: String) -> Element {
+    let mut range_preset = use_signal(|| DEFAULT_RANGE_PRESET);
     let mut start_override = use_signal(String::new);
     let mut end_override = use_signal(String::new);
     let mut y_min_input = use_signal(String::new);
     let mut y_max_input = use_signal(String::new);
-    let mut sampling_granularity = use_signal(|| SamplingGranularity::Auto);
+    let mut sampling_granularity = use_signal(|| DEFAULT_SAMPLING_GRANULARITY);
+    let history = use_resource(move || {
+        let selected_range = range_preset();
+        let start_text = start_override();
+        let end_text = end_override();
+        let selected_sampling = sampling_granularity();
+        async move {
+            fetch_history(history_query_string(
+                selected_range,
+                &start_text,
+                &end_text,
+                selected_sampling,
+                &current_date_string(),
+            ))
+            .await
+        }
+    });
 
     let selected_range = range_preset();
     let selected_sampling = sampling_granularity();
     let start_text = start_override();
     let end_text = end_override();
+    let history_state = history.cloned();
+    let loaded_history = match &history_state {
+        Some(Ok(history)) => Some(history),
+        _ => None,
+    };
+    let data = loaded_history.map(history_data_points).unwrap_or_default();
+    let bounds = date_bounds(&data);
     let (start_date, end_date) = visible_date_range(&data, selected_range, &start_text, &end_text);
     let visible_data = filter_data_by_date_range(&data, &start_date, &end_date);
     let resolved_sampling = resolve_sampling_granularity(selected_sampling, &visible_data);
@@ -495,10 +567,45 @@ fn NetWorthPanel(history: History, currency: String) -> Element {
         .as_ref()
         .map(|bounds| bounds.1.clone())
         .unwrap_or_default();
+    let header_currency = loaded_history
+        .map(|history| history.currency.clone())
+        .unwrap_or_else(|| currency.clone());
 
     rsx! {
+        div { class: "panel-header",
+            h2 { "Net Worth Over Time" }
+            span { "{header_currency}" }
+        }
         div { class: "chart-controls",
             div { class: "preset-row",
+                span { class: "control-label", "Range" }
+                GraphPresetButton {
+                    label: "1M",
+                    selected: selected_range == RangePreset::OneMonth,
+                    onclick: move |_| {
+                        range_preset.set(RangePreset::OneMonth);
+                        start_override.set(String::new());
+                        end_override.set(String::new());
+                    }
+                }
+                GraphPresetButton {
+                    label: "90D",
+                    selected: selected_range == RangePreset::NinetyDays,
+                    onclick: move |_| {
+                        range_preset.set(RangePreset::NinetyDays);
+                        start_override.set(String::new());
+                        end_override.set(String::new());
+                    }
+                }
+                GraphPresetButton {
+                    label: "6M",
+                    selected: selected_range == RangePreset::SixMonths,
+                    onclick: move |_| {
+                        range_preset.set(RangePreset::SixMonths);
+                        start_override.set(String::new());
+                        end_override.set(String::new());
+                    }
+                }
                 GraphPresetButton {
                     label: "1Y",
                     selected: selected_range == RangePreset::OneYear,
@@ -586,22 +693,32 @@ fn NetWorthPanel(history: History, currency: String) -> Element {
                 p { class: "validation", "Y min must be less than Y max." }
             }
             div { class: "range-summary",
-                span { "X {start_date} to {end_date}" }
-                span { "Data Y {data_y_range}" }
-                span { "Axis Y {axis_y_range}" }
+                span { "Date range {start_date} to {end_date}" }
+                span { "Data range {data_y_range}" }
+                span { "Axis range {axis_y_range}" }
                 span { "Sampling {sampling_label} / {sampled_point_count} points" }
             }
         }
-        NetWorthChart {
-            data: sampled_data.clone(),
-            currency: currency.clone(),
-            y_domain
-        }
-        if !sampled_data.is_empty() {
-            div { class: "chart-stats",
-                strong { "{format_full_money(current_value, &currency)}" }
-                span { class: "{change_class}",
-                    "{format_signed_money(absolute_change, &currency)} ({percent_text})"
+        match history_state {
+            None => rsx! {
+                InlineStatus { title: "Net Worth Over Time", message: "Loading graph data..." }
+            },
+            Some(Err(error)) => rsx! {
+                InlineStatus { title: "Net Worth Over Time", message: error }
+            },
+            Some(Ok(_)) => rsx! {
+                NetWorthChart {
+                    data: sampled_data.clone(),
+                    currency: currency.clone(),
+                    y_domain
+                }
+                if !sampled_data.is_empty() {
+                    div { class: "chart-stats",
+                        strong { "{format_full_money(current_value, &currency)}" }
+                        span { class: "{change_class}",
+                            "{format_signed_money(absolute_change, &currency)} ({percent_text})"
+                        }
+                    }
                 }
             }
         }
@@ -1016,26 +1133,51 @@ fn BalancesView(balances: Vec<Balance>) -> Element {
 }
 
 #[component]
-fn HistoryView(history: History, currency: String) -> Element {
+fn HistoryView(currency: String) -> Element {
+    let history = use_resource(|| async {
+        fetch_history(history_query_string(
+            DEFAULT_RANGE_PRESET,
+            "",
+            "",
+            DEFAULT_SAMPLING_GRANULARITY,
+            &current_date_string(),
+        ))
+        .await
+    });
+    rsx! {
+        section { class: "panel",
+            match history.cloned() {
+                None => rsx! { InlineStatus { title: "Net Worth History", message: "Loading history..." } },
+                Some(Ok(history)) => rsx! {
+                    HistoryTable { history, currency }
+                },
+                Some(Err(error)) => rsx! {
+                    InlineStatus { title: "Net Worth History", message: error }
+                },
+            }
+        }
+    }
+}
+
+#[component]
+fn HistoryTable(history: History, currency: String) -> Element {
     let row_count = history.points.len();
 
     rsx! {
-        section { class: "panel",
-            div { class: "panel-header",
-                h2 { "Net Worth History" }
-                span { "{row_count}" }
+        div { class: "panel-header",
+            h2 { "Net Worth History" }
+            span { "{row_count}" }
+        }
+        div { class: "data-table history-table",
+            div { class: "table-head",
+                span { "Date" }
+                span { "Net worth" }
+                span { "Daily change" }
             }
-            div { class: "data-table history-table",
-                div { class: "table-head",
-                    span { "Date" }
-                    span { "Net worth" }
-                    span { "Daily change" }
-                }
-                for point in history.points.iter().rev() {
-                    HistoryPointRow {
-                        point: point.clone(),
-                        currency: currency.clone()
-                    }
+            for point in history.points.iter().rev() {
+                HistoryPointRow {
+                    point: point.clone(),
+                    currency: currency.clone()
                 }
             }
         }
@@ -1068,6 +1210,15 @@ fn asset_label(asset: &serde_json::Value) -> String {
         .or_else(|| asset.get("ticker").and_then(|value| value.as_str()))
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| asset.to_string())
+}
+
+fn current_net_worth_from_snapshot(snapshot: &PortfolioSnapshot) -> f64 {
+    snapshot
+        .total_value
+        .parse::<f64>()
+        .ok()
+        .filter(|value| value.is_finite())
+        .unwrap_or_default()
 }
 
 fn history_data_points(history: &History) -> Vec<NetWorthDataPoint> {
@@ -1121,6 +1272,9 @@ fn visible_date_range(
 
     let end = max_date.clone();
     let start = match preset {
+        RangePreset::OneMonth => offset_months(&end, 1).max(min_date.clone()),
+        RangePreset::NinetyDays => offset_days(&end, 90).max(min_date.clone()),
+        RangePreset::SixMonths => offset_months(&end, 6).max(min_date.clone()),
         RangePreset::OneYear => offset_years(&end, 1).max(min_date.clone()),
         RangePreset::TwoYears => offset_years(&end, 2).max(min_date.clone()),
         RangePreset::Max | RangePreset::Custom => min_date.clone(),
@@ -1128,18 +1282,123 @@ fn visible_date_range(
     (start, end)
 }
 
+fn history_query_string(
+    preset: RangePreset,
+    start_override: &str,
+    end_override: &str,
+    selected_sampling: SamplingGranularity,
+    today: &str,
+) -> String {
+    let (start, end) = requested_history_date_range(preset, start_override, end_override, today);
+    let granularity =
+        history_request_granularity(selected_sampling, start.as_deref(), end.as_deref());
+    let mut params = vec![format!("granularity={granularity}")];
+
+    if let Some(start) = start {
+        params.push(format!("start={start}"));
+    }
+    if let Some(end) = end {
+        params.push(format!("end={end}"));
+    }
+
+    params.join("&")
+}
+
+fn requested_history_date_range(
+    preset: RangePreset,
+    start_override: &str,
+    end_override: &str,
+    today: &str,
+) -> (Option<String>, Option<String>) {
+    if preset == RangePreset::Custom {
+        return (
+            non_empty_string(start_override),
+            non_empty_string(end_override).or_else(|| Some(today.to_string())),
+        );
+    }
+
+    let end = Some(today.to_string());
+    let start = match preset {
+        RangePreset::OneMonth => Some(offset_months(today, 1)),
+        RangePreset::NinetyDays => Some(offset_days(today, 90)),
+        RangePreset::SixMonths => Some(offset_months(today, 6)),
+        RangePreset::OneYear => Some(offset_years(today, 1)),
+        RangePreset::TwoYears => Some(offset_years(today, 2)),
+        RangePreset::Max | RangePreset::Custom => None,
+    };
+
+    if preset == RangePreset::Max {
+        (None, None)
+    } else {
+        (start, end)
+    }
+}
+
+fn non_empty_string(value: &str) -> Option<String> {
+    if value.is_empty() {
+        None
+    } else {
+        Some(value.to_string())
+    }
+}
+
+fn history_request_granularity(
+    selected: SamplingGranularity,
+    start: Option<&str>,
+    end: Option<&str>,
+) -> &'static str {
+    if selected != SamplingGranularity::Auto {
+        return selected.query_value();
+    }
+
+    match (start, end) {
+        (Some(start), Some(end)) => match days_between(start, end) {
+            Some(days) if days < 93 => SamplingGranularity::Daily.query_value(),
+            Some(days) if days > 365 * 3 => SamplingGranularity::Monthly.query_value(),
+            Some(_) => SamplingGranularity::Weekly.query_value(),
+            None => SamplingGranularity::Daily.query_value(),
+        },
+        _ => SamplingGranularity::Monthly.query_value(),
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn current_date_string() -> String {
+    let date = js_sys::Date::new_0();
+    format!(
+        "{:04}-{:02}-{:02}",
+        date.get_full_year(),
+        date.get_month() + 1,
+        date.get_date()
+    )
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn current_date_string() -> String {
+    chrono::Local::now().date_naive().to_string()
+}
+
 fn offset_years(date: &str, years: i32) -> String {
-    let mut parts = date.split('-');
-    let Some(year) = parts.next().and_then(|part| part.parse::<i32>().ok()) else {
+    offset_months(date, years * 12)
+}
+
+fn offset_months(date: &str, months: i32) -> String {
+    let Some((year, month, day)) = parse_ymd(date) else {
         return date.to_string();
     };
-    let Some(month) = parts.next() else {
+
+    let month_index = year * 12 + month as i32 - 1 - months;
+    let new_year = month_index.div_euclid(12);
+    let new_month = month_index.rem_euclid(12) as u32 + 1;
+    let new_day = day.min(days_in_month(new_year, new_month));
+    format!("{new_year:04}-{new_month:02}-{new_day:02}")
+}
+
+fn offset_days(date: &str, days: i64) -> String {
+    let Some((year, month, day)) = parse_ymd(date) else {
         return date.to_string();
     };
-    let Some(day) = parts.next() else {
-        return date.to_string();
-    };
-    format!("{:04}-{month}-{day}", year - years)
+    civil_from_days(days_from_civil(year, month, day) - days)
 }
 
 fn filter_data_by_date_range(
@@ -1271,6 +1530,20 @@ fn parse_ymd(date: &str) -> Option<(i32, u32, u32)> {
     Some((year, month, day))
 }
 
+fn days_in_month(year: i32, month: u32) -> u32 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if is_leap_year(year) => 29,
+        2 => 28,
+        _ => 30,
+    }
+}
+
+fn is_leap_year(year: i32) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+}
+
 fn days_from_civil(year: i32, month: u32, day: u32) -> i64 {
     let year = year - if month <= 2 { 1 } else { 0 };
     let era = (year as i64).div_euclid(400);
@@ -1279,6 +1552,20 @@ fn days_from_civil(year: i32, month: u32, day: u32) -> i64 {
     let doy = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day as i64 - 1;
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     era * 146_097 + doe - 719_468
+}
+
+fn civil_from_days(days: i64) -> String {
+    let days = days + 719_468;
+    let era = days.div_euclid(146_097);
+    let doe = days - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096).div_euclid(365);
+    let mut year = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2).div_euclid(153);
+    let day = doy - (153 * mp + 2).div_euclid(5) + 1;
+    let month = mp + if mp < 10 { 3 } else { -9 };
+    year += if month <= 2 { 1 } else { 0 };
+    format!("{year:04}-{month:02}-{day:02}")
 }
 
 fn value_bounds(points: &[NetWorthDataPoint]) -> Option<(f64, f64)> {
@@ -1454,6 +1741,73 @@ mod tests {
     }
 
     #[test]
+    fn short_range_presets_use_expected_start_dates() {
+        let points = vec![point("2025-01-01", 100.0), point("2026-04-25", 200.0)];
+
+        assert_eq!(
+            visible_date_range(&points, RangePreset::OneMonth, "", ""),
+            ("2026-03-25".to_string(), "2026-04-25".to_string())
+        );
+        assert_eq!(
+            visible_date_range(&points, RangePreset::NinetyDays, "", ""),
+            ("2026-01-25".to_string(), "2026-04-25".to_string())
+        );
+        assert_eq!(
+            visible_date_range(&points, RangePreset::SixMonths, "", ""),
+            ("2025-10-25".to_string(), "2026-04-25".to_string())
+        );
+    }
+
+    #[test]
+    fn default_graph_query_requests_one_year_weekly_history() {
+        assert_eq!(
+            history_query_string(
+                DEFAULT_RANGE_PRESET,
+                "",
+                "",
+                DEFAULT_SAMPLING_GRANULARITY,
+                "2026-04-25"
+            ),
+            "granularity=weekly&start=2025-04-25&end=2026-04-25"
+        );
+    }
+
+    #[test]
+    fn auto_graph_query_uses_daily_under_three_months() {
+        assert_eq!(
+            history_query_string(
+                RangePreset::NinetyDays,
+                "",
+                "",
+                SamplingGranularity::Auto,
+                "2026-04-25"
+            ),
+            "granularity=daily&start=2026-01-25&end=2026-04-25"
+        );
+    }
+
+    #[test]
+    fn max_graph_query_uses_monthly_without_date_bounds() {
+        assert_eq!(
+            history_query_string(
+                RangePreset::Max,
+                "",
+                "",
+                SamplingGranularity::Auto,
+                "2026-04-25"
+            ),
+            "granularity=monthly"
+        );
+    }
+
+    #[test]
+    fn month_offsets_clamp_to_valid_dates() {
+        assert_eq!(offset_months("2026-03-31", 1), "2026-02-28");
+        assert_eq!(offset_months("2024-03-31", 1), "2024-02-29");
+        assert_eq!(offset_years("2024-02-29", 1), "2023-02-28");
+    }
+
+    #[test]
     fn auto_sampling_uses_daily_under_three_months() {
         let points = vec![point("2026-01-26", 100.0), point("2026-04-25", 200.0)];
 
@@ -1492,5 +1846,16 @@ mod tests {
             sampled.last().map(|point| point.date.as_str()),
             Some("2026-01-09")
         );
+    }
+
+    #[test]
+    fn current_net_worth_uses_portfolio_snapshot_total() {
+        let snapshot = PortfolioSnapshot {
+            as_of_date: "2026-04-25".to_string(),
+            currency: "USD".to_string(),
+            total_value: "1234.56".to_string(),
+        };
+
+        assert_eq!(current_net_worth_from_snapshot(&snapshot), 1234.56);
     }
 }

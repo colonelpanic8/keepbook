@@ -196,8 +196,23 @@ small,
 }
 
 .panel-header h2,
-.status-panel h2 {
+.status-panel h2,
+.inline-status h2 {
   font-size: 1rem;
+  margin: 0;
+}
+
+.inline-status {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 160px;
+  justify-content: center;
+  text-align: center;
+}
+
+.inline-status p {
+  color: #62727f;
   margin: 0;
 }
 

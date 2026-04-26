@@ -3271,6 +3271,7 @@ dependencies = [
 name = "keepbook-dioxus"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "dioxus",
  "gloo-net",
  "js-sys",

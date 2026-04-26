@@ -58,7 +58,9 @@ pub struct OverviewOutput {
     pub connections: serde_json::Value,
     pub accounts: serde_json::Value,
     pub balances: serde_json::Value,
-    pub history: serde_json::Value,
+    pub snapshot: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub history: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -90,6 +92,8 @@ pub struct OverviewQuery {
     pub history_granularity: String,
     #[serde(default = "default_portfolio_include_prices")]
     pub include_prices: bool,
+    #[serde(default)]
+    pub include_history: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -168,22 +172,41 @@ async fn overview(
     State(state): State<ApiState>,
     Query(query): Query<OverviewQuery>,
 ) -> Result<Json<OverviewOutput>, ApiError> {
-    let history_start = query.history_start;
-    let history_end = query.history_end.or_else(|| Some(default_history_end()));
-
     let connections = keepbook::app::list_connections(state.storage.as_ref()).await?;
     let accounts = keepbook::app::list_accounts(state.storage.as_ref()).await?;
     let balances = keepbook::app::list_balances(state.storage.as_ref(), &state.config).await?;
-    let history = keepbook::app::portfolio_history(
+    let snapshot = keepbook::app::portfolio_snapshot(
         state.storage.clone(),
         &state.config,
         None,
-        history_start,
-        history_end,
-        query.history_granularity,
-        query.include_prices,
+        None,
+        "both".to_string(),
+        false,
+        None,
+        false,
+        true,
+        false,
+        false,
     )
     .await?;
+    let history = if query.include_history {
+        let history_start = query.history_start;
+        let history_end = query.history_end.or_else(|| Some(default_history_end()));
+        Some(json_value(
+            keepbook::app::portfolio_history(
+                state.storage.clone(),
+                &state.config,
+                None,
+                history_start,
+                history_end,
+                query.history_granularity,
+                query.include_prices,
+            )
+            .await?,
+        )?)
+    } else {
+        None
+    };
 
     Ok(Json(OverviewOutput {
         config_path: state.config_path.display().to_string(),
@@ -192,7 +215,8 @@ async fn overview(
         connections: json_value(connections)?,
         accounts: json_value(accounts)?,
         balances: json_value(balances)?,
-        history: json_value(history)?,
+        snapshot: json_value(snapshot)?,
+        history,
     }))
 }
 
