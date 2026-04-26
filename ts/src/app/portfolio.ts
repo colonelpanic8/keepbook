@@ -1030,13 +1030,64 @@ function formatTrigger(trigger: ChangeTrigger): string {
   }
 }
 
-function computeHistoryTotalValueWithCarryForward(
+interface HistoryCostBasisBackfill {
+  unitCostBasis: Decimal;
+}
+
+interface HistoryValuation {
+  totalValue: Decimal;
+  prospectiveCapitalGainsTax: Decimal | undefined;
+}
+
+async function collectHistoryCostBasisBackfill(
+  storage: Storage,
+): Promise<Map<string, HistoryCostBasisBackfill>> {
+  const totals = new Map<string, { amount: Decimal; costBasis: Decimal }>();
+
+  for (const [accountId, snapshot] of await storage.getLatestBalances()) {
+    if (storage.getAccountConfig(accountId)?.exclude_from_portfolio === true) {
+      continue;
+    }
+
+    for (const balance of snapshot.balances) {
+      if (balance.cost_basis === undefined) continue;
+
+      const amount = new Decimal(balance.amount);
+      if (amount.isZero()) continue;
+
+      const assetId = AssetId.fromAsset(balance.asset).asStr();
+      const existing = totals.get(assetId) ?? {
+        amount: new Decimal(0),
+        costBasis: new Decimal(0),
+      };
+      existing.amount = existing.amount.plus(amount);
+      existing.costBasis = existing.costBasis.plus(new Decimal(balance.cost_basis));
+      totals.set(assetId, existing);
+    }
+  }
+
+  const backfill = new Map<string, HistoryCostBasisBackfill>();
+  for (const [assetId, total] of totals) {
+    if (!total.amount.isZero()) {
+      backfill.set(assetId, { unitCostBasis: total.costBasis.div(total.amount) });
+    }
+  }
+  return backfill;
+}
+
+function addOptionalDecimal(total: Decimal | undefined, value: Decimal): Decimal {
+  return (total ?? new Decimal(0)).plus(value);
+}
+
+function computeHistoryValuationWithCarryForward(
   byAsset: AssetSummary[],
   carryForwardUnitValues: Map<string, Decimal>,
-  currencyDecimals: number | undefined,
-): string | undefined {
+  costBasisBackfill: Map<string, HistoryCostBasisBackfill>,
+  capitalGainsTaxRate: Decimal | undefined,
+): HistoryValuation | undefined {
   try {
     let totalValue = new Decimal(0);
+    let prospectiveCapitalGainsTax: Decimal | undefined;
 
     for (const summary of byAsset) {
       const assetId = AssetId.fromAsset(summary.asset).asStr();
@@ -1056,12 +1107,58 @@ function computeHistoryTotalValueWithCarryForward(
       }
 
       totalValue = totalValue.plus(assetValue);
+
+      if (summary.prospective_capital_gains_tax !== undefined) {
+        const tax = new Decimal(summary.prospective_capital_gains_tax);
+        if (tax.gt(0)) {
+          prospectiveCapitalGainsTax = addOptionalDecimal(prospectiveCapitalGainsTax, tax);
+        }
+        continue;
+      }
+
+      if (capitalGainsTaxRate === undefined) continue;
+
+      const costBasis =
+        summary.cost_basis !== undefined
+          ? new Decimal(summary.cost_basis)
+          : costBasisBackfill.get(assetId)?.unitCostBasis.times(totalAmount);
+      if (costBasis === undefined) continue;
+
+      const gain = assetValue.minus(costBasis);
+      if (gain.gt(0)) {
+        prospectiveCapitalGainsTax = addOptionalDecimal(
+          prospectiveCapitalGainsTax,
+          gain.times(capitalGainsTaxRate),
+        );
+      }
     }
 
-    return decStrRounded(totalValue, currencyDecimals);
+    return { totalValue, prospectiveCapitalGainsTax };
   } catch {
     return undefined;
   }
+}
+
+function applyLatentTaxToHistoryTotalValue(
+  totalValue: string,
+  prospectiveCapitalGainsTax: Decimal | undefined,
+  snapshot: PortfolioSnapshot,
+  config: ResolvedConfig,
+  includeLatentTaxAdjustment: boolean,
+): string {
+  if (!includeLatentTaxAdjustment) {
+    return totalValue;
+  }
+
+  const tax =
+    prospectiveCapitalGainsTax ??
+    (snapshot.prospective_capital_gains_tax === undefined
+      ? undefined
+      : new Decimal(snapshot.prospective_capital_gains_tax));
+  if (tax === undefined) return totalValue;
+  if (tax.lte(0)) return totalValue;
+
+  return decStrRounded(new Decimal(totalValue).minus(tax), config.display.currency_decimals);
 }
 
 /**
@@ -1108,6 +1205,9 @@ export async function portfolioHistory(
   const historyPoints: HistoryPoint[] = [];
   let previousTotalValue: Decimal | undefined;
   const carryForwardUnitValues = new Map<string, Decimal>();
+  const costBasisBackfill = await collectHistoryCostBasisBackfill(storage);
+  const { rate: capitalGainsTaxRate, includeLatentTaxVirtualAccount: includeLatentTaxAdjustment } =
+    resolveCapitalGainsTaxRate(config, undefined);
   for (const point of points) {
     const portfolioService = new PortfolioService(storage, marketDataService, effectiveClock);
 
@@ -1117,16 +1217,29 @@ export async function portfolioHistory(
       currency_decimals: config.display.currency_decimals,
       grouping: 'both',
       include_detail: false,
+      capital_gains_tax_rate: capitalGainsTaxRate,
     });
 
-    const totalValue =
+    const historyValuation =
       snapshot.by_asset !== undefined
-        ? (computeHistoryTotalValueWithCarryForward(
+        ? computeHistoryValuationWithCarryForward(
             snapshot.by_asset,
             carryForwardUnitValues,
-            config.display.currency_decimals,
-          ) ?? snapshot.total_value)
+            costBasisBackfill,
+            capitalGainsTaxRate,
+          )
+        : undefined;
+    const baseTotalValue =
+      historyValuation !== undefined
+        ? decStrRounded(historyValuation.totalValue, config.display.currency_decimals)
         : snapshot.total_value;
+    const totalValue = applyLatentTaxToHistoryTotalValue(
+      baseTotalValue,
+      historyValuation?.prospectiveCapitalGainsTax,
+      snapshot,
+      config,
+      includeLatentTaxAdjustment,
+    );
     const currentTotalValue = new Decimal(totalValue);
 
     // Format triggers

@@ -48,6 +48,7 @@ pub struct ConfigOutput {
     pub data_dir: String,
     pub reporting_currency: String,
     pub history_defaults: HistoryDefaultsOutput,
+    pub filtering: FilteringOutput,
 }
 
 #[derive(Debug, Serialize)]
@@ -60,11 +61,26 @@ pub struct HistoryDefaultsOutput {
 }
 
 #[derive(Debug, Serialize)]
+pub struct FilteringOutput {
+    pub latent_capital_gains_tax: LatentCapitalGainsTaxFilterOutput,
+}
+
+#[derive(Debug, Serialize)]
+pub struct LatentCapitalGainsTaxFilterOutput {
+    pub configured_enabled: bool,
+    pub effective_enabled: bool,
+    pub override_enabled: Option<bool>,
+    pub rate_configured: bool,
+    pub account_name: String,
+}
+
+#[derive(Debug, Serialize)]
 pub struct OverviewOutput {
     pub config_path: String,
     pub data_dir: String,
     pub reporting_currency: String,
     pub history_defaults: HistoryDefaultsOutput,
+    pub filtering: FilteringOutput,
     pub connections: serde_json::Value,
     pub accounts: serde_json::Value,
     pub balances: serde_json::Value,
@@ -90,6 +106,7 @@ pub struct HistoryQuery {
     pub end: Option<String>,
     pub granularity: Option<String>,
     pub include_prices: Option<bool>,
+    pub include_latent_capital_gains_tax: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -98,6 +115,7 @@ pub struct OverviewQuery {
     pub history_end: Option<String>,
     pub history_granularity: Option<String>,
     pub include_prices: Option<bool>,
+    pub include_latent_capital_gains_tax: Option<bool>,
     #[serde(default)]
     pub include_history: bool,
 }
@@ -142,6 +160,36 @@ fn history_defaults(config: &ResolvedConfig) -> HistoryDefaultsOutput {
     }
 }
 
+fn config_with_filter_overrides(
+    base: &ResolvedConfig,
+    include_latent_capital_gains_tax: Option<bool>,
+) -> ResolvedConfig {
+    let mut config = base.clone();
+    if let Some(enabled) = include_latent_capital_gains_tax {
+        config.portfolio.latent_capital_gains_tax.enabled = enabled;
+    }
+    config
+}
+
+fn filtering_output(
+    base: &ResolvedConfig,
+    effective: &ResolvedConfig,
+    include_latent_capital_gains_tax: Option<bool>,
+) -> FilteringOutput {
+    let configured = &base.portfolio.latent_capital_gains_tax;
+    let effective = &effective.portfolio.latent_capital_gains_tax;
+
+    FilteringOutput {
+        latent_capital_gains_tax: LatentCapitalGainsTaxFilterOutput {
+            configured_enabled: configured.enabled,
+            effective_enabled: effective.enabled,
+            override_enabled: include_latent_capital_gains_tax,
+            rate_configured: effective.rate.is_some(),
+            account_name: effective.account_name.clone(),
+        },
+    }
+}
+
 pub fn router(state: ApiState) -> Router {
     Router::new()
         .route("/api/health", get(health))
@@ -182,6 +230,7 @@ async fn config(State(state): State<ApiState>) -> Json<ConfigOutput> {
         data_dir: state.config.data_dir.display().to_string(),
         reporting_currency: state.config.reporting_currency.clone(),
         history_defaults: history_defaults(&state.config),
+        filtering: filtering_output(&state.config, &state.config, None),
     })
 }
 
@@ -189,12 +238,14 @@ async fn overview(
     State(state): State<ApiState>,
     Query(query): Query<OverviewQuery>,
 ) -> Result<Json<OverviewOutput>, ApiError> {
+    let effective_config =
+        config_with_filter_overrides(&state.config, query.include_latent_capital_gains_tax);
     let connections = keepbook::app::list_connections(state.storage.as_ref()).await?;
     let accounts = keepbook::app::list_accounts(state.storage.as_ref()).await?;
-    let balances = keepbook::app::list_balances(state.storage.as_ref(), &state.config).await?;
+    let balances = keepbook::app::list_balances(state.storage.as_ref(), &effective_config).await?;
     let snapshot = keepbook::app::portfolio_snapshot(
         state.storage.clone(),
-        &state.config,
+        &effective_config,
         None,
         None,
         "both".to_string(),
@@ -211,14 +262,14 @@ async fn overview(
         let history_end = query.history_end.or_else(|| Some(default_history_end()));
         let history_granularity = query
             .history_granularity
-            .unwrap_or_else(|| state.config.history.portfolio_granularity.clone());
+            .unwrap_or_else(|| effective_config.history.portfolio_granularity.clone());
         let include_prices = query
             .include_prices
-            .unwrap_or(state.config.history.include_prices);
+            .unwrap_or(effective_config.history.include_prices);
         Some(json_value(
             keepbook::app::portfolio_history(
                 state.storage.clone(),
-                &state.config,
+                &effective_config,
                 None,
                 history_start,
                 history_end,
@@ -236,6 +287,11 @@ async fn overview(
         data_dir: state.config.data_dir.display().to_string(),
         reporting_currency: state.config.reporting_currency.clone(),
         history_defaults: history_defaults(&state.config),
+        filtering: filtering_output(
+            &state.config,
+            &effective_config,
+            query.include_latent_capital_gains_tax,
+        ),
         connections: json_value(connections)?,
         accounts: json_value(accounts)?,
         balances: json_value(balances)?,
@@ -279,15 +335,17 @@ async fn portfolio_history(
     State(state): State<ApiState>,
     Query(query): Query<HistoryQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    let effective_config =
+        config_with_filter_overrides(&state.config, query.include_latent_capital_gains_tax);
     let granularity = query
         .granularity
-        .unwrap_or_else(|| state.config.history.portfolio_granularity.clone());
+        .unwrap_or_else(|| effective_config.history.portfolio_granularity.clone());
     let include_prices = query
         .include_prices
-        .unwrap_or(state.config.history.include_prices);
+        .unwrap_or(effective_config.history.include_prices);
     let output = keepbook::app::portfolio_history(
         state.storage.clone(),
-        &state.config,
+        &effective_config,
         query.currency,
         query.start,
         query.end,

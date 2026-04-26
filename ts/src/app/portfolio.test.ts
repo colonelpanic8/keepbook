@@ -1058,6 +1058,111 @@ describe('portfolioHistory', () => {
     expect(json).not.toContain('summary');
   });
 
+  it('subtracts configured latent capital gains tax from history points', async () => {
+    const clock = makeClock('2024-06-15T12:00:00Z');
+    const { storage } = await setupStorageWithBalance(clock, '2024-06-14T10:00:00Z', [
+      { asset: Asset.equity('AAPL'), amount: '10', cost_basis: '1500' },
+    ]);
+    const store = new MemoryMarketDataStore();
+    await store.put_prices([
+      {
+        asset_id: AssetId.fromAsset(Asset.equity('AAPL')),
+        as_of_date: '2024-06-14',
+        timestamp: new Date('2024-06-14T23:59:59Z'),
+        price: '200',
+        quote_currency: 'USD',
+        kind: 'close',
+        source: 'test',
+      },
+    ]);
+    const config = makeConfig({
+      portfolio: {
+        latent_capital_gains_tax: {
+          enabled: true,
+          rate: 0.23,
+          account_name: 'Latent Capital Gains Tax',
+        },
+      },
+    });
+
+    const result = await portfolioHistory(
+      storage,
+      store,
+      config,
+      { granularity: 'none', includePrices: false },
+      clock,
+    );
+
+    expect(result.points).toHaveLength(1);
+    expect(result.points[0].total_value).toBe('1885');
+  });
+
+  it('backfills latest cost basis for latent tax on older history points', async () => {
+    const clock = makeClock('2024-06-15T12:00:00Z');
+    const storage = new MemoryStorage();
+    const connIdGen = makeIdGen('conn-1');
+    const conn = Connection.new({ name: 'Test Broker', synchronizer: 'manual' }, connIdGen, clock);
+    await storage.saveConnection(conn);
+
+    const acctIdGen = makeIdGen('acct-1');
+    const acct = Account.newWithGenerator(acctIdGen, clock, 'Trading', Id.fromString('conn-1'));
+    await storage.saveAccount(acct);
+
+    await storage.appendBalanceSnapshot(
+      acct.id,
+      BalanceSnapshot.new(new Date('2024-01-01T10:00:00Z'), [
+        AssetBalance.new(Asset.equity('AAPL'), '10'),
+      ]),
+    );
+    await storage.appendBalanceSnapshot(
+      acct.id,
+      BalanceSnapshot.new(new Date('2024-02-01T10:00:00Z'), [
+        AssetBalance.new(Asset.equity('AAPL'), '10', '1500'),
+      ]),
+    );
+
+    const store = new MemoryMarketDataStore();
+    await store.put_prices([
+      {
+        asset_id: AssetId.fromAsset(Asset.equity('AAPL')),
+        as_of_date: '2024-01-01',
+        timestamp: new Date('2024-01-01T23:59:59Z'),
+        price: '200',
+        quote_currency: 'USD',
+        kind: 'close',
+        source: 'test',
+      },
+      {
+        asset_id: AssetId.fromAsset(Asset.equity('AAPL')),
+        as_of_date: '2024-02-01',
+        timestamp: new Date('2024-02-01T23:59:59Z'),
+        price: '200',
+        quote_currency: 'USD',
+        kind: 'close',
+        source: 'test',
+      },
+    ]);
+    const config = makeConfig({
+      portfolio: {
+        latent_capital_gains_tax: {
+          enabled: true,
+          rate: 0.23,
+          account_name: 'Latent Capital Gains Tax',
+        },
+      },
+    });
+
+    const result = await portfolioHistory(
+      storage,
+      store,
+      config,
+      { granularity: 'none', includePrices: false },
+      clock,
+    );
+
+    expect(result.points.map((point) => point.total_value)).toEqual(['1885', '1885']);
+  });
+
   // -------------------------------------------------------------------------
   // Two change points → summary with correct calculation
   // -------------------------------------------------------------------------

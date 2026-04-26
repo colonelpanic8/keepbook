@@ -219,11 +219,29 @@ fn compute_percentage_change_from_previous(
     }
 }
 
-fn compute_history_total_value_with_carry_forward(
+#[derive(Debug, Clone, Copy)]
+struct HistoryCostBasisBackfill {
+    unit_cost_basis: Decimal,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct HistoryValuation {
+    total_value: Decimal,
+    prospective_capital_gains_tax: Option<Decimal>,
+}
+
+fn add_optional_decimal(total: &mut Option<Decimal>, value: Decimal) {
+    *total = Some(total.unwrap_or(Decimal::ZERO) + value);
+}
+
+fn compute_history_valuation_with_carry_forward(
     by_asset: &[crate::portfolio::AssetSummary],
     carry_forward_unit_values: &mut HashMap<String, Decimal>,
-) -> Option<Decimal> {
+    cost_basis_backfill: &HashMap<String, HistoryCostBasisBackfill>,
+    capital_gains_tax_rate: Option<Decimal>,
+) -> Option<HistoryValuation> {
     let mut total_value = Decimal::ZERO;
+    let mut prospective_capital_gains_tax = None;
 
     for asset_summary in by_asset {
         let asset_id = AssetId::from_asset(&asset_summary.asset).to_string();
@@ -233,7 +251,7 @@ fn compute_history_total_value_with_carry_forward(
             Some(value_str) => {
                 let value = Decimal::from_str(value_str).ok()?;
                 if total_amount != Decimal::ZERO {
-                    carry_forward_unit_values.insert(asset_id, value / total_amount);
+                    carry_forward_unit_values.insert(asset_id.clone(), value / total_amount);
                 }
                 value
             }
@@ -251,24 +269,142 @@ fn compute_history_total_value_with_carry_forward(
         };
 
         total_value += asset_value;
+
+        if let Some(tax) = asset_summary
+            .prospective_capital_gains_tax
+            .as_deref()
+            .and_then(|value| Decimal::from_str(value).ok())
+        {
+            if tax > Decimal::ZERO {
+                add_optional_decimal(&mut prospective_capital_gains_tax, tax);
+            }
+            continue;
+        }
+
+        let Some(rate) = capital_gains_tax_rate else {
+            continue;
+        };
+        let cost_basis = asset_summary
+            .cost_basis
+            .as_deref()
+            .and_then(|value| Decimal::from_str(value).ok())
+            .or_else(|| {
+                cost_basis_backfill
+                    .get(&asset_id)
+                    .map(|basis| basis.unit_cost_basis * total_amount)
+            });
+        let Some(cost_basis) = cost_basis else {
+            continue;
+        };
+
+        let gain = asset_value - cost_basis;
+        if gain > Decimal::ZERO {
+            add_optional_decimal(&mut prospective_capital_gains_tax, gain * rate);
+        }
     }
 
-    Some(total_value)
+    Some(HistoryValuation {
+        total_value,
+        prospective_capital_gains_tax,
+    })
+}
+
+async fn collect_history_cost_basis_backfill(
+    storage: &dyn Storage,
+) -> Result<HashMap<String, HistoryCostBasisBackfill>> {
+    let mut totals: HashMap<String, (Decimal, Decimal)> = HashMap::new();
+
+    for (account_id, snapshot) in storage.get_latest_balances().await? {
+        let excluded = storage
+            .get_account_config(&account_id)?
+            .and_then(|config| config.exclude_from_portfolio)
+            .unwrap_or(false);
+        if excluded {
+            continue;
+        }
+
+        for balance in snapshot.balances {
+            let Some(cost_basis) = balance.cost_basis else {
+                continue;
+            };
+            let amount = Decimal::from_str(&balance.amount)?;
+            if amount == Decimal::ZERO {
+                continue;
+            }
+            let cost_basis = Decimal::from_str(&cost_basis)?;
+            let asset_id = AssetId::from_asset(&balance.asset).to_string();
+            let entry = totals
+                .entry(asset_id)
+                .or_insert((Decimal::ZERO, Decimal::ZERO));
+            entry.0 += amount;
+            entry.1 += cost_basis;
+        }
+    }
+
+    Ok(totals
+        .into_iter()
+        .filter_map(|(asset_id, (amount, cost_basis))| {
+            if amount == Decimal::ZERO {
+                None
+            } else {
+                Some((
+                    asset_id,
+                    HistoryCostBasisBackfill {
+                        unit_cost_basis: cost_basis / amount,
+                    },
+                ))
+            }
+        })
+        .collect())
 }
 
 fn history_total_value_from_snapshot(
     snapshot: &crate::portfolio::PortfolioSnapshot,
     config: &ResolvedConfig,
+    include_latent_tax_adjustment: bool,
+    capital_gains_tax_rate: Option<Decimal>,
+    cost_basis_backfill: &HashMap<String, HistoryCostBasisBackfill>,
     carry_forward_unit_values: &mut HashMap<String, Decimal>,
-) -> String {
-    snapshot
-        .by_asset
-        .as_ref()
-        .and_then(|assets| {
-            compute_history_total_value_with_carry_forward(assets, carry_forward_unit_values)
+) -> Result<String> {
+    let history_valuation = snapshot.by_asset.as_ref().and_then(|assets| {
+        compute_history_valuation_with_carry_forward(
+            assets,
+            carry_forward_unit_values,
+            cost_basis_backfill,
+            capital_gains_tax_rate,
+        )
+    });
+    let total_value = history_valuation
+        .map(|valuation| {
+            format_base_currency_value(valuation.total_value, config.display.currency_decimals)
         })
-        .map(|value| format_base_currency_value(value, config.display.currency_decimals))
-        .unwrap_or_else(|| snapshot.total_value.clone())
+        .unwrap_or_else(|| snapshot.total_value.clone());
+
+    if !include_latent_tax_adjustment {
+        return Ok(total_value);
+    }
+
+    let tax = if let Some(tax) =
+        history_valuation.and_then(|valuation| valuation.prospective_capital_gains_tax)
+    {
+        tax
+    } else {
+        let Some(tax_str) = &snapshot.prospective_capital_gains_tax else {
+            return Ok(total_value);
+        };
+        Decimal::from_str(tax_str)
+            .with_context(|| format!("Invalid prospective_capital_gains_tax: {tax_str}"))?
+    };
+    if tax <= Decimal::ZERO {
+        return Ok(total_value);
+    }
+
+    let total_value = Decimal::from_str(&total_value)
+        .with_context(|| format!("Invalid total_value: {total_value}"))?;
+    Ok(format_base_currency_value(
+        total_value - tax,
+        config.display.currency_decimals,
+    ))
 }
 
 fn configure_history_market_data(
@@ -313,6 +449,9 @@ struct HistoryPointInput<'a> {
     timestamp: String,
     change_triggers: Option<Vec<String>>,
     previous_total_value: Option<Decimal>,
+    capital_gains_tax_rate: Option<Decimal>,
+    include_latent_tax_adjustment: bool,
+    cost_basis_backfill: &'a HashMap<String, HistoryCostBasisBackfill>,
 }
 
 async fn build_history_point_for_date(
@@ -327,12 +466,18 @@ async fn build_history_point_for_date(
         currency_decimals: config.display.currency_decimals,
         grouping: Grouping::Asset,
         include_detail: false,
-        capital_gains_tax_rate: None,
+        capital_gains_tax_rate: input.capital_gains_tax_rate,
     };
 
     let snapshot = service.calculate(&query).await?;
-    let history_total_value =
-        history_total_value_from_snapshot(&snapshot, config, carry_forward_unit_values);
+    let history_total_value = history_total_value_from_snapshot(
+        &snapshot,
+        config,
+        input.include_latent_tax_adjustment,
+        input.capital_gains_tax_rate,
+        input.cost_basis_backfill,
+        carry_forward_unit_values,
+    )?;
     let current_total_value = Decimal::from_str(&history_total_value).ok();
     let percentage_change_from_previous =
         compute_percentage_change_from_previous(input.previous_total_value, current_total_value);
@@ -1418,8 +1563,12 @@ pub async fn portfolio_history(
         config,
     ));
 
+    let cost_basis_backfill = collect_history_cost_basis_backfill(storage_arc.as_ref()).await?;
+
     // Create portfolio service
     let service = PortfolioService::new(storage_arc, market_data);
+    let (capital_gains_tax_rate, include_latent_tax_adjustment) =
+        resolve_capital_gains_tax_rate(config, None)?;
 
     // Calculate portfolio value at each change point
     let target_currency = currency
@@ -1466,6 +1615,9 @@ pub async fn portfolio_history(
                     Some(trigger_descriptions)
                 },
                 previous_total_value,
+                capital_gains_tax_rate,
+                include_latent_tax_adjustment,
+                cost_basis_backfill: &cost_basis_backfill,
             },
             &mut carry_forward_unit_values,
         )
@@ -1527,8 +1679,11 @@ pub async fn portfolio_recent_history(
             .await,
         config,
     ));
+    let cost_basis_backfill = collect_history_cost_basis_backfill(storage_arc.as_ref()).await?;
     let service = PortfolioService::new(storage_arc, market_data);
     let target_currency = currency.unwrap_or_else(|| config.reporting_currency.clone());
+    let (capital_gains_tax_rate, include_latent_tax_adjustment) =
+        resolve_capital_gains_tax_rate(config, None)?;
 
     let mut history_points = Vec::with_capacity(sample_dates.len());
     let mut previous_total_value: Option<Decimal> = None;
@@ -1549,6 +1704,9 @@ pub async fn portfolio_recent_history(
                 timestamp,
                 change_triggers: None,
                 previous_total_value,
+                capital_gains_tax_rate,
+                include_latent_tax_adjustment,
+                cost_basis_backfill: &cost_basis_backfill,
             },
             &mut carry_forward_unit_values,
         )
@@ -1630,8 +1788,8 @@ mod tests {
     use crate::app::*;
     use crate::clock::{Clock, FixedClock};
     use crate::config::{
-        DisplayConfig, GitConfig, HistoryConfig, RefreshConfig, ResolvedConfig, SpendingConfig,
-        TrayConfig,
+        DisplayConfig, GitConfig, HistoryConfig, LatentCapitalGainsTaxConfig, PortfolioConfig,
+        RefreshConfig, ResolvedConfig, SpendingConfig, TrayConfig,
     };
     use crate::models::FixedIdGenerator;
     use crate::models::{Account, AssetBalance, BalanceSnapshot, Connection, ConnectionConfig};
@@ -1969,6 +2127,173 @@ mod tests {
         assert_eq!(
             output.points[1].percentage_change_from_previous.as_deref(),
             Some("0")
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn portfolio_history_subtracts_configured_latent_capital_gains_tax() -> anyhow::Result<()>
+    {
+        let dir = TempDir::new()?;
+        let config = ResolvedConfig {
+            data_dir: dir.path().to_path_buf(),
+            reporting_currency: "USD".to_string(),
+            display: DisplayConfig::default(),
+            refresh: RefreshConfig::default(),
+            history: HistoryConfig::default(),
+            tray: TrayConfig::default(),
+            spending: SpendingConfig::default(),
+            portfolio: PortfolioConfig {
+                latent_capital_gains_tax: LatentCapitalGainsTaxConfig {
+                    enabled: true,
+                    rate: Some(0.23),
+                    account_name: "Latent Capital Gains Tax".to_string(),
+                },
+            },
+            ignore: crate::config::IgnoreConfig::default(),
+            git: GitConfig::default(),
+        };
+
+        let storage = Arc::new(MemoryStorage::new());
+        let connection = Connection::new(connection_config("Brokerage"));
+        storage.save_connection(&connection).await?;
+
+        let account = Account::new("Trading", connection.id().clone());
+        storage.save_account(&account).await?;
+
+        let asset = Asset::equity("AAPL");
+        storage
+            .append_balance_snapshot(
+                &account.id,
+                &BalanceSnapshot::new(
+                    Utc.with_ymd_and_hms(2024, 6, 14, 10, 0, 0).unwrap(),
+                    vec![AssetBalance::new(asset.clone(), "10").with_cost_basis("1500")],
+                ),
+            )
+            .await?;
+
+        let store = JsonlMarketDataStore::new(&config.data_dir);
+        store
+            .put_prices(&[PricePoint {
+                asset_id: AssetId::from_asset(&asset),
+                as_of_date: NaiveDate::from_ymd_opt(2024, 6, 14).unwrap(),
+                timestamp: Utc.with_ymd_and_hms(2024, 6, 14, 23, 59, 59).unwrap(),
+                price: "200".to_string(),
+                quote_currency: "USD".to_string(),
+                kind: PriceKind::Close,
+                source: "test".to_string(),
+            }])
+            .await?;
+
+        let output = portfolio_history(
+            storage,
+            &config,
+            None,
+            None,
+            None,
+            "none".to_string(),
+            false,
+        )
+        .await?;
+
+        assert_eq!(output.points.len(), 1);
+        assert_eq!(output.points[0].total_value, "1885");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn portfolio_history_backfills_latest_cost_basis_for_latent_tax() -> anyhow::Result<()> {
+        let dir = TempDir::new()?;
+        let config = ResolvedConfig {
+            data_dir: dir.path().to_path_buf(),
+            reporting_currency: "USD".to_string(),
+            display: DisplayConfig::default(),
+            refresh: RefreshConfig::default(),
+            history: HistoryConfig::default(),
+            tray: TrayConfig::default(),
+            spending: SpendingConfig::default(),
+            portfolio: PortfolioConfig {
+                latent_capital_gains_tax: LatentCapitalGainsTaxConfig {
+                    enabled: true,
+                    rate: Some(0.23),
+                    account_name: "Latent Capital Gains Tax".to_string(),
+                },
+            },
+            ignore: crate::config::IgnoreConfig::default(),
+            git: GitConfig::default(),
+        };
+
+        let storage = Arc::new(MemoryStorage::new());
+        let connection = Connection::new(connection_config("Brokerage"));
+        storage.save_connection(&connection).await?;
+
+        let account = Account::new("Trading", connection.id().clone());
+        storage.save_account(&account).await?;
+
+        let asset = Asset::equity("AAPL");
+        storage
+            .append_balance_snapshot(
+                &account.id,
+                &BalanceSnapshot::new(
+                    Utc.with_ymd_and_hms(2024, 1, 1, 10, 0, 0).unwrap(),
+                    vec![AssetBalance::new(asset.clone(), "10")],
+                ),
+            )
+            .await?;
+        storage
+            .append_balance_snapshot(
+                &account.id,
+                &BalanceSnapshot::new(
+                    Utc.with_ymd_and_hms(2024, 2, 1, 10, 0, 0).unwrap(),
+                    vec![AssetBalance::new(asset.clone(), "10").with_cost_basis("1500")],
+                ),
+            )
+            .await?;
+
+        let store = JsonlMarketDataStore::new(&config.data_dir);
+        store
+            .put_prices(&[
+                PricePoint {
+                    asset_id: AssetId::from_asset(&asset),
+                    as_of_date: NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
+                    timestamp: Utc.with_ymd_and_hms(2024, 1, 1, 23, 59, 59).unwrap(),
+                    price: "200".to_string(),
+                    quote_currency: "USD".to_string(),
+                    kind: PriceKind::Close,
+                    source: "test".to_string(),
+                },
+                PricePoint {
+                    asset_id: AssetId::from_asset(&asset),
+                    as_of_date: NaiveDate::from_ymd_opt(2024, 2, 1).unwrap(),
+                    timestamp: Utc.with_ymd_and_hms(2024, 2, 1, 23, 59, 59).unwrap(),
+                    price: "200".to_string(),
+                    quote_currency: "USD".to_string(),
+                    kind: PriceKind::Close,
+                    source: "test".to_string(),
+                },
+            ])
+            .await?;
+
+        let output = portfolio_history(
+            storage,
+            &config,
+            None,
+            None,
+            None,
+            "none".to_string(),
+            false,
+        )
+        .await?;
+
+        assert_eq!(
+            output
+                .points
+                .iter()
+                .map(|point| point.total_value.as_str())
+                .collect::<Vec<_>>(),
+            vec!["1885", "1885"]
         );
 
         Ok(())
