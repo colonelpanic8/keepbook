@@ -46,7 +46,6 @@
               "target"
               "node_modules"
               "dist"
-              "frontend"
               "ts"
               "plans"
               "docs"

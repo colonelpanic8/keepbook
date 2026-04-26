@@ -254,8 +254,6 @@ TypeScript modules:
 - =ts/src/portfolio= - valuation/history/change points.
 - =ts/src/cli/main.ts= - CLI entrypoint.
 
-A lightweight FFI crate exists at =crates/keepbook-ffi= for embedding use cases.
-
 * Why "Keepbook"?
 
 Keepbook is about keeping control of your own financial records.

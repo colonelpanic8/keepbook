@@ -10,7 +10,6 @@ repository = "https://github.com/colonelpanic8/keepbook"
 resolver = "2"
 members = [
   "crates/keepbook-dioxus",
-  "crates/keepbook-ffi",
   "crates/keepbook-server",
 ]
 
