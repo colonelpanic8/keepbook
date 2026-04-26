@@ -1000,7 +1000,7 @@ export async function portfolioHistory(
 ): Promise<HistoryOutput> {
   const effectiveClock = clock ?? new SystemClock();
   const currency = options.currency ?? config.reporting_currency;
-  const granularity = parseGranularity(options.granularity ?? 'none');
+  const granularity = parseGranularity(options.granularity ?? 'daily');
 
   const marketDataService = new MarketDataService(marketDataStore);
   if (config.history.lookback_days !== undefined) {
@@ -1103,7 +1103,7 @@ export async function portfolioHistory(
     currency,
     start_date: options.start ?? null,
     end_date: options.end ?? null,
-    granularity: options.granularity ?? 'none',
+    granularity: options.granularity ?? 'daily',
     points: historyPoints,
     summary,
   };

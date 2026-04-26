@@ -963,7 +963,7 @@ describe('Integration: full JSON round-trip verification', () => {
     expect(parsed.currency).toBe('USD');
     expect(parsed.start_date).toBeNull();
     expect(parsed.end_date).toBeNull();
-    expect(parsed.granularity).toBe('none');
+    expect(parsed.granularity).toBe('daily');
     expect(parsed.points).toHaveLength(2);
 
     // Points

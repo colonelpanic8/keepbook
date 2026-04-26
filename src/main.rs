@@ -703,8 +703,8 @@ enum PortfolioCommand {
         #[arg(long)]
         end: Option<String>,
 
-        /// Time granularity: none/full, hourly, daily, weekly, monthly, yearly (default: none)
-        #[arg(long, default_value = "none")]
+        /// Time granularity: none/full, hourly, daily, weekly, monthly, yearly (default: daily)
+        #[arg(long, default_value = "daily")]
         granularity: String,
 
         /// Include price changes as change points (default: enabled)

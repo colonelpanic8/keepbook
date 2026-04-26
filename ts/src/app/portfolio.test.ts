@@ -1000,7 +1000,7 @@ describe('portfolioHistory', () => {
       currency: 'USD',
       start_date: null,
       end_date: null,
-      granularity: 'none',
+      granularity: 'daily',
       points: [],
     });
     // summary should be undefined (absent from JSON)
@@ -1665,14 +1665,14 @@ describe('portfolioHistory', () => {
     expect(result.granularity).toBe('daily');
   });
 
-  it('default granularity is "none"', async () => {
+  it('default granularity is "daily"', async () => {
     const storage = new MemoryStorage();
     const store = new NullMarketDataStore();
     const config = makeConfig();
     const clock = makeClock('2024-06-15T12:00:00Z');
 
     const result = await portfolioHistory(storage, store, config, {}, clock);
-    expect(result.granularity).toBe('none');
+    expect(result.granularity).toBe('daily');
   });
 
   // -------------------------------------------------------------------------
@@ -1764,7 +1764,7 @@ describe('portfolioHistory', () => {
     expect(parsed.currency).toBe('USD');
     expect(parsed.start_date).toBeNull();
     expect(parsed.end_date).toBeNull();
-    expect(parsed.granularity).toBe('none');
+    expect(parsed.granularity).toBe('daily');
     expect(parsed.points).toHaveLength(2);
     expect(parsed.summary).toBeDefined();
     expect(parsed.summary.initial_value).toBe('100');
