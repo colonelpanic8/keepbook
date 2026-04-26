@@ -45,11 +45,16 @@ pub struct PriceHistoryRequest<'a> {
     pub include_fx: bool,
 }
 
-pub const DEFAULT_PORTFOLIO_HISTORY_GRANULARITY: &str = "none";
+pub const DEFAULT_PORTFOLIO_HISTORY_GRANULARITY: &str = "daily";
+pub const DEFAULT_PORTFOLIO_CHANGE_POINTS_GRANULARITY: &str = "none";
 pub const DEFAULT_PORTFOLIO_INCLUDE_PRICES: bool = true;
 
 pub fn default_portfolio_history_granularity() -> String {
     DEFAULT_PORTFOLIO_HISTORY_GRANULARITY.to_string()
+}
+
+pub fn default_portfolio_change_points_granularity() -> String {
+    DEFAULT_PORTFOLIO_CHANGE_POINTS_GRANULARITY.to_string()
 }
 
 pub fn default_portfolio_include_prices() -> bool {
@@ -85,6 +90,110 @@ impl PriceHistoryInterval {
             Self::Yearly => "yearly",
         }
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum DateRangeBound {
+    Start,
+    End,
+}
+
+impl DateRangeBound {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Start => "start",
+            Self::End => "end",
+        }
+    }
+}
+
+fn parse_portfolio_date_bound(
+    value: &str,
+    bound: DateRangeBound,
+    anchor_date: NaiveDate,
+) -> Result<NaiveDate> {
+    let value = value.trim();
+    if value.eq_ignore_ascii_case("today") {
+        return Ok(anchor_date);
+    }
+
+    if let Ok(date) = NaiveDate::parse_from_str(value, "%Y-%m-%d") {
+        return Ok(date);
+    }
+
+    if value.len() == 4 && value.chars().all(|c| c.is_ascii_digit()) {
+        let year = value.parse::<i32>()?;
+        return match bound {
+            DateRangeBound::Start => NaiveDate::from_ymd_opt(year, 1, 1)
+                .with_context(|| format!("Invalid {} date: {value}", bound.label())),
+            DateRangeBound::End => Ok(year_end(year)),
+        };
+    }
+
+    if value.len() == 7
+        && value.as_bytes()[4] == b'-'
+        && value[..4].chars().all(|c| c.is_ascii_digit())
+        && value[5..].chars().all(|c| c.is_ascii_digit())
+    {
+        let year = value[..4].parse::<i32>()?;
+        let month = value[5..].parse::<u32>()?;
+        let first_day = NaiveDate::from_ymd_opt(year, month, 1)
+            .with_context(|| format!("Invalid {} date: {value}", bound.label()))?;
+        return match bound {
+            DateRangeBound::Start => Ok(first_day),
+            DateRangeBound::End => Ok(month_end(first_day)),
+        };
+    }
+
+    if let Some(date) = parse_relative_portfolio_date(value, anchor_date)? {
+        return Ok(date);
+    }
+
+    anyhow::bail!(
+        "Invalid {} date: {value}. Use YYYY-MM-DD, YYYY-MM, YYYY, today, or relative offsets like -1y, -3m, -2w, -10d",
+        bound.label()
+    )
+}
+
+fn parse_relative_portfolio_date(value: &str, anchor_date: NaiveDate) -> Result<Option<NaiveDate>> {
+    let Some(sign) = value.chars().next().filter(|c| *c == '-' || *c == '+') else {
+        return Ok(None);
+    };
+    if value.len() < 3 {
+        return Ok(None);
+    }
+
+    let unit = value
+        .chars()
+        .last()
+        .map(|c| c.to_ascii_lowercase())
+        .unwrap_or_default();
+    let amount = &value[1..value.len() - unit.len_utf8()];
+    if amount.is_empty() || !amount.chars().all(|c| c.is_ascii_digit()) {
+        return Ok(None);
+    }
+
+    let magnitude = amount.parse::<i32>()?;
+    let signed = if sign == '-' { -magnitude } else { magnitude };
+
+    let date = match unit {
+        'd' => anchor_date
+            .checked_add_signed(Duration::days(signed as i64))
+            .with_context(|| format!("Relative date out of range: {value}"))?,
+        'w' => anchor_date
+            .checked_add_signed(Duration::weeks(signed as i64))
+            .with_context(|| format!("Relative date out of range: {value}"))?,
+        'm' => shift_months_clamped(anchor_date, signed),
+        'y' => {
+            let months = signed
+                .checked_mul(12)
+                .with_context(|| format!("Relative date out of range: {value}"))?;
+            shift_months_clamped(anchor_date, months)
+        }
+        _ => return Ok(None),
+    };
+
+    Ok(Some(date))
 }
 
 fn compute_percentage_change_from_previous(
@@ -1240,20 +1349,17 @@ pub async fn portfolio_history(
     include_prices: bool,
 ) -> Result<HistoryOutput> {
     // Parse date range
+    let today = Utc::now().date_naive();
     let start_date = start
         .as_ref()
-        .map(|s| {
-            NaiveDate::parse_from_str(s, "%Y-%m-%d")
-                .with_context(|| format!("Invalid start date: {s}"))
-        })
+        .map(|s| parse_portfolio_date_bound(s, DateRangeBound::Start, today))
         .transpose()?;
     let end_date = end
         .as_ref()
-        .map(|s| {
-            NaiveDate::parse_from_str(s, "%Y-%m-%d")
-                .with_context(|| format!("Invalid end date: {s}"))
-        })
+        .map(|s| parse_portfolio_date_bound(s, DateRangeBound::End, today))
         .transpose()?;
+    let start_date_output = start_date.map(|date| date.to_string());
+    let end_date_output = end_date.map(|date| date.to_string());
 
     // Parse granularity
     let granularity_enum = match granularity.as_str() {
@@ -1292,8 +1398,8 @@ pub async fn portfolio_history(
     if filtered.is_empty() {
         return Ok(HistoryOutput {
             currency: currency.unwrap_or_else(|| config.reporting_currency.clone()),
-            start_date: start,
-            end_date: end,
+            start_date: start_date_output,
+            end_date: end_date_output,
             granularity,
             points: Vec::new(),
             summary: None,
@@ -1370,8 +1476,8 @@ pub async fn portfolio_history(
 
     Ok(HistoryOutput {
         currency: target_currency,
-        start_date: start,
-        end_date: end,
+        start_date: start_date_output,
+        end_date: end_date_output,
         granularity,
         points: history_points,
         summary,
@@ -1461,20 +1567,17 @@ pub async fn portfolio_change_points(
     include_prices: bool,
 ) -> Result<ChangePointsOutput> {
     // Parse date range
+    let today = Utc::now().date_naive();
     let start_date = start
         .as_ref()
-        .map(|s| {
-            NaiveDate::parse_from_str(s, "%Y-%m-%d")
-                .with_context(|| format!("Invalid start date: {s}"))
-        })
+        .map(|s| parse_portfolio_date_bound(s, DateRangeBound::Start, today))
         .transpose()?;
     let end_date = end
         .as_ref()
-        .map(|s| {
-            NaiveDate::parse_from_str(s, "%Y-%m-%d")
-                .with_context(|| format!("Invalid end date: {s}"))
-        })
+        .map(|s| parse_portfolio_date_bound(s, DateRangeBound::End, today))
         .transpose()?;
+    let start_date_output = start_date.map(|date| date.to_string());
+    let end_date_output = end_date.map(|date| date.to_string());
 
     // Parse granularity
     let granularity_enum = match granularity.as_str() {
@@ -1511,8 +1614,8 @@ pub async fn portfolio_change_points(
         filter_by_granularity(filtered_by_date, granularity_enum, CoalesceStrategy::Last);
 
     Ok(ChangePointsOutput {
-        start_date: start,
-        end_date: end,
+        start_date: start_date_output,
+        end_date: end_date_output,
         granularity,
         include_prices,
         points: filtered,
@@ -1659,6 +1762,38 @@ mod tests {
                 NaiveDate::from_ymd_opt(2024, 2, 29).unwrap(),
             ]
         );
+        Ok(())
+    }
+
+    #[test]
+    fn parse_portfolio_date_bound_supports_partial_and_relative_dates() -> anyhow::Result<()> {
+        let anchor = NaiveDate::from_ymd_opt(2026, 4, 26).unwrap();
+
+        assert_eq!(
+            parse_portfolio_date_bound("2025", DateRangeBound::Start, anchor)?,
+            NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()
+        );
+        assert_eq!(
+            parse_portfolio_date_bound("2025", DateRangeBound::End, anchor)?,
+            NaiveDate::from_ymd_opt(2025, 12, 31).unwrap()
+        );
+        assert_eq!(
+            parse_portfolio_date_bound("2025-03", DateRangeBound::Start, anchor)?,
+            NaiveDate::from_ymd_opt(2025, 3, 1).unwrap()
+        );
+        assert_eq!(
+            parse_portfolio_date_bound("2025-03", DateRangeBound::End, anchor)?,
+            NaiveDate::from_ymd_opt(2025, 3, 31).unwrap()
+        );
+        assert_eq!(
+            parse_portfolio_date_bound("-1y", DateRangeBound::Start, anchor)?,
+            NaiveDate::from_ymd_opt(2025, 4, 26).unwrap()
+        );
+        assert_eq!(
+            parse_portfolio_date_bound("-3m", DateRangeBound::End, anchor)?,
+            NaiveDate::from_ymd_opt(2026, 1, 26).unwrap()
+        );
+
         Ok(())
     }
 

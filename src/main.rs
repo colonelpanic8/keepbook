@@ -695,15 +695,15 @@ enum PortfolioCommand {
         #[arg(long)]
         currency: Option<String>,
 
-        /// Start date for history (YYYY-MM-DD, default: earliest data)
-        #[arg(long)]
+        /// Start date for history (YYYY-MM-DD, YYYY-MM, YYYY, today, or relative e.g. -1y)
+        #[arg(long, allow_hyphen_values = true)]
         start: Option<String>,
 
-        /// End date for history (YYYY-MM-DD, default: today)
-        #[arg(long)]
+        /// End date for history (YYYY-MM-DD, YYYY-MM, YYYY, today, or relative e.g. -1y)
+        #[arg(long, allow_hyphen_values = true)]
         end: Option<String>,
 
-        /// Time granularity: none/full, hourly, daily, weekly, monthly, yearly (default: none)
+        /// Time granularity: none/full, hourly, daily, weekly, monthly, yearly (default: daily)
         #[arg(long, default_value = app::DEFAULT_PORTFOLIO_HISTORY_GRANULARITY)]
         granularity: String,
 
@@ -718,16 +718,16 @@ enum PortfolioCommand {
 
     /// List all change points (timestamps where portfolio value could have changed)
     ChangePoints {
-        /// Start date (YYYY-MM-DD, default: earliest data)
-        #[arg(long)]
+        /// Start date (YYYY-MM-DD, YYYY-MM, YYYY, today, or relative e.g. -1y)
+        #[arg(long, allow_hyphen_values = true)]
         start: Option<String>,
 
-        /// End date (YYYY-MM-DD, default: today)
-        #[arg(long)]
+        /// End date (YYYY-MM-DD, YYYY-MM, YYYY, today, or relative e.g. -1y)
+        #[arg(long, allow_hyphen_values = true)]
         end: Option<String>,
 
         /// Time granularity: none/full, hourly, daily, weekly, monthly, yearly (default: none)
-        #[arg(long, default_value = app::DEFAULT_PORTFOLIO_HISTORY_GRANULARITY)]
+        #[arg(long, default_value = app::DEFAULT_PORTFOLIO_CHANGE_POINTS_GRANULARITY)]
         granularity: String,
 
         /// Include price changes as change points (default: enabled)

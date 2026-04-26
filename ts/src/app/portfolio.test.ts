@@ -1000,7 +1000,7 @@ describe('portfolioHistory', () => {
       currency: 'USD',
       start_date: null,
       end_date: null,
-      granularity: 'none',
+      granularity: 'daily',
       points: [],
     });
     // summary should be undefined (absent from JSON)
@@ -1471,6 +1471,70 @@ describe('portfolioHistory', () => {
     expect(result.end_date).toBe('2024-06-14');
   });
 
+  it('resolves partial date bounds before filtering', async () => {
+    const clock = makeClock('2024-06-20T12:00:00Z');
+    const { storage } = await setupStorageWithBalances(clock, [
+      {
+        timestamp: '2024-05-31T10:00:00Z',
+        balances: [{ asset: Asset.currency('USD'), amount: '100' }],
+      },
+      {
+        timestamp: '2024-06-12T10:00:00Z',
+        balances: [{ asset: Asset.currency('USD'), amount: '200' }],
+      },
+      {
+        timestamp: '2024-07-01T10:00:00Z',
+        balances: [{ asset: Asset.currency('USD'), amount: '300' }],
+      },
+    ]);
+    const store = new NullMarketDataStore();
+    const config = makeConfig();
+
+    const result = await portfolioHistory(
+      storage,
+      store,
+      config,
+      { start: '2024-06', end: '2024-06' },
+      clock,
+    );
+
+    expect(result.points.map((point) => point.date)).toEqual(['2024-06-12']);
+    expect(result.start_date).toBe('2024-06-01');
+    expect(result.end_date).toBe('2024-06-30');
+  });
+
+  it('resolves relative date bounds from the command clock', async () => {
+    const clock = makeClock('2024-06-20T12:00:00Z');
+    const { storage } = await setupStorageWithBalances(clock, [
+      {
+        timestamp: '2024-06-09T10:00:00Z',
+        balances: [{ asset: Asset.currency('USD'), amount: '100' }],
+      },
+      {
+        timestamp: '2024-06-12T10:00:00Z',
+        balances: [{ asset: Asset.currency('USD'), amount: '200' }],
+      },
+      {
+        timestamp: '2024-06-16T10:00:00Z',
+        balances: [{ asset: Asset.currency('USD'), amount: '300' }],
+      },
+    ]);
+    const store = new NullMarketDataStore();
+    const config = makeConfig();
+
+    const result = await portfolioHistory(
+      storage,
+      store,
+      config,
+      { start: '-10d', end: '-5d' },
+      clock,
+    );
+
+    expect(result.points.map((point) => point.date)).toEqual(['2024-06-12']);
+    expect(result.start_date).toBe('2024-06-10');
+    expect(result.end_date).toBe('2024-06-15');
+  });
+
   // -------------------------------------------------------------------------
   // Trigger string formatting: Balance
   // -------------------------------------------------------------------------
@@ -1665,14 +1729,14 @@ describe('portfolioHistory', () => {
     expect(result.granularity).toBe('daily');
   });
 
-  it('default granularity is "none"', async () => {
+  it('default granularity is "daily"', async () => {
     const storage = new MemoryStorage();
     const store = new NullMarketDataStore();
     const config = makeConfig();
     const clock = makeClock('2024-06-15T12:00:00Z');
 
     const result = await portfolioHistory(storage, store, config, {}, clock);
-    expect(result.granularity).toBe('none');
+    expect(result.granularity).toBe('daily');
   });
 
   // -------------------------------------------------------------------------
@@ -1764,7 +1828,7 @@ describe('portfolioHistory', () => {
     expect(parsed.currency).toBe('USD');
     expect(parsed.start_date).toBeNull();
     expect(parsed.end_date).toBeNull();
-    expect(parsed.granularity).toBe('none');
+    expect(parsed.granularity).toBe('daily');
     expect(parsed.points).toHaveLength(2);
     expect(parsed.summary).toBeDefined();
     expect(parsed.summary.initial_value).toBe('100');
@@ -2022,6 +2086,48 @@ describe('portfolioChangePoints', () => {
     expect(result.points[0].timestamp).toBe('2024-06-12T10:00:00Z');
     expect(result.start_date).toBe('2024-06-11');
     expect(result.end_date).toBe('2024-06-14');
+  });
+
+  it('resolves partial and relative date bounds before filtering', async () => {
+    const clock = makeClock('2024-06-20T12:00:00Z');
+    const { storage } = await setupStorageWithBalances(clock, [
+      {
+        timestamp: '2024-05-31T10:00:00Z',
+        balances: [{ asset: Asset.currency('USD'), amount: '100' }],
+      },
+      {
+        timestamp: '2024-06-12T10:00:00Z',
+        balances: [{ asset: Asset.currency('USD'), amount: '200' }],
+      },
+      {
+        timestamp: '2024-07-01T10:00:00Z',
+        balances: [{ asset: Asset.currency('USD'), amount: '300' }],
+      },
+    ]);
+    const store = new NullMarketDataStore();
+    const config = makeConfig();
+
+    const partial = await portfolioChangePoints(
+      storage,
+      store,
+      config,
+      { start: '2024-06', end: '2024-06' },
+      clock,
+    );
+    const relative = await portfolioChangePoints(
+      storage,
+      store,
+      config,
+      { start: '-10d', end: '-5d' },
+      clock,
+    );
+
+    expect(partial.points.map((point) => point.timestamp.slice(0, 10))).toEqual(['2024-06-12']);
+    expect(partial.start_date).toBe('2024-06-01');
+    expect(partial.end_date).toBe('2024-06-30');
+    expect(relative.points.map((point) => point.timestamp.slice(0, 10))).toEqual(['2024-06-12']);
+    expect(relative.start_date).toBe('2024-06-10');
+    expect(relative.end_date).toBe('2024-06-15');
   });
 
   // -------------------------------------------------------------------------

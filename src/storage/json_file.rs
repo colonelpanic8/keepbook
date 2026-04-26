@@ -1,5 +1,7 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
 
 use anyhow::{Context, Result};
 use tokio::fs;
@@ -34,12 +36,37 @@ use crate::storage::{JsonlCompactionStats, TransactionMetadataBackfillStats};
 #[derive(Clone)]
 pub struct JsonFileStorage {
     base_path: PathBuf,
+    cache: Arc<Mutex<JsonFileStorageCache>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FsCacheKey {
+    len: u64,
+    modified: Option<SystemTime>,
+}
+
+#[derive(Debug, Clone)]
+struct CachedRead<T> {
+    key: Option<FsCacheKey>,
+    value: T,
+}
+
+#[derive(Default)]
+struct JsonFileStorageCache {
+    dirs: HashMap<PathBuf, CachedRead<Vec<Id>>>,
+    connections: HashMap<Id, CachedRead<Option<Connection>>>,
+    accounts: HashMap<Id, CachedRead<Option<Account>>>,
+    account_configs: HashMap<Id, CachedRead<Option<AccountConfig>>>,
+    balance_snapshots: HashMap<Id, CachedRead<Vec<BalanceSnapshot>>>,
+    transactions: HashMap<Id, CachedRead<Vec<Transaction>>>,
+    transaction_annotations: HashMap<Id, CachedRead<Vec<TransactionAnnotationPatch>>>,
 }
 
 impl JsonFileStorage {
     pub fn new(base_path: impl AsRef<Path>) -> Self {
         Self {
             base_path: base_path.as_ref().to_path_buf(),
+            cache: Arc::new(Mutex::new(JsonFileStorageCache::default())),
         }
     }
 
@@ -132,14 +159,29 @@ impl JsonFileStorage {
     /// Load optional account config.
     fn load_account_config(&self, id: &Id) -> Result<Option<AccountConfig>> {
         let path = self.account_config_file(id)?;
-        if !path.exists() {
-            return Ok(None);
+        let key = Self::fs_cache_key_sync(&path)?;
+        {
+            let cache = self.cache.lock().expect("storage cache poisoned");
+            if let Some(cached) = cache.account_configs.get(id) {
+                if cached.key == key {
+                    return Ok(cached.value.clone());
+                }
+            }
         }
-        let content = std::fs::read_to_string(&path)
-            .with_context(|| format!("Failed to read {}", path.display()))?;
-        let config: AccountConfig = toml::from_str(&content)
-            .with_context(|| format!("Failed to parse {}", path.display()))?;
-        Ok(Some(config))
+
+        let config = self.read_toml_sync(&path)?;
+        self.cache
+            .lock()
+            .expect("storage cache poisoned")
+            .account_configs
+            .insert(
+                id.clone(),
+                CachedRead {
+                    key,
+                    value: config.clone(),
+                },
+            );
+        Ok(config)
     }
 
     fn balances_file(&self, account_id: &Id) -> Result<PathBuf> {
@@ -184,6 +226,53 @@ impl JsonFileStorage {
                 .with_context(|| format!("Failed to create directory: {}", parent.display()))?;
         }
         Ok(())
+    }
+
+    async fn fs_cache_key(path: &Path) -> Result<Option<FsCacheKey>> {
+        match fs::metadata(path).await {
+            Ok(metadata) => Ok(Some(FsCacheKey {
+                len: metadata.len(),
+                modified: metadata.modified().ok(),
+            })),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e).with_context(|| format!("Failed to stat {}", path.display())),
+        }
+    }
+
+    fn fs_cache_key_sync(path: &Path) -> Result<Option<FsCacheKey>> {
+        match std::fs::metadata(path) {
+            Ok(metadata) => Ok(Some(FsCacheKey {
+                len: metadata.len(),
+                modified: metadata.modified().ok(),
+            })),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e).with_context(|| format!("Failed to stat {}", path.display())),
+        }
+    }
+
+    async fn combined_fs_cache_key(paths: &[PathBuf]) -> Result<Option<FsCacheKey>> {
+        let mut any_exists = false;
+        let mut len = 0u64;
+        let mut modified: Option<SystemTime> = None;
+
+        for path in paths {
+            if let Some(key) = Self::fs_cache_key(path).await? {
+                any_exists = true;
+                len = len.saturating_add(key.len);
+                modified = match (modified, key.modified) {
+                    (Some(a), Some(b)) => Some(a.max(b)),
+                    (None, Some(b)) => Some(b),
+                    (Some(a), None) => Some(a),
+                    (None, None) => None,
+                };
+            }
+        }
+
+        Ok(any_exists.then_some(FsCacheKey { len, modified }))
+    }
+
+    fn clear_cache(&self) {
+        *self.cache.lock().expect("storage cache poisoned") = JsonFileStorageCache::default();
     }
 
     async fn read_json<T: for<'de> serde::Deserialize<'de>>(
@@ -288,11 +377,34 @@ impl JsonFileStorage {
     }
 
     async fn list_dirs(&self, path: &Path) -> Result<Vec<Id>> {
+        let key = Self::fs_cache_key(path).await?;
+        {
+            let cache = self.cache.lock().expect("storage cache poisoned");
+            if let Some(cached) = cache.dirs.get(path) {
+                if cached.key == key {
+                    return Ok(cached.value.clone());
+                }
+            }
+        }
+
         let mut ids = Vec::new();
 
         let mut entries = match fs::read_dir(path).await {
             Ok(e) => e,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(ids),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                self.cache
+                    .lock()
+                    .expect("storage cache poisoned")
+                    .dirs
+                    .insert(
+                        path.to_path_buf(),
+                        CachedRead {
+                            key,
+                            value: Vec::new(),
+                        },
+                    );
+                return Ok(ids);
+            }
             Err(e) => return Err(e).context("Failed to read directory"),
         };
 
@@ -314,11 +426,23 @@ impl JsonFileStorage {
 
         ids.sort_by(|a, b| a.as_str().cmp(b.as_str()));
 
+        self.cache
+            .lock()
+            .expect("storage cache poisoned")
+            .dirs
+            .insert(
+                path.to_path_buf(),
+                CachedRead {
+                    key,
+                    value: ids.clone(),
+                },
+            );
+
         Ok(ids)
     }
 
     /// Load a connection by reading both config (TOML) and state (JSON).
-    async fn load_connection(&self, id: &Id) -> Result<Option<Connection>> {
+    async fn load_connection_uncached(&self, id: &Id) -> Result<Option<Connection>> {
         let config_path = self.connection_config_file(id)?;
         let state_path = self.connection_state_file(id)?;
 
@@ -350,6 +474,36 @@ impl JsonFileStorage {
         }
 
         Ok(Some(Connection { config, state }))
+    }
+
+    async fn load_connection(&self, id: &Id) -> Result<Option<Connection>> {
+        let key = Self::combined_fs_cache_key(&[
+            self.connection_config_file(id)?,
+            self.connection_state_file(id)?,
+        ])
+        .await?;
+        {
+            let cache = self.cache.lock().expect("storage cache poisoned");
+            if let Some(cached) = cache.connections.get(id) {
+                if cached.key == key {
+                    return Ok(cached.value.clone());
+                }
+            }
+        }
+
+        let connection = self.load_connection_uncached(id).await?;
+        self.cache
+            .lock()
+            .expect("storage cache poisoned")
+            .connections
+            .insert(
+                id.clone(),
+                CachedRead {
+                    key,
+                    value: connection.clone(),
+                },
+            );
+        Ok(connection)
     }
 
     /// Collect accounts for a connection, including any that are linked by connection_id
@@ -651,6 +805,7 @@ impl JsonFileStorage {
             }
         }
 
+        self.clear_cache();
         Ok(stats)
     }
 
@@ -692,6 +847,7 @@ impl JsonFileStorage {
             }
         }
 
+        self.clear_cache();
         Ok(stats)
     }
 }
@@ -781,6 +937,7 @@ impl Storage for JsonFileStorage {
         // Only save state - config is human-managed
         let state_path = self.connection_state_file(conn.id())?;
         self.write_json(&state_path, &conn.state).await?;
+        self.clear_cache();
         let _ = self.update_account_symlinks(conn).await?;
         // Rebuild connection by-name symlinks (handles creates and name changes)
         let _ = self.rebuild_connection_symlinks().await;
@@ -793,6 +950,7 @@ impl Storage for JsonFileStorage {
             fs::remove_dir_all(&dir).await.with_context(|| {
                 format!("Failed to delete connection directory: {}", dir.display())
             })?;
+            self.clear_cache();
             // Rebuild symlinks to remove stale one
             let _ = self.rebuild_connection_symlinks().await;
             Ok(true)
@@ -809,6 +967,7 @@ impl Storage for JsonFileStorage {
         fs::write(&path, config_toml)
             .await
             .with_context(|| format!("Failed to write {}", path.display()))?;
+        self.clear_cache();
         Ok(())
     }
 
@@ -835,9 +994,26 @@ impl Storage for JsonFileStorage {
 
     async fn get_account(&self, id: &Id) -> Result<Option<Account>> {
         let path = self.account_file(id)?;
+        let key = Self::fs_cache_key(&path).await?;
+        {
+            let cache = self.cache.lock().expect("storage cache poisoned");
+            if let Some(cached) = cache.accounts.get(id) {
+                if cached.key == key {
+                    return Ok(cached.value.clone());
+                }
+            }
+        }
+
         let mut account: Account = match self.read_json(&path).await? {
             Some(account) => account,
-            None => return Ok(None),
+            None => {
+                self.cache
+                    .lock()
+                    .expect("storage cache poisoned")
+                    .accounts
+                    .insert(id.clone(), CachedRead { key, value: None });
+                return Ok(None);
+            }
         };
 
         if account.id != *id || !Id::is_path_safe(account.id.as_str()) {
@@ -849,12 +1025,27 @@ impl Storage for JsonFileStorage {
             account.id = id.clone();
         }
 
-        Ok(Some(account))
+        let result = Some(account);
+        self.cache
+            .lock()
+            .expect("storage cache poisoned")
+            .accounts
+            .insert(
+                id.clone(),
+                CachedRead {
+                    key,
+                    value: result.clone(),
+                },
+            );
+
+        Ok(result)
     }
 
     async fn save_account(&self, account: &Account) -> Result<()> {
         let path = self.account_file(&account.id)?;
-        self.write_json(&path, account).await
+        self.write_json(&path, account).await?;
+        self.clear_cache();
+        Ok(())
     }
 
     async fn save_account_config(&self, id: &Id, config: &AccountConfig) -> Result<()> {
@@ -865,6 +1056,7 @@ impl Storage for JsonFileStorage {
         fs::write(&path, config_toml)
             .await
             .with_context(|| format!("Failed to write {}", path.display()))?;
+        self.clear_cache();
         Ok(())
     }
 
@@ -874,6 +1066,7 @@ impl Storage for JsonFileStorage {
             fs::remove_dir_all(&dir).await.with_context(|| {
                 format!("Failed to delete account directory: {}", dir.display())
             })?;
+            self.clear_cache();
             Ok(true)
         } else {
             Ok(false)
@@ -882,7 +1075,29 @@ impl Storage for JsonFileStorage {
 
     async fn get_balance_snapshots(&self, account_id: &Id) -> Result<Vec<BalanceSnapshot>> {
         let path = self.balances_file(account_id)?;
-        self.read_jsonl(&path).await
+        let key = Self::fs_cache_key(&path).await?;
+        {
+            let cache = self.cache.lock().expect("storage cache poisoned");
+            if let Some(cached) = cache.balance_snapshots.get(account_id) {
+                if cached.key == key {
+                    return Ok(cached.value.clone());
+                }
+            }
+        }
+
+        let snapshots = self.read_jsonl(&path).await?;
+        self.cache
+            .lock()
+            .expect("storage cache poisoned")
+            .balance_snapshots
+            .insert(
+                account_id.clone(),
+                CachedRead {
+                    key,
+                    value: snapshots.clone(),
+                },
+            );
+        Ok(snapshots)
     }
 
     async fn append_balance_snapshot(
@@ -891,7 +1106,9 @@ impl Storage for JsonFileStorage {
         snapshot: &BalanceSnapshot,
     ) -> Result<()> {
         let path = self.balances_file(account_id)?;
-        self.append_jsonl(&path, &[snapshot]).await
+        self.append_jsonl(&path, &[snapshot]).await?;
+        self.clear_cache();
+        Ok(())
     }
 
     async fn get_transactions(&self, account_id: &Id) -> Result<Vec<Transaction>> {
@@ -901,17 +1118,41 @@ impl Storage for JsonFileStorage {
 
     async fn get_transactions_raw(&self, account_id: &Id) -> Result<Vec<Transaction>> {
         let path = self.transactions_file(account_id)?;
-        Ok(self
+        let key = Self::fs_cache_key(&path).await?;
+        {
+            let cache = self.cache.lock().expect("storage cache poisoned");
+            if let Some(cached) = cache.transactions.get(account_id) {
+                if cached.key == key {
+                    return Ok(cached.value.clone());
+                }
+            }
+        }
+
+        let txns: Vec<Transaction> = self
             .read_jsonl::<Transaction>(&path)
             .await?
             .into_iter()
             .map(Transaction::backfill_standardized_metadata)
-            .collect())
+            .collect();
+        self.cache
+            .lock()
+            .expect("storage cache poisoned")
+            .transactions
+            .insert(
+                account_id.clone(),
+                CachedRead {
+                    key,
+                    value: txns.clone(),
+                },
+            );
+        Ok(txns)
     }
 
     async fn append_transactions(&self, account_id: &Id, txns: &[Transaction]) -> Result<()> {
         let path = self.transactions_file(account_id)?;
-        self.append_jsonl(&path, txns).await
+        self.append_jsonl(&path, txns).await?;
+        self.clear_cache();
+        Ok(())
     }
 
     async fn get_transaction_annotation_patches(
@@ -919,7 +1160,29 @@ impl Storage for JsonFileStorage {
         account_id: &Id,
     ) -> Result<Vec<crate::models::TransactionAnnotationPatch>> {
         let path = self.transaction_annotations_file(account_id)?;
-        self.read_jsonl(&path).await
+        let key = Self::fs_cache_key(&path).await?;
+        {
+            let cache = self.cache.lock().expect("storage cache poisoned");
+            if let Some(cached) = cache.transaction_annotations.get(account_id) {
+                if cached.key == key {
+                    return Ok(cached.value.clone());
+                }
+            }
+        }
+
+        let patches = self.read_jsonl(&path).await?;
+        self.cache
+            .lock()
+            .expect("storage cache poisoned")
+            .transaction_annotations
+            .insert(
+                account_id.clone(),
+                CachedRead {
+                    key,
+                    value: patches.clone(),
+                },
+            );
+        Ok(patches)
     }
 
     async fn append_transaction_annotation_patches(
@@ -928,7 +1191,9 @@ impl Storage for JsonFileStorage {
         patches: &[crate::models::TransactionAnnotationPatch],
     ) -> Result<()> {
         let path = self.transaction_annotations_file(account_id)?;
-        self.append_jsonl(&path, patches).await
+        self.append_jsonl(&path, patches).await?;
+        self.clear_cache();
+        Ok(())
     }
 
     async fn get_latest_balance_snapshot(
@@ -977,7 +1242,7 @@ impl Storage for JsonFileStorage {
 
 #[cfg(test)]
 mod tests {
-    use super::JsonFileStorage;
+    use super::*;
     use chrono::{TimeZone, Utc};
 
     use crate::models::{
@@ -1077,6 +1342,43 @@ mod tests {
             .map(|c| c.id().to_string())
             .collect();
         assert_eq!(ids, vec!["conn-a".to_string(), "conn-b".to_string()]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn balance_snapshot_cache_refreshes_when_file_changes() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let storage = JsonFileStorage::new(temp.path());
+        let account_id = Id::from_string("acct-1");
+
+        let first = BalanceSnapshot::new(
+            Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap(),
+            vec![AssetBalance::new(Asset::currency("USD"), "10.0")],
+        );
+        let second = BalanceSnapshot::new(
+            Utc.with_ymd_and_hms(2024, 2, 1, 0, 0, 0).unwrap(),
+            vec![AssetBalance::new(Asset::currency("USD"), "20.0")],
+        );
+
+        storage.append_balance_snapshot(&account_id, &first).await?;
+        assert_eq!(storage.get_balance_snapshots(&account_id).await?.len(), 1);
+        assert!(storage
+            .cache
+            .lock()
+            .expect("storage cache poisoned")
+            .balance_snapshots
+            .contains_key(&account_id));
+
+        let path = storage.balances_file(&account_id)?;
+        let mut file = fs::OpenOptions::new().append(true).open(&path).await?;
+        file.write_all(serde_json::to_string(&second)?.as_bytes())
+            .await?;
+        file.write_all(b"\n").await?;
+
+        let snapshots = storage.get_balance_snapshots(&account_id).await?;
+        assert_eq!(snapshots.len(), 2);
+        assert_eq!(snapshots[1].balances[0].amount, "20.0");
+
         Ok(())
     }
 

@@ -1,4 +1,7 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
 
 use anyhow::{Context, Result};
 use chrono::{Datelike, NaiveDate};
@@ -12,6 +15,28 @@ use super::{
 
 pub struct JsonlMarketDataStore {
     base_path: PathBuf,
+    cache: Arc<Mutex<JsonlMarketDataCache>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FsCacheKey {
+    len: u64,
+    modified: Option<SystemTime>,
+}
+
+#[derive(Debug, Clone)]
+struct CachedRead<T> {
+    key: Option<FsCacheKey>,
+    value: T,
+}
+
+#[derive(Default)]
+struct JsonlMarketDataCache {
+    price_files: HashMap<PathBuf, CachedRead<Vec<PricePoint>>>,
+    price_dirs: HashMap<PathBuf, CachedRead<Vec<PathBuf>>>,
+    fx_files: HashMap<PathBuf, CachedRead<Vec<FxRatePoint>>>,
+    fx_dirs: HashMap<PathBuf, CachedRead<Vec<PathBuf>>>,
+    asset_index: Option<CachedRead<HashMap<AssetId, AssetRegistryEntry>>>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, PartialEq, Eq)]
@@ -26,6 +51,7 @@ impl JsonlMarketDataStore {
     pub fn new(base_path: impl AsRef<Path>) -> Self {
         Self {
             base_path: base_path.as_ref().to_path_buf(),
+            cache: Arc::new(Mutex::new(JsonlMarketDataCache::default())),
         }
     }
 
@@ -59,6 +85,17 @@ impl JsonlMarketDataStore {
                 .context("Failed to create directory")?;
         }
         Ok(())
+    }
+
+    async fn fs_cache_key(path: &Path) -> Result<Option<FsCacheKey>> {
+        match fs::metadata(path).await {
+            Ok(metadata) => Ok(Some(FsCacheKey {
+                len: metadata.len(),
+                modified: metadata.modified().ok(),
+            })),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e).with_context(|| format!("Failed to stat {}", path.display())),
+        }
     }
 
     async fn read_jsonl<T: for<'de> serde::Deserialize<'de>>(&self, path: &Path) -> Result<Vec<T>> {
@@ -182,6 +219,182 @@ impl JsonlMarketDataStore {
         rates.retain(|r| r.as_of_date == date && r.kind == kind);
         rates.into_iter().max_by_key(|r| r.timestamp)
     }
+
+    async fn read_cached_price_file(&self, path: &Path) -> Result<Vec<PricePoint>> {
+        let key = Self::fs_cache_key(path).await?;
+        {
+            let cache = self.cache.lock().expect("market data cache poisoned");
+            if let Some(cached) = cache.price_files.get(path) {
+                if cached.key == key {
+                    return Ok(cached.value.clone());
+                }
+            }
+        }
+
+        let mut prices = self.read_jsonl::<PricePoint>(path).await?;
+        Self::sort_prices(&mut prices);
+        let value = prices.clone();
+        self.cache
+            .lock()
+            .expect("market data cache poisoned")
+            .price_files
+            .insert(path.to_path_buf(), CachedRead { key, value });
+        Ok(prices)
+    }
+
+    async fn read_cached_fx_file(&self, path: &Path) -> Result<Vec<FxRatePoint>> {
+        let key = Self::fs_cache_key(path).await?;
+        {
+            let cache = self.cache.lock().expect("market data cache poisoned");
+            if let Some(cached) = cache.fx_files.get(path) {
+                if cached.key == key {
+                    return Ok(cached.value.clone());
+                }
+            }
+        }
+
+        let mut rates = self.read_jsonl::<FxRatePoint>(path).await?;
+        Self::sort_fx_rates(&mut rates);
+        let value = rates.clone();
+        self.cache
+            .lock()
+            .expect("market data cache poisoned")
+            .fx_files
+            .insert(path.to_path_buf(), CachedRead { key, value });
+        Ok(rates)
+    }
+
+    async fn list_cached_jsonl_files(&self, dir: &Path, is_fx: bool) -> Result<Vec<PathBuf>> {
+        let key = Self::fs_cache_key(dir).await?;
+        {
+            let cache = self.cache.lock().expect("market data cache poisoned");
+            let cached = if is_fx {
+                cache.fx_dirs.get(dir)
+            } else {
+                cache.price_dirs.get(dir)
+            };
+            if let Some(cached) = cached {
+                if cached.key == key {
+                    return Ok(cached.value.clone());
+                }
+            }
+        }
+
+        let mut entries = match fs::read_dir(dir).await {
+            Ok(e) => e,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                let value = Vec::new();
+                let mut cache = self.cache.lock().expect("market data cache poisoned");
+                let target = if is_fx {
+                    &mut cache.fx_dirs
+                } else {
+                    &mut cache.price_dirs
+                };
+                target.insert(dir.to_path_buf(), CachedRead { key, value });
+                return Ok(Vec::new());
+            }
+            Err(e) => return Err(e).context("Failed to read market data directory"),
+        };
+
+        let mut files = Vec::new();
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
+                files.push(path);
+            }
+        }
+        files.sort();
+
+        let value = files.clone();
+        let mut cache = self.cache.lock().expect("market data cache poisoned");
+        let target = if is_fx {
+            &mut cache.fx_dirs
+        } else {
+            &mut cache.price_dirs
+        };
+        target.insert(dir.to_path_buf(), CachedRead { key, value });
+        Ok(files)
+    }
+
+    async fn read_cached_asset_index(&self) -> Result<HashMap<AssetId, AssetRegistryEntry>> {
+        let path = self.assets_index_file();
+        let key = Self::fs_cache_key(&path).await?;
+        {
+            let cache = self.cache.lock().expect("market data cache poisoned");
+            if let Some(cached) = &cache.asset_index {
+                if cached.key == key {
+                    return Ok(cached.value.clone());
+                }
+            }
+        }
+
+        let entries: Vec<AssetRegistryEntry> = self.read_jsonl(&path).await?;
+        let mut by_id = HashMap::new();
+        for entry in entries {
+            by_id.insert(entry.id.clone(), entry);
+        }
+
+        let value = by_id.clone();
+        self.cache
+            .lock()
+            .expect("market data cache poisoned")
+            .asset_index = Some(CachedRead { key, value });
+        Ok(by_id)
+    }
+
+    async fn cache_price_file(&self, path: &Path, prices: &[PricePoint]) -> Result<()> {
+        let key = Self::fs_cache_key(path).await?;
+        self.cache
+            .lock()
+            .expect("market data cache poisoned")
+            .price_files
+            .insert(
+                path.to_path_buf(),
+                CachedRead {
+                    key,
+                    value: prices.to_vec(),
+                },
+            );
+        Ok(())
+    }
+
+    async fn cache_fx_file(&self, path: &Path, rates: &[FxRatePoint]) -> Result<()> {
+        let key = Self::fs_cache_key(path).await?;
+        self.cache
+            .lock()
+            .expect("market data cache poisoned")
+            .fx_files
+            .insert(
+                path.to_path_buf(),
+                CachedRead {
+                    key,
+                    value: rates.to_vec(),
+                },
+            );
+        Ok(())
+    }
+
+    fn invalidate_price_dir(&self, asset_id: &AssetId) {
+        let dir = self.prices_dir(asset_id);
+        self.cache
+            .lock()
+            .expect("market data cache poisoned")
+            .price_dirs
+            .remove(&dir);
+    }
+
+    fn invalidate_fx_dir(&self, base: &str, quote: &str) {
+        let dir = self.fx_dir(base, quote);
+        self.cache
+            .lock()
+            .expect("market data cache poisoned")
+            .fx_dirs
+            .remove(&dir);
+    }
+
+    fn clear_cache(&self) {
+        *self.cache.lock().expect("market data cache poisoned") = JsonlMarketDataCache::default();
+    }
 }
 
 #[async_trait::async_trait]
@@ -193,28 +406,17 @@ impl MarketDataStore for JsonlMarketDataStore {
         kind: PriceKind,
     ) -> Result<Option<PricePoint>> {
         let path = self.price_file(asset_id, date);
-        let prices = self.read_jsonl(&path).await?;
+        let prices = self.read_cached_price_file(&path).await?;
         Ok(self.select_latest_price(prices, date, kind))
     }
 
     async fn get_all_prices(&self, asset_id: &AssetId) -> Result<Vec<PricePoint>> {
         let prices_dir = self.prices_dir(asset_id);
-
-        // List all year files in the prices directory
-        let mut entries = match fs::read_dir(&prices_dir).await {
-            Ok(e) => e,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(e) => return Err(e).context("Failed to read prices directory"),
-        };
-
         let mut all_prices = Vec::new();
 
-        while let Some(entry) = entries.next_entry().await? {
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
-                let prices: Vec<PricePoint> = self.read_jsonl(&path).await?;
-                all_prices.extend(prices);
-            }
+        for path in self.list_cached_jsonl_files(&prices_dir, false).await? {
+            let prices = self.read_cached_price_file(&path).await?;
+            all_prices.extend(prices);
         }
 
         Self::sort_prices(&mut all_prices);
@@ -237,11 +439,14 @@ impl MarketDataStore for JsonlMarketDataStore {
         for ((asset_id, year), items) in grouped {
             let date =
                 NaiveDate::from_ymd_opt(year, 1, 1).context("Invalid price date for storage")?;
-            let path = self.price_file(&AssetId::from(asset_id), date);
-            let mut all_items = self.read_jsonl::<PricePoint>(&path).await?;
+            let asset_id = AssetId::from(asset_id);
+            let path = self.price_file(&asset_id, date);
+            let mut all_items = self.read_cached_price_file(&path).await?;
             all_items.extend(items);
             Self::sort_prices(&mut all_items);
             self.write_jsonl(&path, &all_items).await?;
+            self.cache_price_file(&path, &all_items).await?;
+            self.invalidate_price_dir(&asset_id);
         }
 
         Ok(())
@@ -255,28 +460,17 @@ impl MarketDataStore for JsonlMarketDataStore {
         kind: FxRateKind,
     ) -> Result<Option<FxRatePoint>> {
         let path = self.fx_file(base, quote, date);
-        let rates = self.read_jsonl(&path).await?;
+        let rates = self.read_cached_fx_file(&path).await?;
         Ok(self.select_latest_fx(rates, date, kind))
     }
 
     async fn get_all_fx_rates(&self, base: &str, quote: &str) -> Result<Vec<FxRatePoint>> {
         let fx_dir = self.fx_dir(base, quote);
-
-        // List all year files in the fx directory
-        let mut entries = match fs::read_dir(&fx_dir).await {
-            Ok(e) => e,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(e) => return Err(e).context("Failed to read FX directory"),
-        };
-
         let mut all_rates = Vec::new();
 
-        while let Some(entry) = entries.next_entry().await? {
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
-                let rates: Vec<FxRatePoint> = self.read_jsonl(&path).await?;
-                all_rates.extend(rates);
-            }
+        for path in self.list_cached_jsonl_files(&fx_dir, true).await? {
+            let rates = self.read_cached_fx_file(&path).await?;
+            all_rates.extend(rates);
         }
 
         Self::sort_fx_rates(&mut all_rates);
@@ -304,28 +498,29 @@ impl MarketDataStore for JsonlMarketDataStore {
             let date =
                 NaiveDate::from_ymd_opt(year, 1, 1).context("Invalid FX date for storage")?;
             let path = self.fx_file(&base, &quote, date);
-            let mut all_items = self.read_jsonl::<FxRatePoint>(&path).await?;
+            let mut all_items = self.read_cached_fx_file(&path).await?;
             all_items.extend(items);
             Self::sort_fx_rates(&mut all_items);
             self.write_jsonl(&path, &all_items).await?;
+            self.cache_fx_file(&path, &all_items).await?;
+            self.invalidate_fx_dir(&base, &quote);
         }
 
         Ok(())
     }
 
     async fn get_asset_entry(&self, asset_id: &AssetId) -> Result<Option<AssetRegistryEntry>> {
-        let path = self.assets_index_file();
-        let entries: Vec<AssetRegistryEntry> = self.read_jsonl(&path).await?;
-        let entry = entries
-            .into_iter()
-            .rev()
-            .find(|entry| entry.id == *asset_id);
-        Ok(entry)
+        Ok(self.read_cached_asset_index().await?.get(asset_id).cloned())
     }
 
     async fn upsert_asset_entry(&self, entry: &AssetRegistryEntry) -> Result<()> {
         let path = self.assets_index_file();
-        self.append_jsonl(&path, &[entry]).await
+        self.append_jsonl(&path, &[entry]).await?;
+        self.cache
+            .lock()
+            .expect("market data cache poisoned")
+            .asset_index = None;
+        Ok(())
     }
 }
 
@@ -374,6 +569,7 @@ impl JsonlMarketDataStore {
             stats.fx_files_rewritten += 1;
         }
 
+        self.clear_cache();
         Ok(stats)
     }
 }
@@ -498,6 +694,54 @@ mod tests {
         assert_eq!(
             parsed[1].as_of_date,
             NaiveDate::from_ymd_opt(2024, 12, 31).unwrap()
+        );
+
+        let _ = fs::remove_dir_all(&base_path).await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn asset_registry_cache_reads_index_as_one_file_and_refreshes_on_change() -> Result<()> {
+        let base_path = std::env::temp_dir().join(format!("keepbook-md-{}", Uuid::new_v4()));
+        fs::create_dir_all(&base_path).await?;
+        let store = JsonlMarketDataStore::new(&base_path);
+
+        let aapl = AssetRegistryEntry::new(Asset::equity("AAPL"));
+        let msft = AssetRegistryEntry::new(Asset::equity("MSFT"));
+        store.upsert_asset_entry(&aapl).await?;
+
+        assert!(store.get_asset_entry(&aapl.id).await?.is_some());
+        assert_eq!(
+            store
+                .cache
+                .lock()
+                .expect("market data cache poisoned")
+                .asset_index
+                .as_ref()
+                .expect("asset index cached")
+                .value
+                .len(),
+            1
+        );
+
+        let path = store.assets_index_file();
+        let mut file = fs::OpenOptions::new().append(true).open(&path).await?;
+        file.write_all(serde_json::to_string(&msft)?.as_bytes())
+            .await?;
+        file.write_all(b"\n").await?;
+
+        assert!(store.get_asset_entry(&msft.id).await?.is_some());
+        assert_eq!(
+            store
+                .cache
+                .lock()
+                .expect("market data cache poisoned")
+                .asset_index
+                .as_ref()
+                .expect("asset index cached")
+                .value
+                .len(),
+            2
         );
 
         let _ = fs::remove_dir_all(&base_path).await;

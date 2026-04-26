@@ -323,6 +323,9 @@ type FxRateContext = {
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 const YMD_REGEX = /^(\d{4})-(\d{2})-(\d{2})$/;
+const YM_REGEX = /^(\d{4})-(\d{2})$/;
+const YEAR_REGEX = /^(\d{4})$/;
+const RELATIVE_DATE_REGEX = /^([+-])(\d+)([dwmy])$/i;
 
 export interface PriceHistoryOptions {
   account?: string;
@@ -381,6 +384,82 @@ function parseYmdOrThrow(value: string, kind: 'start' | 'end'): string {
   }
 
   return formatDateYMD(parsed);
+}
+
+function formatYmdParts(year: number, month: number, day: number): string {
+  return `${year.toString().padStart(4, '0')}-${month.toString().padStart(2, '0')}-${day
+    .toString()
+    .padStart(2, '0')}`;
+}
+
+function addMonthsClampedYmd(value: string, months: number): string {
+  const parsed = parseYmdDate(value);
+  const year = parsed.getUTCFullYear();
+  const monthIndex = parsed.getUTCMonth();
+  const targetMonthIndex = year * 12 + monthIndex + months;
+  const targetYear = Math.floor(targetMonthIndex / 12);
+  const targetMonth = targetMonthIndex - targetYear * 12 + 1;
+  const targetDay = Math.min(parsed.getUTCDate(), daysInMonth(targetYear, targetMonth));
+  return formatYmdParts(targetYear, targetMonth, targetDay);
+}
+
+function addRelativeDateYmd(value: string, amount: number, unit: string): string {
+  switch (unit.toLowerCase()) {
+    case 'd':
+      return addDaysYmd(value, amount);
+    case 'w':
+      return addDaysYmd(value, amount * 7);
+    case 'm':
+      return addMonthsClampedYmd(value, amount);
+    case 'y':
+      return addMonthsClampedYmd(value, amount * 12);
+    default:
+      throw new Error(`Unsupported relative date unit: ${unit}`);
+  }
+}
+
+function invalidDateRangeArg(value: string, kind: 'start' | 'end'): Error {
+  return new Error(
+    `Invalid ${kind} date: ${value}. Use YYYY-MM-DD, YYYY-MM, YYYY, today, or relative offsets like -1y, -3m, -2w, -10d`,
+  );
+}
+
+function parseDateBoundOrThrow(value: string, kind: 'start' | 'end', today: string): string {
+  const trimmed = value.trim();
+
+  if (trimmed.toLowerCase() === 'today') {
+    return today;
+  }
+
+  if (YMD_REGEX.test(trimmed)) {
+    return parseYmdOrThrow(trimmed, kind);
+  }
+
+  const yearMatch = YEAR_REGEX.exec(trimmed);
+  if (yearMatch !== null) {
+    const year = Number.parseInt(yearMatch[1], 10);
+    return kind === 'start' ? formatYmdParts(year, 1, 1) : formatYmdParts(year, 12, 31);
+  }
+
+  const monthMatch = YM_REGEX.exec(trimmed);
+  if (monthMatch !== null) {
+    const year = Number.parseInt(monthMatch[1], 10);
+    const month = Number.parseInt(monthMatch[2], 10);
+    if (month < 1 || month > 12) {
+      throw invalidDateRangeArg(value, kind);
+    }
+    const day = kind === 'start' ? 1 : daysInMonth(year, month);
+    return formatYmdParts(year, month, day);
+  }
+
+  const relativeMatch = RELATIVE_DATE_REGEX.exec(trimmed);
+  if (relativeMatch !== null) {
+    const sign = relativeMatch[1] === '-' ? -1 : 1;
+    const amount = Number.parseInt(relativeMatch[2], 10) * sign;
+    return addRelativeDateYmd(today, amount, relativeMatch[3]);
+  }
+
+  throw invalidDateRangeArg(value, kind);
 }
 
 function parseYmdDate(value: string): Date {
@@ -1000,7 +1079,12 @@ export async function portfolioHistory(
 ): Promise<HistoryOutput> {
   const effectiveClock = clock ?? new SystemClock();
   const currency = options.currency ?? config.reporting_currency;
-  const granularity = parseGranularity(options.granularity ?? 'none');
+  const granularity = parseGranularity(options.granularity ?? 'daily');
+  const today = effectiveClock.today();
+  const startDate =
+    options.start !== undefined ? parseDateBoundOrThrow(options.start, 'start', today) : undefined;
+  const endDate =
+    options.end !== undefined ? parseDateBoundOrThrow(options.end, 'end', today) : undefined;
 
   const marketDataService = new MarketDataService(marketDataStore);
   if (config.history.lookback_days !== undefined) {
@@ -1014,7 +1098,7 @@ export async function portfolioHistory(
   });
 
   // Filter by date range
-  const dateFiltered = filterByDateRange(allPoints, options.start, options.end);
+  const dateFiltered = filterByDateRange(allPoints, startDate, endDate);
 
   // Filter by granularity
   const points = filterByGranularity(dateFiltered, granularity, 'last');
@@ -1101,9 +1185,9 @@ export async function portfolioHistory(
 
   return {
     currency,
-    start_date: options.start ?? null,
-    end_date: options.end ?? null,
-    granularity: options.granularity ?? 'none',
+    start_date: startDate ?? null,
+    end_date: endDate ?? null,
+    granularity: options.granularity ?? 'daily',
     points: historyPoints,
     summary,
   };
@@ -1165,9 +1249,15 @@ export async function portfolioChangePoints(
   marketDataStore: MarketDataStore,
   _config: ResolvedConfig,
   options: PortfolioChangePointsOptions,
-  _clock?: Clock,
+  clock?: Clock,
 ): Promise<ChangePointsOutput> {
+  const effectiveClock = clock ?? new SystemClock();
   const granularity = parseGranularity(options.granularity ?? 'none');
+  const today = effectiveClock.today();
+  const startDate =
+    options.start !== undefined ? parseDateBoundOrThrow(options.start, 'start', today) : undefined;
+  const endDate =
+    options.end !== undefined ? parseDateBoundOrThrow(options.end, 'end', today) : undefined;
 
   // Collect change points
   const allPoints = await collectChangePoints(storage, marketDataStore, {
@@ -1175,7 +1265,7 @@ export async function portfolioChangePoints(
   });
 
   // Filter by date range
-  const dateFiltered = filterByDateRange(allPoints, options.start, options.end);
+  const dateFiltered = filterByDateRange(allPoints, startDate, endDate);
 
   // Filter by granularity
   const points = filterByGranularity(dateFiltered, granularity, 'last');
@@ -1184,8 +1274,8 @@ export async function portfolioChangePoints(
   const serialized = points.map(serializeChangePoint);
 
   return {
-    start_date: options.start ?? null,
-    end_date: options.end ?? null,
+    start_date: startDate ?? null,
+    end_date: endDate ?? null,
     granularity: options.granularity ?? 'none',
     include_prices: options.includePrices ?? true,
     points: serialized,
