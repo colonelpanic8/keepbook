@@ -185,19 +185,23 @@ fn calculate_history_summary(history_points: &[HistoryPoint]) -> Option<HistoryS
     })
 }
 
-async fn build_history_point_for_date(
-    service: &PortfolioService,
-    config: &ResolvedConfig,
-    target_currency: &str,
+struct HistoryPointInput<'a> {
+    target_currency: &'a str,
     as_of_date: NaiveDate,
     timestamp: String,
     change_triggers: Option<Vec<String>>,
     previous_total_value: Option<Decimal>,
+}
+
+async fn build_history_point_for_date(
+    service: &PortfolioService,
+    config: &ResolvedConfig,
+    input: HistoryPointInput<'_>,
     carry_forward_unit_values: &mut HashMap<String, Decimal>,
 ) -> Result<(HistoryPoint, Option<Decimal>)> {
     let query = PortfolioQuery {
-        as_of_date,
-        currency: target_currency.to_string(),
+        as_of_date: input.as_of_date,
+        currency: input.target_currency.to_string(),
         currency_decimals: config.display.currency_decimals,
         grouping: Grouping::Asset,
         include_detail: false,
@@ -209,15 +213,15 @@ async fn build_history_point_for_date(
         history_total_value_from_snapshot(&snapshot, config, carry_forward_unit_values);
     let current_total_value = Decimal::from_str(&history_total_value).ok();
     let percentage_change_from_previous =
-        compute_percentage_change_from_previous(previous_total_value, current_total_value);
+        compute_percentage_change_from_previous(input.previous_total_value, current_total_value);
 
     Ok((
         HistoryPoint {
-            timestamp,
-            date: as_of_date.to_string(),
+            timestamp: input.timestamp,
+            date: input.as_of_date.to_string(),
             total_value: history_total_value,
             percentage_change_from_previous,
-            change_triggers,
+            change_triggers: input.change_triggers,
         },
         current_total_value,
     ))
@@ -1333,15 +1337,17 @@ pub async fn portfolio_history(
         let (history_point, current_total_value) = build_history_point_for_date(
             &service,
             config,
-            &target_currency,
-            as_of_date,
-            change_point.timestamp.to_rfc3339(),
-            if trigger_descriptions.is_empty() {
-                None
-            } else {
-                Some(trigger_descriptions)
+            HistoryPointInput {
+                target_currency: &target_currency,
+                as_of_date,
+                timestamp: change_point.timestamp.to_rfc3339(),
+                change_triggers: if trigger_descriptions.is_empty() {
+                    None
+                } else {
+                    Some(trigger_descriptions)
+                },
+                previous_total_value,
             },
-            previous_total_value,
             &mut carry_forward_unit_values,
         )
         .await?;
@@ -1418,11 +1424,13 @@ pub async fn portfolio_recent_history(
         let (history_point, current_total_value) = build_history_point_for_date(
             &service,
             config,
-            &target_currency,
-            as_of_date,
-            timestamp,
-            None,
-            previous_total_value,
+            HistoryPointInput {
+                target_currency: &target_currency,
+                as_of_date,
+                timestamp,
+                change_triggers: None,
+                previous_total_value,
+            },
             &mut carry_forward_unit_values,
         )
         .await?;
@@ -1646,13 +1654,15 @@ mod tests {
     #[tokio::test]
     async fn portfolio_recent_history_uses_configured_history_spec() -> anyhow::Result<()> {
         let dir = TempDir::new()?;
-        let mut tray = TrayConfig::default();
-        tray.history_spec = vec![
-            "last 4 days".to_string(),
-            "1 week ago".to_string(),
-            "2 weeks ago".to_string(),
-            "last 12 months".to_string(),
-        ];
+        let tray = TrayConfig {
+            history_spec: vec![
+                "last 4 days".to_string(),
+                "1 week ago".to_string(),
+                "2 weeks ago".to_string(),
+                "last 12 months".to_string(),
+            ],
+            ..Default::default()
+        };
         let config = ResolvedConfig {
             data_dir: dir.path().to_path_buf(),
             reporting_currency: "USD".to_string(),

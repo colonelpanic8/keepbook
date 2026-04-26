@@ -13,8 +13,14 @@ pub extern "C" fn keepbook_ffi_version() -> *mut c_char {
 }
 
 /// Frees a string allocated by this library.
+///
+/// # Safety
+///
+/// `s` must be a pointer returned by this library from `CString::into_raw`.
+/// Passing any other pointer, or passing the same pointer more than once, is
+/// undefined behavior.
 #[no_mangle]
-pub extern "C" fn keepbook_ffi_string_free(s: *mut c_char) {
+pub unsafe extern "C" fn keepbook_ffi_string_free(s: *mut c_char) {
     if s.is_null() {
         return;
     }

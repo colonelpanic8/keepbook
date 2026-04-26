@@ -47,6 +47,38 @@ history-monthly-totals months='12':
     #!/usr/bin/env bash
     set -euo pipefail
 
+    date_adjust() {
+      local base="$1"
+      shift
+
+      if date -d "$base $*" +%F >/dev/null 2>&1; then
+        date -d "$base $*" +%F
+        return
+      fi
+
+      local args=()
+      while [ "$#" -gt 0 ]; do
+        local amount="$1"
+        local unit="$2"
+        shift 2
+
+        case "$unit" in
+          day|days)
+            args+=("-v${amount}d")
+            ;;
+          month|months)
+            args+=("-v${amount}m")
+            ;;
+          *)
+            echo "unsupported date unit: $unit" >&2
+            return 1
+            ;;
+        esac
+      done
+
+      date -j -f %F "$base" "${args[@]}" +%F
+    }
+
     months="{{months}}"
     if ! [[ "$months" =~ ^[0-9]+$ ]] || [ "$months" -le 0 ]; then
       echo "months must be a positive integer (got: $months)" >&2
@@ -57,7 +89,8 @@ history-monthly-totals months='12':
     trap 'rm -f "$month_dates"' EXIT
 
     today="$(date +%F)"
-    start="$(date -d "$(date +%Y-%m-01) -$((months - 1)) month" +%F)"
+    current_month_start="$(date +%Y-%m-01)"
+    start="$(date_adjust "$current_month_start" "-$((months - 1))" month)"
     history_points="$(
       {{keepbook_cmd}} portfolio history \
         --granularity monthly \
@@ -70,7 +103,7 @@ history-monthly-totals months='12':
       if [ "$i" -eq 0 ]; then
         date="$(date +%F)"
       else
-        date="$(date -d "$(date +%Y-%m-01) -$i month +1 month -1 day" +%F)"
+        date="$(date_adjust "$current_month_start" "-$i" month +1 month -1 day)"
       fi
       printf '%s\n' "$date" >> "$month_dates"
     done
@@ -157,6 +190,38 @@ history-quarterly-totals quarters='8':
     #!/usr/bin/env bash
     set -euo pipefail
 
+    date_adjust() {
+      local base="$1"
+      shift
+
+      if date -d "$base $*" +%F >/dev/null 2>&1; then
+        date -d "$base $*" +%F
+        return
+      fi
+
+      local args=()
+      while [ "$#" -gt 0 ]; do
+        local amount="$1"
+        local unit="$2"
+        shift 2
+
+        case "$unit" in
+          day|days)
+            args+=("-v${amount}d")
+            ;;
+          month|months)
+            args+=("-v${amount}m")
+            ;;
+          *)
+            echo "unsupported date unit: $unit" >&2
+            return 1
+            ;;
+        esac
+      done
+
+      date -j -f %F "$base" "${args[@]}" +%F
+    }
+
     quarters="{{quarters}}"
     if ! [[ "$quarters" =~ ^[0-9]+$ ]] || [ "$quarters" -le 0 ]; then
       echo "quarters must be a positive integer (got: $quarters)" >&2
@@ -170,7 +235,7 @@ history-quarterly-totals quarters='8':
     current_month="$(date +%m)"
     current_quarter_start_month=$(( ((10#$current_month - 1) / 3) * 3 + 1 ))
     current_quarter_start="$(date +%Y)-$(printf '%02d' "$current_quarter_start_month")-01"
-    start="$(date -d "$current_quarter_start -$(((quarters - 1) * 3)) month" +%F)"
+    start="$(date_adjust "$current_quarter_start" "-$(((quarters - 1) * 3))" month)"
     history_points="$(
       {{keepbook_cmd}} portfolio history \
         --granularity monthly \
@@ -183,7 +248,7 @@ history-quarterly-totals quarters='8':
       if [ "$i" -eq 0 ]; then
         date="$today"
       else
-        date="$(date -d "$current_quarter_start -$((i * 3)) month +3 month -1 day" +%F)"
+        date="$(date_adjust "$current_quarter_start" "-$((i * 3))" month +3 month -1 day)"
       fi
       printf '%s\n' "$date" >> "$quarter_dates"
     done
@@ -268,6 +333,38 @@ spending-by-category *args:
     #!/usr/bin/env bash
     set -euo pipefail
 
+    date_adjust() {
+      local base="$1"
+      shift
+
+      if date -d "$base $*" +%F >/dev/null 2>&1; then
+        date -d "$base $*" +%F
+        return
+      fi
+
+      local args=()
+      while [ "$#" -gt 0 ]; do
+        local amount="$1"
+        local unit="$2"
+        shift 2
+
+        case "$unit" in
+          day|days)
+            args+=("-v${amount}d")
+            ;;
+          month|months)
+            args+=("-v${amount}m")
+            ;;
+          *)
+            echo "unsupported date unit: $unit" >&2
+            return 1
+            ;;
+        esac
+      done
+
+      date -j -f %F "$base" "${args[@]}" +%F
+    }
+
     start=""
     end=""
     expect_value=""
@@ -304,7 +401,7 @@ spending-by-category *args:
     fi
 
     if [ -z "$start" ]; then
-      start="$(date -d "$end -30 days" +%F)"
+      start="$(date_adjust "$end" -30 days)"
     fi
 
     {{keepbook_cmd}} spending-categories "$@" --period range --start "$start" --end "$end" \

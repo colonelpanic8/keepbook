@@ -13,10 +13,14 @@
 
 # OS
 .DS_Store
+._*
 Thumbs.db
 
 # Worktrees
 .worktrees/
+
+# direnv
+.direnv/
 
 # Browser automation artifacts
 .playwright-cli/

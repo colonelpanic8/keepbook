@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -322,11 +322,11 @@ impl Config {
     /// If `data_dir` is set and relative, it's resolved relative to `config_dir`.
     /// If `data_dir` is not set, returns `config_dir`.
     pub fn resolve_data_dir(&self, config_dir: &Path) -> PathBuf {
-        match &self.data_dir {
+        normalize_path_components(match &self.data_dir {
             Some(data_dir) if data_dir.is_absolute() => data_dir.clone(),
             Some(data_dir) => config_dir.join(data_dir),
             None => config_dir.to_path_buf(),
-        }
+        })
     }
 }
 
@@ -386,12 +386,31 @@ pub fn default_config_path() -> PathBuf {
 
 fn absolute_from_current_dir(path: PathBuf) -> PathBuf {
     if path.is_absolute() {
-        return path;
+        return normalize_path_components(path);
     }
 
     std::env::current_dir()
         .map(|cwd| cwd.join(&path))
-        .unwrap_or(path)
+        .map(normalize_path_components)
+        .unwrap_or_else(|_| normalize_path_components(path))
+}
+
+fn normalize_path_components(path: PathBuf) -> PathBuf {
+    let mut normalized = PathBuf::new();
+
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !normalized.pop() {
+                    normalized.push(component.as_os_str());
+                }
+            }
+            _ => normalized.push(component.as_os_str()),
+        }
+    }
+
+    normalized
 }
 
 impl ResolvedConfig {
@@ -827,7 +846,12 @@ mod tests {
         writeln!(file, "data_dir = \"./data\"")?;
 
         let resolved = ResolvedConfig::load(&config_path)?;
-        assert_eq!(resolved.data_dir, dir.path().join("data"));
+        let expected_config_dir = config_path
+            .canonicalize()?
+            .parent()
+            .context("Config file has no parent directory")?
+            .to_path_buf();
+        assert_eq!(resolved.data_dir, expected_config_dir.join("data"));
 
         Ok(())
     }
