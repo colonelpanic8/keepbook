@@ -8,6 +8,8 @@ import {
   DEFAULT_PORTFOLIO_CONFIG,
   DEFAULT_IGNORE_CONFIG,
   DEFAULT_CONFIG,
+  applyConfigPatch,
+  mergeConfigPatches,
   parseConfig,
   resolveDataDir,
 } from './config.js';
@@ -291,6 +293,68 @@ merge_master_before_command = true
     expect(config.git.auto_commit).toBe(true);
     expect(config.git.auto_push).toBe(true);
     expect(config.git.merge_master_before_command).toBe(true);
+  });
+});
+
+describe('ConfigPatch', () => {
+  it('merges nested patches with later precedence', () => {
+    const merged = mergeConfigPatches(
+      {
+        reporting_currency: 'USD',
+        portfolio: {
+          latent_capital_gains_tax: {
+            enabled: true,
+            rate: 0.23,
+          },
+        },
+      },
+      {
+        portfolio: {
+          latent_capital_gains_tax: {
+            enabled: false,
+            account_name: 'Session Tax',
+          },
+        },
+      },
+    );
+
+    expect(merged).toEqual({
+      reporting_currency: 'USD',
+      portfolio: {
+        latent_capital_gains_tax: {
+          enabled: false,
+          rate: 0.23,
+          account_name: 'Session Tax',
+        },
+      },
+    });
+  });
+
+  it('applies sparse patches without mutating the source config', () => {
+    const base = parseConfig('');
+    const patched = applyConfigPatch(base, {
+      reporting_currency: 'EUR',
+      history: {
+        include_prices: false,
+        graph_granularity: 'monthly',
+      },
+      portfolio: {
+        latent_capital_gains_tax: {
+          enabled: true,
+          rate: 0.23,
+        },
+      },
+    });
+
+    expect(base.reporting_currency).toBe('USD');
+    expect(base.history.include_prices).toBe(true);
+    expect(base.portfolio.latent_capital_gains_tax.enabled).toBe(false);
+
+    expect(patched.reporting_currency).toBe('EUR');
+    expect(patched.history.include_prices).toBe(false);
+    expect(patched.history.graph_granularity).toBe('monthly');
+    expect(patched.portfolio.latent_capital_gains_tax.enabled).toBe(true);
+    expect(patched.portfolio.latent_capital_gains_tax.rate).toBe(0.23);
   });
 });
 

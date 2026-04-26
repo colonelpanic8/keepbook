@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[cfg(target_arch = "wasm32")]
 use gloo_net::http::Request;
@@ -58,9 +58,54 @@ impl Default for LatentCapitalGainsTaxFilter {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct FilterOverrides {
-    include_latent_capital_gains_tax: Option<bool>,
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+struct ConfigPatch {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    portfolio: Option<PortfolioConfigPatch>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+struct PortfolioConfigPatch {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    latent_capital_gains_tax: Option<LatentCapitalGainsTaxConfigPatch>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+struct LatentCapitalGainsTaxConfigPatch {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    enabled: Option<bool>,
+}
+
+impl ConfigPatch {
+    fn is_empty(&self) -> bool {
+        self == &Self::default()
+    }
+
+    fn latent_capital_gains_tax_enabled(&self) -> Option<bool> {
+        self.portfolio
+            .as_ref()
+            .and_then(|portfolio| portfolio.latent_capital_gains_tax.as_ref())
+            .and_then(|latent_tax| latent_tax.enabled)
+    }
+
+    fn with_latent_capital_gains_tax_enabled(&self, enabled: Option<bool>) -> Self {
+        let mut next = self.clone();
+        let mut portfolio = next.portfolio.unwrap_or_default();
+        let mut latent_tax = portfolio.latent_capital_gains_tax.unwrap_or_default();
+        latent_tax.enabled = enabled;
+        portfolio.latent_capital_gains_tax =
+            if latent_tax == LatentCapitalGainsTaxConfigPatch::default() {
+                None
+            } else {
+                Some(latent_tax)
+            };
+        next.portfolio = if portfolio == PortfolioConfigPatch::default() {
+            None
+        } else {
+            Some(portfolio)
+        };
+        next
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -283,10 +328,10 @@ fn main() {
 
 #[component]
 fn App() -> Element {
-    let mut filter_overrides = use_signal(FilterOverrides::default);
+    let mut config_patch = use_signal(ConfigPatch::default);
     let mut overview = use_resource(move || {
-        let overrides = filter_overrides();
-        async move { fetch_overview(overrides).await }
+        let patch = config_patch();
+        async move { fetch_overview(patch).await }
     });
 
     rsx! {
@@ -297,8 +342,8 @@ fn App() -> Element {
                 Some(Ok(data)) => rsx! {
                     Dashboard {
                         overview: data,
-                        filter_overrides: filter_overrides(),
-                        onfilterchange: move |overrides| filter_overrides.set(overrides),
+                        config_patch: config_patch(),
+                        onconfigpatchchange: move |patch| config_patch.set(patch),
                         onrefresh: move |_| overview.restart()
                     }
                 },
@@ -310,13 +355,13 @@ fn App() -> Element {
     }
 }
 
-async fn fetch_overview(overrides: FilterOverrides) -> Result<Overview, String> {
-    fetch_overview_impl(overrides).await
+async fn fetch_overview(config_patch: ConfigPatch) -> Result<Overview, String> {
+    fetch_overview_impl(config_patch).await
 }
 
 #[cfg(target_arch = "wasm32")]
-async fn fetch_overview_impl(overrides: FilterOverrides) -> Result<Overview, String> {
-    let query = filter_override_query_string(overrides);
+async fn fetch_overview_impl(config_patch: ConfigPatch) -> Result<Overview, String> {
+    let query = config_patch_query_string(&config_patch);
     let url = if query.is_empty() {
         format!("{API_BASE}/api/overview")
     } else {
@@ -342,8 +387,8 @@ async fn fetch_overview_impl(overrides: FilterOverrides) -> Result<Overview, Str
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-async fn fetch_overview_impl(overrides: FilterOverrides) -> Result<Overview, String> {
-    let query = filter_override_query_string(overrides);
+async fn fetch_overview_impl(config_patch: ConfigPatch) -> Result<Overview, String> {
+    let query = config_patch_query_string(&config_patch);
     let url = if query.is_empty() {
         format!("{API_BASE}/api/overview")
     } else {
@@ -414,8 +459,8 @@ fn StatusPanel(state: LoadState) -> Element {
 #[component]
 fn Dashboard(
     overview: Overview,
-    filter_overrides: FilterOverrides,
-    onfilterchange: EventHandler<FilterOverrides>,
+    config_patch: ConfigPatch,
+    onconfigpatchchange: EventHandler<ConfigPatch>,
     onrefresh: EventHandler<MouseEvent>,
 ) -> Element {
     let mut active_view = use_signal(|| ActiveView::Summary);
@@ -489,16 +534,16 @@ fn Dashboard(
                         GraphsView {
                             currency: overview.reporting_currency.clone(),
                             defaults: overview.history_defaults.clone(),
-                            filter_overrides,
+                            config_patch: config_patch.clone(),
                         }
                     },
                     ActiveView::Filters => rsx! {
                         FiltersView {
                             filtering: overview.filtering.clone(),
-                            filter_overrides,
+                            config_patch: config_patch.clone(),
                             config_path: overview.config_path.clone(),
                             data_dir: overview.data_dir.clone(),
-                            onfilterchange,
+                            onconfigpatchchange,
                         }
                     },
                     ActiveView::Accounts => rsx! {
@@ -520,7 +565,7 @@ fn Dashboard(
                         HistoryView {
                             currency: overview.reporting_currency.clone(),
                             defaults: overview.history_defaults.clone(),
-                            filter_overrides,
+                            config_patch: config_patch.clone(),
                         }
                     },
                 }
@@ -577,14 +622,10 @@ fn SummaryView(
 }
 
 #[component]
-fn GraphsView(
-    currency: String,
-    defaults: HistoryDefaults,
-    filter_overrides: FilterOverrides,
-) -> Element {
+fn GraphsView(currency: String, defaults: HistoryDefaults, config_patch: ConfigPatch) -> Element {
     rsx! {
         section { class: "panel graph-panel",
-            NetWorthPanel { currency, defaults, filter_overrides }
+            NetWorthPanel { currency, defaults, config_patch }
         }
     }
 }
@@ -592,13 +633,13 @@ fn GraphsView(
 #[component]
 fn FiltersView(
     filtering: FilteringSettings,
-    filter_overrides: FilterOverrides,
+    config_patch: ConfigPatch,
     config_path: String,
     data_dir: String,
-    onfilterchange: EventHandler<FilterOverrides>,
+    onconfigpatchchange: EventHandler<ConfigPatch>,
 ) -> Element {
     let latent_tax = filtering.latent_capital_gains_tax;
-    let override_active = filter_overrides.include_latent_capital_gains_tax.is_some();
+    let override_active = config_patch.latent_capital_gains_tax_enabled().is_some();
     let source = if override_active {
         "Dioxus override"
     } else {
@@ -611,6 +652,8 @@ fn FiltersView(
     } else {
         "Missing"
     };
+    let toggle_patch = config_patch.clone();
+    let reset_patch = config_patch.clone();
 
     rsx! {
         section { class: "panel filters-panel",
@@ -629,9 +672,11 @@ fn FiltersView(
                             r#type: "checkbox",
                             checked: latent_tax.effective_enabled,
                             onchange: move |event| {
-                                let mut next = filter_overrides;
-                                next.include_latent_capital_gains_tax = Some(event.checked());
-                                onfilterchange.call(next);
+                                onconfigpatchchange.call(
+                                    toggle_patch.with_latent_capital_gains_tax_enabled(
+                                        Some(event.checked()),
+                                    ),
+                                );
                             }
                         }
                         span { class: "switch-track",
@@ -662,9 +707,9 @@ fn FiltersView(
                     class: "control-button",
                     disabled: !override_active,
                     onclick: move |_| {
-                        let mut next = filter_overrides;
-                        next.include_latent_capital_gains_tax = None;
-                        onfilterchange.call(next);
+                        onconfigpatchchange.call(
+                            reset_patch.with_latent_capital_gains_tax_enabled(None)
+                        );
                     },
                     "Reset"
                 }
@@ -702,7 +747,7 @@ fn MetricCard(label: String, value: String, detail: String) -> Element {
 fn NetWorthPanel(
     currency: String,
     defaults: HistoryDefaults,
-    filter_overrides: FilterOverrides,
+    config_patch: ConfigPatch,
 ) -> Element {
     let initial_range_preset = range_preset_from_config(&defaults.graph_range);
     let initial_sampling_granularity =
@@ -718,6 +763,7 @@ fn NetWorthPanel(
         let start_text = start_override();
         let end_text = end_override();
         let selected_sampling = sampling_granularity();
+        let patch = config_patch.clone();
         async move {
             fetch_history(history_query_string(
                 selected_range,
@@ -725,7 +771,7 @@ fn NetWorthPanel(
                 &end_text,
                 selected_sampling,
                 &current_date_string(),
-                filter_overrides,
+                patch,
             ))
             .await
         }
@@ -1611,24 +1657,23 @@ fn BalancesView(balances: Vec<Balance>) -> Element {
 }
 
 #[component]
-fn HistoryView(
-    currency: String,
-    defaults: HistoryDefaults,
-    filter_overrides: FilterOverrides,
-) -> Element {
+fn HistoryView(currency: String, defaults: HistoryDefaults, config_patch: ConfigPatch) -> Element {
     let initial_range_preset = range_preset_from_config(&defaults.graph_range);
     let initial_sampling_granularity =
         sampling_granularity_from_config(&defaults.graph_granularity);
-    let history = use_resource(move || async move {
-        fetch_history(history_query_string(
-            initial_range_preset,
-            "",
-            "",
-            initial_sampling_granularity,
-            &current_date_string(),
-            filter_overrides,
-        ))
-        .await
+    let history = use_resource(move || {
+        let patch = config_patch.clone();
+        async move {
+            fetch_history(history_query_string(
+                initial_range_preset,
+                "",
+                "",
+                initial_sampling_granularity,
+                &current_date_string(),
+                patch,
+            ))
+            .await
+        }
     });
     rsx! {
         section { class: "panel",
@@ -1774,7 +1819,7 @@ fn history_query_string(
     end_override: &str,
     selected_sampling: SamplingGranularity,
     today: &str,
-    filter_overrides: FilterOverrides,
+    config_patch: ConfigPatch,
 ) -> String {
     let (start, end) = requested_history_date_range(preset, start_override, end_override, today);
     let granularity =
@@ -1787,32 +1832,36 @@ fn history_query_string(
     if let Some(end) = end {
         params.push(format!("end={end}"));
     }
-    append_filter_override_params(&mut params, filter_overrides);
+    append_config_patch_param(&mut params, &config_patch);
 
     params.join("&")
 }
 
-fn filter_override_query_string(overrides: FilterOverrides) -> String {
+fn config_patch_query_string(config_patch: &ConfigPatch) -> String {
     let mut params = Vec::new();
-    append_filter_override_params(&mut params, overrides);
+    append_config_patch_param(&mut params, config_patch);
     params.join("&")
 }
 
-fn append_filter_override_params(params: &mut Vec<String>, overrides: FilterOverrides) {
-    if let Some(enabled) = overrides.include_latent_capital_gains_tax {
-        params.push(format!(
-            "include_latent_capital_gains_tax={}",
-            bool_query_value(enabled)
-        ));
+fn append_config_patch_param(params: &mut Vec<String>, config_patch: &ConfigPatch) {
+    if !config_patch.is_empty() {
+        match serde_json::to_string(config_patch) {
+            Ok(json) => params.push(format!("config_patch={}", encode_query_component(&json))),
+            Err(_) => {}
+        }
     }
 }
 
-fn bool_query_value(value: bool) -> &'static str {
-    if value {
-        "true"
-    } else {
-        "false"
+fn encode_query_component(value: &str) -> String {
+    let mut encoded = String::new();
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            encoded.push(byte as char);
+        } else {
+            encoded.push_str(&format!("%{byte:02X}"));
+        }
     }
+    encoded
 }
 
 fn requested_history_date_range(
@@ -2304,7 +2353,7 @@ mod tests {
                 "",
                 DEFAULT_SAMPLING_GRANULARITY,
                 "2026-04-25",
-                FilterOverrides::default()
+                ConfigPatch::default()
             ),
             "granularity=weekly&start=2025-04-25&end=2026-04-25"
         );
@@ -2333,7 +2382,7 @@ mod tests {
                 "",
                 SamplingGranularity::Auto,
                 "2026-04-25",
-                FilterOverrides::default()
+                ConfigPatch::default()
             ),
             "granularity=daily&start=2026-01-25&end=2026-04-25"
         );
@@ -2348,19 +2397,23 @@ mod tests {
                 "",
                 SamplingGranularity::Auto,
                 "2026-04-25",
-                FilterOverrides::default()
+                ConfigPatch::default()
             ),
             "granularity=monthly"
         );
     }
 
     #[test]
-    fn filter_override_query_includes_latent_tax_override() {
+    fn config_patch_query_includes_latent_tax_override() {
         assert_eq!(
-            filter_override_query_string(FilterOverrides {
-                include_latent_capital_gains_tax: Some(false),
+            config_patch_query_string(&ConfigPatch {
+                portfolio: Some(PortfolioConfigPatch {
+                    latent_capital_gains_tax: Some(LatentCapitalGainsTaxConfigPatch {
+                        enabled: Some(false),
+                    }),
+                }),
             }),
-            "include_latent_capital_gains_tax=false"
+            "config_patch=%7B%22portfolio%22%3A%7B%22latent_capital_gains_tax%22%3A%7B%22enabled%22%3Afalse%7D%7D%7D"
         );
     }
 

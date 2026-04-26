@@ -9,7 +9,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::Utc;
-use keepbook::config::{default_config_path, ResolvedConfig};
+use keepbook::config::{default_config_path, ConfigPatch, ResolvedConfig};
 use keepbook::storage::{JsonFileStorage, Storage};
 use serde::{Deserialize, Serialize};
 use tower_http::cors::CorsLayer;
@@ -106,7 +106,7 @@ pub struct HistoryQuery {
     pub end: Option<String>,
     pub granularity: Option<String>,
     pub include_prices: Option<bool>,
-    pub include_latent_capital_gains_tax: Option<bool>,
+    pub config_patch: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -115,9 +115,14 @@ pub struct OverviewQuery {
     pub history_end: Option<String>,
     pub history_granularity: Option<String>,
     pub include_prices: Option<bool>,
-    pub include_latent_capital_gains_tax: Option<bool>,
+    pub config_patch: Option<String>,
     #[serde(default)]
     pub include_history: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ConfigQuery {
+    pub config_patch: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -160,21 +165,32 @@ fn history_defaults(config: &ResolvedConfig) -> HistoryDefaultsOutput {
     }
 }
 
-fn config_with_filter_overrides(
-    base: &ResolvedConfig,
-    include_latent_capital_gains_tax: Option<bool>,
-) -> ResolvedConfig {
-    let mut config = base.clone();
-    if let Some(enabled) = include_latent_capital_gains_tax {
-        config.portfolio.latent_capital_gains_tax.enabled = enabled;
-    }
-    config
+fn parse_config_patch(raw: Option<String>) -> Result<ConfigPatch> {
+    raw.as_deref()
+        .filter(|raw| !raw.trim().is_empty())
+        .map(serde_json::from_str)
+        .transpose()
+        .context("failed to parse config_patch JSON")?
+        .map(Ok)
+        .unwrap_or_else(|| Ok(ConfigPatch::default()))
+}
+
+fn effective_config(base: &ResolvedConfig, patch: &ConfigPatch) -> ResolvedConfig {
+    base.with_patch(patch)
+}
+
+fn latent_tax_enabled_patch(patch: &ConfigPatch) -> Option<bool> {
+    patch
+        .portfolio
+        .as_ref()
+        .and_then(|portfolio| portfolio.latent_capital_gains_tax.as_ref())
+        .and_then(|latent_tax| latent_tax.enabled)
 }
 
 fn filtering_output(
     base: &ResolvedConfig,
     effective: &ResolvedConfig,
-    include_latent_capital_gains_tax: Option<bool>,
+    patch: &ConfigPatch,
 ) -> FilteringOutput {
     let configured = &base.portfolio.latent_capital_gains_tax;
     let effective = &effective.portfolio.latent_capital_gains_tax;
@@ -183,7 +199,7 @@ fn filtering_output(
         latent_capital_gains_tax: LatentCapitalGainsTaxFilterOutput {
             configured_enabled: configured.enabled,
             effective_enabled: effective.enabled,
-            override_enabled: include_latent_capital_gains_tax,
+            override_enabled: latent_tax_enabled_patch(patch),
             rate_configured: effective.rate.is_some(),
             account_name: effective.account_name.clone(),
         },
@@ -224,22 +240,28 @@ async fn health() -> Json<HealthOutput> {
     Json(HealthOutput { ok: true })
 }
 
-async fn config(State(state): State<ApiState>) -> Json<ConfigOutput> {
-    Json(ConfigOutput {
+async fn config(
+    State(state): State<ApiState>,
+    Query(query): Query<ConfigQuery>,
+) -> Result<Json<ConfigOutput>, ApiError> {
+    let patch = parse_config_patch(query.config_patch)?;
+    let effective_config = effective_config(&state.config, &patch);
+
+    Ok(Json(ConfigOutput {
         config_path: state.config_path.display().to_string(),
-        data_dir: state.config.data_dir.display().to_string(),
-        reporting_currency: state.config.reporting_currency.clone(),
-        history_defaults: history_defaults(&state.config),
-        filtering: filtering_output(&state.config, &state.config, None),
-    })
+        data_dir: effective_config.data_dir.display().to_string(),
+        reporting_currency: effective_config.reporting_currency.clone(),
+        history_defaults: history_defaults(&effective_config),
+        filtering: filtering_output(&state.config, &effective_config, &patch),
+    }))
 }
 
 async fn overview(
     State(state): State<ApiState>,
     Query(query): Query<OverviewQuery>,
 ) -> Result<Json<OverviewOutput>, ApiError> {
-    let effective_config =
-        config_with_filter_overrides(&state.config, query.include_latent_capital_gains_tax);
+    let patch = parse_config_patch(query.config_patch)?;
+    let effective_config = effective_config(&state.config, &patch);
     let connections = keepbook::app::list_connections(state.storage.as_ref()).await?;
     let accounts = keepbook::app::list_accounts(state.storage.as_ref()).await?;
     let balances = keepbook::app::list_balances(state.storage.as_ref(), &effective_config).await?;
@@ -285,13 +307,9 @@ async fn overview(
     Ok(Json(OverviewOutput {
         config_path: state.config_path.display().to_string(),
         data_dir: state.config.data_dir.display().to_string(),
-        reporting_currency: state.config.reporting_currency.clone(),
-        history_defaults: history_defaults(&state.config),
-        filtering: filtering_output(
-            &state.config,
-            &effective_config,
-            query.include_latent_capital_gains_tax,
-        ),
+        reporting_currency: effective_config.reporting_currency.clone(),
+        history_defaults: history_defaults(&effective_config),
+        filtering: filtering_output(&state.config, &effective_config, &patch),
         connections: json_value(connections)?,
         accounts: json_value(accounts)?,
         balances: json_value(balances)?,
@@ -335,8 +353,8 @@ async fn portfolio_history(
     State(state): State<ApiState>,
     Query(query): Query<HistoryQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let effective_config =
-        config_with_filter_overrides(&state.config, query.include_latent_capital_gains_tax);
+    let patch = parse_config_patch(query.config_patch)?;
+    let effective_config = effective_config(&state.config, &patch);
     let granularity = query
         .granularity
         .unwrap_or_else(|| effective_config.history.portfolio_granularity.clone());

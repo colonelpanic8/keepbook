@@ -390,6 +390,301 @@ impl Config {
     }
 }
 
+/// Ordered merge for sparse configuration patches.
+///
+/// `self.merge_over(later)` keeps values from `self` unless `later` supplies a
+/// replacement for the same field. The operation is intentionally
+/// precedence-sensitive; use it to build a config stack from lowest to highest
+/// priority.
+pub trait MergePatch {
+    fn merge_over(self, later: Self) -> Self;
+}
+
+fn merge_patch_field<T>(target: &mut Option<T>, later: Option<T>) {
+    if later.is_some() {
+        *target = later;
+    }
+}
+
+fn merge_nested_patch<T: MergePatch>(target: &mut Option<T>, later: Option<T>) {
+    if let Some(later) = later {
+        *target = Some(match target.take() {
+            Some(current) => current.merge_over(later),
+            None => later,
+        });
+    }
+}
+
+fn apply_patch_value<T: Clone>(target: &mut T, patch: &Option<T>) {
+    if let Some(value) = patch {
+        *target = value.clone();
+    }
+}
+
+fn apply_optional_patch_value<T: Clone>(target: &mut Option<T>, patch: &Option<T>) {
+    if let Some(value) = patch {
+        *target = Some(value.clone());
+    }
+}
+
+/// Sparse runtime configuration overlay.
+///
+/// This intentionally starts with scalar and nested-object fields. Collection
+/// fields are left out until each field has explicit replace/append/clear
+/// semantics.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ConfigPatch {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reporting_currency: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display: Option<DisplayConfigPatch>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub history: Option<HistoryConfigPatch>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub portfolio: Option<PortfolioConfigPatch>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub git: Option<GitConfigPatch>,
+}
+
+impl MergePatch for ConfigPatch {
+    fn merge_over(mut self, later: Self) -> Self {
+        merge_patch_field(&mut self.reporting_currency, later.reporting_currency);
+        merge_nested_patch(&mut self.display, later.display);
+        merge_nested_patch(&mut self.history, later.history);
+        merge_nested_patch(&mut self.portfolio, later.portfolio);
+        merge_nested_patch(&mut self.git, later.git);
+        self
+    }
+}
+
+impl ConfigPatch {
+    pub fn is_empty(&self) -> bool {
+        self == &Self::default()
+    }
+
+    pub fn apply_to_resolved_config(&self, config: &mut ResolvedConfig) {
+        apply_patch_value(&mut config.reporting_currency, &self.reporting_currency);
+        if let Some(display) = &self.display {
+            display.apply_to_display_config(&mut config.display);
+        }
+        if let Some(history) = &self.history {
+            history.apply_to_history_config(&mut config.history);
+        }
+        if let Some(portfolio) = &self.portfolio {
+            portfolio.apply_to_portfolio_config(&mut config.portfolio);
+        }
+        if let Some(git) = &self.git {
+            git.apply_to_git_config(&mut config.git);
+        }
+    }
+
+    pub fn apply_to_config(&self, config: &mut Config) {
+        apply_patch_value(&mut config.reporting_currency, &self.reporting_currency);
+        if let Some(display) = &self.display {
+            display.apply_to_display_config(&mut config.display);
+        }
+        if let Some(history) = &self.history {
+            history.apply_to_history_config(&mut config.history);
+        }
+        if let Some(portfolio) = &self.portfolio {
+            portfolio.apply_to_portfolio_config(&mut config.portfolio);
+        }
+        if let Some(git) = &self.git {
+            git.apply_to_git_config(&mut config.git);
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DisplayConfigPatch {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub currency_decimals: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub currency_grouping: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub currency_symbol: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub currency_fixed_decimals: Option<bool>,
+}
+
+impl MergePatch for DisplayConfigPatch {
+    fn merge_over(mut self, later: Self) -> Self {
+        merge_patch_field(&mut self.currency_decimals, later.currency_decimals);
+        merge_patch_field(&mut self.currency_grouping, later.currency_grouping);
+        merge_patch_field(&mut self.currency_symbol, later.currency_symbol);
+        merge_patch_field(
+            &mut self.currency_fixed_decimals,
+            later.currency_fixed_decimals,
+        );
+        self
+    }
+}
+
+impl DisplayConfigPatch {
+    fn apply_to_display_config(&self, config: &mut DisplayConfig) {
+        apply_optional_patch_value(&mut config.currency_decimals, &self.currency_decimals);
+        apply_patch_value(&mut config.currency_grouping, &self.currency_grouping);
+        apply_optional_patch_value(&mut config.currency_symbol, &self.currency_symbol);
+        apply_patch_value(
+            &mut config.currency_fixed_decimals,
+            &self.currency_fixed_decimals,
+        );
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HistoryConfigPatch {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allow_future_projection: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lookback_days: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub portfolio_granularity: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub change_points_granularity: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include_prices: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub graph_range: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub graph_granularity: Option<String>,
+}
+
+impl MergePatch for HistoryConfigPatch {
+    fn merge_over(mut self, later: Self) -> Self {
+        merge_patch_field(
+            &mut self.allow_future_projection,
+            later.allow_future_projection,
+        );
+        merge_patch_field(&mut self.lookback_days, later.lookback_days);
+        merge_patch_field(&mut self.portfolio_granularity, later.portfolio_granularity);
+        merge_patch_field(
+            &mut self.change_points_granularity,
+            later.change_points_granularity,
+        );
+        merge_patch_field(&mut self.include_prices, later.include_prices);
+        merge_patch_field(&mut self.graph_range, later.graph_range);
+        merge_patch_field(&mut self.graph_granularity, later.graph_granularity);
+        self
+    }
+}
+
+impl HistoryConfigPatch {
+    fn apply_to_history_config(&self, config: &mut HistoryConfig) {
+        apply_patch_value(
+            &mut config.allow_future_projection,
+            &self.allow_future_projection,
+        );
+        apply_optional_patch_value(&mut config.lookback_days, &self.lookback_days);
+        apply_patch_value(
+            &mut config.portfolio_granularity,
+            &self.portfolio_granularity,
+        );
+        apply_patch_value(
+            &mut config.change_points_granularity,
+            &self.change_points_granularity,
+        );
+        apply_patch_value(&mut config.include_prices, &self.include_prices);
+        apply_patch_value(&mut config.graph_range, &self.graph_range);
+        apply_patch_value(&mut config.graph_granularity, &self.graph_granularity);
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PortfolioConfigPatch {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latent_capital_gains_tax: Option<LatentCapitalGainsTaxConfigPatch>,
+}
+
+impl MergePatch for PortfolioConfigPatch {
+    fn merge_over(mut self, later: Self) -> Self {
+        merge_nested_patch(
+            &mut self.latent_capital_gains_tax,
+            later.latent_capital_gains_tax,
+        );
+        self
+    }
+}
+
+impl PortfolioConfigPatch {
+    fn apply_to_portfolio_config(&self, config: &mut PortfolioConfig) {
+        if let Some(latent_tax) = &self.latent_capital_gains_tax {
+            latent_tax
+                .apply_to_latent_capital_gains_tax_config(&mut config.latent_capital_gains_tax);
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LatentCapitalGainsTaxConfigPatch {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rate: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account_name: Option<String>,
+}
+
+impl MergePatch for LatentCapitalGainsTaxConfigPatch {
+    fn merge_over(mut self, later: Self) -> Self {
+        merge_patch_field(&mut self.enabled, later.enabled);
+        merge_patch_field(&mut self.rate, later.rate);
+        merge_patch_field(&mut self.account_name, later.account_name);
+        self
+    }
+}
+
+impl LatentCapitalGainsTaxConfigPatch {
+    fn apply_to_latent_capital_gains_tax_config(&self, config: &mut LatentCapitalGainsTaxConfig) {
+        apply_patch_value(&mut config.enabled, &self.enabled);
+        apply_optional_patch_value(&mut config.rate, &self.rate);
+        apply_patch_value(&mut config.account_name, &self.account_name);
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GitConfigPatch {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_commit: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_push: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub merge_master_before_command: Option<bool>,
+}
+
+impl MergePatch for GitConfigPatch {
+    fn merge_over(mut self, later: Self) -> Self {
+        merge_patch_field(&mut self.auto_commit, later.auto_commit);
+        merge_patch_field(&mut self.auto_push, later.auto_push);
+        merge_patch_field(
+            &mut self.merge_master_before_command,
+            later.merge_master_before_command,
+        );
+        self
+    }
+}
+
+impl GitConfigPatch {
+    fn apply_to_git_config(&self, config: &mut GitConfig) {
+        apply_patch_value(&mut config.auto_commit, &self.auto_commit);
+        apply_patch_value(&mut config.auto_push, &self.auto_push);
+        apply_patch_value(
+            &mut config.merge_master_before_command,
+            &self.merge_master_before_command,
+        );
+    }
+}
+
 /// Loaded configuration with resolved paths.
 #[derive(Debug, Clone)]
 pub struct ResolvedConfig {
@@ -474,6 +769,13 @@ fn normalize_path_components(path: PathBuf) -> PathBuf {
 }
 
 impl ResolvedConfig {
+    /// Return a cloned config with a sparse runtime patch applied.
+    pub fn with_patch(&self, patch: &ConfigPatch) -> Self {
+        let mut config = self.clone();
+        patch.apply_to_resolved_config(&mut config);
+        config
+    }
+
     /// Load and resolve config from a file path.
     ///
     /// The data directory is resolved relative to the config file's parent directory.
@@ -870,6 +1172,98 @@ mod tests {
         assert_eq!(
             config.portfolio.latent_capital_gains_tax.account_name,
             "Estimated Tax Liability"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_config_patch_merge_over_uses_later_precedence() {
+        let base = ConfigPatch {
+            reporting_currency: Some("USD".to_string()),
+            portfolio: Some(PortfolioConfigPatch {
+                latent_capital_gains_tax: Some(LatentCapitalGainsTaxConfigPatch {
+                    enabled: Some(true),
+                    rate: Some(0.23),
+                    account_name: None,
+                }),
+            }),
+            ..Default::default()
+        };
+        let later = ConfigPatch {
+            portfolio: Some(PortfolioConfigPatch {
+                latent_capital_gains_tax: Some(LatentCapitalGainsTaxConfigPatch {
+                    enabled: Some(false),
+                    account_name: Some("Session Tax".to_string()),
+                    ..Default::default()
+                }),
+            }),
+            ..Default::default()
+        };
+
+        let merged = base.merge_over(later);
+        let latent_tax = merged
+            .portfolio
+            .and_then(|portfolio| portfolio.latent_capital_gains_tax)
+            .expect("latent tax patch should be present");
+
+        assert_eq!(merged.reporting_currency.as_deref(), Some("USD"));
+        assert_eq!(latent_tax.enabled, Some(false));
+        assert_eq!(latent_tax.rate, Some(0.23));
+        assert_eq!(latent_tax.account_name.as_deref(), Some("Session Tax"));
+    }
+
+    #[test]
+    fn test_config_patch_applies_to_resolved_config() -> Result<()> {
+        let dir = TempDir::new()?;
+        let config_path = dir.path().join("keepbook.toml");
+        std::fs::File::create(&config_path)?;
+        let mut resolved = ResolvedConfig::load_or_default(&config_path)?;
+
+        let patch = ConfigPatch {
+            reporting_currency: Some("EUR".to_string()),
+            history: Some(HistoryConfigPatch {
+                include_prices: Some(false),
+                graph_granularity: Some("monthly".to_string()),
+                ..Default::default()
+            }),
+            portfolio: Some(PortfolioConfigPatch {
+                latent_capital_gains_tax: Some(LatentCapitalGainsTaxConfigPatch {
+                    enabled: Some(true),
+                    rate: Some(0.23),
+                    ..Default::default()
+                }),
+            }),
+            ..Default::default()
+        };
+
+        patch.apply_to_resolved_config(&mut resolved);
+
+        assert_eq!(resolved.reporting_currency, "EUR");
+        assert!(!resolved.history.include_prices);
+        assert_eq!(resolved.history.graph_granularity, "monthly");
+        assert!(resolved.portfolio.latent_capital_gains_tax.enabled);
+        assert_eq!(resolved.portfolio.latent_capital_gains_tax.rate, Some(0.23));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_config_patch_deserializes_sparse_json() -> Result<()> {
+        let patch: ConfigPatch = serde_json::from_value(serde_json::json!({
+            "portfolio": {
+                "latent_capital_gains_tax": {
+                    "enabled": false
+                }
+            }
+        }))?;
+
+        assert_eq!(
+            patch
+                .portfolio
+                .and_then(|portfolio| portfolio.latent_capital_gains_tax)
+                .and_then(|latent_tax| latent_tax.enabled),
+            Some(false)
         );
 
         Ok(())

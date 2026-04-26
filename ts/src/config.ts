@@ -149,6 +149,47 @@ export interface Config {
   git: GitConfig;
 }
 
+export interface DisplayConfigPatch {
+  currency_decimals?: number;
+  currency_grouping?: boolean;
+  currency_symbol?: string;
+  currency_fixed_decimals?: boolean;
+}
+
+export interface HistoryConfigPatch {
+  allow_future_projection?: boolean;
+  lookback_days?: number;
+  portfolio_granularity?: string;
+  change_points_granularity?: string;
+  include_prices?: boolean;
+  graph_range?: string;
+  graph_granularity?: string;
+}
+
+export interface LatentCapitalGainsTaxConfigPatch {
+  enabled?: boolean;
+  rate?: number;
+  account_name?: string;
+}
+
+export interface PortfolioConfigPatch {
+  latent_capital_gains_tax?: LatentCapitalGainsTaxConfigPatch;
+}
+
+export interface GitConfigPatch {
+  auto_commit?: boolean;
+  auto_push?: boolean;
+  merge_master_before_command?: boolean;
+}
+
+export interface ConfigPatch {
+  reporting_currency?: string;
+  display?: DisplayConfigPatch;
+  history?: HistoryConfigPatch;
+  portfolio?: PortfolioConfigPatch;
+  git?: GitConfigPatch;
+}
+
 export interface ResolvedConfig {
   /** Resolved (absolute) path to the data directory. */
   data_dir: string;
@@ -464,6 +505,91 @@ export function parseConfig(tomlStr: string): Config {
   }
 
   return config;
+}
+
+// ---------------------------------------------------------------------------
+// Runtime config patches
+// ---------------------------------------------------------------------------
+
+function mergeObjectPatch<T>(base: T | undefined, later: T | undefined): T | undefined {
+  if (later === undefined) return base;
+  return { ...(base ?? {}), ...later } as T;
+}
+
+function mergePortfolioPatch(
+  base: PortfolioConfigPatch | undefined,
+  later: PortfolioConfigPatch | undefined,
+): PortfolioConfigPatch | undefined {
+  if (later === undefined) return base;
+  return {
+    ...(base ?? {}),
+    ...later,
+    latent_capital_gains_tax: mergeObjectPatch(
+      base?.latent_capital_gains_tax,
+      later.latent_capital_gains_tax,
+    ),
+  };
+}
+
+/**
+ * Merge two sparse config patches. Later values take precedence.
+ */
+export function mergeConfigPatches(base: ConfigPatch, later: ConfigPatch): ConfigPatch {
+  return {
+    ...base,
+    ...later,
+    display: mergeObjectPatch(base.display, later.display),
+    history: mergeObjectPatch(base.history, later.history),
+    portfolio: mergePortfolioPatch(base.portfolio, later.portfolio),
+    git: mergeObjectPatch(base.git, later.git),
+  };
+}
+
+/**
+ * Return a config clone with a sparse runtime patch applied.
+ *
+ * This intentionally supports scalar and nested-object fields only. Collection
+ * fields are excluded until each field has explicit replace/append/clear
+ * semantics.
+ */
+export function applyConfigPatch<T extends Config | ResolvedConfig>(
+  config: T,
+  patch: ConfigPatch,
+): T {
+  const next = {
+    ...config,
+    display: { ...config.display },
+    history: { ...config.history },
+    portfolio: {
+      ...config.portfolio,
+      latent_capital_gains_tax: { ...config.portfolio.latent_capital_gains_tax },
+    },
+    git: { ...config.git },
+  } as T;
+
+  if (patch.reporting_currency !== undefined) {
+    next.reporting_currency = patch.reporting_currency;
+  }
+  if (patch.display !== undefined) {
+    next.display = { ...next.display, ...patch.display };
+  }
+  if (patch.history !== undefined) {
+    next.history = { ...next.history, ...patch.history };
+  }
+  if (patch.portfolio?.latent_capital_gains_tax !== undefined) {
+    next.portfolio = {
+      ...next.portfolio,
+      latent_capital_gains_tax: {
+        ...next.portfolio.latent_capital_gains_tax,
+        ...patch.portfolio.latent_capital_gains_tax,
+      },
+    };
+  }
+  if (patch.git !== undefined) {
+    next.git = { ...next.git, ...patch.git };
+  }
+
+  return next;
 }
 
 // ---------------------------------------------------------------------------
