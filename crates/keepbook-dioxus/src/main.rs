@@ -205,6 +205,8 @@ fn App() -> Element {
     let mut overview = use_resource(fetch_overview);
 
     rsx! {
+        document::Title { "Keepbook" }
+        document::Link { rel: "icon", href: "data:," }
         document::Stylesheet { href: CSS }
         main { class: "shell",
             match overview.cloned() {
@@ -296,7 +298,6 @@ async fn fetch_history_impl(query: String) -> Result<History, String> {
         .await
         .map_err(|error| format!("Could not decode net worth history: {error}"))
 }
-
 #[component]
 fn StatusPanel(state: LoadState) -> Element {
     let message = match state {

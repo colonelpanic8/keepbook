@@ -108,6 +108,7 @@
           buildInputs = [
             toolchain
             pkgs.pkg-config
+            pkgs.binaryen
             pkgs.dioxus-cli
             pkgs.openssl
             pkgs.just
@@ -116,7 +117,24 @@
             pkgs.yarn
           ] ++ lib.optionals isLinux [
             pkgs.dbus
+            pkgs.glib
+            pkgs.gtk3
+            pkgs.webkitgtk_4_1
+            pkgs.xdotool
           ];
+
+          LD_LIBRARY_PATH = lib.optionalString isLinux (lib.makeLibraryPath [
+            pkgs.cairo
+            pkgs.gdk-pixbuf
+            pkgs.glib
+            pkgs.gtk3
+            pkgs.harfbuzz
+            pkgs.libsoup_3
+            pkgs.openssl
+            pkgs.pango
+            pkgs.webkitgtk_4_1
+            pkgs.xdotool
+          ]);
 
           OPENSSL_NO_VENDOR = "1";
         };
