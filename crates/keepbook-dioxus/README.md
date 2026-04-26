@@ -12,7 +12,7 @@ Dioxus client over the local `keepbook-server` HTTP API:
 Run the API server first:
 
 ```sh
-direnv exec . cargo run -p keepbook-server -- --config ./keepbook.toml --addr 127.0.0.1:8799
+direnv exec . cargo run -p keepbook-server -- --addr 127.0.0.1:8799
 ```
 
 Then serve the Dioxus web client:
