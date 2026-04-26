@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 #[cfg(target_arch = "wasm32")]
 use gloo_net::http::Request;
 
-static CSS: Asset = asset!("/assets/styles.css");
+const APP_CSS: &str = include_str!("../assets/styles.css");
 const API_BASE: &str = "http://127.0.0.1:8799";
 const DEFAULT_RANGE_PRESET: RangePreset = RangePreset::OneYear;
 const DEFAULT_SAMPLING_GRANULARITY: SamplingGranularity = SamplingGranularity::Weekly;
@@ -338,7 +338,7 @@ fn App() -> Element {
     rsx! {
         document::Title { "Keepbook" }
         document::Link { rel: "icon", href: "data:," }
-        document::Stylesheet { href: CSS }
+        document::Style { "{APP_CSS}" }
         main { class: "shell",
             match overview.cloned() {
                 None => rsx! { StatusPanel { state: LoadState::Loading } },
