@@ -3285,21 +3285,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "keepbook-ffi"
-version = "0.1.1"
-dependencies = [
- "anyhow",
- "chrono",
- "git2",
- "jni",
- "keepbook",
- "serde",
- "serde_json",
- "tokio",
- "toml",
-]
-
-[[package]]
 name = "keepbook-server"
 version = "0.1.0"
 dependencies = [
