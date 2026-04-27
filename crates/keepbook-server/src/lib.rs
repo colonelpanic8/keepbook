@@ -247,6 +247,13 @@ impl ApiState {
         }
 
         let snapshot = self.snapshot().await;
+        let data_dir = resolve_input_data_dir(&snapshot.config_path, input.data_dir.trim());
+        validate_git_data_dir(&data_dir)?;
+        let branch = non_empty(input.branch.trim(), "master");
+        let remote_url = build_ssh_remote_url(&input.host, &input.repo, &input.ssh_user);
+        prepare_git_ssh_environment(&snapshot.config_path)?;
+        sync_git_ssh(&data_dir, &remote_url, &branch, &input.private_key_pem)?;
+
         if input.save_settings {
             write_git_settings(
                 &snapshot.config_path,
@@ -258,13 +265,7 @@ impl ApiState {
                     ssh_user: input.ssh_user.clone(),
                 },
             )?;
-            self.reload().await?;
         }
-
-        let data_dir = resolve_input_data_dir(&snapshot.config_path, input.data_dir.trim());
-        let branch = non_empty(input.branch.trim(), "master");
-        let remote_url = build_ssh_remote_url(&input.host, &input.repo, &input.ssh_user);
-        sync_git_ssh(&data_dir, &remote_url, &branch, &input.private_key_pem)?;
         self.reload().await?;
 
         Ok(GitSyncOutput {
@@ -676,6 +677,47 @@ fn resolve_input_data_dir(config_path: &Path, data_dir: &str) -> PathBuf {
     }
 }
 
+fn validate_git_data_dir(data_dir: &Path) -> Result<()> {
+    if data_dir.parent().is_none() {
+        anyhow::bail!(
+            "Git data directory cannot be a filesystem root: {}",
+            data_dir.display()
+        );
+    }
+
+    Ok(())
+}
+
+fn prepare_git_ssh_environment(config_path: &Path) -> Result<()> {
+    let Some(config_dir) = config_path.parent() else {
+        return Ok(());
+    };
+
+    let ssh_dir = config_dir.join(".ssh");
+    std::fs::create_dir_all(&ssh_dir)
+        .with_context(|| format!("failed to create {}", ssh_dir.display()))?;
+
+    let known_hosts = ssh_dir.join("known_hosts");
+    if !known_hosts.exists() {
+        std::fs::write(&known_hosts, "")
+            .with_context(|| format!("failed to create {}", known_hosts.display()))?;
+    }
+
+    if cfg!(target_os = "android") || std::env::var_os("HOME").is_none() {
+        std::env::set_var("HOME", config_dir);
+    }
+
+    Ok(())
+}
+
+fn log_git_sync_event(message: impl AsRef<str>) {
+    let message = message.as_ref();
+    tracing::info!("{message}");
+
+    #[cfg(target_os = "android")]
+    eprintln!("{message}");
+}
+
 fn normalize_repo_path(repo: &str) -> String {
     let repo = repo.trim();
     if repo.ends_with(".git") {
@@ -735,7 +777,18 @@ fn sync_git_ssh(
         .unwrap_or("git")
         .to_string();
 
-    let repo = if data_dir.join(".git").exists() {
+    let is_existing_repo = data_dir.join(".git").exists();
+    log_git_sync_event(format!(
+        "Keepbook git sync {} {remote_url} branch {branch} in {}",
+        if is_existing_repo {
+            "fetching"
+        } else {
+            "cloning"
+        },
+        data_dir.display()
+    ));
+
+    let repo = if is_existing_repo {
         let repo = Repository::open(data_dir)
             .with_context(|| format!("failed to open git repository {}", data_dir.display()))?;
         match repo.find_remote("origin") {
@@ -783,6 +836,11 @@ fn sync_git_ssh(
     repo.set_head(&local_ref)?;
     repo.checkout_head(Some(CheckoutBuilder::new().force()))?;
     repo.reset(commit.as_object(), ResetType::Hard, None)?;
+    log_git_sync_event(format!(
+        "Keepbook git sync checked out {branch} at {} in {}",
+        commit.id(),
+        data_dir.display()
+    ));
 
     Ok(())
 }
@@ -793,4 +851,22 @@ pub fn default_listen_addr() -> SocketAddr {
 
 pub fn default_server_config_path() -> PathBuf {
     default_config_path()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn validate_git_data_dir_rejects_filesystem_root() {
+        let error = validate_git_data_dir(Path::new("/")).expect_err("root should be rejected");
+        assert!(error.to_string().contains("filesystem root"));
+    }
+
+    #[test]
+    fn validate_git_data_dir_accepts_nested_path() {
+        validate_git_data_dir(Path::new("/tmp/keepbook-data"))
+            .expect("nested path should be valid");
+    }
 }
