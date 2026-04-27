@@ -2478,6 +2478,7 @@ mod tests {
             timestamp: "2026-02-01T14:30:00+00:00".to_string(),
             date: "2026-02-01".to_string(),
             total_value: "1234".to_string(),
+            prospective_capital_gains_tax: None,
             percentage_change_from_previous: None,
             change_triggers: None,
         };

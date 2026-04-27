@@ -164,8 +164,7 @@ export function serializeSnapshot(snapshot: PortfolioSnapshot): object {
       equity_value_after: snapshot.valuation_scenario.equity_value_after,
     };
     if (snapshot.valuation_scenario.target_pre_tax_total_value !== undefined) {
-      scenario.target_pre_tax_total_value =
-        snapshot.valuation_scenario.target_pre_tax_total_value;
+      scenario.target_pre_tax_total_value = snapshot.valuation_scenario.target_pre_tax_total_value;
     }
     out.valuation_scenario = scenario;
   }
@@ -458,7 +457,8 @@ export async function portfolioTaxImpact(
     });
   }
 
-  const shouldWriteGraph = options.graph === true || options.output !== undefined || options.svgOutput !== undefined;
+  const shouldWriteGraph =
+    options.graph === true || options.output !== undefined || options.svgOutput !== undefined;
   const graphOutput = shouldWriteGraph
     ? await writeTaxImpactGraph(curvePoints, currency, {
         title: options.title ?? 'Keepbook Tax Impact',
@@ -1352,6 +1352,49 @@ export interface PortfolioHistoryOptions {
   end?: string;
   granularity?: string;
   includePrices?: boolean;
+  includeLatentCapitalGainsTax?: boolean;
+  account?: string;
+  connection?: string;
+}
+
+export const LATENT_CAPITAL_GAINS_TAX_ACCOUNT_ID = 'virtual:latent_capital_gains_tax';
+
+type PortfolioHistorySelection =
+  | { type: 'portfolio' }
+  | { type: 'accounts'; accountIds: Id[] }
+  | { type: 'latent_capital_gains_tax' };
+
+type HistoryValueMode =
+  | { type: 'portfolio'; includeLatentTaxAdjustment: boolean }
+  | { type: 'latent_capital_gains_tax' };
+
+function isLatentCapitalGainsTaxAccount(config: ResolvedConfig, idOrName: string): boolean {
+  return (
+    idOrName === LATENT_CAPITAL_GAINS_TAX_ACCOUNT_ID ||
+    idOrName.toLowerCase() === config.portfolio.latent_capital_gains_tax.account_name.toLowerCase()
+  );
+}
+
+async function resolvePortfolioHistorySelection(
+  storage: Storage,
+  config: ResolvedConfig,
+  account: string | undefined,
+  connection: string | undefined,
+): Promise<PortfolioHistorySelection> {
+  if (account !== undefined && connection !== undefined) {
+    throw new Error('Specify only one of --account or --connection');
+  }
+
+  if (account !== undefined && isLatentCapitalGainsTaxAccount(config, account)) {
+    return { type: 'latent_capital_gains_tax' };
+  }
+
+  if (account === undefined && connection === undefined) {
+    return { type: 'portfolio' };
+  }
+
+  const { accounts } = await resolvePriceHistoryScope(storage, account, connection);
+  return { type: 'accounts', accountIds: accounts.map((accountEntry) => accountEntry.id) };
 }
 
 /**
@@ -1383,10 +1426,16 @@ interface HistoryValuation {
 
 async function collectHistoryCostBasisBackfill(
   storage: Storage,
+  accountIds: Id[],
 ): Promise<Map<string, HistoryCostBasisBackfill>> {
   const totals = new Map<string, { amount: Decimal; costBasis: Decimal }>();
+  const scopedAccountIds = new Set(accountIds.map((id) => id.asStr()));
 
   for (const [accountId, snapshot] of await storage.getLatestBalances()) {
+    if (scopedAccountIds.size > 0 && !scopedAccountIds.has(accountId.asStr())) {
+      continue;
+    }
+
     if (storage.getAccountConfig(accountId)?.exclude_from_portfolio === true) {
       continue;
     }
@@ -1481,22 +1530,28 @@ function computeHistoryValuationWithCarryForward(
   }
 }
 
-function applyLatentTaxToHistoryTotalValue(
+function historyTotalValueFromSnapshot(
   totalValue: string,
   prospectiveCapitalGainsTax: Decimal | undefined,
   snapshot: PortfolioSnapshot,
   config: ResolvedConfig,
-  includeLatentTaxAdjustment: boolean,
+  mode: HistoryValueMode,
 ): string {
-  if (!includeLatentTaxAdjustment) {
-    return totalValue;
-  }
-
   const tax =
     prospectiveCapitalGainsTax ??
     (snapshot.prospective_capital_gains_tax === undefined
       ? undefined
       : new Decimal(snapshot.prospective_capital_gains_tax));
+
+  if (mode.type === 'latent_capital_gains_tax') {
+    return tax === undefined
+      ? decStrRounded(new Decimal(0), config.display.currency_decimals)
+      : decStrRounded(tax, config.display.currency_decimals);
+  }
+
+  if (!mode.includeLatentTaxAdjustment) {
+    return totalValue;
+  }
   if (tax === undefined) return totalValue;
   if (tax.lte(0)) return totalValue;
 
@@ -1517,8 +1572,37 @@ export async function portfolioHistory(
   clock?: Clock,
 ): Promise<HistoryOutput> {
   const effectiveClock = clock ?? new SystemClock();
-  const currency = options.currency ?? config.reporting_currency;
-  const resolvedGranularity = options.granularity ?? config.history.portfolio_granularity;
+  const effectiveConfig =
+    options.includeLatentCapitalGainsTax === undefined
+      ? config
+      : {
+          ...config,
+          portfolio: {
+            ...config.portfolio,
+            latent_capital_gains_tax: {
+              ...config.portfolio.latent_capital_gains_tax,
+              enabled: options.includeLatentCapitalGainsTax,
+            },
+          },
+        };
+  const selection = await resolvePortfolioHistorySelection(
+    storage,
+    effectiveConfig,
+    options.account,
+    options.connection,
+  );
+  const accountIds = selection.type === 'accounts' ? selection.accountIds : [];
+  const valueMode: HistoryValueMode =
+    selection.type === 'latent_capital_gains_tax'
+      ? { type: 'latent_capital_gains_tax' }
+      : {
+          type: 'portfolio',
+          includeLatentTaxAdjustment:
+            selection.type === 'portfolio' &&
+            resolveCapitalGainsTaxRate(effectiveConfig, undefined).includeLatentTaxVirtualAccount,
+        };
+  const currency = options.currency ?? effectiveConfig.reporting_currency;
+  const resolvedGranularity = options.granularity ?? effectiveConfig.history.portfolio_granularity;
   const granularity = parseGranularity(resolvedGranularity);
   const today = effectiveClock.today();
   const startDate =
@@ -1527,14 +1611,15 @@ export async function portfolioHistory(
     options.end !== undefined ? parseDateBoundOrThrow(options.end, 'end', today) : undefined;
 
   const marketDataService = new MarketDataService(marketDataStore);
-  if (config.history.lookback_days !== undefined) {
-    marketDataService.withLookbackDays(config.history.lookback_days);
+  if (effectiveConfig.history.lookback_days !== undefined) {
+    marketDataService.withLookbackDays(effectiveConfig.history.lookback_days);
   }
-  marketDataService.withFutureProjection(config.history.allow_future_projection);
+  marketDataService.withFutureProjection(effectiveConfig.history.allow_future_projection);
 
   // Collect change points
   const allPoints = await collectChangePoints(storage, marketDataStore, {
-    includePrices: options.includePrices ?? config.history.include_prices,
+    accountIds,
+    includePrices: options.includePrices ?? effectiveConfig.history.include_prices,
   });
 
   // Filter by date range
@@ -1547,19 +1632,30 @@ export async function portfolioHistory(
   const historyPoints: HistoryPoint[] = [];
   let previousTotalValue: Decimal | undefined;
   const carryForwardUnitValues = new Map<string, Decimal>();
-  const costBasisBackfill = await collectHistoryCostBasisBackfill(storage);
-  const { rate: capitalGainsTaxRate, includeLatentTaxVirtualAccount: includeLatentTaxAdjustment } =
-    resolveCapitalGainsTaxRate(config, undefined);
+  const costBasisBackfill = await collectHistoryCostBasisBackfill(storage, accountIds);
+  const capitalGainsTaxRate =
+    selection.type === 'latent_capital_gains_tax'
+      ? (() => {
+          const rate = effectiveConfig.portfolio.latent_capital_gains_tax.rate;
+          if (rate === undefined) {
+            throw new Error(
+              'portfolio.latent_capital_gains_tax.rate is required for the latent capital gains tax account',
+            );
+          }
+          return new Decimal(rate);
+        })()
+      : resolveCapitalGainsTaxRate(effectiveConfig, undefined).rate;
   for (const point of points) {
     const portfolioService = new PortfolioService(storage, marketDataService, effectiveClock);
 
     const snapshot = await portfolioService.calculate({
       as_of_date: formatDateYMD(point.timestamp),
       currency,
-      currency_decimals: config.display.currency_decimals,
+      currency_decimals: effectiveConfig.display.currency_decimals,
       grouping: 'both',
       include_detail: false,
       capital_gains_tax_rate: capitalGainsTaxRate,
+      account_ids: accountIds,
     });
 
     const historyValuation =
@@ -1573,14 +1669,14 @@ export async function portfolioHistory(
         : undefined;
     const baseTotalValue =
       historyValuation !== undefined
-        ? decStrRounded(historyValuation.totalValue, config.display.currency_decimals)
+        ? decStrRounded(historyValuation.totalValue, effectiveConfig.display.currency_decimals)
         : snapshot.total_value;
-    const totalValue = applyLatentTaxToHistoryTotalValue(
+    const totalValue = historyTotalValueFromSnapshot(
       baseTotalValue,
       historyValuation?.prospectiveCapitalGainsTax,
       snapshot,
-      config,
-      includeLatentTaxAdjustment,
+      effectiveConfig,
+      valueMode,
     );
     const currentTotalValue = new Decimal(totalValue);
 
@@ -1608,6 +1704,13 @@ export async function portfolioHistory(
           : formatRfc3339(point.timestamp),
       date: formatDateYMD(point.timestamp),
       total_value: totalValue,
+      prospective_capital_gains_tax:
+        historyValuation?.prospectiveCapitalGainsTax === undefined
+          ? snapshot.prospective_capital_gains_tax
+          : decStrRounded(
+              historyValuation.prospectiveCapitalGainsTax,
+              effectiveConfig.display.currency_decimals,
+            ),
       percentage_change_from_previous: percentageChangeFromPrevious,
       change_triggers: triggers.length > 0 ? triggers : undefined,
     };

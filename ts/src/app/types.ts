@@ -146,6 +146,7 @@ export interface HistoryPoint {
   timestamp: string;
   date: string;
   total_value: string;
+  prospective_capital_gains_tax?: string;
   percentage_change_from_previous: string | null;
   change_triggers?: string[];
 }

@@ -773,6 +773,15 @@ enum PortfolioCommand {
         /// Disable price changes as change points (faster, less detailed)
         #[arg(long, conflicts_with = "include_prices")]
         no_include_prices: bool,
+
+        /// Restrict history to a single account by id or name.
+        /// Use virtual:latent_capital_gains_tax for the configured latent tax account.
+        #[arg(long, conflicts_with = "connection")]
+        account: Option<String>,
+
+        /// Restrict history to accounts under a connection by id or name
+        #[arg(long, conflicts_with = "account")]
+        connection: Option<String>,
     },
 
     /// List all change points (timestamps where portfolio value could have changed)
@@ -1207,6 +1216,8 @@ async fn main() -> Result<()> {
                 granularity,
                 include_prices,
                 no_include_prices,
+                account,
+                connection,
             } => {
                 let granularity =
                     granularity.unwrap_or_else(|| config.history.portfolio_granularity.clone());
@@ -1217,16 +1228,52 @@ async fn main() -> Result<()> {
                 } else {
                     config.history.include_prices
                 };
-                let output = app::portfolio_history(
-                    storage_arc.clone(),
+                let selection = app::resolve_portfolio_history_selection(
+                    storage_arc.as_ref(),
                     &config,
-                    currency,
-                    start,
-                    end,
-                    granularity,
-                    include_prices,
+                    account.as_deref(),
+                    connection.as_deref(),
                 )
                 .await?;
+                let output = match selection {
+                    app::PortfolioHistorySelection::Portfolio => {
+                        app::portfolio_history(
+                            storage_arc.clone(),
+                            &config,
+                            currency,
+                            start,
+                            end,
+                            granularity,
+                            include_prices,
+                        )
+                        .await?
+                    }
+                    app::PortfolioHistorySelection::Accounts(account_ids) => {
+                        app::portfolio_history_for_accounts(
+                            storage_arc.clone(),
+                            &config,
+                            currency,
+                            start,
+                            end,
+                            granularity,
+                            include_prices,
+                            account_ids,
+                        )
+                        .await?
+                    }
+                    app::PortfolioHistorySelection::LatentCapitalGainsTax => {
+                        app::latent_capital_gains_tax_history(
+                            storage_arc.clone(),
+                            &config,
+                            currency,
+                            start,
+                            end,
+                            granularity,
+                            include_prices,
+                        )
+                        .await?
+                    }
+                };
                 println!("{}", serde_json::to_string_pretty(&output)?);
             }
 

@@ -6,6 +6,7 @@
 
 import type { Decimal } from '../decimal.js';
 import type { AssetType } from '../models/asset.js';
+import type { Id } from '../models/id.js';
 
 // ---------------------------------------------------------------------------
 // Grouping
@@ -41,6 +42,11 @@ export interface PortfolioQuery {
    * unrealized gains, and prospective tax are calculated.
    */
   equity_valuation_adjustment?: EquityValuationAdjustment;
+  /**
+   * Restrict valuation to these accounts. Empty/undefined means all
+   * non-excluded accounts in the portfolio.
+   */
+  account_ids?: Id[];
 }
 
 export type EquityValuationAdjustment =

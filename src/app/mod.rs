@@ -29,8 +29,10 @@ pub use mutations::{
 pub use portfolio::{
     default_portfolio_change_points_granularity, default_portfolio_history_granularity,
     default_portfolio_include_prices, fetch_historical_prices, fill_prices_at_date,
-    portfolio_change_points, portfolio_history, portfolio_recent_history, portfolio_snapshot,
-    portfolio_tax_impact, PriceHistoryRequest, DEFAULT_PORTFOLIO_CHANGE_POINTS_GRANULARITY,
+    latent_capital_gains_tax_history, portfolio_change_points, portfolio_history,
+    portfolio_history_for_accounts, portfolio_recent_history, portfolio_snapshot,
+    portfolio_tax_impact, resolve_portfolio_history_selection, PortfolioHistorySelection,
+    PriceHistoryRequest, DEFAULT_PORTFOLIO_CHANGE_POINTS_GRANULARITY,
     DEFAULT_PORTFOLIO_HISTORY_GRANULARITY, DEFAULT_PORTFOLIO_INCLUDE_PRICES,
 };
 pub use preflight::{run_preflight, PreflightOptions};

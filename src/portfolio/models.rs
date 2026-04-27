@@ -2,7 +2,7 @@
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::models::Asset;
+use crate::models::{Asset, Id};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -29,6 +29,9 @@ pub struct PortfolioQuery {
     /// Optional scenario that changes equity valuations before totals,
     /// unrealized gains, and prospective tax are calculated.
     pub equity_valuation_adjustment: Option<EquityValuationAdjustment>,
+    /// Restrict valuation to these accounts. Empty means all non-excluded
+    /// accounts in the portfolio.
+    pub account_ids: Vec<Id>,
 }
 
 #[derive(Debug, Clone)]

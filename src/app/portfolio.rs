@@ -54,6 +54,13 @@ pub const DEFAULT_PORTFOLIO_HISTORY_GRANULARITY: &str =
 pub const DEFAULT_PORTFOLIO_CHANGE_POINTS_GRANULARITY: &str =
     crate::config::DEFAULT_HISTORY_CHANGE_POINTS_GRANULARITY;
 pub const DEFAULT_PORTFOLIO_INCLUDE_PRICES: bool = crate::config::DEFAULT_HISTORY_INCLUDE_PRICES;
+pub const LATENT_CAPITAL_GAINS_TAX_ACCOUNT_ID: &str = "virtual:latent_capital_gains_tax";
+
+pub enum PortfolioHistorySelection {
+    Portfolio,
+    Accounts(Vec<Id>),
+    LatentCapitalGainsTax,
+}
 
 pub fn default_portfolio_history_granularity() -> String {
     crate::config::default_history_portfolio_granularity()
@@ -65,6 +72,37 @@ pub fn default_portfolio_change_points_granularity() -> String {
 
 pub fn default_portfolio_include_prices() -> bool {
     crate::config::default_history_include_prices()
+}
+
+fn is_latent_capital_gains_tax_account(config: &ResolvedConfig, id_or_name: &str) -> bool {
+    id_or_name == LATENT_CAPITAL_GAINS_TAX_ACCOUNT_ID
+        || id_or_name.eq_ignore_ascii_case(&config.portfolio.latent_capital_gains_tax.account_name)
+}
+
+pub async fn resolve_portfolio_history_selection(
+    storage: &dyn Storage,
+    config: &ResolvedConfig,
+    account: Option<&str>,
+    connection: Option<&str>,
+) -> Result<PortfolioHistorySelection> {
+    if account.is_some() && connection.is_some() {
+        anyhow::bail!("Specify only one of --account or --connection");
+    }
+
+    if let Some(id_or_name) = account {
+        if is_latent_capital_gains_tax_account(config, id_or_name) {
+            return Ok(PortfolioHistorySelection::LatentCapitalGainsTax);
+        }
+    }
+
+    if account.is_none() && connection.is_none() {
+        return Ok(PortfolioHistorySelection::Portfolio);
+    }
+
+    let (_, accounts) = resolve_price_history_scope(storage, account, connection).await?;
+    Ok(PortfolioHistorySelection::Accounts(
+        accounts.into_iter().map(|account| account.id).collect(),
+    ))
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -234,6 +272,17 @@ struct HistoryValuation {
     prospective_capital_gains_tax: Option<Decimal>,
 }
 
+struct HistoryPointValue {
+    total_value: String,
+    prospective_capital_gains_tax: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum HistoryValueMode {
+    Portfolio { include_latent_tax_adjustment: bool },
+    LatentCapitalGainsTax,
+}
+
 fn add_optional_decimal(total: &mut Option<Decimal>, value: Decimal) {
     *total = Some(total.unwrap_or(Decimal::ZERO) + value);
 }
@@ -315,10 +364,16 @@ fn compute_history_valuation_with_carry_forward(
 
 async fn collect_history_cost_basis_backfill(
     storage: &dyn Storage,
+    account_ids: &[Id],
 ) -> Result<HashMap<String, HistoryCostBasisBackfill>> {
     let mut totals: HashMap<String, (Decimal, Decimal)> = HashMap::new();
+    let scoped_account_ids: HashSet<&Id> = account_ids.iter().collect();
 
     for (account_id, snapshot) in storage.get_latest_balances().await? {
+        if !scoped_account_ids.is_empty() && !scoped_account_ids.contains(&account_id) {
+            continue;
+        }
+
         let excluded = storage
             .get_account_config(&account_id)?
             .and_then(|config| config.exclude_from_portfolio)
@@ -365,11 +420,11 @@ async fn collect_history_cost_basis_backfill(
 fn history_total_value_from_snapshot(
     snapshot: &crate::portfolio::PortfolioSnapshot,
     config: &ResolvedConfig,
-    include_latent_tax_adjustment: bool,
+    mode: HistoryValueMode,
     capital_gains_tax_rate: Option<Decimal>,
     cost_basis_backfill: &HashMap<String, HistoryCostBasisBackfill>,
     carry_forward_unit_values: &mut HashMap<String, Decimal>,
-) -> Result<String> {
+) -> Result<HistoryPointValue> {
     let history_valuation = snapshot.by_asset.as_ref().and_then(|assets| {
         compute_history_valuation_with_carry_forward(
             assets,
@@ -379,36 +434,71 @@ fn history_total_value_from_snapshot(
         )
     });
     let total_value = history_valuation
+        .as_ref()
         .map(|valuation| {
             format_base_currency_value(valuation.total_value, config.display.currency_decimals)
         })
         .unwrap_or_else(|| snapshot.total_value.clone());
+    let prospective_capital_gains_tax = history_valuation
+        .as_ref()
+        .and_then(|valuation| valuation.prospective_capital_gains_tax)
+        .map(|tax| format_base_currency_value(tax, config.display.currency_decimals))
+        .or_else(|| snapshot.prospective_capital_gains_tax.clone());
 
-    if !include_latent_tax_adjustment {
-        return Ok(total_value);
+    if matches!(mode, HistoryValueMode::LatentCapitalGainsTax) {
+        return Ok(HistoryPointValue {
+            total_value: prospective_capital_gains_tax.clone().unwrap_or_else(|| {
+                format_base_currency_value(Decimal::ZERO, config.display.currency_decimals)
+            }),
+            prospective_capital_gains_tax,
+        });
     }
 
-    let tax = if let Some(tax) =
-        history_valuation.and_then(|valuation| valuation.prospective_capital_gains_tax)
+    let HistoryValueMode::Portfolio {
+        include_latent_tax_adjustment,
+    } = mode
+    else {
+        unreachable!("handled latent capital gains tax history mode above");
+    };
+
+    if !include_latent_tax_adjustment {
+        return Ok(HistoryPointValue {
+            total_value,
+            prospective_capital_gains_tax,
+        });
+    }
+
+    let tax = if let Some(tax) = history_valuation
+        .as_ref()
+        .and_then(|valuation| valuation.prospective_capital_gains_tax)
     {
         tax
     } else {
         let Some(tax_str) = &snapshot.prospective_capital_gains_tax else {
-            return Ok(total_value);
+            return Ok(HistoryPointValue {
+                total_value,
+                prospective_capital_gains_tax,
+            });
         };
         Decimal::from_str(tax_str)
             .with_context(|| format!("Invalid prospective_capital_gains_tax: {tax_str}"))?
     };
     if tax <= Decimal::ZERO {
-        return Ok(total_value);
+        return Ok(HistoryPointValue {
+            total_value,
+            prospective_capital_gains_tax,
+        });
     }
 
     let total_value = Decimal::from_str(&total_value)
         .with_context(|| format!("Invalid total_value: {total_value}"))?;
-    Ok(format_base_currency_value(
-        total_value - tax,
-        config.display.currency_decimals,
-    ))
+    Ok(HistoryPointValue {
+        total_value: format_base_currency_value(
+            total_value - tax,
+            config.display.currency_decimals,
+        ),
+        prospective_capital_gains_tax,
+    })
 }
 
 fn configure_history_market_data(
@@ -454,8 +544,9 @@ struct HistoryPointInput<'a> {
     change_triggers: Option<Vec<String>>,
     previous_total_value: Option<Decimal>,
     capital_gains_tax_rate: Option<Decimal>,
-    include_latent_tax_adjustment: bool,
+    value_mode: HistoryValueMode,
     cost_basis_backfill: &'a HashMap<String, HistoryCostBasisBackfill>,
+    account_ids: &'a [Id],
 }
 
 async fn build_history_point_for_date(
@@ -472,18 +563,19 @@ async fn build_history_point_for_date(
         include_detail: false,
         capital_gains_tax_rate: input.capital_gains_tax_rate,
         equity_valuation_adjustment: None,
+        account_ids: input.account_ids.to_vec(),
     };
 
     let snapshot = service.calculate(&query).await?;
-    let history_total_value = history_total_value_from_snapshot(
+    let history_point_value = history_total_value_from_snapshot(
         &snapshot,
         config,
-        input.include_latent_tax_adjustment,
+        input.value_mode,
         input.capital_gains_tax_rate,
         input.cost_basis_backfill,
         carry_forward_unit_values,
     )?;
-    let current_total_value = Decimal::from_str(&history_total_value).ok();
+    let current_total_value = Decimal::from_str(&history_point_value.total_value).ok();
     let percentage_change_from_previous =
         compute_percentage_change_from_previous(input.previous_total_value, current_total_value);
 
@@ -491,7 +583,8 @@ async fn build_history_point_for_date(
         HistoryPoint {
             timestamp: input.timestamp,
             date: input.as_of_date.to_string(),
-            total_value: history_total_value,
+            total_value: history_point_value.total_value,
+            prospective_capital_gains_tax: history_point_value.prospective_capital_gains_tax,
             percentage_change_from_previous,
             change_triggers: input.change_triggers,
         },
@@ -1397,6 +1490,7 @@ pub async fn portfolio_snapshot(
         include_detail: detail,
         capital_gains_tax_rate,
         equity_valuation_adjustment,
+        account_ids: Vec::new(),
     };
 
     // Setup market data store
@@ -1577,6 +1671,7 @@ pub async fn portfolio_tax_impact(
         include_detail: false,
         capital_gains_tax_rate: Some(rate),
         equity_valuation_adjustment: None,
+        account_ids: Vec::new(),
     };
     let base = service.calculate(&base_query).await?;
     let current_nominal = parse_decimal_arg(&base.total_value, "current nominal net worth")?;
@@ -1961,6 +2056,82 @@ pub async fn portfolio_history(
     granularity: String,
     include_prices: bool,
 ) -> Result<HistoryOutput> {
+    portfolio_history_scoped(
+        storage,
+        config,
+        currency,
+        start,
+        end,
+        granularity,
+        include_prices,
+        Vec::new(),
+        HistoryValueMode::Portfolio {
+            include_latent_tax_adjustment: resolve_capital_gains_tax_rate(config, None)?.1,
+        },
+    )
+    .await
+}
+
+pub async fn portfolio_history_for_accounts(
+    storage: Arc<dyn Storage>,
+    config: &ResolvedConfig,
+    currency: Option<String>,
+    start: Option<String>,
+    end: Option<String>,
+    granularity: String,
+    include_prices: bool,
+    account_ids: Vec<Id>,
+) -> Result<HistoryOutput> {
+    portfolio_history_scoped(
+        storage,
+        config,
+        currency,
+        start,
+        end,
+        granularity,
+        include_prices,
+        account_ids,
+        HistoryValueMode::Portfolio {
+            include_latent_tax_adjustment: false,
+        },
+    )
+    .await
+}
+
+pub async fn latent_capital_gains_tax_history(
+    storage: Arc<dyn Storage>,
+    config: &ResolvedConfig,
+    currency: Option<String>,
+    start: Option<String>,
+    end: Option<String>,
+    granularity: String,
+    include_prices: bool,
+) -> Result<HistoryOutput> {
+    portfolio_history_scoped(
+        storage,
+        config,
+        currency,
+        start,
+        end,
+        granularity,
+        include_prices,
+        Vec::new(),
+        HistoryValueMode::LatentCapitalGainsTax,
+    )
+    .await
+}
+
+async fn portfolio_history_scoped(
+    storage: Arc<dyn Storage>,
+    config: &ResolvedConfig,
+    currency: Option<String>,
+    start: Option<String>,
+    end: Option<String>,
+    granularity: String,
+    include_prices: bool,
+    account_ids: Vec<Id>,
+    value_mode: HistoryValueMode,
+) -> Result<HistoryOutput> {
     // Parse date range
     let today = Utc::now().date_naive();
     let start_date = start
@@ -1993,7 +2164,7 @@ pub async fn portfolio_history(
 
     // Collect change points
     let options = CollectOptions {
-        account_ids: Vec::new(), // All accounts
+        account_ids: account_ids.clone(),
         include_prices,
         include_fx: false,
         target_currency: currency.clone(),
@@ -2029,12 +2200,25 @@ pub async fn portfolio_history(
         config,
     ));
 
-    let cost_basis_backfill = collect_history_cost_basis_backfill(storage_arc.as_ref()).await?;
+    let cost_basis_backfill =
+        collect_history_cost_basis_backfill(storage_arc.as_ref(), &account_ids).await?;
 
     // Create portfolio service
     let service = PortfolioService::new(storage_arc, market_data);
-    let (capital_gains_tax_rate, include_latent_tax_adjustment) =
-        resolve_capital_gains_tax_rate(config, None)?;
+    let capital_gains_tax_rate = match value_mode {
+        HistoryValueMode::LatentCapitalGainsTax => {
+            let rate = config
+                .portfolio
+                .latent_capital_gains_tax
+                .rate
+                .context("portfolio.latent_capital_gains_tax.rate is required for the latent capital gains tax account")?;
+            Some(decimal_from_f64(
+                rate,
+                "portfolio.latent_capital_gains_tax.rate",
+            )?)
+        }
+        HistoryValueMode::Portfolio { .. } => resolve_capital_gains_tax_rate(config, None)?.0,
+    };
 
     // Calculate portfolio value at each change point
     let target_currency = currency
@@ -2082,8 +2266,9 @@ pub async fn portfolio_history(
                 },
                 previous_total_value,
                 capital_gains_tax_rate,
-                include_latent_tax_adjustment,
+                value_mode,
                 cost_basis_backfill: &cost_basis_backfill,
+                account_ids: &account_ids,
             },
             &mut carry_forward_unit_values,
         )
@@ -2145,7 +2330,9 @@ pub async fn portfolio_recent_history(
             .await,
         config,
     ));
-    let cost_basis_backfill = collect_history_cost_basis_backfill(storage_arc.as_ref()).await?;
+    let account_ids = Vec::new();
+    let cost_basis_backfill =
+        collect_history_cost_basis_backfill(storage_arc.as_ref(), &account_ids).await?;
     let service = PortfolioService::new(storage_arc, market_data);
     let target_currency = currency.unwrap_or_else(|| config.reporting_currency.clone());
     let (capital_gains_tax_rate, include_latent_tax_adjustment) =
@@ -2171,8 +2358,11 @@ pub async fn portfolio_recent_history(
                 change_triggers: None,
                 previous_total_value,
                 capital_gains_tax_rate,
-                include_latent_tax_adjustment,
+                value_mode: HistoryValueMode::Portfolio {
+                    include_latent_tax_adjustment,
+                },
                 cost_basis_backfill: &cost_basis_backfill,
+                account_ids: &account_ids,
             },
             &mut carry_forward_unit_values,
         )

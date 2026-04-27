@@ -63,6 +63,12 @@ components, tray/menu views, and any future frontend.
 - Prefer `yarn` for TypeScript workflows in `ts/` (install, build, test, and CLI execution).
 - Use `npm`/`npx` only when explicitly required.
 
+## Development Environment
+
+- Run repository commands in the direnv-provided environment.
+- If the current shell has not already loaded direnv, use `direnv exec . <command>` from the repository root instead of `nix develop --command <command>`.
+- Prefer direct commands such as `cargo test` or `cd ts && yarn test` only when the active shell is already inside the direnv context.
+
 ## Project Structure
 
 ```

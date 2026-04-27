@@ -892,6 +892,11 @@ portfolio
   )
   .option('--include-prices', 'include price change points')
   .option('--no-include-prices', 'exclude price change points')
+  .option(
+    '--account <idOrName>',
+    'restrict history to one account; use virtual:latent_capital_gains_tax for the configured latent tax account',
+  )
+  .option('--connection <idOrName>', 'restrict history to accounts under one connection')
   .action(
     async (opts: {
       currency?: string;
@@ -899,6 +904,8 @@ portfolio
       end?: string;
       granularity?: string;
       includePrices?: boolean;
+      account?: string;
+      connection?: string;
     }) => {
       await runWithConfig(async (cfg) => {
         const storage = new JsonFileStorage(cfg.config.data_dir);
@@ -909,6 +916,8 @@ portfolio
           end: opts.end,
           granularity: opts.granularity,
           includePrices: opts.includePrices,
+          account: opts.account,
+          connection: opts.connection,
         });
       });
     },

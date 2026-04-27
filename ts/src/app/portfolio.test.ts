@@ -1149,6 +1149,7 @@ describe('portfolioHistory', () => {
 
     expect(result.points).toHaveLength(1);
     expect(result.points[0].total_value).toBe('1885');
+    expect(result.points[0].prospective_capital_gains_tax).toBe('115');
   });
 
   it('backfills latest cost basis for latent tax on older history points', async () => {
@@ -1215,6 +1216,10 @@ describe('portfolioHistory', () => {
     );
 
     expect(result.points.map((point) => point.total_value)).toEqual(['1885', '1885']);
+    expect(result.points.map((point) => point.prospective_capital_gains_tax)).toEqual([
+      '115',
+      '115',
+    ]);
   });
 
   // -------------------------------------------------------------------------

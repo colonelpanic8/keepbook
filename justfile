@@ -64,6 +64,12 @@ history-daily-balance *args:
 history-daily-balance-tsv *args:
     {{keepbook_cmd}} portfolio history --granularity daily "$@" | jq -r '.points[] | "\(.date)\t\(.total_value)"'
 
+# Historical latent capital gains tax burden as tab-separated date/value rows.
+# Extra CLI args can override defaults, e.g.:
+#   just history-tax-burden -- --granularity weekly --start 2025-01-01
+history-tax-burden *args:
+    {{keepbook_cmd}} portfolio history --account virtual:latent_capital_gains_tax --start -1y --granularity monthly "$@" | jq -r '.points[] | "\(.date)\t\(.total_value)"'
+
 # Portfolio totals for each month over the last N months.
 # Uses `portfolio history --granularity monthly` as the source of truth, then
 # fills month slots from the nearest available historical point (prefer prior,

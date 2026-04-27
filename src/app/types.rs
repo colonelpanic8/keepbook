@@ -145,6 +145,8 @@ pub struct HistoryPoint {
     pub timestamp: String,
     pub date: String,
     pub total_value: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prospective_capital_gains_tax: Option<String>,
     pub percentage_change_from_previous: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub change_triggers: Option<Vec<String>>,

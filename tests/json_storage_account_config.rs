@@ -49,6 +49,7 @@ async fn json_storage_reads_account_config_for_zero_backfill() -> Result<()> {
         include_detail: false,
         capital_gains_tax_rate: None,
         equity_valuation_adjustment: None,
+        account_ids: Vec::new(),
     };
 
     let snapshot = service.calculate(&query).await?;

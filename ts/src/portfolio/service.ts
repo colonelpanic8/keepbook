@@ -107,7 +107,7 @@ export class PortfolioService {
 
   async calculate(query: PortfolioQuery): Promise<PortfolioSnapshot> {
     // 1. Load accounts, connections, and filtered balances
-    const ctx = await this.loadCalculationContext(query.as_of_date);
+    const ctx = await this.loadCalculationContext(query.as_of_date, query.account_ids ?? []);
 
     // 2. Aggregate balances by normalized asset
     const byAssetAgg = this.aggregateByAsset(ctx.filtered_snapshots);
@@ -203,7 +203,10 @@ export class PortfolioService {
   // Private: load calculation context
   // -----------------------------------------------------------------------
 
-  private async loadCalculationContext(asOfDate: string): Promise<CalculationContext> {
+  private async loadCalculationContext(
+    asOfDate: string,
+    accountIds: Id[],
+  ): Promise<CalculationContext> {
     const accounts = await this.storage.listAccounts();
     const connections = await this.storage.listConnections();
 
@@ -220,8 +223,13 @@ export class PortfolioService {
     const asOfEnd = new Date(asOfDate + 'T23:59:59Z');
     const filteredSnapshots: Array<[Id, BalanceSnapshotType]> = [];
     const zeroAccounts: Id[] = [];
+    const scopedAccountIds = new Set(accountIds.map((id) => id.asStr()));
 
     for (const account of accountMap.values()) {
+      if (scopedAccountIds.size > 0 && !scopedAccountIds.has(account.id.asStr())) {
+        continue;
+      }
+
       const accountConfig = this.storage.getAccountConfig(account.id);
       if (accountConfig?.exclude_from_portfolio === true) {
         continue;

@@ -1,5 +1,5 @@
 // src/portfolio/service.rs
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -91,7 +91,9 @@ impl PortfolioService {
 
     pub async fn calculate(&self, query: &PortfolioQuery) -> Result<PortfolioSnapshot> {
         // Load accounts, connections, and balances
-        let ctx = self.load_calculation_context(query.as_of_date).await?;
+        let ctx = self
+            .load_calculation_context(query.as_of_date, &query.account_ids)
+            .await?;
 
         // Aggregate balances by asset
         let by_asset_agg = Self::aggregate_by_asset(&ctx.filtered_snapshots)?;
@@ -169,7 +171,11 @@ impl PortfolioService {
     }
 
     /// Load accounts, connections, and balances from storage.
-    async fn load_calculation_context(&self, as_of_date: NaiveDate) -> Result<CalculationContext> {
+    async fn load_calculation_context(
+        &self,
+        as_of_date: NaiveDate,
+        account_ids: &[Id],
+    ) -> Result<CalculationContext> {
         let accounts = self.storage.list_accounts().await?;
         let connections = self.storage.list_connections().await?;
 
@@ -183,8 +189,13 @@ impl PortfolioService {
         let as_of_datetime = as_of_date.and_hms_opt(23, 59, 59).unwrap().and_utc();
         let mut filtered_snapshots = Vec::new();
         let mut zero_accounts = Vec::new();
+        let scoped_account_ids: HashSet<&Id> = account_ids.iter().collect();
 
         for account in account_map.values() {
+            if !scoped_account_ids.is_empty() && !scoped_account_ids.contains(&account.id) {
+                continue;
+            }
+
             let account_config = self.storage.get_account_config(&account.id)?;
             let excluded = account_config
                 .as_ref()
@@ -874,6 +885,7 @@ mod tests {
             include_detail: false,
             capital_gains_tax_rate: None,
             equity_valuation_adjustment: None,
+            account_ids: Vec::new(),
         };
         let result = service.calculate(&query).await?;
 
@@ -948,6 +960,7 @@ mod tests {
             include_detail: false,
             capital_gains_tax_rate: None,
             equity_valuation_adjustment: None,
+            account_ids: Vec::new(),
         };
         let result = service.calculate(&query).await?;
 
@@ -1012,6 +1025,7 @@ mod tests {
             include_detail: true,
             capital_gains_tax_rate: Some(Decimal::new(238, 3)),
             equity_valuation_adjustment: None,
+            account_ids: Vec::new(),
         };
         let result = service.calculate(&query).await?;
 
@@ -1086,6 +1100,7 @@ mod tests {
             equity_valuation_adjustment: Some(EquityValuationAdjustment::TargetPreTaxTotalValue(
                 Decimal::from(2600),
             )),
+            account_ids: Vec::new(),
         };
         let result = service.calculate(&query).await?;
 
@@ -1166,6 +1181,7 @@ mod tests {
             include_detail: true,
             capital_gains_tax_rate: None,
             equity_valuation_adjustment: None,
+            account_ids: Vec::new(),
         };
         let result = service.calculate(&query).await?;
 
@@ -1236,6 +1252,7 @@ mod tests {
             include_detail: false,
             capital_gains_tax_rate: None,
             equity_valuation_adjustment: None,
+            account_ids: Vec::new(),
         };
         let result = service.calculate(&query).await?;
 
@@ -1291,6 +1308,7 @@ mod tests {
             include_detail: false,
             capital_gains_tax_rate: None,
             equity_valuation_adjustment: None,
+            account_ids: Vec::new(),
         };
 
         let result = service.calculate(&query).await?;
@@ -1341,6 +1359,7 @@ mod tests {
             include_detail: false,
             capital_gains_tax_rate: None,
             equity_valuation_adjustment: None,
+            account_ids: Vec::new(),
         };
 
         let result = service.calculate(&query).await?;
@@ -1404,6 +1423,7 @@ mod tests {
             include_detail: false,
             capital_gains_tax_rate: None,
             equity_valuation_adjustment: None,
+            account_ids: Vec::new(),
         };
 
         let result = service.calculate(&query).await?;
@@ -1459,6 +1479,7 @@ mod tests {
             include_detail: false,
             capital_gains_tax_rate: None,
             equity_valuation_adjustment: None,
+            account_ids: Vec::new(),
         };
 
         let result = service.calculate(&query).await?;
