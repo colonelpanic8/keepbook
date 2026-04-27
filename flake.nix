@@ -115,14 +115,20 @@
         androidNdkHome = "${androidHome}/ndk/${androidNdkVersion}";
         androidAapt2 = "${androidHome}/build-tools/${androidBuildToolsVersion}/aapt2";
         androidLlvmBin = "${androidNdkHome}/toolchains/llvm/prebuilt/linux-x86_64/bin";
+        android16KbPageRustFlags = "-C link-arg=-Wl,-z,max-page-size=16384 -C link-arg=-Wl,-z,common-page-size=16384";
         dioxusAndroidEnv = {
           ANDROID_HOME = androidHome;
           ANDROID_SDK_ROOT = androidHome;
           ANDROID_NDK_HOME = androidNdkHome;
           NDK_HOME = androidNdkHome;
           CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER = "${androidLlvmBin}/aarch64-linux-android24-clang";
+          CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS = android16KbPageRustFlags;
+          CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER = "${androidLlvmBin}/x86_64-linux-android24-clang";
+          CARGO_TARGET_X86_64_LINUX_ANDROID_RUSTFLAGS = android16KbPageRustFlags;
           CC_aarch64_linux_android = "${androidLlvmBin}/aarch64-linux-android24-clang";
+          CC_x86_64_linux_android = "${androidLlvmBin}/x86_64-linux-android24-clang";
           AR_aarch64_linux_android = "${androidLlvmBin}/llvm-ar";
+          AR_x86_64_linux_android = "${androidLlvmBin}/llvm-ar";
           GRADLE_OPTS = "-Dorg.gradle.project.android.aapt2FromMavenOverride=${androidAapt2}";
           JAVA_HOME = pkgs.jdk17.home;
           OPENSSL_NO_VENDOR = "0";
@@ -135,6 +141,7 @@
               else "debug"
             }";
             runtimeInputs = [
+              pkgs.coreutils
               pkgs.findutils
               pkgs.jq
               pkgs.nix
@@ -144,6 +151,12 @@
 
               repo="''${KEEPBOOK_ROOT:-$PWD}"
               cd "$repo"
+
+              profile=${
+                if release
+                then "release"
+                else "debug"
+              }
 
               args=(
                 dx ${
@@ -165,13 +178,9 @@
                 args+=(--release)
               fi
 
+              rm -rf "target/dx/keepbook-dioxus/$profile/android"
               nix develop "$repo#android" --command "''${args[@]}" "$@"
 
-              profile=${
-                if release
-                then "release"
-                else "debug"
-              }
               if ${
                 if release
                 then "true"
