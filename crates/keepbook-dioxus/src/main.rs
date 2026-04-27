@@ -874,6 +874,9 @@ fn SettingsView(
     let mut private_key_name = use_signal(String::new);
     let mut status = use_signal(String::new);
     let mut busy = use_signal(|| false);
+    let mut github_preset_open = use_signal(|| false);
+    let mut github_repo_input = use_signal(String::new);
+    let mut github_repo_error = use_signal(String::new);
 
     if let Some(Ok(current)) = settings.cloned() {
         let key = format!(
@@ -908,8 +911,20 @@ fn SettingsView(
         }
         section { class: "panel settings-panel",
             div { class: "panel-header",
-                h2 { "Git Sync" }
-                span { "Server-backed" }
+                div { class: "panel-title",
+                    h2 { "Git Sync" }
+                    span { "Server-backed" }
+                }
+                button {
+                    class: "control-button",
+                    disabled: is_busy,
+                    onclick: move |_| {
+                        github_repo_input.set(repo());
+                        github_repo_error.set(String::new());
+                        github_preset_open.set(true);
+                    },
+                    "GitHub preset"
+                }
             }
             match current_settings {
                 None => rsx! { BackendActivity { message: "Loading Git settings" } },
@@ -1064,7 +1079,99 @@ fn SettingsView(
                 },
             }
         }
+        if github_preset_open() {
+            div { class: "modal-backdrop",
+                div { class: "modal-dialog",
+                    div { class: "modal-header",
+                        h3 { "GitHub repository" }
+                        button {
+                            class: "icon-button",
+                            disabled: is_busy,
+                            onclick: move |_| github_preset_open.set(false),
+                            "x"
+                        }
+                    }
+                    label { class: "control-field",
+                        span { "Owner/repo" }
+                        input {
+                            class: "control-input",
+                            r#type: "text",
+                            value: "{github_repo_input()}",
+                            placeholder: "owner/keepbook-data",
+                            autofocus: true,
+                            oninput: move |event| {
+                                github_repo_input.set(event.value());
+                                github_repo_error.set(String::new());
+                            }
+                        }
+                    }
+                    if !github_repo_error().is_empty() {
+                        p { class: "validation", "{github_repo_error()}" }
+                    }
+                    div { class: "modal-actions",
+                        button {
+                            class: "control-button",
+                            disabled: is_busy,
+                            onclick: move |_| github_preset_open.set(false),
+                            "Cancel"
+                        }
+                        button {
+                            class: "control-button selected",
+                            disabled: is_busy,
+                            onclick: move |_| {
+                                match normalize_github_repo_input(&github_repo_input()) {
+                                    Ok(normalized) => {
+                                        host.set("github.com".to_string());
+                                        repo.set(normalized.clone());
+                                        branch.set("master".to_string());
+                                        ssh_user.set("git".to_string());
+                                        github_repo_error.set(String::new());
+                                        github_preset_open.set(false);
+                                        status.set(format!("Applied GitHub preset for {normalized}."));
+                                    }
+                                    Err(error) => github_repo_error.set(error),
+                                }
+                            },
+                            "Apply"
+                        }
+                    }
+                }
+            }
+        }
     }
+}
+
+fn normalize_github_repo_input(input: &str) -> Result<String, String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err("Enter a repository as owner/repo.".to_string());
+    }
+
+    let repo = trim_github_repo_prefix(trimmed)
+        .trim_matches('/')
+        .strip_suffix(".git")
+        .unwrap_or_else(|| trim_github_repo_prefix(trimmed).trim_matches('/'));
+
+    let mut parts = repo.split('/');
+    let Some(owner) = parts.next() else {
+        return Err("Enter a repository as owner/repo.".to_string());
+    };
+    let Some(name) = parts.next() else {
+        return Err("Enter a repository as owner/repo.".to_string());
+    };
+    if owner.is_empty() || name.is_empty() || parts.next().is_some() {
+        return Err("Enter a repository as owner/repo.".to_string());
+    }
+
+    Ok(format!("{owner}/{name}"))
+}
+
+fn trim_github_repo_prefix(input: &str) -> &str {
+    input
+        .strip_prefix("https://github.com/")
+        .or_else(|| input.strip_prefix("http://github.com/"))
+        .or_else(|| input.strip_prefix("git@github.com:"))
+        .unwrap_or(input)
 }
 
 #[component]
