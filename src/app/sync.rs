@@ -9,8 +9,8 @@ use crate::market_data::{JsonlMarketDataStore, MarketDataServiceBuilder};
 use crate::models::{Connection, Id};
 use crate::storage::{CompactionStorage, MetadataBackfillStorage, Storage, SymlinkStorage};
 use crate::sync::{
-    AuthPrompter, DefaultSynchronizerFactory, GitAutoCommitter, SyncContext, SyncOptions,
-    SyncOutcome, SyncService, TransactionSyncMode,
+    AuthPrompter, DefaultSynchronizerFactory, FixedAuthPrompter, GitAutoCommitter, SyncContext,
+    SyncOptions, SyncOutcome, SyncService, TransactionSyncMode,
 };
 
 use super::maybe_auto_commit;
@@ -25,6 +25,20 @@ impl AuthPrompter for StdinPrompter {
         io::stdin().read_line(&mut input)?;
         let input = input.trim().to_lowercase();
         Ok(input.is_empty() || input == "y" || input == "yes")
+    }
+}
+
+fn env_enabled(key: &str) -> bool {
+    match std::env::var(key) {
+        Ok(v) => !(v == "0" || v.eq_ignore_ascii_case("false") || v.eq_ignore_ascii_case("no")),
+        Err(_) => false,
+    }
+}
+
+fn env_disabled(key: &str) -> bool {
+    match std::env::var(key) {
+        Ok(v) => v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes"),
+        Err(_) => false,
     }
 }
 
@@ -45,12 +59,19 @@ async fn build_sync_service_with_quote_staleness(
         .with_quote_staleness(quote_staleness)
         .build()
         .await;
+    let auth_prompter: Arc<dyn AuthPrompter> = if env_enabled("KEEPBOOK_AUTO_LOGIN") {
+        Arc::new(FixedAuthPrompter::allow())
+    } else {
+        Arc::new(StdinPrompter)
+    };
+    let auto_commit = config.git.auto_commit && !env_disabled("KEEPBOOK_DISABLE_AUTO_COMMIT");
+    let auto_push = config.git.auto_push && !env_disabled("KEEPBOOK_DISABLE_AUTO_PUSH");
     let context = SyncContext::new(storage, market_data, config.reporting_currency.clone())
-        .with_auth_prompter(Arc::new(StdinPrompter))
+        .with_auth_prompter(auth_prompter)
         .with_auto_committer(Arc::new(GitAutoCommitter::new(
             config.data_dir.clone(),
-            config.git.auto_commit,
-            config.git.auto_push,
+            auto_commit,
+            auto_push,
         )))
         .with_factory(Arc::new(DefaultSynchronizerFactory::new(Some(
             config.data_dir.clone(),

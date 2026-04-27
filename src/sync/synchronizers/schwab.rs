@@ -4,18 +4,14 @@
 //! and Schwab's internal APIs for data fetching.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
 use chromiumoxide::browser::{Browser, BrowserConfig};
-use chromiumoxide::cdp::browser_protocol::fetch::{
-    self, EventRequestPaused, RequestPattern, RequestStage,
-};
+use chromiumoxide::cdp::js_protocol::runtime::EvaluateParams;
 use chrono::Utc;
 use futures::StreamExt;
 use secrecy::ExposeSecret;
-use tokio::sync::Mutex;
 
 use crate::credentials::{CredentialStore, SessionCache, SessionData};
 use crate::market_data::{AssetId, PriceKind, PricePoint};
@@ -33,7 +29,6 @@ use crate::sync::{
 };
 
 const SCHWAB_LOGIN_URL: &str = "https://client.schwab.com/Login/SignOn/CustomerCenterLogin.aspx";
-const SCHWAB_API_DOMAIN: &str = "ausgateway.schwab.com";
 
 /// Schwab synchronizer with browser-based authentication.
 pub struct SchwabSynchronizer {
@@ -502,59 +497,7 @@ impl InteractiveAuth for SchwabSynchronizer {
         // Create a new page
         let page = browser.new_page("about:blank").await?;
 
-        // Set up request interception to capture the bearer token
-        let captured_token: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-        let token_clone = captured_token.clone();
-
-        // Enable fetch domain for request interception
-        let patterns = vec![RequestPattern {
-            url_pattern: Some(format!("*{SCHWAB_API_DOMAIN}*")),
-            resource_type: None,
-            request_stage: Some(RequestStage::Request),
-        }];
-
-        page.execute(fetch::EnableParams {
-            patterns: Some(patterns),
-            handle_auth_requests: None,
-        })
-        .await?;
-
-        // Listen for paused requests
-        let mut request_events = page.event_listener::<EventRequestPaused>().await?;
-
-        let page_clone = page.clone();
-        let intercept_task = tokio::spawn(async move {
-            while let Some(event) = request_events.next().await {
-                // Check for Authorization header in the request
-                let headers = event.request.headers.inner();
-                if let Some(headers_obj) = headers.as_object() {
-                    let auth_value = headers_obj
-                        .get("authorization")
-                        .or_else(|| headers_obj.get("Authorization"));
-
-                    if let Some(auth) = auth_value.and_then(|v| v.as_str()) {
-                        if auth.starts_with("Bearer ") {
-                            let token = auth.strip_prefix("Bearer ").unwrap().to_string();
-                            println!("\nCaptured bearer token!");
-                            let mut guard = token_clone.lock().await;
-                            *guard = Some(token);
-                        }
-                    }
-                }
-
-                // Continue the request
-                let _ = page_clone
-                    .execute(fetch::ContinueRequestParams {
-                        request_id: event.request_id.clone(),
-                        url: None,
-                        method: None,
-                        post_data: None,
-                        headers: None,
-                        intercept_response: None,
-                    })
-                    .await;
-            }
-        });
+        install_schwab_token_capture(&page).await?;
 
         // Navigate to Schwab login
         println!("Navigating to Schwab login page...");
@@ -592,23 +535,27 @@ impl InteractiveAuth for SchwabSynchronizer {
         println!("Waiting for session capture...");
         let timeout = Duration::from_secs(300); // 5 minute timeout
         let start = std::time::Instant::now();
+        let mut last_post_login_drive = std::time::Instant::now() - Duration::from_secs(30);
 
-        loop {
+        let (token, api_base) = loop {
             tokio::time::sleep(Duration::from_millis(500)).await;
 
-            let guard = captured_token.lock().await;
-            if guard.is_some() {
-                break;
+            if let Some(auth) = extract_schwab_auth_capture(&page).await? {
+                println!("\nCaptured bearer token!");
+                break auth;
             }
-            drop(guard);
+
+            if last_post_login_drive.elapsed() >= Duration::from_secs(5) {
+                last_post_login_drive = std::time::Instant::now();
+                if let Err(err) = drive_schwab_post_login(&page).await {
+                    eprintln!("Schwab: post-login browser drive failed (continuing): {err:#}");
+                }
+            }
 
             if start.elapsed() > timeout {
                 anyhow::bail!("Timeout waiting for login. Please try again.");
             }
-        }
-
-        // Get the token
-        let token = captured_token.lock().await.clone().unwrap();
+        };
 
         // Get all cookies
         println!("Capturing cookies...");
@@ -627,7 +574,9 @@ impl InteractiveAuth for SchwabSynchronizer {
             cookies: cookie_map,
             cookie_jar: Vec::new(),
             captured_at: Some(Utc::now().timestamp()),
-            data: HashMap::new(),
+            data: api_base
+                .map(|base| [("api_base".to_string(), base)].into())
+                .unwrap_or_default(),
         };
 
         // Save to cache
@@ -638,11 +587,224 @@ impl InteractiveAuth for SchwabSynchronizer {
         println!("Cookies: {} captured", session.cookies.len());
 
         // Clean up
-        intercept_task.abort();
         drop(browser);
         handler_task.abort();
 
         Ok(())
+    }
+}
+
+const SCHWAB_TOKEN_CAPTURE_SCRIPT: &str = r#"(function() {
+  if (window.__keepbookSchwabCaptureInstalled) return;
+  window.__keepbookSchwabCaptureInstalled = true;
+  window.__keepbookSchwabAuthCaptures = window.__keepbookSchwabAuthCaptures || [];
+
+  function saveAuth(value, url) {
+    const text = String(value || '');
+    const match = text.match(/Bearer\s+([A-Za-z0-9._~+/=-]+)/i);
+    if (!match) return;
+    const token = match[1];
+    const capture = { token, url: String(url || location.href || ''), at: Date.now() };
+    window.__keepbookSchwabAuthCaptures.push(capture);
+    if (window.__keepbookSchwabAuthCaptures.length > 20) {
+      window.__keepbookSchwabAuthCaptures.shift();
+    }
+  }
+
+  function inspectHeaders(headers, url) {
+    if (!headers) return;
+    try {
+      if (typeof Headers !== 'undefined' && headers instanceof Headers) {
+        for (const [key, value] of headers.entries()) {
+          if (String(key).toLowerCase() === 'authorization') saveAuth(value, url);
+        }
+        return;
+      }
+    } catch (_) {}
+    if (Array.isArray(headers)) {
+      for (const pair of headers) {
+        if (pair && String(pair[0]).toLowerCase() === 'authorization') saveAuth(pair[1], url);
+      }
+      return;
+    }
+    if (typeof headers === 'object') {
+      for (const key of Object.keys(headers)) {
+        if (String(key).toLowerCase() === 'authorization') saveAuth(headers[key], url);
+      }
+    }
+  }
+
+  try {
+    const originalFetch = window.fetch;
+    if (typeof originalFetch === 'function') {
+      window.fetch = function(input, init) {
+        try {
+          const url = typeof input === 'string' ? input : (input && input.url);
+          if (input && input.headers) inspectHeaders(input.headers, url);
+          if (init && init.headers) inspectHeaders(init.headers, url);
+        } catch (_) {}
+        return originalFetch.apply(this, arguments);
+      };
+    }
+  } catch (_) {}
+
+  try {
+    const originalOpen = XMLHttpRequest.prototype.open;
+    const originalSetRequestHeader = XMLHttpRequest.prototype.setRequestHeader;
+    XMLHttpRequest.prototype.open = function(method, url) {
+      try { this.__keepbookSchwabUrl = String(url || ''); } catch (_) {}
+      return originalOpen.apply(this, arguments);
+    };
+    XMLHttpRequest.prototype.setRequestHeader = function(name, value) {
+      try {
+        if (String(name).toLowerCase() === 'authorization') saveAuth(value, this.__keepbookSchwabUrl);
+      } catch (_) {}
+      return originalSetRequestHeader.apply(this, arguments);
+    };
+  } catch (_) {}
+})()"#;
+
+async fn install_schwab_token_capture(page: &chromiumoxide::Page) -> Result<()> {
+    page.evaluate_on_new_document(SCHWAB_TOKEN_CAPTURE_SCRIPT)
+        .await?;
+    match page.evaluate(SCHWAB_TOKEN_CAPTURE_SCRIPT).await {
+        Ok(_) => Ok(()),
+        Err(err) => {
+            let message = err.to_string();
+            if message.contains("Cannot find context with specified id")
+                || message.contains("Execution context was destroyed")
+            {
+                Ok(())
+            } else {
+                Err(err.into())
+            }
+        }
+    }
+}
+
+async fn extract_schwab_auth_capture(
+    page: &chromiumoxide::Page,
+) -> Result<Option<(String, Option<String>)>> {
+    let expr = r#"(function() {
+  const captures = Array.isArray(window.__keepbookSchwabAuthCaptures)
+    ? window.__keepbookSchwabAuthCaptures
+    : [];
+  const latest = captures[captures.length - 1];
+  if (!latest || !latest.token) return null;
+  let apiBase = null;
+  try {
+    const url = new URL(latest.url, location.href);
+    if (/schwab\.com$/i.test(url.hostname)) {
+      apiBase = url.origin + '/api/is.ClientSummaryExpWeb/V1/api';
+    }
+  } catch (_) {}
+  return { token: latest.token, apiBase };
+})()"#;
+
+    let frames = page.frames().await.unwrap_or_default();
+    for frame_id in frames {
+        let Some(context_id) = page.frame_execution_context(frame_id).await? else {
+            continue;
+        };
+        let mut params = EvaluateParams::from(expr);
+        params.context_id = Some(context_id);
+        params.return_by_value = Some(true);
+        let value = match page.evaluate(params).await {
+            Ok(result) => result.into_value::<Option<serde_json::Value>>()?,
+            Err(err) => {
+                let message = err.to_string();
+                if message.contains("Cannot find context with specified id")
+                    || message.contains("Execution context was destroyed")
+                {
+                    continue;
+                }
+                return Err(err.into());
+            }
+        };
+        let Some(value) = value else {
+            continue;
+        };
+        let Some(token) = value
+            .get("token")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+        else {
+            continue;
+        };
+        let api_base = value
+            .get("apiBase")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+        return Ok(Some((token, api_base)));
+    }
+
+    Ok(None)
+}
+
+async fn drive_schwab_post_login(page: &chromiumoxide::Page) -> Result<()> {
+    let js = r#"(async function() {
+  const url = String(location.href || '');
+  const text = String(document.body && document.body.innerText || '').toLowerCase();
+  if (/security code|enter security code|confirm your identity|let's be sure it's you/.test(text)) {
+    return { action: 'waiting-for-mfa' };
+  }
+  if (/login|signon|password|user id|username/.test(text) && /client\.schwab\.com\/login|signon/i.test(url)) {
+    return { action: 'waiting-for-login' };
+  }
+
+  const accountHref = Array.from(document.querySelectorAll('a,button,[role="button"]'))
+    .map((el) => ({
+      el,
+      text: String(el.innerText || el.textContent || el.getAttribute('aria-label') || '').toLowerCase(),
+      href: String(el.href || el.getAttribute('href') || '')
+    }))
+    .find((item) => /accounts|positions|portfolio|summary/.test(item.text) || /accounts|positions|portfolio|summary/.test(item.href));
+  if (accountHref) {
+    try {
+      accountHref.el.click();
+      return { action: 'clicked-account-nav' };
+    } catch (_) {}
+  }
+
+  if (!/client\.schwab\.com/i.test(url) || /sws-gateway/i.test(url)) {
+    location.href = 'https://client.schwab.com/clientapps/accounts/summary/';
+    return { action: 'navigate-summary' };
+  }
+
+  const apiUrls = [
+    'https://ausgateway.schwab.com/api/is.ClientSummaryExpWeb/V1/api/Account?includeCustomGroups=true',
+    'https://ausgateway.schwab.com/api/is.ClientSummaryExpWeb/V1/api/AggregatedPositions'
+  ];
+  for (const apiUrl of apiUrls) {
+    try {
+      await fetch(apiUrl, {
+        credentials: 'include',
+        headers: {
+          'accept': 'application/json',
+          'schwab-client-channel': 'IO',
+          'schwab-client-correlid': (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()),
+          'schwab-env': 'PROD',
+          'schwab-resource-version': '1'
+        }
+      });
+      return { action: 'fetch-api', apiUrl };
+    } catch (_) {}
+  }
+  return { action: 'none' };
+})()"#;
+
+    match page.evaluate(js).await {
+        Ok(_) => Ok(()),
+        Err(err) => {
+            let message = err.to_string();
+            if message.contains("Cannot find context with specified id")
+                || message.contains("Execution context was destroyed")
+            {
+                Ok(())
+            } else {
+                Err(err.into())
+            }
+        }
     }
 }
 
