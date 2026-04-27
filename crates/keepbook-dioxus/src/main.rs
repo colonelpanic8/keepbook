@@ -7,6 +7,71 @@ use gloo_net::http::Request;
 use std::sync::OnceLock;
 
 const APP_CSS: &str = include_str!("../assets/styles.css");
+const SSH_KEY_FILE_PICKER_BRIDGE_JS: &str = r#"
+(function () {
+  if (window.__keepbookSshKeyPickerBridgeInstalled) {
+    return;
+  }
+  window.__keepbookSshKeyPickerBridgeInstalled = true;
+  var maxKeyBytes = 65536;
+
+  function emitPayload(payload) {
+    var sink = document.getElementById("ssh-private-key-file-payload");
+    if (!sink) {
+      return;
+    }
+    sink.value = "";
+    sink.value = JSON.stringify(payload);
+    sink.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  document.addEventListener("click", function (event) {
+    var target = event.target;
+    if (
+      target instanceof HTMLInputElement &&
+      target.id === "ssh-private-key-file-input" &&
+      target.type === "file"
+    ) {
+      event.stopImmediatePropagation();
+    }
+  }, true);
+
+  document.addEventListener("change", function (event) {
+    var target = event.target;
+    if (
+      !(target instanceof HTMLInputElement) ||
+      target.id !== "ssh-private-key-file-input" ||
+      target.type !== "file"
+    ) {
+      return;
+    }
+
+    var file = target.files && target.files[0];
+    if (!file) {
+      emitPayload({ error: "No SSH key file selected." });
+      return;
+    }
+    if (file.size > maxKeyBytes) {
+      emitPayload({ error: "SSH key file is too large. Pick a private key file under 64 KB." });
+      return;
+    }
+
+    emitPayload({ status: "Reading SSH key file " + file.name + "..." });
+
+    var reader = new FileReader();
+    reader.onload = function () {
+      emitPayload({
+        name: file.name,
+        contents: String(reader.result || "")
+      });
+    };
+    reader.onerror = function () {
+      emitPayload({ error: "Key file read failed." });
+    };
+    reader.readAsText(file);
+  }, true);
+})();
+"#;
 #[cfg(target_arch = "wasm32")]
 const API_BASE: &str = "http://127.0.0.1:8799";
 const DEFAULT_RANGE_PRESET: RangePreset = RangePreset::OneYear;
@@ -339,6 +404,7 @@ fn App() -> Element {
         document::Title { "Keepbook" }
         document::Link { rel: "icon", href: "data:," }
         document::Style { "{APP_CSS}" }
+        document::Script { "{SSH_KEY_FILE_PICKER_BRIDGE_JS}" }
         main { class: "shell",
             match overview.cloned() {
                 None => rsx! { StatusPanel { state: LoadState::Loading } },
@@ -968,30 +1034,50 @@ fn SettingsView(
                     div { class: "control-field secret-field",
                         span { "SSH private key" }
                         div { class: "key-file-picker",
+                            label { class: "file-select-wrapper",
+                                input {
+                                    id: "ssh-private-key-file-input",
+                                    class: "file-select-input",
+                                    r#type: "file",
+                                    disabled: is_busy,
+                                }
+                                span { class: "file-select-button", "Select key file" }
+                            }
                             input {
-                                class: "control-input key-file-input",
-                                r#type: "file",
-                                accept: ".pem,.key,.txt,application/x-pem-file,text/plain",
-                                onchange: move |event| {
-                                    let Some(file) = event.files().into_iter().next() else {
-                                        status.set("No SSH key file selected.".to_string());
-                                        return;
-                                    };
-                                    let name = file.name();
-                                    status.set(format!("Reading SSH key file {name}..."));
-                                    spawn(async move {
-                                        match file.read_string().await {
-                                            Ok(contents) if contents.trim().is_empty() => {
-                                                status.set("Selected SSH key file is empty.".to_string());
+                                id: "ssh-private-key-file-payload",
+                                class: "file-payload-input",
+                                r#type: "text",
+                                oninput: move |event| {
+                                    match serde_json::from_str::<serde_json::Value>(&event.value()) {
+                                        Ok(payload) => {
+                                            if let Some(message) = payload.get("status").and_then(|value| value.as_str()) {
+                                                status.set(message.to_string());
+                                                return;
                                             }
-                                            Ok(contents) => {
+                                            if let Some(error) = payload.get("error").and_then(|value| value.as_str()) {
+                                                status.set(error.to_string());
+                                                return;
+                                            }
+                                            let name = payload
+                                                .get("name")
+                                                .and_then(|value| value.as_str())
+                                                .unwrap_or("selected key")
+                                                .to_string();
+                                            let contents = payload
+                                                .get("contents")
+                                                .and_then(|value| value.as_str())
+                                                .unwrap_or_default()
+                                                .to_string();
+                                            if contents.trim().is_empty() {
+                                                status.set("Selected SSH key file is empty.".to_string());
+                                            } else {
                                                 private_key.set(contents);
                                                 private_key_name.set(name.clone());
                                                 status.set(format!("Selected SSH key file: {name}."));
                                             }
-                                            Err(error) => status.set(format!("Key file read failed: {error}")),
                                         }
-                                    });
+                                        Err(error) => status.set(format!("Key file read failed: {error}")),
+                                    }
                                 }
                             }
                             small { class: "key-file-status",
