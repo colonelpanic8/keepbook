@@ -387,6 +387,29 @@ small,
   padding: 7px 9px;
 }
 
+.directory-picker {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.directory-picker-path {
+  background: #ffffff;
+  border: 1px solid #cfdad7;
+  border-radius: 6px;
+  color: #17202a;
+  flex: 1;
+  font-family: inherit;
+  font-size: 0.86rem;
+  min-height: 38px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 8px 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .secret-field {
   margin-bottom: 12px;
 }
@@ -473,7 +496,7 @@ small,
   border: 1px solid #d7dfdd;
   border-radius: 6px;
   color: #31424e;
-  margin: 12px 0 0;
+  margin: 12px 0;
   padding: 10px;
 }
 

@@ -4,7 +4,12 @@ use serde::{Deserialize, Serialize};
 #[cfg(target_arch = "wasm32")]
 use gloo_net::http::Request;
 #[cfg(not(target_arch = "wasm32"))]
+use std::path::PathBuf;
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::OnceLock;
+
+#[cfg(all(not(target_arch = "wasm32"), target_os = "android"))]
+const ANDROID_PACKAGE_DATA_DIR: &str = "/data/user/0/org.colonelpanic.keepbook.dioxus";
 
 const APP_CSS: &str = include_str!("../assets/styles.css");
 const SSH_KEY_FILE_PICKER_BRIDGE_JS: &str = r#"
@@ -630,12 +635,79 @@ fn native_api_state() -> Result<&'static keepbook_server::ApiState, String> {
         return Ok(state);
     }
 
-    let state = keepbook_server::ApiState::load(keepbook_server::default_server_config_path())
+    let state = keepbook_server::ApiState::load(native_config_path())
         .map_err(|error| format!("Could not initialize local keepbook API: {error:#}"))?;
     let _ = STATE.set(state);
     STATE
         .get()
         .ok_or_else(|| "Could not initialize local keepbook API".to_string())
+}
+
+#[cfg(all(not(target_arch = "wasm32"), target_os = "android"))]
+fn android_app_files_dir() -> PathBuf {
+    PathBuf::from(ANDROID_PACKAGE_DATA_DIR).join("files")
+}
+
+#[cfg(all(not(target_arch = "wasm32"), target_os = "android"))]
+fn android_default_git_data_dir() -> PathBuf {
+    android_app_files_dir().join("keepbook-data")
+}
+
+#[cfg(all(not(target_arch = "wasm32"), target_os = "android"))]
+fn normalize_android_app_data_path(path: String) -> String {
+    let legacy_prefix = "/data/data/org.colonelpanic.keepbook.dioxus";
+    path.strip_prefix(legacy_prefix)
+        .map(|suffix| format!("{ANDROID_PACKAGE_DATA_DIR}{suffix}"))
+        .unwrap_or(path)
+}
+
+#[cfg(all(not(target_arch = "wasm32"), target_os = "android"))]
+fn native_config_path() -> PathBuf {
+    let files_dir = android_app_files_dir();
+    if let Err(error) = std::fs::create_dir_all(&files_dir) {
+        eprintln!(
+            "Could not create Android keepbook files dir {}: {error}",
+            files_dir.display()
+        );
+    }
+
+    let config_path = files_dir.join("keepbook.toml");
+    if !config_path.exists() {
+        let default_config = "data_dir = \"./keepbook-data\"\n";
+        if let Err(error) = std::fs::write(&config_path, default_config) {
+            eprintln!(
+                "Could not write Android keepbook config {}: {error}",
+                config_path.display()
+            );
+        }
+    }
+
+    config_path
+}
+
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+fn native_config_path() -> PathBuf {
+    keepbook_server::default_server_config_path()
+}
+
+#[cfg(all(not(target_arch = "wasm32"), target_os = "android"))]
+fn recommended_data_dir() -> Option<String> {
+    Some(android_default_git_data_dir().display().to_string())
+}
+
+#[cfg(all(not(target_arch = "wasm32"), target_os = "android"))]
+fn normalize_git_data_dir_for_client(path: String) -> String {
+    normalize_android_app_data_path(path)
+}
+
+#[cfg(any(target_arch = "wasm32", not(target_os = "android")))]
+fn normalize_git_data_dir_for_client(path: String) -> String {
+    path
+}
+
+#[cfg(any(target_arch = "wasm32", not(target_os = "android")))]
+fn recommended_data_dir() -> Option<String> {
+    None
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -954,7 +1026,7 @@ fn SettingsView(
             current.git.ssh_user
         );
         if loaded_key() != key {
-            git_data_dir.set(current.data_dir);
+            git_data_dir.set(normalize_git_data_dir_for_client(current.data_dir));
             host.set(current.git.host);
             repo.set(current.git.repo);
             branch.set(current.git.branch);
@@ -999,12 +1071,15 @@ fn SettingsView(
                     div { class: "settings-meta",
                         span { "Config {current.config_path}" }
                     }
+                    if !status_text.is_empty() {
+                        p { class: "settings-status", "{status_text}" }
+                    }
                     div { class: "settings-grid",
-                        TextInput {
-                            label: "Data directory",
+                        DataDirectoryControl {
                             value: git_data_dir(),
-                            placeholder: "/path/to/keepbook-data",
-                            oninput: move |value| git_data_dir.set(value)
+                            recommended: recommended_data_dir(),
+                            disabled: is_busy,
+                            onselect: move |value| git_data_dir.set(value)
                         }
                         TextInput {
                             label: "Git host",
@@ -1158,9 +1233,6 @@ fn SettingsView(
                             },
                             "Save and Sync"
                         }
-                    }
-                    if !status_text.is_empty() {
-                        p { class: "settings-status", "{status_text}" }
                     }
                 },
             }
@@ -1975,6 +2047,48 @@ fn TextInput(
                 value: "{value}",
                 placeholder: "{placeholder}",
                 oninput: move |event| oninput.call(event.value())
+            }
+        }
+    }
+}
+
+#[component]
+fn DataDirectoryControl(
+    value: String,
+    recommended: Option<String>,
+    disabled: bool,
+    onselect: EventHandler<String>,
+) -> Element {
+    let display_value = if value.trim().is_empty() {
+        recommended
+            .clone()
+            .unwrap_or_else(|| "/path/to/keepbook-data".to_string())
+    } else {
+        value
+    };
+
+    rsx! {
+        div { class: "control-field directory-field",
+            span { "Data directory" }
+            if let Some(path) = recommended {
+                div { class: "directory-picker",
+                    code { class: "directory-picker-path", "{display_value}" }
+                    button {
+                        class: "control-button",
+                        disabled,
+                        onclick: move |_| onselect.call(path.clone()),
+                        "Use app data folder"
+                    }
+                }
+            } else {
+                input {
+                    class: "control-input",
+                    r#type: "text",
+                    value: "{display_value}",
+                    placeholder: "/path/to/keepbook-data",
+                    disabled,
+                    oninput: move |event| onselect.call(event.value())
+                }
             }
         }
     }
