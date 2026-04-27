@@ -1,23 +1,20 @@
 //! Schwab synchronizer with browser-based authentication.
 //!
-//! This synchronizer uses Chrome DevTools Protocol for automated session capture
+//! This synchronizer uses a headless browser helper for automated session capture
 //! and Schwab's internal APIs for data fetching.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::process::Stdio;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use chromiumoxide::browser::{Browser, BrowserConfig};
-use chromiumoxide::cdp::browser_protocol::fetch::{
-    self, EventRequestPaused, RequestPattern, RequestStage,
-};
 use chrono::Utc;
-use futures::StreamExt;
 use secrecy::ExposeSecret;
-use tokio::sync::Mutex;
+use serde::{Deserialize, Serialize};
+use tokio::io::AsyncWriteExt;
+use tokio::process::Command;
 
-use crate::credentials::{CredentialStore, SessionCache, SessionData};
+use crate::credentials::{CredentialStore, SessionCache, SessionData, StoredCookie};
 use crate::market_data::{AssetId, PriceKind, PricePoint};
 use crate::models::{
     Account, Asset, AssetBalance, Connection, ConnectionStatus, Id, LastSync, SyncStatus,
@@ -33,7 +30,7 @@ use crate::sync::{
 };
 
 const SCHWAB_LOGIN_URL: &str = "https://client.schwab.com/Login/SignOn/CustomerCenterLogin.aspx";
-const SCHWAB_API_DOMAIN: &str = "ausgateway.schwab.com";
+const SCHWAB_HEADLESS_AUTH_HELPER: &str = include_str!("../../../scripts/schwab-headless-auth.mjs");
 
 /// Schwab synchronizer with browser-based authentication.
 pub struct SchwabSynchronizer {
@@ -475,160 +472,23 @@ impl InteractiveAuth for SchwabSynchronizer {
     }
 
     async fn login(&mut self) -> Result<()> {
-        // Check for Chrome
-        let chrome_path = find_chrome().context(
-            "Chrome/Chromium not found. Please install Chrome or Chromium to use the login command.",
+        if !Self::should_autofill_login() {
+            anyhow::bail!(
+                "Schwab headless login requires credential autofill; unset KEEPBOOK_SCHWAB_AUTOFILL=0 to use this experiment"
+            );
+        }
+
+        let (username, password) = self.get_login_credentials().await?.context(
+            "Schwab headless login requires KEEPBOOK_SCHWAB_USERNAME/KEEPBOOK_SCHWAB_PASSWORD or credential-store username/password entries",
         )?;
 
-        // Configure browser with anti-detection flags
-        let config = BrowserConfig::builder()
-            .chrome_executable(chrome_path)
-            .with_head() // Show the browser window
-            .viewport(None) // Use default viewport
-            .arg("--disable-blink-features=AutomationControlled")
-            .arg("--disable-infobars")
-            .arg("--no-first-run")
-            .arg("--no-default-browser-check")
-            .build()
-            .map_err(|e| anyhow::anyhow!("Failed to configure browser: {e}"))?;
+        println!("Starting headless Schwab login...");
+        println!(
+            "MFA can be completed headlessly when KEEPBOOK_SCHWAB_SMS_CODE_COMMAND or KEEPBOOK_SMS_CODE_COMMAND is configured."
+        );
 
-        let (browser, mut handler) = Browser::launch(config)
-            .await
-            .context("Failed to launch browser")?;
-
-        // Spawn the handler task
-        let handler_task = tokio::spawn(async move { while (handler.next().await).is_some() {} });
-
-        // Create a new page
-        let page = browser.new_page("about:blank").await?;
-
-        // Set up request interception to capture the bearer token
-        let captured_token: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-        let token_clone = captured_token.clone();
-
-        // Enable fetch domain for request interception
-        let patterns = vec![RequestPattern {
-            url_pattern: Some(format!("*{SCHWAB_API_DOMAIN}*")),
-            resource_type: None,
-            request_stage: Some(RequestStage::Request),
-        }];
-
-        page.execute(fetch::EnableParams {
-            patterns: Some(patterns),
-            handle_auth_requests: None,
-        })
-        .await?;
-
-        // Listen for paused requests
-        let mut request_events = page.event_listener::<EventRequestPaused>().await?;
-
-        let page_clone = page.clone();
-        let intercept_task = tokio::spawn(async move {
-            while let Some(event) = request_events.next().await {
-                // Check for Authorization header in the request
-                let headers = event.request.headers.inner();
-                if let Some(headers_obj) = headers.as_object() {
-                    let auth_value = headers_obj
-                        .get("authorization")
-                        .or_else(|| headers_obj.get("Authorization"));
-
-                    if let Some(auth) = auth_value.and_then(|v| v.as_str()) {
-                        if auth.starts_with("Bearer ") {
-                            let token = auth.strip_prefix("Bearer ").unwrap().to_string();
-                            println!("\nCaptured bearer token!");
-                            let mut guard = token_clone.lock().await;
-                            *guard = Some(token);
-                        }
-                    }
-                }
-
-                // Continue the request
-                let _ = page_clone
-                    .execute(fetch::ContinueRequestParams {
-                        request_id: event.request_id.clone(),
-                        url: None,
-                        method: None,
-                        post_data: None,
-                        headers: None,
-                        intercept_response: None,
-                    })
-                    .await;
-            }
-        });
-
-        // Navigate to Schwab login
-        println!("Navigating to Schwab login page...");
-        page.goto(SCHWAB_LOGIN_URL).await?;
-
-        if Self::should_autofill_login() {
-            match self.get_login_credentials().await {
-                Ok(Some((username, password))) => {
-                    eprintln!(
-                        "Schwab: attempting autofill (set KEEPBOOK_SCHWAB_AUTOFILL=0 to disable)..."
-                    );
-                    if let Err(err) = autofill_login_form(&page, &username, &password).await {
-                        eprintln!(
-                            "Schwab: autofill failed (continuing with manual login): {err:#}"
-                        );
-                    }
-                }
-                Ok(None) => {}
-                Err(err) => {
-                    eprintln!(
-                        "Schwab: could not load credentials (continuing with manual login): {err:#}"
-                    );
-                }
-            }
-        }
-
-        println!("\n========================================");
-        println!("Complete the login process in the browser.");
-        println!("Include any 2FA/security verification.");
-        println!("Once logged in, navigate around the site");
-        println!("(e.g., click on Accounts) to trigger API calls.");
-        println!("========================================\n");
-
-        // Wait for token capture
-        println!("Waiting for session capture...");
-        let timeout = Duration::from_secs(300); // 5 minute timeout
-        let start = std::time::Instant::now();
-
-        loop {
-            tokio::time::sleep(Duration::from_millis(500)).await;
-
-            let guard = captured_token.lock().await;
-            if guard.is_some() {
-                break;
-            }
-            drop(guard);
-
-            if start.elapsed() > timeout {
-                anyhow::bail!("Timeout waiting for login. Please try again.");
-            }
-        }
-
-        // Get the token
-        let token = captured_token.lock().await.clone().unwrap();
-
-        // Get all cookies
-        println!("Capturing cookies...");
-        let cookies = page.get_cookies().await?;
-
-        let mut cookie_map = HashMap::new();
-        for cookie in cookies {
-            cookie_map.insert(cookie.name.clone(), cookie.value.clone());
-        }
-
-        println!("Captured {} cookies", cookie_map.len());
-
-        // Build session data
-        let session = SessionData {
-            token: Some(token.clone()),
-            cookies: cookie_map,
-            cookie_jar: Vec::new(),
-            captured_at: Some(Utc::now().timestamp()),
-            data: HashMap::new(),
-        };
+        let session = run_schwab_headless_auth(&username, &password).await?;
+        let token = session.token.clone().unwrap_or_default();
 
         // Save to cache
         self.session_cache.set(&self.session_key(), &session)?;
@@ -637,282 +497,101 @@ impl InteractiveAuth for SchwabSynchronizer {
         println!("Token: {}...", &token[..50.min(token.len())]);
         println!("Cookies: {} captured", session.cookies.len());
 
-        // Clean up
-        intercept_task.abort();
-        drop(browser);
-        handler_task.abort();
-
         Ok(())
     }
 }
 
-async fn autofill_login_form(
-    page: &chromiumoxide::Page,
-    username: &str,
-    password: &str,
-) -> Result<()> {
-    let creds = serde_json::json!({ "username": username, "password": password });
-
-    let js: String = format!(
-        r#"(function(creds) {{
-  function fire(el, type) {{
-    try {{ el.dispatchEvent(new Event(type, {{ bubbles: true }})); }} catch (_) {{}}
-  }}
-  function isVisible(el) {{
-    if (!el || !el.getBoundingClientRect) return false;
-    const r = el.getBoundingClientRect();
-    return r.width > 20 && r.height > 12;
-  }}
-  function bySelectors(root, selectors) {{
-    for (const sel of selectors) {{
-      const el = root.querySelector(sel);
-      if (el && isVisible(el)) return el;
-    }}
-    return null;
-  }}
-  function collectDocs(rootDoc) {{
-    const out = [rootDoc];
-    const seen = new Set([rootDoc]);
-    const queue = [rootDoc];
-    let hops = 0;
-    while (queue.length && hops < 30) {{
-      hops += 1;
-      const doc = queue.shift();
-      const frames = Array.from(doc.querySelectorAll('iframe,frame'));
-      for (const fr of frames) {{
-        let child = null;
-        try {{
-          child = fr.contentDocument || (fr.contentWindow && fr.contentWindow.document) || null;
-        }} catch (_) {{
-          child = null;
-        }}
-        if (child && !seen.has(child)) {{
-          seen.add(child);
-          out.push(child);
-          queue.push(child);
-        }}
-      }}
-    }}
-    return out;
-  }}
-
-  const passSelectors = [
-    'input[type="password"]',
-    'input[name="password"]',
-    'input[name*="pass" i]',
-    'input[id*="password" i]',
-    'input[autocomplete="current-password"]',
-  ];
-  const userSelectors = [
-    'input[name="LoginId"]',
-    'input[autocomplete="username"]',
-    'input[id*="login" i]',
-    'input[name*="user" i]',
-    'input[name*="email" i]',
-    'input[id*="user" i]',
-    'input[type="email"]',
-    'input[type="text"]',
-  ];
-  const submitSelectors = [
-    'button[type="submit"]',
-    'input[type="submit"]',
-    'button[id*="sign" i]',
-    'button[id*="submit" i]',
-    'button[id*="login" i]',
-    'button[name*="login" i]',
-    'button[name*="submit" i]',
-    'button[aria-label*="sign in" i]',
-    'button[aria-label*="log in" i]',
-    'a[role="button"][id*="login" i]',
-  ];
-  const docs = collectDocs(document);
-  const frameNames = Array.from(document.querySelectorAll('iframe,frame'))
-    .map(f => (f.getAttribute('name') || f.id || '').toString())
-    .filter(Boolean)
-    .slice(0, 12);
-
-  let pass = null;
-  let form = null;
-  let user = null;
-  let submit = null;
-  let chosenDoc = null;
-
-  for (const doc of docs) {{
-    pass = bySelectors(doc, passSelectors);
-    if (!pass) continue;
-    form = pass.form || pass.closest('form') || doc;
-    user = bySelectors(form, userSelectors) || bySelectors(doc, userSelectors);
-    submit =
-      (form.querySelector && bySelectors(form, submitSelectors)) || bySelectors(doc, submitSelectors);
-    if (pass && user && submit) {{
-      chosenDoc = doc;
-      break;
-    }}
-  }}
-
-  if (!pass) return {{ ok: false, error: "password input not found", frameNames }};
-  if (!user) return {{ ok: false, error: "username input not found", frameNames }};
-  if (!submit) return {{ ok: false, error: "submit control not found", frameNames }};
-
-  try {{ user.focus(); }} catch (_) {{}}
-  user.value = String(creds.username || "");
-  fire(user, "input");
-  fire(user, "change");
-  fire(user, "blur");
-
-  try {{ pass.focus(); }} catch (_) {{}}
-  pass.value = String(creds.password || "");
-  fire(pass, "input");
-  fire(pass, "change");
-  fire(pass, "blur");
-
-  let submittedBy = null;
-  const actualForm = submit.form || form;
-  if (actualForm && typeof actualForm.requestSubmit === 'function') {{
-    try {{ actualForm.requestSubmit(submit); submittedBy = 'requestSubmit'; }} catch (_) {{}}
-  }}
-  if (!submittedBy && actualForm && typeof actualForm.submit === 'function') {{
-    try {{ actualForm.submit(); submittedBy = 'form.submit'; }} catch (_) {{}}
-  }}
-  if (!submittedBy) {{
-    try {{ submit.focus(); }} catch (_) {{}}
-    try {{ submit.click(); submittedBy = 'submit.click'; }} catch (_) {{}}
-  }}
-  if (!submittedBy) {{
-    try {{
-      const win = (chosenDoc && chosenDoc.defaultView) || window;
-      pass.focus();
-      pass.dispatchEvent(new win.KeyboardEvent('keydown', {{ key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }}));
-      pass.dispatchEvent(new win.KeyboardEvent('keyup', {{ key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }}));
-      submittedBy = 'enter';
-    }} catch (_) {{}}
-  }}
-
-  if (!submittedBy) return {{ ok: false, error: "submit failed", frameNames }};
-  return {{ ok: true, submittedBy, frameNames }};
-}})({creds})"#
-    );
-
-    let deadline = std::time::Instant::now() + Duration::from_secs(20);
-    let mut attempted_iframe_navigation = false;
-    loop {
-        let v: serde_json::Value = page.evaluate(js.clone()).await?.into_value()?;
-        let ok = v.get("ok").and_then(|x| x.as_bool()).unwrap_or(false);
-        if ok {
-            if let Some(by) = v.get("submittedBy").and_then(|x| x.as_str()) {
-                eprintln!("Schwab: submitted login ({by})");
-            }
-            return Ok(());
-        }
-
-        let err = v
-            .get("error")
-            .and_then(|x| x.as_str())
-            .unwrap_or("unknown error");
-
-        if err == "password input not found" && !attempted_iframe_navigation {
-            attempted_iframe_navigation = true;
-            if let Some(src) = extract_login_iframe_src(page).await? {
-                eprintln!("Schwab: trying iframe-url fallback for autofill...");
-                if let Err(nav_err) = page.goto(src).await {
-                    eprintln!("Schwab: iframe-url fallback navigation failed: {nav_err:#}");
-                } else {
-                    tokio::time::sleep(Duration::from_millis(500)).await;
-                    continue;
-                }
-            }
-        }
-
-        let retryable = matches!(
-            err,
-            "password input not found" | "username input not found" | "submit control not found"
-        );
-        if retryable && std::time::Instant::now() < deadline {
-            tokio::time::sleep(Duration::from_millis(250)).await;
-            continue;
-        }
-
-        let frame_names = v
-            .get("frameNames")
-            .and_then(|x| x.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str())
-                    .take(12)
-                    .collect::<Vec<_>>()
-                    .join(",")
-            })
-            .unwrap_or_default();
-
-        anyhow::bail!("Schwab autofill JS failed: {err} (frames={frame_names})");
-    }
+#[derive(Debug, Serialize)]
+struct SchwabHeadlessAuthRequest<'a> {
+    username: &'a str,
+    password: &'a str,
+    #[serde(rename = "loginUrl")]
+    login_url: &'a str,
+    #[serde(rename = "timeoutMs")]
+    timeout_ms: u64,
 }
 
-async fn extract_login_iframe_src(page: &chromiumoxide::Page) -> Result<Option<String>> {
-    let js = r#"(function() {
-  const selectors = [
-    'iframe[name="lmsIframe"]',
-    'iframe#lmsIframe',
-    'iframe[id*="lms" i]',
-    'iframe[name*="lms" i]',
-    'iframe[name*="login" i]',
-  ];
-  for (const sel of selectors) {
-    const iframe = document.querySelector(sel);
-    if (!iframe) continue;
-    const src = (iframe.getAttribute('src') || iframe.src || '').trim();
-    if (src) return src;
-  }
-  return null;
-})()"#;
-
-    let src: Option<String> = page.evaluate(js).await?.into_value()?;
-    Ok(src.filter(|s| !s.trim().is_empty()))
+#[derive(Debug, Deserialize)]
+struct SchwabHeadlessAuthOutput {
+    token: String,
+    #[serde(default)]
+    api_base: Option<String>,
+    #[serde(default)]
+    cookies: HashMap<String, String>,
+    #[serde(default)]
+    cookie_jar: Vec<StoredCookie>,
 }
 
-/// Find Chrome/Chromium executable.
-fn find_chrome() -> Option<String> {
-    // First try using `which` to find chrome in PATH
-    if let Ok(output) = std::process::Command::new("which")
-        .arg("google-chrome")
-        .output()
-    {
-        if output.status.success() {
-            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !path.is_empty() {
-                return Some(path);
-            }
-        }
+async fn run_schwab_headless_auth(username: &str, password: &str) -> Result<SessionData> {
+    let timeout_ms = std::env::var("KEEPBOOK_SCHWAB_AUTH_TIMEOUT_MS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(300_000);
+    let node = std::env::var("KEEPBOOK_NODE").unwrap_or_else(|_| "node".to_string());
+
+    let tempdir = tempfile::tempdir().context("Failed to create Schwab auth helper tempdir")?;
+    let script_path = tempdir.path().join("schwab-headless-auth.mjs");
+    std::fs::write(&script_path, SCHWAB_HEADLESS_AUTH_HELPER)
+        .with_context(|| format!("Failed to write Schwab auth helper to {script_path:?}"))?;
+
+    let request = SchwabHeadlessAuthRequest {
+        username,
+        password,
+        login_url: SCHWAB_LOGIN_URL,
+        timeout_ms,
+    };
+    let request_json =
+        serde_json::to_vec(&request).context("Failed to serialize Schwab auth helper input")?;
+
+    let mut child = Command::new(&node)
+        .arg(&script_path)
+        .env("KEEPBOOK_PLAYWRIGHT_ROOT", env!("CARGO_MANIFEST_DIR"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .with_context(|| format!("Failed to start Node.js for Schwab headless auth ({node})"))?;
+
+    let mut stdin = child
+        .stdin
+        .take()
+        .context("Failed to open stdin for Schwab headless auth helper")?;
+    stdin
+        .write_all(&request_json)
+        .await
+        .context("Failed to write Schwab auth helper input")?;
+    drop(stdin);
+
+    let wait_timeout = Duration::from_millis(timeout_ms.saturating_add(30_000));
+    let output = tokio::time::timeout(wait_timeout, child.wait_with_output())
+        .await
+        .context("Timed out waiting for Schwab headless auth helper")?
+        .context("Failed to wait for Schwab headless auth helper")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("Schwab headless auth helper failed: {}", stderr.trim());
     }
 
-    if let Ok(output) = std::process::Command::new("which").arg("chromium").output() {
-        if output.status.success() {
-            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !path.is_empty() {
-                return Some(path);
-            }
-        }
+    let auth: SchwabHeadlessAuthOutput =
+        serde_json::from_slice(&output.stdout).with_context(|| {
+            format!(
+                "Failed to parse Schwab headless auth helper output: {}",
+                String::from_utf8_lossy(&output.stdout).trim()
+            )
+        })?;
+
+    let mut data = HashMap::new();
+    if let Some(api_base) = auth.api_base.filter(|v| !v.trim().is_empty()) {
+        data.insert("api_base".to_string(), api_base);
     }
 
-    // Fall back to known paths
-    let candidates = [
-        "/usr/bin/google-chrome",
-        "/usr/bin/google-chrome-stable",
-        "/usr/bin/chromium",
-        "/usr/bin/chromium-browser",
-        "/snap/bin/chromium",
-        // NixOS
-        "/run/current-system/sw/bin/google-chrome",
-        "/run/current-system/sw/bin/chromium",
-        // macOS
-        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-        "/Applications/Chromium.app/Contents/MacOS/Chromium",
-    ];
-
-    for candidate in candidates {
-        if std::path::Path::new(candidate).exists() {
-            return Some(candidate.to_string());
-        }
-    }
-    None
+    Ok(SessionData {
+        token: Some(auth.token),
+        cookies: auth.cookies,
+        cookie_jar: auth.cookie_jar,
+        captured_at: Some(Utc::now().timestamp()),
+        data,
+    })
 }
