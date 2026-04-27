@@ -45,16 +45,11 @@ dioxus-ios-build *args:
 
 # Build the Dioxus client as an Android debug APK.
 dioxus-android-build *args:
-    rm -rf target/dx/keepbook-dioxus/debug/android
-    nix develop .#android --command dx build --android --target aarch64-linux-android --package keepbook-dioxus --no-default-features --features mobile "$@"
-    find target/dx/keepbook-dioxus/debug/android -path '*/build/outputs/apk/*.apk' -print
+    nix run .#dioxus-android-debug -- "$@"
 
 # Build the Dioxus client as an Android release APK.
 dioxus-android-release *args:
-    rm -rf target/dx/keepbook-dioxus/release/android
-    nix develop .#android --command dx bundle --android --target aarch64-linux-android --release --package keepbook-dioxus --no-default-features --features mobile "$@"
-    nix develop .#android --command bash -lc 'cd target/dx/keepbook-dioxus/release/android/app && ./gradlew :app:assembleRelease --no-daemon --console plain'
-    find target/dx/keepbook-dioxus/release/android \( -path '*/build/outputs/apk/release/*.apk' -o -path '*/build/outputs/bundle/release/*.aab' \) -print
+    nix run .#dioxus-android-release -- "$@"
 
 # Portfolio history distilled to daily date/balance JSON objects.
 # Extra CLI args can be passed through, e.g.:

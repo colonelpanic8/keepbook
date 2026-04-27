@@ -91,16 +91,25 @@
           cargo = toolchain;
           rustc = toolchain;
         };
-        androidBuildToolsVersion = "34.0.0";
-        androidCmdLineToolsVersion = "8.0";
-        androidNdkVersion = "27.1.12297006";
+        androidBuildToolsVersion = "36.1.0";
+        androidCmdLineToolsVersion = "19.0";
+        androidCompileSdkVersion = "36";
+        androidGradlePluginVersion = "8.13.2";
+        androidKotlinPluginVersion = "2.2.21";
+        androidNdkVersion = "29.0.14206865";
+        androidPlatformToolsVersion = "36.0.2";
+        androidTargetSdkVersion = "36";
         androidComposition = pkgs.androidenv.composeAndroidPackages {
           cmdLineToolsVersion = androidCmdLineToolsVersion;
           toolsVersion = "26.1.1";
-          platformToolsVersion = "35.0.2";
-          buildToolsVersions = [androidBuildToolsVersion];
+          platformToolsVersion = androidPlatformToolsVersion;
+          buildToolsVersions = ["34.0.0" androidBuildToolsVersion];
           includeEmulator = true;
-          platformVersions = ["33" "34"];
+          # Dioxus 0.7.3 still generates an initial Gradle project pinned to
+          # SDK 33/Build Tools 34. The wrapper patches and rebuilds with the
+          # latest versions below, but the generated first pass still needs
+          # these packages available in the immutable SDK.
+          platformVersions = ["33" androidCompileSdkVersion];
           includeSources = false;
           includeSystemImages = false;
           systemImageTypes = ["google_apis_playstore"];
@@ -143,6 +152,7 @@
             runtimeInputs = [
               pkgs.coreutils
               pkgs.findutils
+              pkgs.gnused
               pkgs.jq
               pkgs.nix
             ];
@@ -178,8 +188,40 @@
                 args+=(--release)
               fi
 
+              patch_android_project() {
+                local gradle_root="target/dx/keepbook-dioxus/$profile/android/app"
+                local root_gradle="$gradle_root/build.gradle.kts"
+                local app_gradle="$gradle_root/app/build.gradle.kts"
+                local gradle_properties="$gradle_root/gradle.properties"
+                local manifest="$gradle_root/app/src/main/AndroidManifest.xml"
+
+                if [[ -f "$root_gradle" ]]; then
+                  sed -i \
+                    -e 's/com\.android\.tools\.build:gradle:[^"]*/com.android.tools.build:gradle:${androidGradlePluginVersion}/' \
+                    -e 's/org\.jetbrains\.kotlin:kotlin-gradle-plugin:[^"]*/org.jetbrains.kotlin:kotlin-gradle-plugin:${androidKotlinPluginVersion}/' \
+                    "$root_gradle"
+                fi
+
+                if [[ -f "$app_gradle" ]]; then
+                  sed -i \
+                    -e 's/compileSdk = [0-9][0-9]*/compileSdk = ${androidCompileSdkVersion}\n    buildToolsVersion = "${androidBuildToolsVersion}"/' \
+                    -e 's/targetSdk = [0-9][0-9]*/targetSdk = ${androidTargetSdkVersion}/' \
+                    -e '/^[[:space:]]*kotlinOptions[[:space:]]*{/,/^[[:space:]]*}/c\    kotlin {\n        compilerOptions {\n            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_1_8)\n        }\n    }' \
+                    "$app_gradle"
+                fi
+
+                if [[ -f "$gradle_properties" ]]; then
+                  sed -i '/^android\.defaults\.buildfeatures\.buildconfig=/d' "$gradle_properties"
+                fi
+
+                if [[ -f "$manifest" ]]; then
+                  sed -i '/android:extractNativeLibs=/d' "$manifest"
+                fi
+              }
+
               rm -rf "target/dx/keepbook-dioxus/$profile/android"
               nix develop "$repo#android" --command "''${args[@]}" "$@"
+              patch_android_project
 
               if ${
                 if release
@@ -187,7 +229,10 @@
                 else "false"
               }; then
                 nix develop "$repo#android" --command bash -lc \
-                  'cd target/dx/keepbook-dioxus/release/android/app && ./gradlew :app:assembleRelease --no-daemon --console plain'
+                  'cd target/dx/keepbook-dioxus/release/android/app && ./gradlew :app:bundleRelease :app:assembleRelease --no-daemon --console plain'
+              else
+                nix develop "$repo#android" --command bash -lc \
+                  'cd target/dx/keepbook-dioxus/debug/android/app && ./gradlew :app:assembleDebug --no-daemon --console plain'
               fi
 
               if ${
