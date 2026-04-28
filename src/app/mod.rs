@@ -78,3 +78,25 @@ fn maybe_auto_commit(config: &ResolvedConfig, action: &str) {
         tracing::warn!("Git auto-commit skipped: keepbook was built without git support");
     }
 }
+
+pub fn maybe_push_after_sync(config: &ResolvedConfig, enabled: bool) {
+    if !enabled {
+        return;
+    }
+
+    #[cfg(feature = "git")]
+    match crate::git::try_push_remote(&config.data_dir) {
+        Ok(crate::git::PushRemoteOutcome::Pushed) => {
+            tracing::info!("Git push after sync completed");
+        }
+        Ok(crate::git::PushRemoteOutcome::SkippedNotRepo { reason }) => {
+            tracing::warn!("Git push after sync skipped: {reason}");
+        }
+        Err(error) => {
+            tracing::warn!("Git push after sync failed: {error:#}");
+        }
+    }
+
+    #[cfg(not(feature = "git"))]
+    tracing::warn!("Git push after sync skipped: keepbook was built without git support");
+}

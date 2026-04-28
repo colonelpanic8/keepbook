@@ -1559,6 +1559,7 @@ impl Daemon {
                 &self.config,
                 app::PreflightOptions {
                     merge_origin_master: self.config.git.merge_master_before_command,
+                    pull_remote: self.config.git.pull_before_edit,
                 },
             )?;
 
@@ -1601,6 +1602,8 @@ impl Daemon {
                 symlink_connections,
                 symlink_accounts,
             );
+
+            app::maybe_push_after_sync(&self.config, self.config.git.push_after_sync);
 
             Ok::<String, anyhow::Error>(summary)
         }

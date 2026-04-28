@@ -76,6 +76,30 @@ struct Cli {
     )]
     skip_git_merge_master: bool,
 
+    /// Pull remote changes before commands that edit data.
+    #[arg(long, global = true, conflicts_with = "skip_git_pull_before_edit")]
+    git_pull_before_edit: bool,
+
+    /// Skip pulling remote changes before editing even if enabled in config.
+    #[arg(
+        long = "skip-git-pull-before-edit",
+        global = true,
+        conflicts_with = "git_pull_before_edit"
+    )]
+    skip_git_pull_before_edit: bool,
+
+    /// Push committed changes after sync commands complete.
+    #[arg(long, global = true, conflicts_with = "skip_git_push_after_sync")]
+    git_push_after_sync: bool,
+
+    /// Skip pushing after sync even if enabled in config.
+    #[arg(
+        long = "skip-git-push-after-sync",
+        global = true,
+        conflicts_with = "git_push_after_sync"
+    )]
+    skip_git_push_after_sync: bool,
+
     /// Schwab username override for login autofill.
     ///
     /// Equivalent to setting KEEPBOOK_SCHWAB_USERNAME for this command invocation.
@@ -298,6 +322,23 @@ enum Command {
         #[arg(long, default_value_t = false)]
         include_empty: bool,
     },
+}
+
+impl Command {
+    fn edits_data(&self) -> bool {
+        match self {
+            Command::Add(_)
+            | Command::Remove(_)
+            | Command::Set(_)
+            | Command::Import(_)
+            | Command::Sync(_)
+            | Command::MarketData(MarketDataCommand::Fetch { .. }) => true,
+            Command::Portfolio(PortfolioCommand::Snapshot {
+                offline, dry_run, ..
+            }) => !*offline && !*dry_run,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -835,6 +876,18 @@ async fn main() -> Result<()> {
     let storage_arc: Arc<dyn Storage> = Arc::new(storage.clone());
 
     // Pre-command hook (decoupled from CLI parsing; CLI only computes enablement).
+    let edits_data = cli
+        .command
+        .as_ref()
+        .map(|command| command.edits_data())
+        .unwrap_or(false);
+    let push_after_sync = if cli.git_push_after_sync {
+        true
+    } else if cli.skip_git_push_after_sync {
+        false
+    } else {
+        config.git.push_after_sync
+    };
     let merge_enabled = if cli.git_merge_master {
         true
     } else if cli.skip_git_merge_master {
@@ -842,10 +895,18 @@ async fn main() -> Result<()> {
     } else {
         config.git.merge_master_before_command
     };
+    let pull_enabled = if cli.git_pull_before_edit {
+        true
+    } else if cli.skip_git_pull_before_edit {
+        false
+    } else {
+        config.git.pull_before_edit
+    };
     app::run_preflight(
         &config,
         app::PreflightOptions {
             merge_origin_master: merge_enabled,
+            pull_remote: edits_data && pull_enabled,
         },
     )?;
 
@@ -985,6 +1046,7 @@ async fn main() -> Result<()> {
                     app::sync_connection(storage_arc.clone(), &config, &id_or_name, transactions)
                         .await?
                 };
+                app::maybe_push_after_sync(&config, push_after_sync);
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
             SyncCommand::All {
@@ -997,6 +1059,7 @@ async fn main() -> Result<()> {
                 } else {
                     app::sync_all(storage_arc.clone(), &config, transactions).await?
                 };
+                app::maybe_push_after_sync(&config, push_after_sync);
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
             SyncCommand::Prices { opts, scope } => {
@@ -1017,18 +1080,22 @@ async fn main() -> Result<()> {
                     opts.quote_staleness,
                 )
                 .await?;
+                app::maybe_push_after_sync(&config, push_after_sync);
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
             SyncCommand::Symlinks => {
                 let result = app::sync_symlinks(&storage, &config).await?;
+                app::maybe_push_after_sync(&config, push_after_sync);
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
             SyncCommand::Recompact => {
                 let result = app::sync_recompact(&storage, &config).await?;
+                app::maybe_push_after_sync(&config, push_after_sync);
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
             SyncCommand::BackfillMetadata => {
                 let result = app::sync_backfill_metadata(&storage, &config).await?;
+                app::maybe_push_after_sync(&config, push_after_sync);
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
         },

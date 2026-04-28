@@ -39,6 +39,14 @@ describe('default constants', () => {
     it('has merge_master_before_command false', () => {
       expect(DEFAULT_GIT_CONFIG.merge_master_before_command).toBe(false);
     });
+
+    it('has pull_before_edit false', () => {
+      expect(DEFAULT_GIT_CONFIG.pull_before_edit).toBe(false);
+    });
+
+    it('has push_after_sync false', () => {
+      expect(DEFAULT_GIT_CONFIG.push_after_sync).toBe(false);
+    });
   });
 
   describe('DEFAULT_CONFIG', () => {
@@ -89,6 +97,8 @@ describe('parseConfig', () => {
     expect(config.refresh.price_staleness).toBe(24 * MS_PER_HOUR);
     expect(config.git.auto_commit).toBe(false);
     expect(config.git.auto_push).toBe(false);
+    expect(config.git.pull_before_edit).toBe(false);
+    expect(config.git.push_after_sync).toBe(false);
     expect(config.git.merge_master_before_command).toBe(false);
     expect(config.tray).toEqual(DEFAULT_TRAY_CONFIG);
     expect(config.history).toEqual(DEFAULT_HISTORY_CONFIG);
@@ -238,11 +248,15 @@ balance_staleness = "7d"
 [git]
 auto_commit = true
 auto_push = true
+pull_before_edit = true
+push_after_sync = true
 merge_master_before_command = true
 `;
     const config = parseConfig(toml);
     expect(config.git.auto_commit).toBe(true);
     expect(config.git.auto_push).toBe(true);
+    expect(config.git.pull_before_edit).toBe(true);
+    expect(config.git.push_after_sync).toBe(true);
     expect(config.git.merge_master_before_command).toBe(true);
   });
 
@@ -254,6 +268,8 @@ auto_commit = true
     const config = parseConfig(toml);
     expect(config.git.auto_commit).toBe(true);
     expect(config.git.auto_push).toBe(true);
+    expect(config.git.pull_before_edit).toBe(false);
+    expect(config.git.push_after_sync).toBe(false);
     expect(config.git.merge_master_before_command).toBe(false);
   });
 
@@ -281,6 +297,8 @@ price_staleness = "1h"
 [git]
 auto_commit = true
 auto_push = true
+pull_before_edit = true
+push_after_sync = true
 merge_master_before_command = true
 `;
     const config = parseConfig(toml);
@@ -290,6 +308,8 @@ merge_master_before_command = true
     expect(config.refresh.price_staleness).toBe(1 * MS_PER_HOUR);
     expect(config.git.auto_commit).toBe(true);
     expect(config.git.auto_push).toBe(true);
+    expect(config.git.pull_before_edit).toBe(true);
+    expect(config.git.push_after_sync).toBe(true);
     expect(config.git.merge_master_before_command).toBe(true);
   });
 });

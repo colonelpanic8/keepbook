@@ -26,6 +26,10 @@ export interface GitConfig {
   auto_commit: boolean;
   /** Whether to auto-push after successful auto-commits. */
   auto_push: boolean;
+  /** Whether to pull remote changes before commands that edit data. */
+  pull_before_edit: boolean;
+  /** Whether to push committed changes after sync commands complete. */
+  push_after_sync: boolean;
   /** Whether to merge origin/master before each command. */
   merge_master_before_command: boolean;
 }
@@ -187,6 +191,8 @@ export const DEFAULT_REFRESH_CONFIG: RefreshConfig = {
 export const DEFAULT_GIT_CONFIG: GitConfig = {
   auto_commit: false,
   auto_push: false,
+  pull_before_edit: false,
+  push_after_sync: false,
   merge_master_before_command: false,
 };
 
@@ -286,6 +292,14 @@ export function parseConfig(tomlStr: string): Config {
   const git: GitConfig = {
     auto_commit: autoCommit,
     auto_push: typeof gitRaw.auto_push === 'boolean' ? gitRaw.auto_push : autoCommit,
+    pull_before_edit:
+      typeof gitRaw.pull_before_edit === 'boolean'
+        ? gitRaw.pull_before_edit
+        : DEFAULT_GIT_CONFIG.pull_before_edit,
+    push_after_sync:
+      typeof gitRaw.push_after_sync === 'boolean'
+        ? gitRaw.push_after_sync
+        : DEFAULT_GIT_CONFIG.push_after_sync,
     merge_master_before_command:
       typeof gitRaw.merge_master_before_command === 'boolean'
         ? gitRaw.merge_master_before_command

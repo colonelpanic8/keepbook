@@ -19,6 +19,21 @@ pub enum MergeOriginMasterOutcome {
     ConflictAborted,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum PullRemoteOutcome {
+    SkippedNotRepo { reason: String },
+    SkippedNoUpstream { reason: String },
+    UpToDate,
+    Pulled,
+    ConflictAborted,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum PushRemoteOutcome {
+    SkippedNotRepo { reason: String },
+    Pushed,
+}
+
 pub fn try_auto_commit(
     data_dir: &Path,
     action: &str,
@@ -165,6 +180,133 @@ pub fn try_merge_origin_master(data_dir: &Path) -> Result<MergeOriginMasterOutco
 
     let stderr = String::from_utf8_lossy(&merge.stderr);
     anyhow::bail!("git merge origin/master failed: {stderr}")
+}
+
+pub fn try_pull_remote(data_dir: &Path) -> Result<PullRemoteOutcome> {
+    let repo_root = git_repo_root(data_dir)?;
+    let Some(repo_root) = repo_root else {
+        return Ok(PullRemoteOutcome::SkippedNotRepo {
+            reason: "data directory is not a git repository".to_string(),
+        });
+    };
+
+    let repo_root = repo_root
+        .canonicalize()
+        .unwrap_or_else(|_| repo_root.clone());
+    let data_dir = data_dir
+        .canonicalize()
+        .unwrap_or_else(|_| data_dir.to_path_buf());
+
+    if repo_root != data_dir {
+        return Ok(PullRemoteOutcome::SkippedNotRepo {
+            reason: format!(
+                "data directory is not the git repo root (repo root: {})",
+                repo_root.display()
+            ),
+        });
+    }
+
+    let status = git_output(&data_dir, &["status", "--porcelain"])?;
+    if !status.status.success() {
+        let stderr = String::from_utf8_lossy(&status.stderr);
+        anyhow::bail!("git status failed: {stderr}");
+    }
+    let status_stdout = String::from_utf8_lossy(&status.stdout);
+    if !status_stdout.trim().is_empty() {
+        anyhow::bail!("git working tree is not clean; cannot pull remote changes");
+    }
+
+    let upstream = git_output(
+        &data_dir,
+        &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+    )?;
+    if !upstream.status.success() {
+        return Ok(PullRemoteOutcome::SkippedNoUpstream {
+            reason: "current branch does not have an upstream tracking branch".to_string(),
+        });
+    }
+    let upstream_ref = String::from_utf8_lossy(&upstream.stdout).trim().to_string();
+    if upstream_ref.is_empty() {
+        return Ok(PullRemoteOutcome::SkippedNoUpstream {
+            reason: "current branch does not have an upstream tracking branch".to_string(),
+        });
+    }
+
+    let head_before = git_output(&data_dir, &["rev-parse", "HEAD"])?;
+    if !head_before.status.success() {
+        let stderr = String::from_utf8_lossy(&head_before.stderr);
+        anyhow::bail!("git rev-parse HEAD failed: {stderr}");
+    }
+    let head_before = String::from_utf8_lossy(&head_before.stdout)
+        .trim()
+        .to_string();
+
+    let fetch = git_output(&data_dir, &["fetch"])?;
+    if !fetch.status.success() {
+        let stderr = String::from_utf8_lossy(&fetch.stderr);
+        anyhow::bail!("git fetch failed: {stderr}");
+    }
+
+    let merge = git_output(&data_dir, &["merge", "--no-edit", upstream_ref.as_str()])?;
+    if merge.status.success() {
+        let head_after = git_output(&data_dir, &["rev-parse", "HEAD"])?;
+        if !head_after.status.success() {
+            let stderr = String::from_utf8_lossy(&head_after.stderr);
+            anyhow::bail!("git rev-parse HEAD failed: {stderr}");
+        }
+        let head_after = String::from_utf8_lossy(&head_after.stdout)
+            .trim()
+            .to_string();
+        if head_before == head_after {
+            return Ok(PullRemoteOutcome::UpToDate);
+        }
+        return Ok(PullRemoteOutcome::Pulled);
+    }
+
+    if has_unmerged_files(&data_dir)? {
+        let abort = git_output(&data_dir, &["merge", "--abort"])?;
+        if !abort.status.success() {
+            let stderr = String::from_utf8_lossy(&abort.stderr);
+            anyhow::bail!("git pull had conflicts and git merge --abort failed: {stderr}");
+        }
+        return Ok(PullRemoteOutcome::ConflictAborted);
+    }
+
+    let stderr = String::from_utf8_lossy(&merge.stderr);
+    anyhow::bail!("git merge {upstream_ref} failed: {stderr}")
+}
+
+pub fn try_push_remote(data_dir: &Path) -> Result<PushRemoteOutcome> {
+    let repo_root = git_repo_root(data_dir)?;
+    let Some(repo_root) = repo_root else {
+        return Ok(PushRemoteOutcome::SkippedNotRepo {
+            reason: "data directory is not a git repository".to_string(),
+        });
+    };
+
+    let repo_root = repo_root
+        .canonicalize()
+        .unwrap_or_else(|_| repo_root.clone());
+    let data_dir = data_dir
+        .canonicalize()
+        .unwrap_or_else(|_| data_dir.to_path_buf());
+
+    if repo_root != data_dir {
+        return Ok(PushRemoteOutcome::SkippedNotRepo {
+            reason: format!(
+                "data directory is not the git repo root (repo root: {})",
+                repo_root.display()
+            ),
+        });
+    }
+
+    let push = git_output(&data_dir, &["push"])?;
+    if !push.status.success() {
+        let stderr = String::from_utf8_lossy(&push.stderr);
+        anyhow::bail!("git push failed: {stderr}");
+    }
+
+    Ok(PushRemoteOutcome::Pushed)
 }
 
 fn git_repo_root(dir: &Path) -> Result<Option<PathBuf>> {

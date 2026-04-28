@@ -10,6 +10,8 @@ pub fn config_output(config_path: &Path, config: &ResolvedConfig) -> serde_json:
         "git": {
             "auto_commit": config.git.auto_commit,
             "auto_push": config.git.auto_push,
+            "pull_before_edit": config.git.pull_before_edit,
+            "push_after_sync": config.git.push_after_sync,
             "merge_master_before_command": config.git.merge_master_before_command
         }
     })

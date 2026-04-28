@@ -127,6 +127,8 @@ describe('loadConfig', () => {
       '[git]',
       'auto_commit = true',
       'auto_push = true',
+      'pull_before_edit = true',
+      'push_after_sync = true',
       'merge_master_before_command = true',
       '',
       '[refresh]',
@@ -147,6 +149,8 @@ describe('loadConfig', () => {
     expect(config.reporting_currency).toBe('EUR');
     expect(config.git.auto_commit).toBe(true);
     expect(config.git.auto_push).toBe(true);
+    expect(config.git.pull_before_edit).toBe(true);
+    expect(config.git.push_after_sync).toBe(true);
     expect(config.git.merge_master_before_command).toBe(true);
     expect(config.refresh.balance_staleness).toBe(7 * 24 * 60 * 60 * 1000);
     expect(config.refresh.price_staleness).toBe(12 * 60 * 60 * 1000);
@@ -166,6 +170,8 @@ describe('loadConfig', () => {
 
     expect(config.git.auto_commit).toBe(true);
     expect(config.git.auto_push).toBe(true);
+    expect(config.git.pull_before_edit).toBe(false);
+    expect(config.git.push_after_sync).toBe(false);
     expect(config.git.merge_master_before_command).toBe(false);
   });
 
@@ -208,6 +214,8 @@ describe('loadConfig', () => {
     expect(config.reporting_currency).toBe('USD');
     expect(config.git.auto_commit).toBe(false);
     expect(config.git.auto_push).toBe(false);
+    expect(config.git.pull_before_edit).toBe(false);
+    expect(config.git.push_after_sync).toBe(false);
     expect(config.git.merge_master_before_command).toBe(false);
     expect(config.refresh.balance_staleness).toBe(DEFAULT_REFRESH_CONFIG.balance_staleness);
     expect(config.refresh.price_staleness).toBe(DEFAULT_REFRESH_CONFIG.price_staleness);
@@ -250,7 +258,13 @@ describe('configOutput', () => {
         latent_capital_gains_tax: { enabled: false, account_name: 'Latent Capital Gains Tax' },
       },
       ignore: { transaction_rules: [] },
-      git: { auto_commit: false, auto_push: false, merge_master_before_command: false },
+      git: {
+        auto_commit: false,
+        auto_push: false,
+        pull_before_edit: false,
+        push_after_sync: false,
+        merge_master_before_command: false,
+      },
     });
 
     expect(result).toEqual({
@@ -265,6 +279,8 @@ describe('configOutput', () => {
       git: {
         auto_commit: false,
         auto_push: false,
+        pull_before_edit: false,
+        push_after_sync: false,
         merge_master_before_command: false,
       },
     });
@@ -286,7 +302,13 @@ describe('configOutput', () => {
         latent_capital_gains_tax: { enabled: false, account_name: 'Latent Capital Gains Tax' },
       },
       ignore: { transaction_rules: [] },
-      git: { auto_commit: true, auto_push: true, merge_master_before_command: true },
+      git: {
+        auto_commit: true,
+        auto_push: true,
+        pull_before_edit: true,
+        push_after_sync: true,
+        merge_master_before_command: true,
+      },
     });
 
     expect(result).toEqual({
@@ -301,6 +323,8 @@ describe('configOutput', () => {
       git: {
         auto_commit: true,
         auto_push: true,
+        pull_before_edit: true,
+        push_after_sync: true,
         merge_master_before_command: true,
       },
     });
@@ -322,7 +346,13 @@ describe('configOutput', () => {
         latent_capital_gains_tax: { enabled: false, account_name: 'Latent Capital Gains Tax' },
       },
       ignore: { transaction_rules: [] },
-      git: { auto_commit: false, auto_push: false, merge_master_before_command: false },
+      git: {
+        auto_commit: false,
+        auto_push: false,
+        pull_before_edit: false,
+        push_after_sync: false,
+        merge_master_before_command: false,
+      },
     }) as Record<string, unknown>;
 
     expect(Object.keys(result).sort()).toEqual(

@@ -52,7 +52,13 @@ function makeConfig(overrides?: Partial<ResolvedConfig>): ResolvedConfig {
       latent_capital_gains_tax: { enabled: false, account_name: 'Latent Capital Gains Tax' },
     },
     ignore: { transaction_rules: [] },
-    git: { auto_commit: false, auto_push: false, merge_master_before_command: false },
+    git: {
+      auto_commit: false,
+      auto_push: false,
+      pull_before_edit: false,
+      push_after_sync: false,
+      merge_master_before_command: false,
+    },
     ...overrides,
   };
 }

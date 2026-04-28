@@ -267,6 +267,12 @@ pub struct GitConfig {
     /// Enable automatic pushes after successful auto-commits.
     pub auto_push: bool,
 
+    /// Pull remote changes before commands that edit data.
+    pub pull_before_edit: bool,
+
+    /// Push committed changes after sync commands complete.
+    pub push_after_sync: bool,
+
     /// Merge `origin/master` before running commands.
     pub merge_master_before_command: bool,
 }
@@ -281,6 +287,8 @@ impl<'de> Deserialize<'de> for GitConfig {
         struct RawGitConfig {
             auto_commit: bool,
             auto_push: Option<bool>,
+            pull_before_edit: bool,
+            push_after_sync: bool,
             merge_master_before_command: bool,
         }
 
@@ -289,6 +297,8 @@ impl<'de> Deserialize<'de> for GitConfig {
         Ok(Self {
             auto_commit: raw.auto_commit,
             auto_push: raw.auto_push.unwrap_or(raw.auto_commit),
+            pull_before_edit: raw.pull_before_edit,
+            push_after_sync: raw.push_after_sync,
             merge_master_before_command: raw.merge_master_before_command,
         })
     }
@@ -642,11 +652,15 @@ mod tests {
         writeln!(file, "[git]")?;
         writeln!(file, "auto_commit = true")?;
         writeln!(file, "auto_push = true")?;
+        writeln!(file, "pull_before_edit = true")?;
+        writeln!(file, "push_after_sync = true")?;
         writeln!(file, "merge_master_before_command = true")?;
 
         let config = Config::load(&config_path)?;
         assert!(config.git.auto_commit);
         assert!(config.git.auto_push);
+        assert!(config.git.pull_before_edit);
+        assert!(config.git.push_after_sync);
         assert!(config.git.merge_master_before_command);
 
         Ok(())
@@ -664,6 +678,8 @@ mod tests {
         let config = Config::load(&config_path)?;
         assert!(config.git.auto_commit);
         assert!(config.git.auto_push);
+        assert!(!config.git.pull_before_edit);
+        assert!(!config.git.push_after_sync);
         assert!(!config.git.merge_master_before_command);
 
         Ok(())
@@ -778,6 +794,8 @@ mod tests {
         let config = Config::default();
         assert!(!config.git.auto_commit);
         assert!(!config.git.auto_push);
+        assert!(!config.git.pull_before_edit);
+        assert!(!config.git.push_after_sync);
         assert!(!config.git.merge_master_before_command);
     }
 

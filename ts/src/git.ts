@@ -16,6 +16,17 @@ export type MergeOriginMasterOutcome =
   | { type: 'merged' }
   | { type: 'conflict_aborted' };
 
+export type PullRemoteOutcome =
+  | { type: 'skipped_not_repo'; reason: string }
+  | { type: 'skipped_no_upstream'; reason: string }
+  | { type: 'up_to_date' }
+  | { type: 'pulled' }
+  | { type: 'conflict_aborted' };
+
+export type PushRemoteOutcome =
+  | { type: 'skipped_not_repo'; reason: string }
+  | { type: 'pushed' };
+
 export async function tryAutoCommit(
   dataDir: string,
   action: string,
@@ -106,6 +117,95 @@ export async function tryMergeOriginMaster(dataDir: string): Promise<MergeOrigin
     return { type: 'up_to_date' };
   }
   return { type: 'merged' };
+}
+
+export async function tryPullRemote(dataDir: string): Promise<PullRemoteOutcome> {
+  const repoRoot = await gitRepoRoot(dataDir);
+  if (repoRoot === null) {
+    return { type: 'skipped_not_repo', reason: 'data directory is not a git repository' };
+  }
+
+  const canonicalRoot = await canonicalize(repoRoot);
+  const canonicalDir = await canonicalize(dataDir);
+
+  if (canonicalRoot !== canonicalDir) {
+    return {
+      type: 'skipped_not_repo',
+      reason: `data directory is not the git repo root (repo root: ${canonicalRoot})`,
+    };
+  }
+
+  const { stdout: statusOut } = await gitOutput(canonicalDir, ['status', '--porcelain']);
+  if (statusOut.trim() !== '') {
+    throw new Error('git working tree is not clean; cannot pull remote changes');
+  }
+
+  let upstreamRef: string;
+  try {
+    const { stdout } = await gitOutput(canonicalDir, [
+      'rev-parse',
+      '--abbrev-ref',
+      '--symbolic-full-name',
+      '@{u}',
+    ]);
+    upstreamRef = stdout.trim();
+  } catch {
+    return {
+      type: 'skipped_no_upstream',
+      reason: 'current branch does not have an upstream tracking branch',
+    };
+  }
+  if (upstreamRef === '') {
+    return {
+      type: 'skipped_no_upstream',
+      reason: 'current branch does not have an upstream tracking branch',
+    };
+  }
+
+  const { stdout: headBefore } = await gitOutput(canonicalDir, ['rev-parse', 'HEAD']);
+
+  await gitOutput(canonicalDir, ['fetch']);
+
+  try {
+    await gitOutput(canonicalDir, ['merge', '--no-edit', upstreamRef]);
+  } catch (err) {
+    const { stdout: unmergedOut } = await gitOutput(canonicalDir, [
+      'diff',
+      '--name-only',
+      '--diff-filter=U',
+    ]);
+    if (unmergedOut.trim() !== '') {
+      await gitOutput(canonicalDir, ['merge', '--abort']);
+      return { type: 'conflict_aborted' };
+    }
+    throw err;
+  }
+
+  const { stdout: headAfter } = await gitOutput(canonicalDir, ['rev-parse', 'HEAD']);
+  if (headBefore.trim() === headAfter.trim()) {
+    return { type: 'up_to_date' };
+  }
+  return { type: 'pulled' };
+}
+
+export async function tryPushRemote(dataDir: string): Promise<PushRemoteOutcome> {
+  const repoRoot = await gitRepoRoot(dataDir);
+  if (repoRoot === null) {
+    return { type: 'skipped_not_repo', reason: 'data directory is not a git repository' };
+  }
+
+  const canonicalRoot = await canonicalize(repoRoot);
+  const canonicalDir = await canonicalize(dataDir);
+
+  if (canonicalRoot !== canonicalDir) {
+    return {
+      type: 'skipped_not_repo',
+      reason: `data directory is not the git repo root (repo root: ${canonicalRoot})`,
+    };
+  }
+
+  await gitOutput(canonicalDir, ['push']);
+  return { type: 'pushed' };
 }
 
 async function canonicalize(p: string): Promise<string> {

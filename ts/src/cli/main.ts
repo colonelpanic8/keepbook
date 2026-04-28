@@ -43,7 +43,7 @@ import {
 // Library
 import { JsonFileStorage } from '../storage/json-file.js';
 import { JsonlMarketDataStore } from '../market-data/jsonl-store.js';
-import { tryAutoCommit } from '../git.js';
+import { tryAutoCommit, tryPushRemote } from '../git.js';
 import { runPreflight } from '../app/preflight.js';
 import { cliVersion } from './version.js';
 
@@ -64,11 +64,16 @@ async function run(fn: () => Promise<unknown>): Promise<void> {
 
 async function runWithConfig(
   fn: (cfg: Awaited<ReturnType<typeof loadConfig>>) => Promise<unknown>,
+  options: { editData?: boolean; syncData?: boolean } = {},
 ): Promise<void> {
   await run(async () => {
     const opts = program.opts() as {
       gitMergeMaster?: boolean;
       skipGitMergeMaster?: boolean;
+      gitPullBeforeEdit?: boolean;
+      skipGitPullBeforeEdit?: boolean;
+      gitPushAfterSync?: boolean;
+      skipGitPushAfterSync?: boolean;
       schwabUsername?: string;
       schwabPassword?: string;
     };
@@ -87,9 +92,31 @@ async function runWithConfig(
       : opts.skipGitMergeMaster
         ? false
         : cfg.config.git.merge_master_before_command;
+    const pullEnabled = opts.gitPullBeforeEdit
+      ? true
+      : opts.skipGitPullBeforeEdit
+        ? false
+        : cfg.config.git.pull_before_edit;
+    const pushAfterSync = opts.gitPushAfterSync
+      ? true
+      : opts.skipGitPushAfterSync
+        ? false
+        : cfg.config.git.push_after_sync;
 
-    await runPreflight(cfg.config, { merge_origin_master: mergeEnabled });
-    return fn(cfg);
+    await runPreflight(cfg.config, {
+      merge_origin_master: mergeEnabled,
+      pull_remote: options.editData === true && pullEnabled,
+    });
+    const result = await fn(cfg);
+    if (options.syncData === true && pushAfterSync) {
+      try {
+        await tryPushRemote(cfg.config.data_dir);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`Git push after sync failed: ${message}`);
+      }
+    }
+    return result;
   });
 }
 
@@ -106,6 +133,13 @@ program
   .option('-c, --config <path>', 'path to config file')
   .option('--git-merge-master', 'merge origin/master before executing the command')
   .option('--skip-git-merge-master', 'skip merging origin/master even if enabled in config')
+  .option('--git-pull-before-edit', 'pull remote changes before commands that edit data')
+  .option(
+    '--skip-git-pull-before-edit',
+    'skip pulling remote changes before editing even if enabled in config',
+  )
+  .option('--git-push-after-sync', 'push committed changes after sync commands complete')
+  .option('--skip-git-push-after-sync', 'skip pushing after sync even if enabled in config')
   .option(
     '--schwab-username <username>',
     'Schwab username override (equivalent to KEEPBOOK_SCHWAB_USERNAME for this process)',
@@ -308,7 +342,7 @@ add
         );
       }
       return result;
-    });
+    }, { editData: true });
   });
 
 add
@@ -329,7 +363,7 @@ add
         await tryAutoCommit(cfg.config.data_dir, `add account '${name}'`, cfg.config.git.auto_push);
       }
       return result;
-    });
+    }, { editData: true });
   });
 
 // ---------------------------------------------------------------------------
@@ -353,7 +387,7 @@ remove
         );
       }
       return result;
-    });
+    }, { editData: true });
   });
 
 // ---------------------------------------------------------------------------
@@ -387,7 +421,7 @@ set
         );
       }
       return result;
-    });
+    }, { editData: true });
   });
 
 set
@@ -412,7 +446,7 @@ set
           );
         }
         return result;
-      });
+      }, { editData: true });
     },
   );
 
@@ -476,7 +510,7 @@ set
           );
         }
         return result;
-      });
+      }, { editData: true });
     },
   );
 
@@ -504,7 +538,7 @@ importSchwab
         );
       }
       return result;
-    });
+    }, { editData: true });
   });
 
 // ---------------------------------------------------------------------------
@@ -636,7 +670,7 @@ sync
         });
       }
       return syncConnectionWithOptions(storage, idOrName, { transactions: txMode });
-    });
+    }, { editData: true, syncData: true });
   });
 
 sync
@@ -652,7 +686,7 @@ sync
         return syncAllIfStaleWithOptions(storage, cfg.config.refresh, { transactions: txMode });
       }
       return syncAllWithOptions(storage, { transactions: txMode });
-    });
+    }, { editData: true, syncData: true });
   });
 
 sync
@@ -663,7 +697,7 @@ sync
   .action(async (_scope?: string, _id?: string, _opts?: object) => {
     await runWithConfig(async (_cfg) => {
       return syncPrices();
-    });
+    }, { editData: true, syncData: true });
   });
 
 sync
@@ -672,7 +706,7 @@ sync
   .action(async () => {
     await runWithConfig(async (_cfg) => {
       return syncSymlinks();
-    });
+    }, { editData: true, syncData: true });
   });
 
 sync
@@ -682,7 +716,7 @@ sync
     await runWithConfig(async (cfg) => {
       const storage = new JsonFileStorage(cfg.config.data_dir);
       return syncBackfillMetadata(storage);
-    });
+    }, { editData: true, syncData: true });
   });
 
 sync
@@ -693,7 +727,7 @@ sync
       const storage = new JsonFileStorage(cfg.config.data_dir);
       const marketData = new JsonlMarketDataStore(cfg.config.data_dir);
       return syncRecompact(storage, marketData);
-    });
+    }, { editData: true, syncData: true });
   });
 
 // ---------------------------------------------------------------------------
@@ -773,7 +807,7 @@ marketData
           currency: opts.currency,
           include_fx: opts.fx,
         });
-      });
+      }, { editData: true });
     },
   );
 
