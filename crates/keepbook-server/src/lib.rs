@@ -242,19 +242,26 @@ impl ApiState {
     }
 
     pub async fn sync_git_repo(&self, input: GitSyncInput) -> Result<GitSyncOutput> {
-        if input.private_key_pem.trim().is_empty() {
-            anyhow::bail!("SSH private key is empty");
-        }
-
         let snapshot = self.snapshot().await;
         let data_dir = resolve_input_data_dir(&snapshot.config_path, input.data_dir.trim());
         validate_git_data_dir(&data_dir)?;
+        let configured_git = load_git_remote_settings(&snapshot.config_path)?;
+        let private_key_pem =
+            resolve_git_private_key(&snapshot.config_path, &configured_git, &input)?;
         let branch = non_empty(input.branch.trim(), "master");
         let remote_url = build_ssh_remote_url(&input.host, &input.repo, &input.ssh_user);
         prepare_git_ssh_environment(&snapshot.config_path)?;
-        sync_git_ssh(&data_dir, &remote_url, &branch, &input.private_key_pem)?;
+        sync_git_ssh(&data_dir, &remote_url, &branch, &private_key_pem)?;
 
         if input.save_settings {
+            let ssh_key_path = if input.private_key_pem.trim().is_empty() {
+                configured_git.ssh_key_path
+            } else {
+                Some(persist_git_private_key(
+                    &snapshot.config_path,
+                    &input.private_key_pem,
+                )?)
+            };
             write_git_settings(
                 &snapshot.config_path,
                 &GitSettingsInput {
@@ -263,6 +270,7 @@ impl ApiState {
                     repo: input.repo.clone(),
                     branch: input.branch.clone(),
                     ssh_user: input.ssh_user.clone(),
+                    ssh_key_path,
                 },
             )?;
         }
@@ -306,6 +314,8 @@ pub struct GitRemoteSettings {
     pub repo: String,
     pub branch: String,
     pub ssh_user: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ssh_key_path: Option<String>,
 }
 
 impl Default for GitRemoteSettings {
@@ -315,6 +325,7 @@ impl Default for GitRemoteSettings {
             repo: "colonelpanic8/keepbook-data".to_string(),
             branch: "master".to_string(),
             ssh_user: "git".to_string(),
+            ssh_key_path: None,
         }
     }
 }
@@ -333,6 +344,8 @@ pub struct GitSettingsInput {
     pub repo: String,
     pub branch: String,
     pub ssh_user: String,
+    #[serde(default)]
+    pub ssh_key_path: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -625,6 +638,7 @@ fn load_git_remote_settings(config_path: &Path) -> Result<GitRemoteSettings> {
         repo: table_string(git_sync, "repo").unwrap_or(defaults.repo),
         branch: table_string(git_sync, "branch").unwrap_or(defaults.branch),
         ssh_user: table_string(git_sync, "ssh_user").unwrap_or(defaults.ssh_user),
+        ssh_key_path: table_string(git_sync, "ssh_key_path"),
     })
 }
 
@@ -651,6 +665,14 @@ fn write_git_settings(config_path: &Path, input: &GitSettingsInput) -> Result<()
     doc["git_sync"]["repo"] = value(input.repo.trim());
     doc["git_sync"]["branch"] = value(non_empty(input.branch.trim(), "master"));
     doc["git_sync"]["ssh_user"] = value(non_empty(input.ssh_user.trim(), "git"));
+    if let Some(ssh_key_path) = input
+        .ssh_key_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        doc["git_sync"]["ssh_key_path"] = value(ssh_key_path);
+    }
 
     std::fs::write(config_path, doc.to_string())
         .with_context(|| format!("failed to write {}", config_path.display()))?;
@@ -708,6 +730,92 @@ fn prepare_git_ssh_environment(config_path: &Path) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn default_git_ssh_key_path(config_path: &Path) -> Result<PathBuf> {
+    let Some(config_dir) = config_path.parent() else {
+        anyhow::bail!("cannot resolve SSH key path without a config directory");
+    };
+
+    Ok(config_dir.join(".ssh").join("keepbook_sync_key"))
+}
+
+fn persist_git_private_key(config_path: &Path, private_key_pem: &str) -> Result<String> {
+    let key_path = default_git_ssh_key_path(config_path)?;
+    let Some(parent) = key_path.parent() else {
+        anyhow::bail!(
+            "cannot resolve SSH key directory for {}",
+            key_path.display()
+        );
+    };
+
+    std::fs::create_dir_all(parent)
+        .with_context(|| format!("failed to create {}", parent.display()))?;
+
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .mode(0o600)
+            .open(&key_path)
+            .with_context(|| format!("failed to open {}", key_path.display()))?;
+        file.write_all(private_key_pem.trim_end().as_bytes())
+            .with_context(|| format!("failed to write {}", key_path.display()))?;
+        file.write_all(b"\n")
+            .with_context(|| format!("failed to finalize {}", key_path.display()))?;
+        std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600))
+            .with_context(|| format!("failed to set permissions on {}", key_path.display()))?;
+    }
+
+    #[cfg(not(unix))]
+    {
+        std::fs::write(&key_path, format!("{}\n", private_key_pem.trim_end()))
+            .with_context(|| format!("failed to write {}", key_path.display()))?;
+    }
+
+    Ok(key_path.display().to_string())
+}
+
+fn resolve_git_private_key(
+    config_path: &Path,
+    settings: &GitRemoteSettings,
+    input: &GitSyncInput,
+) -> Result<String> {
+    let inline_key = input.private_key_pem.trim();
+    if !inline_key.is_empty() {
+        return Ok(input.private_key_pem.clone());
+    }
+
+    let Some(key_path) = settings.ssh_key_path.as_deref() else {
+        anyhow::bail!("SSH private key is empty and no saved SSH key path is configured");
+    };
+
+    let key_path = resolve_config_relative_path(config_path, key_path);
+    std::fs::read_to_string(&key_path)
+        .with_context(|| format!("failed to read saved SSH key {}", key_path.display()))
+        .and_then(|contents| {
+            if contents.trim().is_empty() {
+                anyhow::bail!("saved SSH key {} is empty", key_path.display());
+            }
+            Ok(contents)
+        })
+}
+
+fn resolve_config_relative_path(config_path: &Path, path: &str) -> PathBuf {
+    let path = PathBuf::from(path);
+    if path.is_absolute() {
+        path
+    } else {
+        config_path
+            .parent()
+            .map(|parent| parent.join(path.clone()))
+            .unwrap_or(path)
+    }
 }
 
 fn log_git_sync_event(message: impl AsRef<str>) {

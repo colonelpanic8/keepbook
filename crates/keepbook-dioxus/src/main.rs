@@ -212,6 +212,8 @@ struct GitRemoteSettings {
     repo: String,
     branch: String,
     ssh_user: String,
+    #[serde(default)]
+    ssh_key_path: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -228,6 +230,8 @@ struct GitSettingsInput {
     repo: String,
     branch: String,
     ssh_user: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ssh_key_path: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
@@ -605,6 +609,7 @@ async fn save_git_settings_impl(input: GitSettingsInput) -> Result<GitSettingsOu
             repo: input.repo,
             branch: input.branch,
             ssh_user: input.ssh_user,
+            ssh_key_path: input.ssh_key_path,
         })
         .await
         .map_err(|error| format!("Could not save Git settings: {error:#}"))?;
@@ -1001,13 +1006,14 @@ fn SettingsView(
     onfilterchange: EventHandler<FilterOverrides>,
     onrefresh: EventHandler<()>,
 ) -> Element {
-    let settings = use_resource(fetch_git_settings);
+    let mut settings = use_resource(fetch_git_settings);
     let mut loaded_key = use_signal(String::new);
     let mut git_data_dir = use_signal(String::new);
     let mut host = use_signal(|| "github.com".to_string());
     let mut repo = use_signal(|| "colonelpanic8/keepbook-data".to_string());
     let mut branch = use_signal(|| "master".to_string());
     let mut ssh_user = use_signal(|| "git".to_string());
+    let mut ssh_key_path = use_signal(|| None::<String>);
     let mut private_key = use_signal(String::new);
     let mut private_key_name = use_signal(String::new);
     let mut status = use_signal(String::new);
@@ -1018,12 +1024,13 @@ fn SettingsView(
 
     if let Some(Ok(current)) = settings.cloned() {
         let key = format!(
-            "{}\n{}\n{}\n{}\n{}",
+            "{}\n{}\n{}\n{}\n{}\n{}",
             current.data_dir,
             current.git.host,
             current.git.repo,
             current.git.branch,
-            current.git.ssh_user
+            current.git.ssh_user,
+            current.git.ssh_key_path.as_deref().unwrap_or_default()
         );
         if loaded_key() != key {
             git_data_dir.set(normalize_git_data_dir_for_client(current.data_dir));
@@ -1031,6 +1038,7 @@ fn SettingsView(
             repo.set(current.git.repo);
             branch.set(current.git.branch);
             ssh_user.set(current.git.ssh_user);
+            ssh_key_path.set(current.git.ssh_key_path);
             loaded_key.set(key);
         }
     }
@@ -1157,7 +1165,11 @@ fn SettingsView(
                             }
                             small { class: "key-file-status",
                                 if private_key().trim().is_empty() {
-                                    "No private key selected"
+                                    if let Some(saved_key_path) = ssh_key_path() {
+                                        "Saved key: {saved_key_path}"
+                                    } else {
+                                        "No private key selected"
+                                    }
                                 } else if private_key_name().is_empty() {
                                     "Private key loaded"
                                 } else {
@@ -1189,13 +1201,16 @@ fn SettingsView(
                                     repo: repo(),
                                     branch: branch(),
                                     ssh_user: ssh_user(),
+                                    ssh_key_path: ssh_key_path(),
                                 };
                                 busy.set(true);
                                 status.set("Saving settings...".to_string());
                                 spawn(async move {
                                     match save_git_settings(input).await {
                                         Ok(saved) => {
+                                            ssh_key_path.set(saved.git.ssh_key_path);
                                             status.set(format!("Saved. Data directory is {}", saved.data_dir));
+                                            settings.restart();
                                             onrefresh.call(());
                                         }
                                         Err(error) => status.set(format!("Save failed: {error}")),
@@ -1207,8 +1222,15 @@ fn SettingsView(
                         }
                         button {
                             class: "control-button selected",
-                            disabled: is_busy,
+                            disabled: is_busy
+                                || (private_key().trim().is_empty()
+                                    && ssh_key_path().as_deref().unwrap_or_default().trim().is_empty()),
                             onclick: move |_| {
+                                let key_source = if private_key().trim().is_empty() {
+                                    "saved SSH key"
+                                } else {
+                                    "selected SSH key"
+                                };
                                 let input = GitSyncInput {
                                     data_dir: git_data_dir(),
                                     host: host(),
@@ -1219,11 +1241,12 @@ fn SettingsView(
                                     save_settings: true,
                                 };
                                 busy.set(true);
-                                status.set("Syncing repository...".to_string());
+                                status.set(format!("Syncing repository using {key_source}..."));
                                 spawn(async move {
                                     match sync_git_repo(input).await {
                                         Ok(result) => {
                                             status.set(format!("Synced {} from {} {}", result.data_dir, result.remote_url, result.branch));
+                                            settings.restart();
                                             onrefresh.call(());
                                         }
                                         Err(error) => status.set(format!("Sync failed: {error}")),
