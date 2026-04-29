@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 #[cfg(feature = "http")]
-use axum::extract::{Query, State};
+use axum::extract::{Path as AxumPath, Query, State};
 #[cfg(feature = "http")]
 use axum::http::StatusCode;
 #[cfg(feature = "http")]
@@ -187,6 +187,38 @@ impl ApiState {
             )
             .await?,
         )
+    }
+
+    pub async fn proposed_transaction_edits(
+        &self,
+        query: ProposedTransactionEditsQuery,
+    ) -> Result<serde_json::Value> {
+        let state = self.snapshot().await;
+        json_value(
+            keepbook::app::list_proposed_transaction_edits(
+                state.storage.as_ref(),
+                query.include_decided,
+            )
+            .await?,
+        )
+    }
+
+    pub async fn approve_proposed_transaction_edit(&self, id: String) -> Result<serde_json::Value> {
+        let state = self.snapshot().await;
+        keepbook::app::approve_proposed_transaction_edit(state.storage.as_ref(), &state.config, &id)
+            .await
+    }
+
+    pub async fn reject_proposed_transaction_edit(&self, id: String) -> Result<serde_json::Value> {
+        let state = self.snapshot().await;
+        keepbook::app::reject_proposed_transaction_edit(state.storage.as_ref(), &state.config, &id)
+            .await
+    }
+
+    pub async fn remove_proposed_transaction_edit(&self, id: String) -> Result<serde_json::Value> {
+        let state = self.snapshot().await;
+        keepbook::app::remove_proposed_transaction_edit(state.storage.as_ref(), &state.config, &id)
+            .await
     }
 
     pub async fn portfolio_history(&self, query: HistoryQuery) -> Result<serde_json::Value> {
@@ -407,6 +439,12 @@ pub struct TransactionQuery {
     pub include_ignored: bool,
 }
 
+#[derive(Debug, Deserialize, Default)]
+pub struct ProposedTransactionEditsQuery {
+    #[serde(default)]
+    pub include_decided: bool,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct HistoryQuery {
     pub currency: Option<String>,
@@ -512,6 +550,22 @@ pub fn router(state: ApiState) -> Router {
         .route("/api/accounts", get(accounts))
         .route("/api/balances", get(balances))
         .route("/api/transactions", get(transactions))
+        .route(
+            "/api/proposed-transaction-edits",
+            get(proposed_transaction_edits),
+        )
+        .route(
+            "/api/proposed-transaction-edits/{id}/approve",
+            post(approve_proposed_transaction_edit),
+        )
+        .route(
+            "/api/proposed-transaction-edits/{id}/reject",
+            post(reject_proposed_transaction_edit),
+        )
+        .route(
+            "/api/proposed-transaction-edits/{id}/remove",
+            post(remove_proposed_transaction_edit),
+        )
         .route("/api/portfolio/history", get(portfolio_history))
         .route("/api/git/merge-master", post(merge_origin_master))
         .route(
@@ -579,6 +633,38 @@ async fn transactions(
     Query(query): Query<TransactionQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     Ok(Json(state.transactions(query).await?))
+}
+
+#[cfg(feature = "http")]
+async fn proposed_transaction_edits(
+    State(state): State<ApiState>,
+    Query(query): Query<ProposedTransactionEditsQuery>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    Ok(Json(state.proposed_transaction_edits(query).await?))
+}
+
+#[cfg(feature = "http")]
+async fn approve_proposed_transaction_edit(
+    State(state): State<ApiState>,
+    AxumPath(id): AxumPath<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    Ok(Json(state.approve_proposed_transaction_edit(id).await?))
+}
+
+#[cfg(feature = "http")]
+async fn reject_proposed_transaction_edit(
+    State(state): State<ApiState>,
+    AxumPath(id): AxumPath<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    Ok(Json(state.reject_proposed_transaction_edit(id).await?))
+}
+
+#[cfg(feature = "http")]
+async fn remove_proposed_transaction_edit(
+    State(state): State<ApiState>,
+    AxumPath(id): AxumPath<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    Ok(Json(state.remove_proposed_transaction_edit(id).await?))
 }
 
 #[cfg(feature = "http")]
