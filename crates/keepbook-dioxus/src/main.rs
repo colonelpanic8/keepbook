@@ -241,10 +241,19 @@ struct GitRemoteSettings {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
+struct GitRepoState {
+    cloned: bool,
+    remote_url: Option<String>,
+    branch: Option<String>,
+    commit: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 struct GitSettingsOutput {
     config_path: String,
     data_dir: String,
     git: GitRemoteSettings,
+    repo_state: GitRepoState,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
@@ -1128,9 +1137,14 @@ fn SettingsView(
     let mut private_key_name = use_signal(String::new);
     let mut status = use_signal(String::new);
     let mut busy = use_signal(|| false);
-    let mut github_preset_open = use_signal(|| false);
-    let mut github_repo_input = use_signal(String::new);
-    let mut github_repo_error = use_signal(String::new);
+    let mut add_location_open = use_signal(|| false);
+    let mut location_remote_input = use_signal(String::new);
+    let mut location_path_input = use_signal(String::new);
+    let mut location_branch_input = use_signal(|| "master".to_string());
+    let mut location_error = use_signal(String::new);
+    let mut clone_dialog_open = use_signal(|| false);
+    let mut clone_dialog_title = use_signal(String::new);
+    let mut clone_dialog_message = use_signal(String::new);
 
     if let Some(Ok(current)) = settings.cloned() {
         let key = format!(
@@ -1171,15 +1185,20 @@ fn SettingsView(
                     h2 { "Git Sync" }
                     span { "Server-backed" }
                 }
-                button {
-                    class: "control-button",
-                    disabled: is_busy,
-                    onclick: move |_| {
-                        github_repo_input.set(repo());
-                        github_repo_error.set(String::new());
-                        github_preset_open.set(true);
-                    },
-                    "GitHub preset"
+                div { class: "settings-actions inline-actions",
+                    button {
+                        class: "icon-button add-location-button",
+                        title: "Add location",
+                        disabled: is_busy,
+                        onclick: move |_| {
+                            location_remote_input.set(remote_input_from_settings(&host(), &repo(), &ssh_user()));
+                            location_path_input.set(git_data_dir());
+                            location_branch_input.set(branch());
+                            location_error.set(String::new());
+                            add_location_open.set(true);
+                        },
+                        "+"
+                    }
                 }
             }
             match current_settings {
@@ -1192,37 +1211,63 @@ fn SettingsView(
                     if !status_text.is_empty() {
                         p { class: "settings-status", "{status_text}" }
                     }
-                    div { class: "settings-grid",
-                        DataDirectoryControl {
-                            value: git_data_dir(),
-                            recommended: recommended_data_dir(),
-                            disabled: is_busy,
-                            onselect: move |value| git_data_dir.set(value)
-                        }
-                        TextInput {
-                            label: "Git host",
-                            value: host(),
-                            placeholder: "github.com",
-                            oninput: move |value| host.set(value)
-                        }
-                        TextInput {
-                            label: "Repository",
-                            value: repo(),
-                            placeholder: "owner/keepbook-data",
-                            oninput: move |value| repo.set(value)
-                        }
-                        TextInput {
-                            label: "Branch",
-                            value: branch(),
-                            placeholder: "master",
-                            oninput: move |value| branch.set(value)
-                        }
-                        TextInput {
-                            label: "SSH user",
-                            value: ssh_user(),
-                            placeholder: "git",
-                            oninput: move |value| ssh_user.set(value)
-                        }
+                    GitLocationList {
+                        current: current.clone(),
+                        staged_data_dir: git_data_dir(),
+                        staged_remote: remote_input_from_settings(&host(), &repo(), &ssh_user()),
+                        staged_branch: branch(),
+                        disabled: is_busy
+                            || (private_key().trim().is_empty()
+                                && ssh_key_path().as_deref().unwrap_or_default().trim().is_empty()),
+                        onclone: move |_| {
+                            let repo_cloned = current.repo_state.cloned;
+                            let input = GitSyncInput {
+                                data_dir: git_data_dir(),
+                                host: host(),
+                                repo: repo(),
+                                branch: branch(),
+                                ssh_user: ssh_user(),
+                                private_key_pem: private_key(),
+                                save_settings: true,
+                            };
+                            let action = if repo_cloned { "Syncing" } else { "Cloning" };
+                            let key_source = if input.private_key_pem.trim().is_empty() {
+                                "saved SSH key"
+                            } else {
+                                "selected SSH key"
+                            };
+                            busy.set(true);
+                            clone_dialog_open.set(true);
+                            clone_dialog_title.set(format!("{action} repository"));
+                            clone_dialog_message.set(format!(
+                                "{} {} at {} using {}",
+                                action,
+                                remote_input_from_settings(&input.host, &input.repo, &input.ssh_user),
+                                input.data_dir,
+                                key_source
+                            ));
+                            status.set(format!("{action} repository..."));
+                            spawn(async move {
+                                match sync_git_repo(input).await {
+                                    Ok(result) => {
+                                        clone_dialog_title.set("Repository ready".to_string());
+                                        clone_dialog_message.set(format!(
+                                            "Synced {} from {} {}",
+                                            result.data_dir, result.remote_url, result.branch
+                                        ));
+                                        status.set(format!("Synced {} from {} {}", result.data_dir, result.remote_url, result.branch));
+                                        settings.restart();
+                                        onrefresh.call(());
+                                    }
+                                    Err(error) => {
+                                        clone_dialog_title.set("Git operation failed".to_string());
+                                        clone_dialog_message.set(error.clone());
+                                        status.set(format!("Sync failed: {error}"));
+                                    }
+                                }
+                                busy.set(false);
+                            });
+                        },
                     }
                     div { class: "control-field secret-field",
                         span { "SSH private key" }
@@ -1300,136 +1345,222 @@ fn SettingsView(
                             }
                         }
                     }
-                    div { class: "settings-actions",
-                        button {
-                            class: "control-button",
-                            disabled: is_busy,
-                            onclick: move |_| {
-                                let input = GitSettingsInput {
-                                    data_dir: git_data_dir(),
-                                    host: host(),
-                                    repo: repo(),
-                                    branch: branch(),
-                                    ssh_user: ssh_user(),
-                                    ssh_key_path: ssh_key_path(),
-                                };
-                                busy.set(true);
-                                status.set("Saving settings...".to_string());
-                                spawn(async move {
-                                    match save_git_settings(input).await {
-                                        Ok(saved) => {
-                                            ssh_key_path.set(saved.git.ssh_key_path);
-                                            status.set(format!("Saved. Data directory is {}", saved.data_dir));
-                                            settings.restart();
-                                            onrefresh.call(());
-                                        }
-                                        Err(error) => status.set(format!("Save failed: {error}")),
-                                    }
-                                    busy.set(false);
-                                });
-                            },
-                            "Save"
-                        }
-                        button {
-                            class: "control-button selected",
-                            disabled: is_busy
-                                || (private_key().trim().is_empty()
-                                    && ssh_key_path().as_deref().unwrap_or_default().trim().is_empty()),
-                            onclick: move |_| {
-                                let key_source = if private_key().trim().is_empty() {
-                                    "saved SSH key"
-                                } else {
-                                    "selected SSH key"
-                                };
-                                let input = GitSyncInput {
-                                    data_dir: git_data_dir(),
-                                    host: host(),
-                                    repo: repo(),
-                                    branch: branch(),
-                                    ssh_user: ssh_user(),
-                                    private_key_pem: private_key(),
-                                    save_settings: true,
-                                };
-                                busy.set(true);
-                                status.set(format!("Syncing repository using {key_source}..."));
-                                spawn(async move {
-                                    match sync_git_repo(input).await {
-                                        Ok(result) => {
-                                            status.set(format!("Synced {} from {} {}", result.data_dir, result.remote_url, result.branch));
-                                            settings.restart();
-                                            onrefresh.call(());
-                                        }
-                                        Err(error) => status.set(format!("Sync failed: {error}")),
-                                    }
-                                    busy.set(false);
-                                });
-                            },
-                            "Save and Sync"
-                        }
-                    }
                 },
             }
         }
-        if github_preset_open() {
+        if add_location_open() {
             div { class: "modal-backdrop",
                 div { class: "modal-dialog",
                     div { class: "modal-header",
-                        h3 { "GitHub repository" }
+                        h3 { "Add location" }
                         button {
                             class: "icon-button",
                             disabled: is_busy,
-                            onclick: move |_| github_preset_open.set(false),
+                            onclick: move |_| add_location_open.set(false),
                             "x"
                         }
                     }
                     label { class: "control-field",
-                        span { "Owner/repo" }
+                        span { "Remote" }
                         input {
                             class: "control-input",
                             r#type: "text",
-                            value: "{github_repo_input()}",
-                            placeholder: "owner/keepbook-data",
+                            value: "{location_remote_input()}",
+                            placeholder: "git@github.com:owner/keepbook-data.git",
                             autofocus: true,
                             oninput: move |event| {
-                                github_repo_input.set(event.value());
-                                github_repo_error.set(String::new());
+                                location_remote_input.set(event.value());
+                                location_error.set(String::new());
                             }
                         }
                     }
-                    if !github_repo_error().is_empty() {
-                        p { class: "validation", "{github_repo_error()}" }
+                    TextInput {
+                        label: "Location",
+                        value: location_path_input(),
+                        placeholder: "/path/to/keepbook-data",
+                        oninput: move |value| location_path_input.set(value)
+                    }
+                    TextInput {
+                        label: "Branch",
+                        value: location_branch_input(),
+                        placeholder: "master",
+                        oninput: move |value| location_branch_input.set(value)
+                    }
+                    if let Some(path) = recommended_data_dir() {
+                        div { class: "settings-actions inline-actions",
+                            button {
+                                class: "control-button",
+                                disabled: is_busy,
+                                onclick: move |_| location_path_input.set(path.clone()),
+                                "Use app data folder"
+                            }
+                        }
+                    }
+                    if !location_error().is_empty() {
+                        p { class: "validation", "{location_error()}" }
                     }
                     div { class: "modal-actions",
                         button {
                             class: "control-button",
                             disabled: is_busy,
-                            onclick: move |_| github_preset_open.set(false),
+                            onclick: move |_| add_location_open.set(false),
                             "Cancel"
                         }
                         button {
                             class: "control-button selected",
                             disabled: is_busy,
                             onclick: move |_| {
-                                match normalize_github_repo_input(&github_repo_input()) {
-                                    Ok(normalized) => {
-                                        host.set("github.com".to_string());
-                                        repo.set(normalized.clone());
-                                        branch.set("master".to_string());
-                                        ssh_user.set("git".to_string());
-                                        github_repo_error.set(String::new());
-                                        github_preset_open.set(false);
-                                        status.set(format!("Applied GitHub preset for {normalized}."));
+                                match git_settings_from_remote(&location_remote_input()) {
+                                    Ok((next_host, next_repo, next_ssh_user)) => {
+                                        let next_data_dir = location_path_input();
+                                        if next_data_dir.trim().is_empty() {
+                                            location_error.set("Enter a local location.".to_string());
+                                            return;
+                                        }
+                                        let next_branch = non_empty_client(&location_branch_input(), "master");
+                                        let input = GitSettingsInput {
+                                            data_dir: next_data_dir.clone(),
+                                            host: next_host.clone(),
+                                            repo: next_repo.clone(),
+                                            branch: next_branch.clone(),
+                                            ssh_user: next_ssh_user.clone(),
+                                            ssh_key_path: ssh_key_path(),
+                                        };
+                                        busy.set(true);
+                                        status.set("Saving Git location...".to_string());
+                                        spawn(async move {
+                                            match save_git_settings(input).await {
+                                                Ok(saved) => {
+                                                    git_data_dir.set(normalize_git_data_dir_for_client(saved.data_dir));
+                                                    host.set(saved.git.host);
+                                                    repo.set(saved.git.repo);
+                                                    branch.set(saved.git.branch);
+                                                    ssh_user.set(saved.git.ssh_user);
+                                                    ssh_key_path.set(saved.git.ssh_key_path);
+                                                    location_error.set(String::new());
+                                                    add_location_open.set(false);
+                                                    status.set("Git location added.".to_string());
+                                                    settings.restart();
+                                                    onrefresh.call(());
+                                                }
+                                                Err(error) => {
+                                                    location_error.set(error.clone());
+                                                    status.set(format!("Save failed: {error}"));
+                                                }
+                                            }
+                                            busy.set(false);
+                                        });
                                     }
-                                    Err(error) => github_repo_error.set(error),
+                                    Err(error) => location_error.set(error),
                                 }
                             },
-                            "Apply"
+                            "Add"
+                        }
+                    }
+                }
+            }
+        }
+        if clone_dialog_open() {
+            div { class: "modal-backdrop",
+                div { class: "modal-dialog clone-dialog",
+                    div { class: "modal-header",
+                        h3 { "{clone_dialog_title()}" }
+                        if !is_busy {
+                            button {
+                                class: "icon-button",
+                                onclick: move |_| clone_dialog_open.set(false),
+                                "x"
+                            }
+                        }
+                    }
+                    div { class: "clone-progress",
+                        if is_busy {
+                            span { class: "activity-spinner large" }
+                        }
+                        p { "{clone_dialog_message()}" }
+                    }
+                    if !is_busy {
+                        div { class: "modal-actions",
+                            button {
+                                class: "control-button selected",
+                                onclick: move |_| clone_dialog_open.set(false),
+                                "Close"
+                            }
                         }
                     }
                 }
             }
         }
     }
+}
+
+fn git_settings_from_remote(remote: &str) -> Result<(String, String, String), String> {
+    let trimmed = remote.trim();
+    if trimmed.is_empty() {
+        return Err("Enter a remote.".to_string());
+    }
+
+    if is_explicit_git_remote(trimmed) {
+        return Ok((
+            remote_host(trimmed).unwrap_or_else(|| "github.com".to_string()),
+            trimmed.to_string(),
+            remote_user(trimmed).unwrap_or_else(|| "git".to_string()),
+        ));
+    }
+
+    normalize_github_repo_input(trimmed)
+        .map(|repo| ("github.com".to_string(), repo, "git".to_string()))
+}
+
+fn remote_input_from_settings(host: &str, repo: &str, ssh_user: &str) -> String {
+    let repo = repo.trim();
+    if repo.is_empty() {
+        return String::new();
+    }
+    if is_explicit_git_remote(repo) {
+        return repo.to_string();
+    }
+
+    let host = non_empty_client(host, "github.com");
+    let ssh_user = non_empty_client(ssh_user, "git");
+    let repo = if repo.ends_with(".git") {
+        repo.to_string()
+    } else {
+        format!("{repo}.git")
+    };
+    format!("{ssh_user}@{host}:{repo}")
+}
+
+fn non_empty_client(value: &str, default: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        default.to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn is_explicit_git_remote(remote: &str) -> bool {
+    remote.contains("://") || (remote.contains('@') && remote.contains(':'))
+}
+
+fn remote_user(remote: &str) -> Option<String> {
+    remote
+        .split('@')
+        .next()
+        .and_then(|prefix| prefix.rsplit(['/', ':']).next())
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn remote_host(remote: &str) -> Option<String> {
+    let without_scheme = remote.split("://").nth(1).unwrap_or(remote);
+    let after_user = without_scheme.split('@').nth(1).unwrap_or(without_scheme);
+    after_user
+        .split([':', '/'])
+        .next()
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
 }
 
 fn normalize_github_repo_input(input: &str) -> Result<String, String> {
@@ -1463,6 +1594,69 @@ fn trim_github_repo_prefix(input: &str) -> &str {
         .or_else(|| input.strip_prefix("http://github.com/"))
         .or_else(|| input.strip_prefix("git@github.com:"))
         .unwrap_or(input)
+}
+
+#[component]
+fn GitLocationList(
+    current: GitSettingsOutput,
+    staged_data_dir: String,
+    staged_remote: String,
+    staged_branch: String,
+    disabled: bool,
+    onclone: EventHandler<()>,
+) -> Element {
+    let state = current.repo_state;
+    let remote_label = state.remote_url.clone().unwrap_or(staged_remote);
+    let branch_label = state.branch.clone().unwrap_or(staged_branch);
+    let commit_label = state
+        .commit
+        .as_deref()
+        .map(short_commit)
+        .unwrap_or_else(|| "Not cloned".to_string());
+    let status_label = if state.cloned { "Cloned" } else { "Not cloned" };
+    let action_label = if state.cloned { "Sync" } else { "Clone" };
+
+    rsx! {
+        div { class: "git-locations",
+            div { class: "git-locations-heading",
+                strong { "Known locations" }
+            }
+            div { class: "git-location-row",
+                div { class: "git-location-main",
+                    div { class: "git-location-title",
+                        strong { "{status_label}" }
+                        small { "{branch_label}" }
+                    }
+                    div { class: "git-state-grid",
+                        div { class: "git-state-row",
+                            span { "Remote" }
+                            code { "{remote_label}" }
+                        }
+                        div { class: "git-state-row",
+                            span { "Commit" }
+                            code { "{commit_label}" }
+                        }
+                        div { class: "git-state-row",
+                            span { "Location" }
+                            code { "{staged_data_dir}" }
+                        }
+                    }
+                }
+                div { class: "git-location-actions",
+                    button {
+                        class: "control-button selected",
+                        disabled,
+                        onclick: move |_| onclone.call(()),
+                        "{action_label}"
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn short_commit(commit: &str) -> String {
+    commit.chars().take(12).collect()
 }
 
 #[component]

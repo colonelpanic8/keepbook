@@ -260,10 +260,12 @@ impl ApiState {
     pub async fn git_settings(&self) -> Result<GitSettingsOutput> {
         let snapshot = self.snapshot().await;
         let git = load_git_remote_settings(&snapshot.config_path)?;
+        prepare_git_ssh_environment(&snapshot.config_path)?;
         Ok(GitSettingsOutput {
             config_path: snapshot.config_path.display().to_string(),
             data_dir: snapshot.config.data_dir.display().to_string(),
             git,
+            repo_state: read_git_repo_state(&snapshot.config.data_dir),
         })
     }
 
@@ -278,12 +280,19 @@ impl ApiState {
         let snapshot = self.snapshot().await;
         let data_dir = resolve_input_data_dir(&snapshot.config_path, input.data_dir.trim());
         validate_git_data_dir(&data_dir)?;
+        prepare_git_ssh_environment(&snapshot.config_path)?;
         let configured_git = load_git_remote_settings(&snapshot.config_path)?;
         let private_key_pem =
             resolve_git_private_key(&snapshot.config_path, &configured_git, &input)?;
-        let branch = non_empty(input.branch.trim(), "master");
-        let remote_url = build_ssh_remote_url(&input.host, &input.repo, &input.ssh_user);
-        prepare_git_ssh_environment(&snapshot.config_path)?;
+        let repo_state = read_git_repo_state(&data_dir);
+        let branch = repo_state
+            .branch
+            .clone()
+            .unwrap_or_else(|| non_empty(input.branch.trim(), "master"));
+        let remote_url = repo_state
+            .remote_url
+            .clone()
+            .unwrap_or_else(|| build_ssh_remote_url(&input.host, &input.repo, &input.ssh_user));
         sync_git_ssh(&data_dir, &remote_url, &branch, &private_key_pem)?;
 
         if input.save_settings {
@@ -368,6 +377,7 @@ pub struct GitSettingsOutput {
     pub config_path: String,
     pub data_dir: String,
     pub git: GitRemoteSettings,
+    pub repo_state: GitRepoState,
 }
 
 #[derive(Debug, Deserialize)]
@@ -399,6 +409,17 @@ pub struct GitSyncOutput {
     pub data_dir: String,
     pub remote_url: String,
     pub branch: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct GitRepoState {
+    pub cloned: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remote_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub commit: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -797,6 +818,38 @@ fn validate_git_data_dir(data_dir: &Path) -> Result<()> {
     Ok(())
 }
 
+fn read_git_repo_state(data_dir: &Path) -> GitRepoState {
+    let Ok(repo) = git2::Repository::open(data_dir) else {
+        return GitRepoState {
+            cloned: false,
+            remote_url: None,
+            branch: None,
+            commit: None,
+        };
+    };
+
+    let remote_url = repo
+        .find_remote("origin")
+        .ok()
+        .and_then(|remote| remote.url().map(ToString::to_string));
+    let head = repo.head().ok();
+    let branch = head
+        .as_ref()
+        .filter(|head| head.is_branch())
+        .and_then(|head| head.shorthand().map(ToString::to_string));
+    let commit = head
+        .as_ref()
+        .and_then(|head| head.peel_to_commit().ok())
+        .map(|commit| commit.id().to_string());
+
+    GitRepoState {
+        cloned: true,
+        remote_url,
+        branch,
+        commit,
+    }
+}
+
 fn prepare_git_ssh_environment(config_path: &Path) -> Result<()> {
     let Some(config_dir) = config_path.parent() else {
         return Ok(());
@@ -924,7 +977,7 @@ fn normalize_repo_path(repo: &str) -> String {
 
 fn build_ssh_remote_url(host: &str, repo: &str, ssh_user: &str) -> String {
     let repo = repo.trim();
-    if repo.contains("://") {
+    if is_explicit_git_remote(repo) {
         return repo.to_string();
     }
 
@@ -938,6 +991,10 @@ fn build_ssh_remote_url(host: &str, repo: &str, ssh_user: &str) -> String {
     } else {
         format!("{ssh_user}@{host}:{repo}")
     }
+}
+
+fn is_explicit_git_remote(remote: &str) -> bool {
+    remote.contains("://") || (remote.contains('@') && remote.contains(':'))
 }
 
 fn sync_git_ssh(

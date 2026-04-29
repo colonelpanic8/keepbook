@@ -484,6 +484,11 @@ small,
   gap: 10px;
 }
 
+.inline-actions {
+  flex-direction: row;
+  justify-content: flex-end;
+}
+
 .settings-meta {
   color: #62727f;
   font-size: 0.82rem;
@@ -504,6 +509,114 @@ small,
   color: #31424e;
   margin: 12px 0;
   padding: 10px;
+}
+
+.add-location-button {
+  border: 1px solid #cddbd7;
+  font-size: 1.2rem;
+  font-weight: 800;
+  height: 34px;
+  justify-content: center;
+  width: 34px;
+}
+
+.git-locations {
+  border: 1px solid #d7dfdd;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 12px 0;
+  padding: 12px;
+}
+
+.git-locations-heading,
+.git-location-title {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.git-locations-heading strong,
+.git-location-title strong {
+  color: #17202a;
+  font-size: 1rem;
+}
+
+.git-location-title small,
+.git-state-row span {
+  color: #62727f;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.git-location-row {
+  align-items: center;
+  border-top: 1px solid #eef2f1;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding-top: 10px;
+}
+
+.git-location-main {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.git-location-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.git-state-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.git-state-row {
+  align-items: baseline;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 82px minmax(0, 1fr);
+  min-width: 0;
+}
+
+.git-state-row code {
+  background: #f7faf9;
+  border: 1px solid #e1e8e6;
+  border-radius: 6px;
+  color: #17202a;
+  font-family: inherit;
+  font-size: 0.82rem;
+  min-width: 0;
+  overflow: hidden;
+  padding: 6px 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clone-dialog {
+  max-width: 500px;
+  width: min(100%, 500px);
+}
+
+.clone-progress {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  min-height: 58px;
+}
+
+.clone-progress p {
+  color: #31424e;
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .range-summary {
@@ -732,6 +845,12 @@ small,
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.settings-actions.inline-actions {
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .setting-row {
