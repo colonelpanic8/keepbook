@@ -71,6 +71,28 @@ export interface TransactionAnnotationOutput {
   effective_date?: string;
 }
 
+export interface ProposedTransactionEditOutput {
+  id: string;
+  account_id: string;
+  account_name: string;
+  transaction_id: string;
+  transaction_description: string;
+  transaction_timestamp: string;
+  transaction_amount: string;
+  created_at: string;
+  updated_at: string;
+  status: string;
+  patch: TransactionAnnotationPatchOutput;
+}
+
+export interface TransactionAnnotationPatchOutput {
+  description?: string | null;
+  note?: string | null;
+  category?: string | null;
+  tags?: string[] | null;
+  effective_date?: string | null;
+}
+
 // ---------------------------------------------------------------------------
 // Spending
 // ---------------------------------------------------------------------------

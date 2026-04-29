@@ -80,6 +80,35 @@ pub struct TransactionAnnotationOutput {
     pub effective_date: Option<String>,
 }
 
+#[derive(Serialize)]
+pub struct ProposedTransactionEditOutput {
+    pub id: String,
+    pub account_id: String,
+    pub account_name: String,
+    pub transaction_id: String,
+    pub transaction_description: String,
+    pub transaction_timestamp: String,
+    pub transaction_amount: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub status: String,
+    pub patch: TransactionAnnotationPatchOutput,
+}
+
+#[derive(Serialize)]
+pub struct TransactionAnnotationPatchOutput {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<Option<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<Option<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category: Option<Option<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Option<Vec<String>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effective_date: Option<Option<String>>,
+}
+
 /// Scope output for spending report.
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]

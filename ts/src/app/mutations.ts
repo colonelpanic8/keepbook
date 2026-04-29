@@ -22,8 +22,17 @@ import {
   type TransactionAnnotationPatchType,
   type TransactionAnnotationType,
 } from '../models/transaction-annotation.js';
+import {
+  ProposedTransactionEdit,
+  type ProposedTransactionEditType,
+  type ProposedTransactionEditStatus,
+} from '../models/proposed-transaction-edit.js';
 import { type BalanceBackfillPolicy } from '../models/account.js';
 import { findAccount } from '../storage/lookup.js';
+import {
+  type ProposedTransactionEditOutput,
+  type TransactionAnnotationPatchOutput,
+} from './types.js';
 
 // ---------------------------------------------------------------------------
 // addConnection
@@ -557,5 +566,242 @@ export async function setTransactionAnnotation(
     transaction_id: transactionIdStr,
     patch: patchOut,
     annotation: annotationOut,
+  };
+}
+
+export async function proposeTransactionEdit(
+  storage: Storage,
+  accountIdStr: string,
+  transactionIdStr: string,
+  args: SetTransactionAnnotationArgs,
+  ids?: IdGenerator,
+  clock?: Clock,
+): Promise<object> {
+  const patchOrError = buildTransactionAnnotationPatch(args);
+  if ('error' in patchOrError) return patchOrError;
+
+  let accountId: Id;
+  let transactionId: Id;
+  try {
+    accountId = Id.fromStringChecked(accountIdStr);
+  } catch {
+    return { success: false, error: `Invalid account id: ${accountIdStr}` };
+  }
+  try {
+    transactionId = Id.fromStringChecked(transactionIdStr);
+  } catch {
+    return { success: false, error: `Invalid transaction id: ${transactionIdStr}` };
+  }
+
+  const account = await storage.getAccount(accountId);
+  if (account === null) {
+    return { success: false, error: `Account not found: '${accountIdStr}'` };
+  }
+  const txns = await storage.getTransactions(accountId);
+  if (!txns.some((t) => t.id.equals(transactionId))) {
+    return { success: false, error: `Transaction not found for account: '${transactionIdStr}'` };
+  }
+
+  const now = (clock ?? new SystemClock()).now();
+  const proposal: ProposedTransactionEditType = {
+    id: (ids ?? new UuidIdGenerator()).newId(),
+    account_id: accountId,
+    transaction_id: transactionId,
+    created_at: now,
+    updated_at: now,
+    status: 'pending',
+    ...patchOrError.patch,
+  };
+  await storage.appendProposedTransactionEdits([proposal]);
+
+  return {
+    success: true,
+    proposal: proposalToJSON(proposal),
+  };
+}
+
+export async function listProposedTransactionEdits(
+  storage: Storage,
+  includeDecided = false,
+): Promise<ProposedTransactionEditOutput[]> {
+  const accounts = await storage.listAccounts();
+  const accountsById = new Map(accounts.map((account) => [account.id.asStr(), account]));
+  const output: ProposedTransactionEditOutput[] = [];
+  for (const edit of await storage.getProposedTransactionEdits()) {
+    if (!includeDecided && edit.status !== 'pending') continue;
+    const account = accountsById.get(edit.account_id.asStr());
+    if (account === undefined) continue;
+    const transaction = (await storage.getTransactions(edit.account_id)).find((tx) =>
+      tx.id.equals(edit.transaction_id),
+    );
+    if (transaction === undefined) continue;
+    output.push({
+      id: edit.id.asStr(),
+      account_id: edit.account_id.asStr(),
+      account_name: account.name,
+      transaction_id: edit.transaction_id.asStr(),
+      transaction_description: transaction.description,
+      transaction_timestamp: transaction.timestamp_raw ?? transaction.timestamp.toISOString(),
+      transaction_amount: transaction.amount,
+      created_at: edit.created_at_raw ?? edit.created_at.toISOString(),
+      updated_at: edit.updated_at_raw ?? edit.updated_at.toISOString(),
+      status: edit.status,
+      patch: proposalPatchOutput(edit),
+    });
+  }
+  return output;
+}
+
+export async function approveProposedTransactionEdit(
+  storage: Storage,
+  proposalIdStr: string,
+  clock?: Clock,
+): Promise<object> {
+  return decideProposedTransactionEdit(storage, proposalIdStr, 'approved', clock);
+}
+
+export async function rejectProposedTransactionEdit(
+  storage: Storage,
+  proposalIdStr: string,
+  clock?: Clock,
+): Promise<object> {
+  return decideProposedTransactionEdit(storage, proposalIdStr, 'rejected', clock);
+}
+
+export async function removeProposedTransactionEdit(
+  storage: Storage,
+  proposalIdStr: string,
+  clock?: Clock,
+): Promise<object> {
+  return decideProposedTransactionEdit(storage, proposalIdStr, 'removed', clock);
+}
+
+async function decideProposedTransactionEdit(
+  storage: Storage,
+  proposalIdStr: string,
+  status: ProposedTransactionEditStatus,
+  clock?: Clock,
+): Promise<object> {
+  let proposalId: Id;
+  try {
+    proposalId = Id.fromStringChecked(proposalIdStr);
+  } catch {
+    return { success: false, error: `Invalid proposal id: ${proposalIdStr}` };
+  }
+  const edit = (await storage.getProposedTransactionEdits()).find((p) => p.id.equals(proposalId));
+  if (edit === undefined) {
+    return { success: false, error: `Proposed transaction edit not found: '${proposalIdStr}'` };
+  }
+  if (edit.status !== 'pending') {
+    return { success: false, error: 'Proposed transaction edit is already decided' };
+  }
+
+  const now = (clock ?? new SystemClock()).now();
+  if (status === 'approved') {
+    await storage.appendTransactionAnnotationPatches(edit.account_id, [
+      ProposedTransactionEdit.toAnnotationPatch(edit, now),
+    ]);
+  }
+  const decision = ProposedTransactionEdit.withStatus(edit, status, now);
+  await storage.appendProposedTransactionEdits([decision]);
+  return {
+    success: true,
+    proposal: proposalToJSON(decision),
+  };
+}
+
+function buildTransactionAnnotationPatch(
+  args: SetTransactionAnnotationArgs,
+): { patch: Partial<TransactionAnnotationPatchType> } | { success: false; error: string } {
+  const description = args.description;
+  const clearDescription = args.clear_description ?? false;
+  const note = args.note;
+  const clearNote = args.clear_note ?? false;
+  const category = args.category;
+  const clearCategory = args.clear_category ?? false;
+  const tags = args.tags ?? [];
+  const tagsEmpty = args.tags_empty ?? false;
+  const clearTags = args.clear_tags ?? false;
+  const effectiveDate = args.effective_date;
+  const clearEffectiveDate = args.clear_effective_date ?? false;
+
+  if (clearDescription && description !== undefined) {
+    return { success: false, error: 'Cannot use description and clear_description together' };
+  }
+  if (clearNote && note !== undefined) {
+    return { success: false, error: 'Cannot use note and clear_note together' };
+  }
+  if (clearCategory && category !== undefined) {
+    return { success: false, error: 'Cannot use category and clear_category together' };
+  }
+  if (clearTags && (tagsEmpty || tags.length > 0)) {
+    return { success: false, error: 'Cannot use clear_tags with tags/tags_empty' };
+  }
+  if (clearEffectiveDate && effectiveDate !== undefined) {
+    return { success: false, error: 'Cannot use effective_date and clear_effective_date together' };
+  }
+  if (effectiveDate !== undefined) {
+    const parsedEffectiveDate = new Date(`${effectiveDate}T00:00:00Z`);
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(effectiveDate) ||
+      Number.isNaN(parsedEffectiveDate.getTime()) ||
+      formatDateYMD(parsedEffectiveDate) !== effectiveDate
+    ) {
+      return { success: false, error: `Invalid effective date: ${effectiveDate}` };
+    }
+  }
+
+  const hasChange =
+    description !== undefined ||
+    clearDescription ||
+    note !== undefined ||
+    clearNote ||
+    category !== undefined ||
+    clearCategory ||
+    tags.length > 0 ||
+    tagsEmpty ||
+    clearTags ||
+    effectiveDate !== undefined ||
+    clearEffectiveDate;
+  if (!hasChange) return { success: false, error: 'No annotation fields specified' };
+
+  return {
+    patch: {
+      ...(clearDescription
+        ? { description: null }
+        : description !== undefined
+          ? { description }
+          : {}),
+      ...(clearNote ? { note: null } : note !== undefined ? { note } : {}),
+      ...(clearCategory ? { category: null } : category !== undefined ? { category } : {}),
+      ...(clearTags
+        ? { tags: null }
+        : tagsEmpty
+          ? { tags: [] }
+          : tags.length > 0
+            ? { tags: [...tags] }
+            : {}),
+      ...(clearEffectiveDate
+        ? { effective_date: null }
+        : effectiveDate !== undefined
+          ? { effective_date: effectiveDate }
+          : {}),
+    },
+  };
+}
+
+function proposalPatchOutput(edit: ProposedTransactionEditType): TransactionAnnotationPatchOutput {
+  return ProposedTransactionEdit.patchJSON(edit);
+}
+
+function proposalToJSON(edit: ProposedTransactionEditType): object {
+  return {
+    id: edit.id.asStr(),
+    account_id: edit.account_id.asStr(),
+    transaction_id: edit.transaction_id.asStr(),
+    created_at: edit.created_at_raw ?? formatRfc3339(edit.created_at),
+    updated_at: edit.updated_at_raw ?? formatRfc3339(edit.updated_at),
+    status: edit.status,
+    patch: proposalPatchOutput(edit),
   };
 }

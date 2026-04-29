@@ -146,6 +146,14 @@ enum Command {
     #[command(subcommand)]
     Set(SetCommand),
 
+    /// Propose changes for later review
+    #[command(subcommand)]
+    Propose(ProposeCommand),
+
+    /// Manage proposed transaction edits
+    #[command(subcommand)]
+    ProposedEdits(ProposedEditsCommand),
+
     /// Import data from exported files
     #[command(subcommand)]
     Import(ImportCommand),
@@ -330,9 +338,12 @@ impl Command {
             Command::Add(_)
             | Command::Remove(_)
             | Command::Set(_)
+            | Command::Propose(_)
             | Command::Import(_)
             | Command::Sync(_)
             | Command::MarketData(MarketDataCommand::Fetch { .. }) => true,
+            Command::ProposedEdits(ProposedEditsCommand::List { .. }) => false,
+            Command::ProposedEdits(_) => true,
             Command::Portfolio(PortfolioCommand::Snapshot {
                 offline, dry_run, ..
             }) => !*offline && !*dry_run,
@@ -458,6 +469,83 @@ enum SetCommand {
         #[arg(long)]
         clear_effective_date: bool,
     },
+}
+
+#[derive(Subcommand)]
+enum ProposeCommand {
+    /// Propose a transaction annotation edit
+    Transaction {
+        /// Account ID
+        #[arg(long)]
+        account: String,
+
+        /// Transaction ID
+        #[arg(long)]
+        transaction: String,
+
+        /// Override description
+        #[arg(long, conflicts_with = "clear_description")]
+        description: Option<String>,
+
+        /// Clear description override
+        #[arg(long)]
+        clear_description: bool,
+
+        /// Set note
+        #[arg(long, conflicts_with = "clear_note")]
+        note: Option<String>,
+
+        /// Clear note
+        #[arg(long)]
+        clear_note: bool,
+
+        /// Set category
+        #[arg(long, conflicts_with = "clear_category")]
+        category: Option<String>,
+
+        /// Clear category
+        #[arg(long)]
+        clear_category: bool,
+
+        /// Set tags (repeatable)
+        #[arg(long, short)]
+        tag: Vec<String>,
+
+        /// Set tags to empty array
+        #[arg(long, conflicts_with = "clear_tags")]
+        tags_empty: bool,
+
+        /// Clear tags field
+        #[arg(long)]
+        clear_tags: bool,
+
+        /// Override reporting date (YYYY-MM-DD) without changing synced timestamp
+        #[arg(long, conflicts_with = "clear_effective_date")]
+        effective_date: Option<String>,
+
+        /// Clear reporting date override
+        #[arg(long)]
+        clear_effective_date: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum ProposedEditsCommand {
+    /// List proposed transaction edits
+    List {
+        /// Include approved, rejected, and removed proposals
+        #[arg(long, default_value_t = false)]
+        include_decided: bool,
+    },
+
+    /// Approve a proposed transaction edit and apply it
+    Approve { id: String },
+
+    /// Reject a proposed transaction edit
+    Reject { id: String },
+
+    /// Remove a proposed transaction edit from the active queue
+    Remove { id: String },
 }
 
 #[derive(Subcommand)]
@@ -1008,6 +1096,71 @@ async fn main() -> Result<()> {
                     clear_effective_date,
                 )
                 .await?;
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
+        },
+
+        Some(Command::Propose(propose_cmd)) => match propose_cmd {
+            ProposeCommand::Transaction {
+                account,
+                transaction,
+                description,
+                clear_description,
+                note,
+                clear_note,
+                category,
+                clear_category,
+                tag,
+                tags_empty,
+                clear_tags,
+                effective_date,
+                clear_effective_date,
+            } => {
+                let result = app::propose_transaction_edit(
+                    storage_arc.as_ref(),
+                    &config,
+                    &account,
+                    &transaction,
+                    description,
+                    clear_description,
+                    note,
+                    clear_note,
+                    category,
+                    clear_category,
+                    tag,
+                    tags_empty,
+                    clear_tags,
+                    effective_date,
+                    clear_effective_date,
+                )
+                .await?;
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
+        },
+
+        Some(Command::ProposedEdits(proposed_cmd)) => match proposed_cmd {
+            ProposedEditsCommand::List { include_decided } => {
+                let result =
+                    app::list_proposed_transaction_edits(storage_arc.as_ref(), include_decided)
+                        .await?;
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
+            ProposedEditsCommand::Approve { id } => {
+                let result =
+                    app::approve_proposed_transaction_edit(storage_arc.as_ref(), &config, &id)
+                        .await?;
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
+            ProposedEditsCommand::Reject { id } => {
+                let result =
+                    app::reject_proposed_transaction_edit(storage_arc.as_ref(), &config, &id)
+                        .await?;
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
+            ProposedEditsCommand::Remove { id } => {
+                let result =
+                    app::remove_proposed_transaction_edit(storage_arc.as_ref(), &config, &id)
+                        .await?;
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
         },

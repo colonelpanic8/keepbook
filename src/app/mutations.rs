@@ -7,12 +7,13 @@ use crate::clock::{Clock, SystemClock};
 use crate::config::ResolvedConfig;
 use crate::models::{
     Account, AccountConfig, Asset, AssetBalance, BalanceBackfillPolicy, BalanceSnapshot,
-    Connection, ConnectionConfig, ConnectionState, Id, IdGenerator, TransactionAnnotation,
-    TransactionAnnotationPatch, UuidIdGenerator,
+    Connection, ConnectionConfig, ConnectionState, Id, IdGenerator, ProposedTransactionEdit,
+    ProposedTransactionEditStatus, TransactionAnnotation, TransactionAnnotationPatch,
+    UuidIdGenerator,
 };
 use crate::storage::{find_account, Storage};
 
-use super::maybe_auto_commit;
+use super::{maybe_auto_commit, ProposedTransactionEditOutput, TransactionAnnotationPatchOutput};
 
 pub async fn remove_connection(
     storage: &dyn Storage,
@@ -553,6 +554,389 @@ pub async fn set_transaction_annotation(
     );
 
     Ok(result)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn propose_transaction_edit(
+    storage: &dyn Storage,
+    config: &ResolvedConfig,
+    account_id: &str,
+    transaction_id: &str,
+    description: Option<String>,
+    clear_description: bool,
+    note: Option<String>,
+    clear_note: bool,
+    category: Option<String>,
+    clear_category: bool,
+    tags: Vec<String>,
+    tags_empty: bool,
+    clear_tags: bool,
+    effective_date: Option<String>,
+    clear_effective_date: bool,
+) -> Result<serde_json::Value> {
+    propose_transaction_edit_with(
+        storage,
+        config,
+        account_id,
+        transaction_id,
+        description,
+        clear_description,
+        note,
+        clear_note,
+        category,
+        clear_category,
+        tags,
+        tags_empty,
+        clear_tags,
+        effective_date,
+        clear_effective_date,
+        &UuidIdGenerator,
+        &SystemClock,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn propose_transaction_edit_with(
+    storage: &dyn Storage,
+    config: &ResolvedConfig,
+    account_id: &str,
+    transaction_id: &str,
+    description: Option<String>,
+    clear_description: bool,
+    note: Option<String>,
+    clear_note: bool,
+    category: Option<String>,
+    clear_category: bool,
+    tags: Vec<String>,
+    tags_empty: bool,
+    clear_tags: bool,
+    effective_date: Option<String>,
+    clear_effective_date: bool,
+    ids: &dyn IdGenerator,
+    clock: &dyn Clock,
+) -> Result<serde_json::Value> {
+    let patch = build_transaction_annotation_patch(
+        description,
+        clear_description,
+        note,
+        clear_note,
+        category,
+        clear_category,
+        tags,
+        tags_empty,
+        clear_tags,
+        effective_date,
+        clear_effective_date,
+    )?;
+
+    let acct_id = Id::from_string_checked(account_id)
+        .with_context(|| format!("Invalid account id: {account_id}"))?;
+    let tx_id = Id::from_string_checked(transaction_id)
+        .with_context(|| format!("Invalid transaction id: {transaction_id}"))?;
+
+    storage
+        .get_account(&acct_id)
+        .await?
+        .context("Account not found")?;
+    let txns = storage.get_transactions(&acct_id).await?;
+    if !txns.iter().any(|t| t.id == tx_id) {
+        anyhow::bail!("Transaction not found for account");
+    }
+
+    let now = clock.now();
+    let edit = ProposedTransactionEdit {
+        id: ids.new_id(),
+        account_id: acct_id,
+        transaction_id: tx_id,
+        created_at: now,
+        updated_at: now,
+        status: ProposedTransactionEditStatus::Pending,
+        description: patch.description,
+        note: patch.note,
+        category: patch.category,
+        tags: patch.tags,
+        effective_date: patch.effective_date,
+    };
+    storage
+        .append_proposed_transaction_edits(std::slice::from_ref(&edit))
+        .await?;
+
+    let result = serde_json::json!({
+        "success": true,
+        "proposal": proposal_to_json(&edit)?
+    });
+
+    maybe_auto_commit(config, &format!("propose transaction edit {}", edit.id));
+    Ok(result)
+}
+
+pub async fn list_proposed_transaction_edits(
+    storage: &dyn Storage,
+    include_decided: bool,
+) -> Result<Vec<ProposedTransactionEditOutput>> {
+    let accounts = storage.list_accounts().await?;
+    let accounts_by_id: std::collections::HashMap<Id, Account> = accounts
+        .into_iter()
+        .map(|account| (account.id.clone(), account))
+        .collect();
+    let mut output = Vec::new();
+
+    for edit in storage.get_proposed_transaction_edits().await? {
+        if !include_decided && edit.status != ProposedTransactionEditStatus::Pending {
+            continue;
+        }
+        if let Some(rendered) =
+            render_proposed_transaction_edit(storage, &accounts_by_id, &edit).await?
+        {
+            output.push(rendered);
+        }
+    }
+
+    Ok(output)
+}
+
+pub async fn approve_proposed_transaction_edit(
+    storage: &dyn Storage,
+    config: &ResolvedConfig,
+    proposal_id: &str,
+) -> Result<serde_json::Value> {
+    decide_proposed_transaction_edit(
+        storage,
+        config,
+        proposal_id,
+        ProposedTransactionEditStatus::Approved,
+    )
+    .await
+}
+
+pub async fn reject_proposed_transaction_edit(
+    storage: &dyn Storage,
+    config: &ResolvedConfig,
+    proposal_id: &str,
+) -> Result<serde_json::Value> {
+    decide_proposed_transaction_edit(
+        storage,
+        config,
+        proposal_id,
+        ProposedTransactionEditStatus::Rejected,
+    )
+    .await
+}
+
+pub async fn remove_proposed_transaction_edit(
+    storage: &dyn Storage,
+    config: &ResolvedConfig,
+    proposal_id: &str,
+) -> Result<serde_json::Value> {
+    decide_proposed_transaction_edit(
+        storage,
+        config,
+        proposal_id,
+        ProposedTransactionEditStatus::Removed,
+    )
+    .await
+}
+
+async fn decide_proposed_transaction_edit(
+    storage: &dyn Storage,
+    config: &ResolvedConfig,
+    proposal_id: &str,
+    status: ProposedTransactionEditStatus,
+) -> Result<serde_json::Value> {
+    let id = Id::from_string_checked(proposal_id)
+        .with_context(|| format!("Invalid proposal id: {proposal_id}"))?;
+    let edit = storage
+        .get_proposed_transaction_edits()
+        .await?
+        .into_iter()
+        .find(|edit| edit.id == id)
+        .context("Proposed transaction edit not found")?;
+
+    if edit.status != ProposedTransactionEditStatus::Pending {
+        anyhow::bail!("Proposed transaction edit is already decided");
+    }
+
+    let now = chrono::Utc::now();
+    if status == ProposedTransactionEditStatus::Approved {
+        let patch = edit.to_annotation_patch(now);
+        storage
+            .append_transaction_annotation_patches(&edit.account_id, &[patch])
+            .await?;
+    }
+
+    let decision = edit.with_status(status, now);
+    storage
+        .append_proposed_transaction_edits(std::slice::from_ref(&decision))
+        .await?;
+
+    let result = serde_json::json!({
+        "success": true,
+        "proposal": proposal_to_json(&decision)?
+    });
+    maybe_auto_commit(
+        config,
+        &format!("decide proposed transaction edit {proposal_id}"),
+    );
+    Ok(result)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_transaction_annotation_patch(
+    description: Option<String>,
+    clear_description: bool,
+    note: Option<String>,
+    clear_note: bool,
+    category: Option<String>,
+    clear_category: bool,
+    tags: Vec<String>,
+    tags_empty: bool,
+    clear_tags: bool,
+    effective_date: Option<String>,
+    clear_effective_date: bool,
+) -> Result<TransactionAnnotationPatch> {
+    if clear_description && description.is_some() {
+        anyhow::bail!("Cannot use --description and --clear-description together");
+    }
+    if clear_note && note.is_some() {
+        anyhow::bail!("Cannot use --note and --clear-note together");
+    }
+    if clear_category && category.is_some() {
+        anyhow::bail!("Cannot use --category and --clear-category together");
+    }
+    if clear_tags && (tags_empty || !tags.is_empty()) {
+        anyhow::bail!("Cannot use --clear-tags with --tag/--tags-empty");
+    }
+    if clear_effective_date && effective_date.is_some() {
+        anyhow::bail!("Cannot use --effective-date and --clear-effective-date together");
+    }
+
+    let parsed_effective_date = effective_date
+        .as_deref()
+        .map(|s| {
+            chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")
+                .with_context(|| format!("Invalid effective date: {s}"))
+        })
+        .transpose()?;
+
+    let has_change = description.is_some()
+        || clear_description
+        || note.is_some()
+        || clear_note
+        || category.is_some()
+        || clear_category
+        || !tags.is_empty()
+        || tags_empty
+        || clear_tags
+        || effective_date.is_some()
+        || clear_effective_date;
+    if !has_change {
+        anyhow::bail!("No annotation fields specified");
+    }
+
+    let mut patch = TransactionAnnotationPatch {
+        transaction_id: Id::from("pending"),
+        timestamp: chrono::Utc::now(),
+        description: None,
+        note: None,
+        category: None,
+        tags: None,
+        effective_date: None,
+    };
+    if clear_description {
+        patch.description = Some(None);
+    } else if let Some(v) = description {
+        patch.description = Some(Some(v));
+    }
+    if clear_note {
+        patch.note = Some(None);
+    } else if let Some(v) = note {
+        patch.note = Some(Some(v));
+    }
+    if clear_category {
+        patch.category = Some(None);
+    } else if let Some(v) = category {
+        patch.category = Some(Some(v));
+    }
+    if clear_tags {
+        patch.tags = Some(None);
+    } else if tags_empty {
+        patch.tags = Some(Some(Vec::new()));
+    } else if !tags.is_empty() {
+        patch.tags = Some(Some(tags));
+    }
+    if clear_effective_date {
+        patch.effective_date = Some(None);
+    } else if let Some(v) = parsed_effective_date {
+        patch.effective_date = Some(Some(v));
+    }
+
+    Ok(patch)
+}
+
+fn proposal_to_json(edit: &ProposedTransactionEdit) -> Result<serde_json::Value> {
+    Ok(serde_json::json!({
+        "id": edit.id.to_string(),
+        "account_id": edit.account_id.to_string(),
+        "transaction_id": edit.transaction_id.to_string(),
+        "created_at": edit.created_at.to_rfc3339(),
+        "updated_at": edit.updated_at.to_rfc3339(),
+        "status": proposal_status_string(edit.status),
+        "patch": serde_json::to_value(proposal_patch_output(edit))?
+    }))
+}
+
+async fn render_proposed_transaction_edit(
+    storage: &dyn Storage,
+    accounts_by_id: &std::collections::HashMap<Id, Account>,
+    edit: &ProposedTransactionEdit,
+) -> Result<Option<ProposedTransactionEditOutput>> {
+    let Some(account) = accounts_by_id.get(&edit.account_id) else {
+        return Ok(None);
+    };
+    let transaction = storage
+        .get_transactions(&edit.account_id)
+        .await?
+        .into_iter()
+        .find(|tx| tx.id == edit.transaction_id);
+    let Some(transaction) = transaction else {
+        return Ok(None);
+    };
+
+    Ok(Some(ProposedTransactionEditOutput {
+        id: edit.id.to_string(),
+        account_id: edit.account_id.to_string(),
+        account_name: account.name.clone(),
+        transaction_id: edit.transaction_id.to_string(),
+        transaction_description: transaction.description,
+        transaction_timestamp: transaction.timestamp.to_rfc3339(),
+        transaction_amount: transaction.amount,
+        created_at: edit.created_at.to_rfc3339(),
+        updated_at: edit.updated_at.to_rfc3339(),
+        status: proposal_status_string(edit.status).to_string(),
+        patch: proposal_patch_output(edit),
+    }))
+}
+
+fn proposal_patch_output(edit: &ProposedTransactionEdit) -> TransactionAnnotationPatchOutput {
+    TransactionAnnotationPatchOutput {
+        description: edit.description.clone(),
+        note: edit.note.clone(),
+        category: edit.category.clone(),
+        tags: edit.tags.clone(),
+        effective_date: edit
+            .effective_date
+            .map(|value| value.map(|date| date.to_string())),
+    }
+}
+
+fn proposal_status_string(status: ProposedTransactionEditStatus) -> &'static str {
+    match status {
+        ProposedTransactionEditStatus::Pending => "pending",
+        ProposedTransactionEditStatus::Approved => "approved",
+        ProposedTransactionEditStatus::Rejected => "rejected",
+        ProposedTransactionEditStatus::Removed => "removed",
+    }
 }
 
 pub fn parse_asset(s: &str) -> Result<Asset> {

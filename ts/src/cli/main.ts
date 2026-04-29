@@ -18,6 +18,11 @@ import {
   setAccountConfig,
   setBalance,
   setTransactionAnnotation,
+  proposeTransactionEdit,
+  listProposedTransactionEdits,
+  approveProposedTransactionEdit,
+  rejectProposedTransactionEdit,
+  removeProposedTransactionEdit,
 } from '../app/mutations.js';
 import { importSchwabTransactions } from '../app/import.js';
 import {
@@ -331,18 +336,21 @@ add
   .description('Add a new connection')
   .option('--synchronizer <name>', 'synchronizer to use (default: manual)', 'manual')
   .action(async (name: string, opts: { synchronizer: string }) => {
-    await runWithConfig(async (cfg) => {
-      const storage = new JsonFileStorage(cfg.config.data_dir);
-      const result = await addConnection(storage, name, opts.synchronizer);
-      if (cfg.config.git.auto_commit) {
-        await tryAutoCommit(
-          cfg.config.data_dir,
-          `add connection '${name}'`,
-          cfg.config.git.auto_push,
-        );
-      }
-      return result;
-    }, { editData: true });
+    await runWithConfig(
+      async (cfg) => {
+        const storage = new JsonFileStorage(cfg.config.data_dir);
+        const result = await addConnection(storage, name, opts.synchronizer);
+        if (cfg.config.git.auto_commit) {
+          await tryAutoCommit(
+            cfg.config.data_dir,
+            `add connection '${name}'`,
+            cfg.config.git.auto_push,
+          );
+        }
+        return result;
+      },
+      { editData: true },
+    );
   });
 
 add
@@ -356,14 +364,21 @@ add
     [] as string[],
   )
   .action(async (name: string, opts: { connection: string; tag: string[] }) => {
-    await runWithConfig(async (cfg) => {
-      const storage = new JsonFileStorage(cfg.config.data_dir);
-      const result = await addAccount(storage, opts.connection, name, opts.tag);
-      if (cfg.config.git.auto_commit) {
-        await tryAutoCommit(cfg.config.data_dir, `add account '${name}'`, cfg.config.git.auto_push);
-      }
-      return result;
-    }, { editData: true });
+    await runWithConfig(
+      async (cfg) => {
+        const storage = new JsonFileStorage(cfg.config.data_dir);
+        const result = await addAccount(storage, opts.connection, name, opts.tag);
+        if (cfg.config.git.auto_commit) {
+          await tryAutoCommit(
+            cfg.config.data_dir,
+            `add account '${name}'`,
+            cfg.config.git.auto_push,
+          );
+        }
+        return result;
+      },
+      { editData: true },
+    );
   });
 
 // ---------------------------------------------------------------------------
@@ -376,18 +391,21 @@ remove
   .command('connection <id>')
   .description('Remove a connection and its accounts')
   .action(async (id: string) => {
-    await runWithConfig(async (cfg) => {
-      const storage = new JsonFileStorage(cfg.config.data_dir);
-      const result = await removeConnection(storage, id);
-      if (cfg.config.git.auto_commit) {
-        await tryAutoCommit(
-          cfg.config.data_dir,
-          `remove connection '${id}'`,
-          cfg.config.git.auto_push,
-        );
-      }
-      return result;
-    }, { editData: true });
+    await runWithConfig(
+      async (cfg) => {
+        const storage = new JsonFileStorage(cfg.config.data_dir);
+        const result = await removeConnection(storage, id);
+        if (cfg.config.git.auto_commit) {
+          await tryAutoCommit(
+            cfg.config.data_dir,
+            `remove connection '${id}'`,
+            cfg.config.git.auto_push,
+          );
+        }
+        return result;
+      },
+      { editData: true },
+    );
   });
 
 // ---------------------------------------------------------------------------
@@ -404,24 +422,27 @@ set
   .requiredOption('--amount <str>', 'balance amount')
   .option('--cost-basis <str>', 'total cost basis in reporting/portfolio currency')
   .action(async (opts: { account: string; asset: string; amount: string; costBasis?: string }) => {
-    await runWithConfig(async (cfg) => {
-      const storage = new JsonFileStorage(cfg.config.data_dir);
-      const result = await setBalance(
-        storage,
-        opts.account,
-        opts.asset,
-        opts.amount,
-        opts.costBasis,
-      );
-      if (cfg.config.git.auto_commit) {
-        await tryAutoCommit(
-          cfg.config.data_dir,
-          `set balance for '${opts.account}'`,
-          cfg.config.git.auto_push,
+    await runWithConfig(
+      async (cfg) => {
+        const storage = new JsonFileStorage(cfg.config.data_dir);
+        const result = await setBalance(
+          storage,
+          opts.account,
+          opts.asset,
+          opts.amount,
+          opts.costBasis,
         );
-      }
-      return result;
-    }, { editData: true });
+        if (cfg.config.git.auto_commit) {
+          await tryAutoCommit(
+            cfg.config.data_dir,
+            `set balance for '${opts.account}'`,
+            cfg.config.git.auto_push,
+          );
+        }
+        return result;
+      },
+      { editData: true },
+    );
   });
 
 set
@@ -432,21 +453,24 @@ set
   .option('--clear-balance-backfill', 'clear balance backfill policy override')
   .action(
     async (opts: { account: string; balanceBackfill?: string; clearBalanceBackfill?: boolean }) => {
-      await runWithConfig(async (cfg) => {
-        const storage = new JsonFileStorage(cfg.config.data_dir);
-        const result = await setAccountConfig(storage, opts.account, {
-          balance_backfill: opts.balanceBackfill,
-          clear_balance_backfill: opts.clearBalanceBackfill,
-        });
-        if ((result as { success?: boolean }).success && cfg.config.git.auto_commit) {
-          await tryAutoCommit(
-            cfg.config.data_dir,
-            `set account config '${opts.account}'`,
-            cfg.config.git.auto_push,
-          );
-        }
-        return result;
-      }, { editData: true });
+      await runWithConfig(
+        async (cfg) => {
+          const storage = new JsonFileStorage(cfg.config.data_dir);
+          const result = await setAccountConfig(storage, opts.account, {
+            balance_backfill: opts.balanceBackfill,
+            clear_balance_backfill: opts.clearBalanceBackfill,
+          });
+          if ((result as { success?: boolean }).success && cfg.config.git.auto_commit) {
+            await tryAutoCommit(
+              cfg.config.data_dir,
+              `set account config '${opts.account}'`,
+              cfg.config.git.auto_push,
+            );
+          }
+          return result;
+        },
+        { editData: true },
+      );
     },
   );
 
@@ -487,32 +511,184 @@ set
       effectiveDate?: string;
       clearEffectiveDate?: boolean;
     }) => {
-      await runWithConfig(async (cfg) => {
+      await runWithConfig(
+        async (cfg) => {
+          const storage = new JsonFileStorage(cfg.config.data_dir);
+          const result = await setTransactionAnnotation(storage, opts.account, opts.transaction, {
+            description: opts.description,
+            clear_description: opts.clearDescription,
+            note: opts.note,
+            clear_note: opts.clearNote,
+            category: opts.category,
+            clear_category: opts.clearCategory,
+            tags: opts.tag,
+            tags_empty: opts.tagsEmpty,
+            clear_tags: opts.clearTags,
+            effective_date: opts.effectiveDate,
+            clear_effective_date: opts.clearEffectiveDate,
+          });
+          if ((result as { success?: boolean }).success && cfg.config.git.auto_commit) {
+            await tryAutoCommit(
+              cfg.config.data_dir,
+              `set transaction annotation '${opts.transaction}'`,
+              cfg.config.git.auto_push,
+            );
+          }
+          return result;
+        },
+        { editData: true },
+      );
+    },
+  );
+
+// ---------------------------------------------------------------------------
+// propose / proposed-edits
+// ---------------------------------------------------------------------------
+
+const propose = program.command('propose').description('Propose changes for later review');
+
+propose
+  .command('transaction')
+  .description('Propose a transaction annotation edit')
+  .requiredOption('--account <id>', 'account ID')
+  .requiredOption('--transaction <id>', 'transaction ID')
+  .option('--description <text>', 'override description')
+  .option('--clear-description', 'clear description override')
+  .option('--note <text>', 'set note')
+  .option('--clear-note', 'clear note')
+  .option('--category <text>', 'set category')
+  .option('--clear-category', 'clear category')
+  .option(
+    '--tag <tag>',
+    'tag (repeatable)',
+    (val: string, arr: string[]) => [...arr, val],
+    [] as string[],
+  )
+  .option('--tags-empty', 'set tags to empty array')
+  .option('--clear-tags', 'clear tags field')
+  .option('--effective-date <date>', 'override reporting date (YYYY-MM-DD)')
+  .option('--clear-effective-date', 'clear reporting date override')
+  .action(
+    async (opts: {
+      account: string;
+      transaction: string;
+      description?: string;
+      clearDescription?: boolean;
+      note?: string;
+      clearNote?: boolean;
+      category?: string;
+      clearCategory?: boolean;
+      tag: string[];
+      tagsEmpty?: boolean;
+      clearTags?: boolean;
+      effectiveDate?: string;
+      clearEffectiveDate?: boolean;
+    }) => {
+      await runWithConfig(
+        async (cfg) => {
+          const storage = new JsonFileStorage(cfg.config.data_dir);
+          const result = await proposeTransactionEdit(storage, opts.account, opts.transaction, {
+            description: opts.description,
+            clear_description: opts.clearDescription,
+            note: opts.note,
+            clear_note: opts.clearNote,
+            category: opts.category,
+            clear_category: opts.clearCategory,
+            tags: opts.tag,
+            tags_empty: opts.tagsEmpty,
+            clear_tags: opts.clearTags,
+            effective_date: opts.effectiveDate,
+            clear_effective_date: opts.clearEffectiveDate,
+          });
+          if ((result as { success?: boolean }).success && cfg.config.git.auto_commit) {
+            await tryAutoCommit(
+              cfg.config.data_dir,
+              `propose transaction edit '${opts.transaction}'`,
+              cfg.config.git.auto_push,
+            );
+          }
+          return result;
+        },
+        { editData: true },
+      );
+    },
+  );
+
+const proposedEdits = program.command('proposed-edits').description('Manage proposed edits');
+
+proposedEdits
+  .command('list')
+  .description('List proposed transaction edits')
+  .option('--include-decided', 'include approved, rejected, and removed proposals')
+  .action(async (opts: { includeDecided?: boolean }) => {
+    await runWithConfig(async (cfg) => {
+      const storage = new JsonFileStorage(cfg.config.data_dir);
+      return listProposedTransactionEdits(storage, opts.includeDecided ?? false);
+    });
+  });
+
+proposedEdits
+  .command('approve <id>')
+  .description('Approve a proposed transaction edit and apply it')
+  .action(async (id: string) => {
+    await runWithConfig(
+      async (cfg) => {
         const storage = new JsonFileStorage(cfg.config.data_dir);
-        const result = await setTransactionAnnotation(storage, opts.account, opts.transaction, {
-          description: opts.description,
-          clear_description: opts.clearDescription,
-          note: opts.note,
-          clear_note: opts.clearNote,
-          category: opts.category,
-          clear_category: opts.clearCategory,
-          tags: opts.tag,
-          tags_empty: opts.tagsEmpty,
-          clear_tags: opts.clearTags,
-          effective_date: opts.effectiveDate,
-          clear_effective_date: opts.clearEffectiveDate,
-        });
+        const result = await approveProposedTransactionEdit(storage, id);
         if ((result as { success?: boolean }).success && cfg.config.git.auto_commit) {
           await tryAutoCommit(
             cfg.config.data_dir,
-            `set transaction annotation '${opts.transaction}'`,
+            `approve proposed transaction edit '${id}'`,
             cfg.config.git.auto_push,
           );
         }
         return result;
-      }, { editData: true });
-    },
-  );
+      },
+      { editData: true },
+    );
+  });
+
+proposedEdits
+  .command('reject <id>')
+  .description('Reject a proposed transaction edit')
+  .action(async (id: string) => {
+    await runWithConfig(
+      async (cfg) => {
+        const storage = new JsonFileStorage(cfg.config.data_dir);
+        const result = await rejectProposedTransactionEdit(storage, id);
+        if ((result as { success?: boolean }).success && cfg.config.git.auto_commit) {
+          await tryAutoCommit(
+            cfg.config.data_dir,
+            `reject proposed transaction edit '${id}'`,
+            cfg.config.git.auto_push,
+          );
+        }
+        return result;
+      },
+      { editData: true },
+    );
+  });
+
+proposedEdits
+  .command('remove <id>')
+  .description('Remove a proposed transaction edit from the active queue')
+  .action(async (id: string) => {
+    await runWithConfig(
+      async (cfg) => {
+        const storage = new JsonFileStorage(cfg.config.data_dir);
+        const result = await removeProposedTransactionEdit(storage, id);
+        if ((result as { success?: boolean }).success && cfg.config.git.auto_commit) {
+          await tryAutoCommit(
+            cfg.config.data_dir,
+            `remove proposed transaction edit '${id}'`,
+            cfg.config.git.auto_push,
+          );
+        }
+        return result;
+      },
+      { editData: true },
+    );
+  });
 
 // ---------------------------------------------------------------------------
 // import
@@ -527,18 +703,21 @@ importSchwab
   .description('Import transactions from a Schwab JSON export file')
   .requiredOption('--account <id_or_name>', 'account ID or name')
   .action(async (file: string, opts: { account: string }) => {
-    await runWithConfig(async (cfg) => {
-      const storage = new JsonFileStorage(cfg.config.data_dir);
-      const result = await importSchwabTransactions(storage, opts.account, file);
-      if (cfg.config.git.auto_commit) {
-        await tryAutoCommit(
-          cfg.config.data_dir,
-          `import schwab transactions (account ${result.account_id})`,
-          cfg.config.git.auto_push,
-        );
-      }
-      return result;
-    }, { editData: true });
+    await runWithConfig(
+      async (cfg) => {
+        const storage = new JsonFileStorage(cfg.config.data_dir);
+        const result = await importSchwabTransactions(storage, opts.account, file);
+        if (cfg.config.git.auto_commit) {
+          await tryAutoCommit(
+            cfg.config.data_dir,
+            `import schwab transactions (account ${result.account_id})`,
+            cfg.config.git.auto_push,
+          );
+        }
+        return result;
+      },
+      { editData: true },
+    );
   });
 
 // ---------------------------------------------------------------------------
@@ -661,16 +840,19 @@ sync
   .option('--if-stale', 'only sync if data is stale')
   .option('--transactions <mode>', 'transaction sync mode: auto|full', 'auto')
   .action(async (idOrName: string, opts: { ifStale?: boolean; transactions?: string }) => {
-    await runWithConfig(async (cfg) => {
-      const storage = new JsonFileStorage(cfg.config.data_dir);
-      const txMode = opts.transactions === 'full' ? 'full' : 'auto';
-      if (opts.ifStale) {
-        return syncConnectionIfStaleWithOptions(storage, idOrName, cfg.config.refresh, {
-          transactions: txMode,
-        });
-      }
-      return syncConnectionWithOptions(storage, idOrName, { transactions: txMode });
-    }, { editData: true, syncData: true });
+    await runWithConfig(
+      async (cfg) => {
+        const storage = new JsonFileStorage(cfg.config.data_dir);
+        const txMode = opts.transactions === 'full' ? 'full' : 'auto';
+        if (opts.ifStale) {
+          return syncConnectionIfStaleWithOptions(storage, idOrName, cfg.config.refresh, {
+            transactions: txMode,
+          });
+        }
+        return syncConnectionWithOptions(storage, idOrName, { transactions: txMode });
+      },
+      { editData: true, syncData: true },
+    );
   });
 
 sync
@@ -679,14 +861,17 @@ sync
   .option('--if-stale', 'only sync if data is stale')
   .option('--transactions <mode>', 'transaction sync mode: auto|full', 'auto')
   .action(async (opts: { ifStale?: boolean; transactions?: string }) => {
-    await runWithConfig(async (cfg) => {
-      const storage = new JsonFileStorage(cfg.config.data_dir);
-      const txMode = opts.transactions === 'full' ? 'full' : 'auto';
-      if (opts.ifStale) {
-        return syncAllIfStaleWithOptions(storage, cfg.config.refresh, { transactions: txMode });
-      }
-      return syncAllWithOptions(storage, { transactions: txMode });
-    }, { editData: true, syncData: true });
+    await runWithConfig(
+      async (cfg) => {
+        const storage = new JsonFileStorage(cfg.config.data_dir);
+        const txMode = opts.transactions === 'full' ? 'full' : 'auto';
+        if (opts.ifStale) {
+          return syncAllIfStaleWithOptions(storage, cfg.config.refresh, { transactions: txMode });
+        }
+        return syncAllWithOptions(storage, { transactions: txMode });
+      },
+      { editData: true, syncData: true },
+    );
   });
 
 sync
@@ -695,39 +880,51 @@ sync
   .option('--force', 'force refresh')
   .option('--quote-staleness <dur>', 'quote staleness duration')
   .action(async (_scope?: string, _id?: string, _opts?: object) => {
-    await runWithConfig(async (_cfg) => {
-      return syncPrices();
-    }, { editData: true, syncData: true });
+    await runWithConfig(
+      async (_cfg) => {
+        return syncPrices();
+      },
+      { editData: true, syncData: true },
+    );
   });
 
 sync
   .command('symlinks')
   .description('Create symlinks')
   .action(async () => {
-    await runWithConfig(async (_cfg) => {
-      return syncSymlinks();
-    }, { editData: true, syncData: true });
+    await runWithConfig(
+      async (_cfg) => {
+        return syncSymlinks();
+      },
+      { editData: true, syncData: true },
+    );
   });
 
 sync
   .command('backfill-metadata')
   .description('Persist backfilled standardized transaction metadata to JSONL')
   .action(async () => {
-    await runWithConfig(async (cfg) => {
-      const storage = new JsonFileStorage(cfg.config.data_dir);
-      return syncBackfillMetadata(storage);
-    }, { editData: true, syncData: true });
+    await runWithConfig(
+      async (cfg) => {
+        const storage = new JsonFileStorage(cfg.config.data_dir);
+        return syncBackfillMetadata(storage);
+      },
+      { editData: true, syncData: true },
+    );
   });
 
 sync
   .command('recompact')
   .description('Recompact account and market-data JSONL files (dedupe logs and sort canonically)')
   .action(async () => {
-    await runWithConfig(async (cfg) => {
-      const storage = new JsonFileStorage(cfg.config.data_dir);
-      const marketData = new JsonlMarketDataStore(cfg.config.data_dir);
-      return syncRecompact(storage, marketData);
-    }, { editData: true, syncData: true });
+    await runWithConfig(
+      async (cfg) => {
+        const storage = new JsonFileStorage(cfg.config.data_dir);
+        const marketData = new JsonlMarketDataStore(cfg.config.data_dir);
+        return syncRecompact(storage, marketData);
+      },
+      { editData: true, syncData: true },
+    );
   });
 
 // ---------------------------------------------------------------------------
@@ -794,20 +991,23 @@ marketData
       currency?: string;
       fx?: boolean;
     }) => {
-      await runWithConfig(async (cfg) => {
-        const storage = new JsonFileStorage(cfg.config.data_dir);
-        return fetchHistoricalPrices(storage, cfg.config, {
-          account: opts.account,
-          connection: opts.connection,
-          start: opts.start,
-          end: opts.end,
-          interval: opts.interval,
-          lookback_days: opts.lookbackDays,
-          request_delay_ms: opts.requestDelayMs,
-          currency: opts.currency,
-          include_fx: opts.fx,
-        });
-      }, { editData: true });
+      await runWithConfig(
+        async (cfg) => {
+          const storage = new JsonFileStorage(cfg.config.data_dir);
+          return fetchHistoricalPrices(storage, cfg.config, {
+            account: opts.account,
+            connection: opts.connection,
+            start: opts.start,
+            end: opts.end,
+            interval: opts.interval,
+            lookback_days: opts.lookbackDays,
+            request_delay_ms: opts.requestDelayMs,
+            currency: opts.currency,
+            include_fx: opts.fx,
+          });
+        },
+        { editData: true },
+      );
     },
   );
 

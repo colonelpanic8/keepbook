@@ -23,8 +23,11 @@ pub use list::{
     list_accounts, list_all, list_balances, list_connections, list_price_sources, list_transactions,
 };
 pub use mutations::{
-    add_account, add_account_with, add_connection, add_connection_with, parse_asset,
-    remove_connection, set_account_config, set_balance, set_transaction_annotation,
+    add_account, add_account_with, add_connection, add_connection_with,
+    approve_proposed_transaction_edit, list_proposed_transaction_edits, parse_asset,
+    propose_transaction_edit, propose_transaction_edit_with, reject_proposed_transaction_edit,
+    remove_connection, remove_proposed_transaction_edit, set_account_config, set_balance,
+    set_transaction_annotation,
 };
 pub use portfolio::{
     default_portfolio_change_points_granularity, default_portfolio_history_granularity,
@@ -46,9 +49,10 @@ pub use sync::{
 pub use types::{
     AccountOutput, AllOutput, AssetInfoOutput, BalanceOutput, ChangePointsOutput, ConnectionOutput,
     HistoryOutput, HistoryPoint, HistorySummary, PriceHistoryFailure, PriceHistoryOutput,
-    PriceHistoryScopeOutput, PriceHistoryStats, PriceSourceOutput, SpendingBreakdownEntryOutput,
-    SpendingOutput, SpendingPeriodOutput, SpendingScopeOutput, TaxImpactGraphOutput,
-    TaxImpactOutput, TaxImpactPoint, TransactionAnnotationOutput, TransactionOutput,
+    PriceHistoryScopeOutput, PriceHistoryStats, PriceSourceOutput, ProposedTransactionEditOutput,
+    SpendingBreakdownEntryOutput, SpendingOutput, SpendingPeriodOutput, SpendingScopeOutput,
+    TaxImpactGraphOutput, TaxImpactOutput, TaxImpactPoint, TransactionAnnotationOutput,
+    TransactionAnnotationPatchOutput, TransactionOutput,
 };
 
 fn maybe_auto_commit(config: &ResolvedConfig, action: &str) {
