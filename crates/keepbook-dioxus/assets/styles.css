@@ -319,6 +319,12 @@ small,
   color: #ffffff;
 }
 
+.control-button.danger-button {
+  background: #f8eeee;
+  border-color: #e4c6c6;
+  color: #8b2f2f;
+}
+
 .control-button:disabled {
   cursor: default;
   opacity: 0.48;
@@ -896,6 +902,42 @@ small,
 .history-table .table-head,
 .history-table .table-row {
   grid-template-columns: minmax(160px, 0.7fr) minmax(220px, 1fr) minmax(160px, 0.7fr);
+}
+
+.proposed-edits-table .table-head,
+.proposed-edits-table .table-row {
+  grid-template-columns:
+    minmax(220px, 1fr)
+    minmax(150px, 0.55fr)
+    minmax(260px, 1.1fr)
+    minmax(190px, 0.7fr)
+    minmax(260px, 0.8fr);
+  min-width: 1120px;
+}
+
+.proposal-transaction-cell,
+.proposal-actions {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.proposal-transaction-cell {
+  flex-direction: column;
+}
+
+.proposal-actions {
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.proposal-actions .control-button {
+  min-width: 76px;
+}
+
+.proposal-empty {
+  aspect-ratio: auto;
+  min-height: 160px;
 }
 
 .group-list {

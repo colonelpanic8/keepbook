@@ -168,6 +168,30 @@ struct Balance {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
+struct ProposedTransactionEdit {
+    id: String,
+    account_id: String,
+    account_name: String,
+    transaction_id: String,
+    transaction_description: String,
+    transaction_timestamp: String,
+    transaction_amount: String,
+    created_at: String,
+    updated_at: String,
+    status: String,
+    patch: ProposedTransactionEditPatch,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Default)]
+struct ProposedTransactionEditPatch {
+    description: Option<Option<String>>,
+    note: Option<Option<String>>,
+    category: Option<Option<String>>,
+    tags: Option<Option<Vec<String>>>,
+    effective_date: Option<Option<String>>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 struct History {
     currency: String,
     points: Vec<HistoryPoint>,
@@ -363,17 +387,19 @@ enum ActiveView {
     Accounts,
     Connections,
     Balances,
+    ProposedEdits,
     History,
     Settings,
 }
 
 impl ActiveView {
-    const ALL: [Self; 7] = [
+    const ALL: [Self; 8] = [
         Self::Summary,
         Self::Graphs,
         Self::Accounts,
         Self::Connections,
         Self::Balances,
+        Self::ProposedEdits,
         Self::History,
         Self::Settings,
     ];
@@ -385,6 +411,7 @@ impl ActiveView {
             Self::Accounts => "Accounts",
             Self::Connections => "Connections",
             Self::Balances => "Balances",
+            Self::ProposedEdits => "Proposed Edits",
             Self::History => "History",
             Self::Settings => "Settings",
         }
@@ -496,6 +523,14 @@ async fn sync_git_repo(input: GitSyncInput) -> Result<GitSyncOutput, String> {
     sync_git_repo_impl(input).await
 }
 
+async fn fetch_proposed_transaction_edits() -> Result<Vec<ProposedTransactionEdit>, String> {
+    fetch_proposed_transaction_edits_impl().await
+}
+
+async fn decide_proposed_transaction_edit(id: String, action: &'static str) -> Result<(), String> {
+    decide_proposed_transaction_edit_impl(id, action).await
+}
+
 #[cfg(target_arch = "wasm32")]
 async fn fetch_history_impl(query: String) -> Result<History, String> {
     let response = Request::get(&format!("{API_BASE}/api/portfolio/history?{query}"))
@@ -580,6 +615,48 @@ async fn sync_git_repo_impl(input: GitSyncInput) -> Result<GitSyncOutput, String
         .map_err(|error| format!("Could not decode Git sync result: {error}"))
 }
 
+#[cfg(target_arch = "wasm32")]
+async fn fetch_proposed_transaction_edits_impl() -> Result<Vec<ProposedTransactionEdit>, String> {
+    let response = Request::get(&format!("{API_BASE}/api/proposed-transaction-edits"))
+        .send()
+        .await
+        .map_err(|error| format!("Could not reach keepbook-server at {API_BASE}: {error}"))?;
+
+    if !response.ok() {
+        return Err(format!(
+            "keepbook-server returned HTTP {} {}",
+            response.status(),
+            response.status_text()
+        ));
+    }
+
+    response
+        .json::<Vec<ProposedTransactionEdit>>()
+        .await
+        .map_err(|error| format!("Could not decode proposed edits: {error}"))
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn decide_proposed_transaction_edit_impl(
+    id: String,
+    action: &'static str,
+) -> Result<(), String> {
+    let response = Request::post(&format!(
+        "{API_BASE}/api/proposed-transaction-edits/{id}/{action}"
+    ))
+    .send()
+    .await
+    .map_err(|error| format!("Could not reach keepbook-server at {API_BASE}: {error}"))?;
+
+    if !response.ok() {
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+        return Err(format!("keepbook-server returned HTTP {status}: {text}"));
+    }
+
+    Ok(())
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 async fn fetch_history_impl(query: String) -> Result<History, String> {
     let query = serde_urlencoded::from_str::<keepbook_server::HistoryQuery>(&query)
@@ -631,6 +708,34 @@ async fn sync_git_repo_impl(input: GitSyncInput) -> Result<GitSyncOutput, String
         .await
         .map_err(|error| format!("Sync failed: {error:#}"))?;
     from_native_output(output, "Git sync result")
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn fetch_proposed_transaction_edits_impl() -> Result<Vec<ProposedTransactionEdit>, String> {
+    let output = native_api_state()?
+        .proposed_transaction_edits(keepbook_server::ProposedTransactionEditsQuery {
+            include_decided: false,
+        })
+        .await
+        .map_err(|error| format!("Could not load proposed edits: {error:#}"))?;
+    from_native_output(output, "proposed edits")
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn decide_proposed_transaction_edit_impl(
+    id: String,
+    action: &'static str,
+) -> Result<(), String> {
+    let state = native_api_state()?;
+    let result = match action {
+        "approve" => state.approve_proposed_transaction_edit(id).await,
+        "reject" => state.reject_proposed_transaction_edit(id).await,
+        "remove" => state.remove_proposed_transaction_edit(id).await,
+        _ => return Err(format!("Unsupported proposal action: {action}")),
+    };
+    result
+        .map(|_| ())
+        .map_err(|error| format!("Could not update proposed edit: {error:#}"))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -837,6 +942,11 @@ fn Dashboard(
                     },
                     ActiveView::Balances => rsx! {
                         BalancesView { balances: overview.balances.clone() }
+                    },
+                    ActiveView::ProposedEdits => rsx! {
+                        ProposedEditsView {
+                            onrefresh: move |_| onrefresh.call(())
+                        }
                     },
                     ActiveView::History => rsx! {
                         HistoryView {
@@ -2352,6 +2462,128 @@ fn BalancesView(balances: Vec<Balance>) -> Element {
 }
 
 #[component]
+fn ProposedEditsView(onrefresh: EventHandler<()>) -> Element {
+    let mut proposals = use_resource(fetch_proposed_transaction_edits);
+    let mut busy_id = use_signal(String::new);
+    let mut status = use_signal(String::new);
+    let current = proposals.cloned();
+    let busy = busy_id();
+    let status_text = status();
+
+    rsx! {
+        section { class: "panel",
+            div { class: "panel-header",
+                h2 { "Proposed transaction edits" }
+                button {
+                    class: "control-button",
+                    disabled: !busy.is_empty(),
+                    onclick: move |_| proposals.restart(),
+                    "Refresh"
+                }
+            }
+            if !status_text.is_empty() {
+                p { class: "settings-status", "{status_text}" }
+            }
+            match current {
+                None => rsx! { BackendActivity { message: "Loading proposed edits" } },
+                Some(Err(error)) => rsx! { p { class: "validation", "{error}" } },
+                Some(Ok(items)) => rsx! {
+                    if items.is_empty() {
+                        div { class: "chart-empty proposal-empty",
+                            strong { "No pending edits" }
+                            small { "Approved, rejected, and removed edits are hidden from this queue." }
+                        }
+                    } else {
+                        div { class: "data-table proposed-edits-table",
+                            div { class: "table-head",
+                                span { "Transaction" }
+                                span { "Account" }
+                                span { "Patch" }
+                                span { "Created" }
+                                span { "Actions" }
+                            }
+                            for edit in items {
+                                ProposedEditRow {
+                                    edit: edit.clone(),
+                                    busy: busy.clone(),
+                                    ondecide: move |(id, action): (String, &'static str)| {
+                                        busy_id.set(id.clone());
+                                        status.set(format!("{action} {id}..."));
+                                        spawn(async move {
+                                            match decide_proposed_transaction_edit(id.clone(), action).await {
+                                                Ok(()) => {
+                                                    status.set(format!("{} {id}.", proposal_action_past_tense(action)));
+                                                    proposals.restart();
+                                                    onrefresh.call(());
+                                                }
+                                                Err(error) => status.set(error),
+                                            }
+                                            busy_id.set(String::new());
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+            }
+        }
+    }
+}
+
+#[component]
+fn ProposedEditRow(
+    edit: ProposedTransactionEdit,
+    busy: String,
+    ondecide: EventHandler<(String, &'static str)>,
+) -> Element {
+    let is_busy = busy == edit.id;
+    let any_busy = !busy.is_empty();
+    let patch = proposed_patch_summary(&edit.patch);
+    let amount_class = if edit.transaction_amount.trim_start().starts_with('-') {
+        "change-negative"
+    } else {
+        "change-positive"
+    };
+    let approve_id = edit.id.clone();
+    let reject_id = edit.id.clone();
+    let remove_id = edit.id.clone();
+
+    rsx! {
+        div { class: "table-row",
+            div { class: "proposal-transaction-cell",
+                strong { "{edit.transaction_description}" }
+                small { "{edit.transaction_timestamp}" }
+                small { class: "{amount_class}", "{edit.transaction_amount}" }
+            }
+            small { "{edit.account_name}" }
+            small { "{patch}" }
+            small { "{edit.created_at}" }
+            div { class: "proposal-actions",
+                button {
+                    class: "control-button selected",
+                    disabled: any_busy,
+                    onclick: move |_| ondecide.call((approve_id.clone(), "approve")),
+                    if is_busy { "Working" } else { "Approve" }
+                }
+                button {
+                    class: "control-button",
+                    disabled: any_busy,
+                    onclick: move |_| ondecide.call((reject_id.clone(), "reject")),
+                    "Reject"
+                }
+                button {
+                    class: "control-button danger-button",
+                    disabled: any_busy,
+                    onclick: move |_| ondecide.call((remove_id.clone(), "remove")),
+                    "Remove"
+                }
+            }
+        }
+    }
+}
+
+#[component]
 fn HistoryView(
     currency: String,
     defaults: HistoryDefaults,
@@ -2437,6 +2669,43 @@ fn asset_label(asset: &serde_json::Value) -> String {
         .or_else(|| asset.get("ticker").and_then(|value| value.as_str()))
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| asset.to_string())
+}
+
+fn proposed_patch_summary(patch: &ProposedTransactionEditPatch) -> String {
+    let mut parts = Vec::new();
+    push_patch_part(&mut parts, "description", &patch.description);
+    push_patch_part(&mut parts, "note", &patch.note);
+    push_patch_part(&mut parts, "category", &patch.category);
+    if let Some(value) = &patch.tags {
+        match value {
+            Some(tags) => parts.push(format!("tags={}", tags.join(", "))),
+            None => parts.push("tags=clear".to_string()),
+        }
+    }
+    push_patch_part(&mut parts, "effective_date", &patch.effective_date);
+    if parts.is_empty() {
+        "No changes".to_string()
+    } else {
+        parts.join("; ")
+    }
+}
+
+fn push_patch_part(parts: &mut Vec<String>, label: &str, value: &Option<Option<String>>) {
+    if let Some(value) = value {
+        match value {
+            Some(text) => parts.push(format!("{label}={text}")),
+            None => parts.push(format!("{label}=clear")),
+        }
+    }
+}
+
+fn proposal_action_past_tense(action: &str) -> &'static str {
+    match action {
+        "approve" => "Approved",
+        "reject" => "Rejected",
+        "remove" => "Removed",
+        _ => "Updated",
+    }
 }
 
 fn current_net_worth_from_snapshot(snapshot: &PortfolioSnapshot) -> f64 {
@@ -2533,7 +2802,7 @@ fn history_query_string(
     params.join("&")
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", test))]
 fn filter_override_query_string(overrides: FilterOverrides) -> String {
     let mut params = Vec::new();
     append_filter_override_params(&mut params, overrides);
