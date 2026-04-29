@@ -8,8 +8,8 @@ pub use memory::MemoryStorage;
 
 use crate::credentials::CredentialStore;
 use crate::models::{
-    Account, AccountConfig, BalanceSnapshot, Connection, ConnectionConfig, Id, Transaction,
-    TransactionAnnotationPatch,
+    Account, AccountConfig, BalanceSnapshot, Connection, ConnectionConfig, Id,
+    ProposedTransactionEdit, Transaction, TransactionAnnotationPatch,
 };
 use anyhow::Result;
 use serde::Serialize;
@@ -76,6 +76,13 @@ pub trait Storage: Send + Sync {
         &self,
         account_id: &Id,
         patches: &[TransactionAnnotationPatch],
+    ) -> Result<()>;
+
+    // Proposed transaction edits (append-only queue events)
+    async fn get_proposed_transaction_edits(&self) -> Result<Vec<ProposedTransactionEdit>>;
+    async fn append_proposed_transaction_edits(
+        &self,
+        edits: &[ProposedTransactionEdit],
     ) -> Result<()>;
 }
 

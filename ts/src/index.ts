@@ -63,6 +63,12 @@ export {
   withStandardizedMetadata,
 } from './models/transaction.js';
 export {
+  ProposedTransactionEdit,
+  type ProposedTransactionEditType,
+  type ProposedTransactionEditStatus,
+  type ProposedTransactionEditJSON,
+} from './models/proposed-transaction-edit.js';
+export {
   AssetBalance,
   BalanceSnapshot,
   type AssetBalanceType,

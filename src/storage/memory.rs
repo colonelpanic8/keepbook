@@ -10,7 +10,7 @@ use tokio::sync::Mutex;
 use crate::credentials::CredentialStore;
 use crate::models::{
     Account, AccountConfig, BalanceSnapshot, Connection, ConnectionConfig, ConnectionState, Id,
-    Transaction, TransactionAnnotationPatch,
+    ProposedTransactionEdit, Transaction, TransactionAnnotationPatch,
 };
 
 use super::{dedupe_transactions_last_write_wins, Storage};
@@ -23,6 +23,7 @@ pub struct MemoryStorage {
     balances: Mutex<HashMap<Id, Vec<BalanceSnapshot>>>,
     transactions: Mutex<HashMap<Id, Vec<Transaction>>>,
     transaction_annotation_patches: Mutex<HashMap<Id, Vec<TransactionAnnotationPatch>>>,
+    proposed_transaction_edits: Mutex<Vec<ProposedTransactionEdit>>,
 }
 
 impl MemoryStorage {
@@ -34,6 +35,7 @@ impl MemoryStorage {
             balances: Mutex::new(HashMap::new()),
             transactions: Mutex::new(HashMap::new()),
             transaction_annotation_patches: Mutex::new(HashMap::new()),
+            proposed_transaction_edits: Mutex::new(Vec::new()),
         }
     }
 
@@ -252,6 +254,42 @@ impl Storage for MemoryStorage {
             .entry(account_id.clone())
             .or_default()
             .extend(new_patches.iter().cloned());
+        Ok(())
+    }
+
+    async fn get_proposed_transaction_edits(&self) -> Result<Vec<ProposedTransactionEdit>> {
+        let events = self.proposed_transaction_edits.lock().await;
+        let mut by_id: HashMap<Id, ProposedTransactionEdit> = HashMap::new();
+        for edit in events.iter().cloned() {
+            by_id
+                .entry(edit.id.clone())
+                .and_modify(|existing| {
+                    if edit.updated_at >= existing.updated_at {
+                        *existing = edit.clone();
+                    }
+                })
+                .or_insert(edit);
+        }
+        let mut edits: Vec<ProposedTransactionEdit> = by_id.into_values().collect();
+        edits.sort_by(|a, b| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then_with(|| a.id.as_str().cmp(b.id.as_str()))
+        });
+        Ok(edits)
+    }
+
+    async fn append_proposed_transaction_edits(
+        &self,
+        edits: &[ProposedTransactionEdit],
+    ) -> Result<()> {
+        if edits.is_empty() {
+            return Ok(());
+        }
+        self.proposed_transaction_edits
+            .lock()
+            .await
+            .extend(edits.iter().cloned());
         Ok(())
     }
 }

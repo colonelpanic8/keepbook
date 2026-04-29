@@ -4,6 +4,7 @@ import { type BalanceSnapshotType } from '../models/balance.js';
 import { type ConnectionType, type ConnectionConfig } from '../models/connection.js';
 import { type TransactionType } from '../models/transaction.js';
 import { type TransactionAnnotationPatchType } from '../models/transaction-annotation.js';
+import { type ProposedTransactionEditType } from '../models/proposed-transaction-edit.js';
 
 // ---------------------------------------------------------------------------
 // CredentialStore
@@ -66,6 +67,10 @@ export interface Storage {
     accountId: Id,
     patches: TransactionAnnotationPatchType[],
   ): Promise<void>;
+
+  // Proposed transaction edits (append-only queue events)
+  getProposedTransactionEdits(): Promise<ProposedTransactionEditType[]>;
+  appendProposedTransactionEdits(edits: ProposedTransactionEditType[]): Promise<void>;
 }
 
 export interface JsonlCompactionStats {

@@ -31,6 +31,11 @@ import {
   type TransactionAnnotationPatchType,
   type TransactionAnnotationPatchJSON,
 } from '../models/transaction-annotation.js';
+import {
+  ProposedTransactionEdit,
+  type ProposedTransactionEditType,
+  type ProposedTransactionEditJSON,
+} from '../models/proposed-transaction-edit.js';
 import { dedupeTransactionsLastWriteWins } from './dedupe.js';
 import {
   type Storage,
@@ -154,6 +159,10 @@ export class JsonFileStorage implements Storage, CompactionStorage, MetadataBack
 
   private accountsDir(): string {
     return path.join(this.basePath, 'accounts');
+  }
+
+  private proposedTransactionEditsFile(): string {
+    return path.join(this.basePath, 'proposed_transaction_edits.jsonl');
   }
 
   private ensureIdPathSafe(id: Id): void {
@@ -653,6 +662,29 @@ export class JsonFileStorage implements Storage, CompactionStorage, MetadataBack
     const filePath = this.transactionAnnotationsFile(accountId);
     const jsonItems = patches.map(TransactionAnnotationPatch.toJSON);
     await this.appendJsonl(filePath, jsonItems);
+  }
+
+  async getProposedTransactionEdits(): Promise<ProposedTransactionEditType[]> {
+    const filePath = this.proposedTransactionEditsFile();
+    const jsonItems = await this.readJsonl<ProposedTransactionEditJSON>(filePath);
+    const byId = new Map<string, ProposedTransactionEditType>();
+    for (const edit of jsonItems.map(ProposedTransactionEdit.fromJSON)) {
+      const key = edit.id.asStr();
+      const existing = byId.get(key);
+      if (existing === undefined || edit.updated_at.getTime() >= existing.updated_at.getTime()) {
+        byId.set(key, edit);
+      }
+    }
+    return [...byId.values()].sort((a, b) => {
+      const ts = a.created_at.getTime() - b.created_at.getTime();
+      return ts !== 0 ? ts : a.id.asStr().localeCompare(b.id.asStr());
+    });
+  }
+
+  async appendProposedTransactionEdits(edits: ProposedTransactionEditType[]): Promise<void> {
+    if (edits.length === 0) return;
+    const filePath = this.proposedTransactionEditsFile();
+    await this.appendJsonl(filePath, edits.map(ProposedTransactionEdit.toJSON));
   }
 
   async recompactAllJsonl(): Promise<JsonlCompactionStats> {

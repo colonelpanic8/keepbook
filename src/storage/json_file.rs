@@ -12,7 +12,7 @@ use super::{dedupe_transactions_last_write_wins, Storage};
 use crate::credentials::CredentialStore;
 use crate::models::{
     Account, AccountConfig, BalanceSnapshot, Connection, ConnectionConfig, ConnectionState, Id,
-    Transaction, TransactionAnnotation, TransactionAnnotationPatch,
+    ProposedTransactionEdit, Transaction, TransactionAnnotation, TransactionAnnotationPatch,
 };
 use crate::storage::{JsonlCompactionStats, TransactionMetadataBackfillStats};
 
@@ -60,6 +60,7 @@ struct JsonFileStorageCache {
     balance_snapshots: HashMap<Id, CachedRead<Vec<BalanceSnapshot>>>,
     transactions: HashMap<Id, CachedRead<Vec<Transaction>>>,
     transaction_annotations: HashMap<Id, CachedRead<Vec<TransactionAnnotationPatch>>>,
+    proposed_transaction_edits: Option<CachedRead<Vec<ProposedTransactionEdit>>>,
 }
 
 impl JsonFileStorage {
@@ -80,6 +81,10 @@ impl JsonFileStorage {
 
     fn accounts_dir(&self) -> PathBuf {
         self.base_path.join("accounts")
+    }
+
+    fn proposed_transaction_edits_file(&self) -> PathBuf {
+        self.base_path.join("proposed_transaction_edits.jsonl")
     }
 
     fn ensure_id_path_safe(&self, id: &Id) -> Result<()> {
@@ -1192,6 +1197,57 @@ impl Storage for JsonFileStorage {
     ) -> Result<()> {
         let path = self.transaction_annotations_file(account_id)?;
         self.append_jsonl(&path, patches).await?;
+        self.clear_cache();
+        Ok(())
+    }
+
+    async fn get_proposed_transaction_edits(&self) -> Result<Vec<ProposedTransactionEdit>> {
+        let path = self.proposed_transaction_edits_file();
+        let key = Self::fs_cache_key(&path).await?;
+        {
+            let cache = self.cache.lock().expect("storage cache poisoned");
+            if let Some(cached) = &cache.proposed_transaction_edits {
+                if cached.key == key {
+                    return Ok(cached.value.clone());
+                }
+            }
+        }
+
+        let events: Vec<ProposedTransactionEdit> = self.read_jsonl(&path).await?;
+        let mut by_id: HashMap<Id, ProposedTransactionEdit> = HashMap::new();
+        for edit in events {
+            by_id
+                .entry(edit.id.clone())
+                .and_modify(|existing| {
+                    if edit.updated_at >= existing.updated_at {
+                        *existing = edit.clone();
+                    }
+                })
+                .or_insert(edit);
+        }
+        let mut edits: Vec<ProposedTransactionEdit> = by_id.into_values().collect();
+        edits.sort_by(|a, b| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then_with(|| a.id.as_str().cmp(b.id.as_str()))
+        });
+
+        self.cache
+            .lock()
+            .expect("storage cache poisoned")
+            .proposed_transaction_edits = Some(CachedRead {
+            key,
+            value: edits.clone(),
+        });
+        Ok(edits)
+    }
+
+    async fn append_proposed_transaction_edits(
+        &self,
+        edits: &[ProposedTransactionEdit],
+    ) -> Result<()> {
+        let path = self.proposed_transaction_edits_file();
+        self.append_jsonl(&path, edits).await?;
         self.clear_cache();
         Ok(())
     }

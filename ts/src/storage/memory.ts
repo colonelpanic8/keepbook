@@ -8,6 +8,7 @@ import {
 } from '../models/connection.js';
 import { type TransactionType } from '../models/transaction.js';
 import { type TransactionAnnotationPatchType } from '../models/transaction-annotation.js';
+import { type ProposedTransactionEditType } from '../models/proposed-transaction-edit.js';
 import { dedupeTransactionsLastWriteWins } from './dedupe.js';
 import { type Storage, type CredentialStore } from './storage.js';
 
@@ -23,7 +24,11 @@ export class MemoryStorage implements Storage {
   private readonly accountConfigs = new Map<string, AccountConfig>();
   private readonly balances = new Map<string, BalanceSnapshotType[]>();
   private readonly transactions = new Map<string, TransactionType[]>();
-  private readonly transactionAnnotationPatches = new Map<string, TransactionAnnotationPatchType[]>();
+  private readonly transactionAnnotationPatches = new Map<
+    string,
+    TransactionAnnotationPatchType[]
+  >();
+  private readonly proposedTransactionEdits: ProposedTransactionEditType[] = [];
 
   // -----------------------------------------------------------------------
   // Credentials
@@ -207,5 +212,24 @@ export class MemoryStorage implements Storage {
     } else {
       this.transactionAnnotationPatches.set(key, [...patches]);
     }
+  }
+
+  async getProposedTransactionEdits(): Promise<ProposedTransactionEditType[]> {
+    const byId = new Map<string, ProposedTransactionEditType>();
+    for (const edit of this.proposedTransactionEdits) {
+      const key = edit.id.asStr();
+      const existing = byId.get(key);
+      if (existing === undefined || edit.updated_at.getTime() >= existing.updated_at.getTime()) {
+        byId.set(key, edit);
+      }
+    }
+    return [...byId.values()].sort((a, b) => {
+      const ts = a.created_at.getTime() - b.created_at.getTime();
+      return ts !== 0 ? ts : a.id.asStr().localeCompare(b.id.asStr());
+    });
+  }
+
+  async appendProposedTransactionEdits(edits: ProposedTransactionEditType[]): Promise<void> {
+    this.proposedTransactionEdits.push(...edits);
   }
 }
