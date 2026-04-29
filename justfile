@@ -10,6 +10,10 @@ keepbook_tray_cmd := env_var_or_default(
   "KEEPBOOK_TRAY_CMD",
   "cargo run --features tray --bin keepbook-sync-daemon --",
 )
+keepbook_dioxus_desktop_cmd := env_var_or_default(
+  "KEEPBOOK_DIOXUS_DESKTOP_CMD",
+  "dx serve --desktop --package keepbook-dioxus --no-default-features --features desktop",
+)
 
 # Run the development keepbook binary with arbitrary args.
 # Example:
@@ -24,6 +28,10 @@ kb *args:
 #   just run-tray -- --help
 run-tray *args:
     {{keepbook_tray_cmd}} "$@"
+
+# Run the Dioxus desktop app with its integrated tray icon.
+run-dioxus-desktop *args:
+    {{keepbook_dioxus_desktop_cmd}} "$@"
 
 # Build the Dioxus client as an iOS simulator app bundle.
 dioxus-ios-build *args:

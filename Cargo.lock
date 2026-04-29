@@ -3274,6 +3274,7 @@ dependencies = [
  "chrono",
  "dioxus",
  "gloo-net",
+ "image",
  "js-sys",
  "keepbook-server",
  "serde",

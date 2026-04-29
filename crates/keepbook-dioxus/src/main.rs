@@ -8,6 +8,12 @@ use std::path::PathBuf;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::OnceLock;
 
+#[cfg(all(
+    feature = "desktop",
+    not(any(target_os = "ios", target_os = "android"))
+))]
+mod tray;
+
 #[cfg(all(not(target_arch = "wasm32"), target_os = "android"))]
 const ANDROID_PACKAGE_DATA_DIR: &str = "/data/user/0/org.colonelpanic.keepbook.dioxus";
 
@@ -434,11 +440,28 @@ enum LoadState {
 }
 
 fn main() {
+    #[cfg(feature = "desktop")]
+    {
+        dioxus::LaunchBuilder::desktop()
+            .with_cfg(dioxus::desktop::Config::new().with_disable_dma_buf_on_wayland(false))
+            .launch(App);
+    }
+
+    #[cfg(not(feature = "desktop"))]
     dioxus::launch(App);
 }
 
 #[component]
 fn App() -> Element {
+    #[cfg(all(
+        feature = "desktop",
+        not(any(target_os = "ios", target_os = "android"))
+    ))]
+    use_hook(|| {
+        use dioxus::desktop::{window, WindowCloseBehaviour};
+        window().set_close_behavior(WindowCloseBehaviour::WindowHides);
+    });
+
     let mut filter_overrides = use_signal(FilterOverrides::default);
     let mut overview = use_resource(move || {
         let overrides = filter_overrides();
@@ -446,6 +469,10 @@ fn App() -> Element {
     });
 
     rsx! {
+        DesktopTrayBridge {
+            overview: overview.cloned().and_then(Result::ok),
+            onrefresh: move |_| overview.restart(),
+        }
         document::Title { "Keepbook" }
         document::Link { rel: "icon", href: "data:," }
         document::Style { "{APP_CSS}" }
@@ -467,6 +494,31 @@ fn App() -> Element {
             }
         }
     }
+}
+
+#[cfg(all(
+    feature = "desktop",
+    not(any(target_os = "ios", target_os = "android"))
+))]
+#[component]
+fn DesktopTrayBridge(overview: Option<Overview>, onrefresh: EventHandler<()>) -> Element {
+    rsx! {
+        tray::KeepbookTray {
+            overview,
+            onrefresh,
+        }
+    }
+}
+
+#[cfg(not(all(
+    feature = "desktop",
+    not(any(target_os = "ios", target_os = "android"))
+)))]
+#[component]
+fn DesktopTrayBridge(overview: Option<Overview>, onrefresh: EventHandler<()>) -> Element {
+    let _ = overview;
+    let _ = onrefresh;
+    rsx! {}
 }
 
 async fn fetch_overview(overrides: FilterOverrides) -> Result<Overview, String> {
@@ -881,6 +933,10 @@ fn Dashboard(
 
     rsx! {
         div { class: "app-shell",
+            DesktopTrayViewActions {
+                onshowgraphs: move |_| active_view.set(ActiveView::Graphs),
+                onshowsettings: move |_| active_view.set(ActiveView::Settings),
+            }
             aside { class: "{nav_class}",
                 div { class: "nav-title",
                     strong { "Keepbook" }
@@ -978,6 +1034,37 @@ fn Dashboard(
             }
         }
     }
+}
+
+#[cfg(all(
+    feature = "desktop",
+    not(any(target_os = "ios", target_os = "android"))
+))]
+#[component]
+fn DesktopTrayViewActions(
+    onshowgraphs: EventHandler<()>,
+    onshowsettings: EventHandler<()>,
+) -> Element {
+    rsx! {
+        tray::TrayViewActions {
+            onshowgraphs,
+            onshowsettings,
+        }
+    }
+}
+
+#[cfg(not(all(
+    feature = "desktop",
+    not(any(target_os = "ios", target_os = "android"))
+)))]
+#[component]
+fn DesktopTrayViewActions(
+    onshowgraphs: EventHandler<()>,
+    onshowsettings: EventHandler<()>,
+) -> Element {
+    let _ = onshowgraphs;
+    let _ = onshowsettings;
+    rsx! {}
 }
 
 #[component]

@@ -323,6 +323,7 @@
                 pkgs.dbus
                 pkgs.glib
                 pkgs.gtk3
+                pkgs.libappindicator-gtk3
                 pkgs.webkitgtk_4_1
                 pkgs.xdotool
               ];
@@ -333,14 +334,17 @@
               pkgs.glib
               pkgs.gtk3
               pkgs.harfbuzz
+              pkgs.libappindicator-gtk3
               pkgs.libsoup_3
               pkgs.openssl
               pkgs.pango
               pkgs.webkitgtk_4_1
               pkgs.xdotool
+              pkgs.zlib
             ]);
 
             OPENSSL_NO_VENDOR = "1";
+            WEBKIT_DISABLE_DMABUF_RENDERER = "1";
           };
 
           android = pkgs.mkShell (dioxusAndroidEnv
