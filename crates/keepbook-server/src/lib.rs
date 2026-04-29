@@ -251,6 +251,7 @@ impl ApiState {
             &state.config,
             keepbook::app::PreflightOptions {
                 merge_origin_master: true,
+                pull_remote: false,
             },
         )?;
         json_value(())
