@@ -2856,13 +2856,61 @@ fn HistoryPointRow(point: HistoryPoint, currency: String) -> Element {
 }
 
 fn asset_label(asset: &serde_json::Value) -> String {
-    asset
-        .get("symbol")
-        .and_then(|value| value.as_str())
-        .or_else(|| asset.get("currency").and_then(|value| value.as_str()))
-        .or_else(|| asset.get("ticker").and_then(|value| value.as_str()))
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(|| asset.to_string())
+    let Some(obj) = asset.as_object() else {
+        return asset
+            .as_str()
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| asset.to_string());
+    };
+
+    match obj.get("type").and_then(|value| value.as_str()) {
+        Some("currency") => obj
+            .get("iso_code")
+            .or_else(|| obj.get("currency"))
+            .and_then(|value| value.as_str())
+            .map(normalize_currency_code_for_display)
+            .unwrap_or_else(|| "Currency".to_string()),
+        Some("equity") => {
+            let ticker = obj
+                .get("ticker")
+                .or_else(|| obj.get("symbol"))
+                .and_then(|value| value.as_str())
+                .unwrap_or("Equity");
+            match obj.get("exchange").and_then(|value| value.as_str()) {
+                Some(exchange) if !exchange.trim().is_empty() => {
+                    format!("{} ({})", ticker.trim(), exchange.trim())
+                }
+                _ => ticker.trim().to_string(),
+            }
+        }
+        Some("crypto") => {
+            let symbol = obj
+                .get("symbol")
+                .and_then(|value| value.as_str())
+                .unwrap_or("Crypto");
+            match obj.get("network").and_then(|value| value.as_str()) {
+                Some(network) if !network.trim().is_empty() => {
+                    format!("{} ({})", symbol.trim(), network.trim())
+                }
+                _ => symbol.trim().to_string(),
+            }
+        }
+        _ => obj
+            .get("symbol")
+            .and_then(|value| value.as_str())
+            .or_else(|| obj.get("ticker").and_then(|value| value.as_str()))
+            .or_else(|| obj.get("iso_code").and_then(|value| value.as_str()))
+            .or_else(|| obj.get("currency").and_then(|value| value.as_str()))
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| asset.to_string()),
+    }
+}
+
+fn normalize_currency_code_for_display(value: &str) -> String {
+    match value.trim() {
+        "840" => "USD".to_string(),
+        trimmed => trimmed.to_uppercase(),
+    }
 }
 
 fn proposed_patch_summary(patch: &ProposedTransactionEditPatch) -> String {
@@ -3566,6 +3614,26 @@ mod tests {
                 include_latent_capital_gains_tax: Some(false),
             }),
             "include_latent_capital_gains_tax=false"
+        );
+    }
+
+    #[test]
+    fn asset_label_formats_tagged_assets() {
+        assert_eq!(
+            asset_label(&serde_json::json!({"type":"currency","iso_code":"USD"})),
+            "USD"
+        );
+        assert_eq!(
+            asset_label(&serde_json::json!({"type":"currency","iso_code":"840"})),
+            "USD"
+        );
+        assert_eq!(
+            asset_label(&serde_json::json!({"type":"equity","ticker":"AAPL"})),
+            "AAPL"
+        );
+        assert_eq!(
+            asset_label(&serde_json::json!({"type":"crypto","symbol":"ETH","network":"base"})),
+            "ETH (base)"
         );
     }
 
