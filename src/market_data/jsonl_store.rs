@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::hash::Hash;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
@@ -32,11 +33,20 @@ struct CachedRead<T> {
 
 #[derive(Default)]
 struct JsonlMarketDataCache {
-    price_files: HashMap<PathBuf, CachedRead<Vec<PricePoint>>>,
+    price_files: HashMap<PathBuf, CachedRead<CachedPriceFile>>,
     price_dirs: HashMap<PathBuf, CachedRead<Vec<PathBuf>>>,
-    fx_files: HashMap<PathBuf, CachedRead<Vec<FxRatePoint>>>,
+    fx_files: HashMap<PathBuf, CachedRead<CachedFxFile>>,
     fx_dirs: HashMap<PathBuf, CachedRead<Vec<PathBuf>>>,
     asset_index: Option<CachedRead<HashMap<AssetId, AssetRegistryEntry>>>,
+}
+
+type CachedPriceFile = CachedPointFile<PricePoint, PriceKind>;
+type CachedFxFile = CachedPointFile<FxRatePoint, FxRateKind>;
+
+#[derive(Debug, Clone)]
+struct CachedPointFile<T, K> {
+    items: Vec<T>,
+    latest_by_date_kind: HashMap<(NaiveDate, K), T>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, PartialEq, Eq)]
@@ -200,24 +210,51 @@ impl JsonlMarketDataStore {
         });
     }
 
-    fn select_latest_price(
-        &self,
-        mut prices: Vec<PricePoint>,
-        date: NaiveDate,
-        kind: PriceKind,
-    ) -> Option<PricePoint> {
-        prices.retain(|p| p.as_of_date == date && p.kind == kind);
-        prices.into_iter().max_by_key(|p| p.timestamp)
+    fn build_cached_point_file<T, K, S>(
+        mut items: Vec<T>,
+        sort_items: impl FnOnce(&mut [T]),
+        key_for: impl Fn(&T) -> (NaiveDate, K),
+        timestamp_for: impl Fn(&T) -> S,
+    ) -> CachedPointFile<T, K>
+    where
+        T: Clone,
+        K: Copy + Eq + Hash,
+        S: Ord,
+    {
+        sort_items(&mut items);
+        let mut latest_by_date_kind: HashMap<(NaiveDate, K), T> = HashMap::new();
+        for item in &items {
+            let key = key_for(item);
+            match latest_by_date_kind.get(&key) {
+                Some(existing) if timestamp_for(existing) >= timestamp_for(item) => {}
+                _ => {
+                    latest_by_date_kind.insert(key, item.clone());
+                }
+            }
+        }
+
+        CachedPointFile {
+            items,
+            latest_by_date_kind,
+        }
     }
 
-    fn select_latest_fx(
-        &self,
-        mut rates: Vec<FxRatePoint>,
-        date: NaiveDate,
-        kind: FxRateKind,
-    ) -> Option<FxRatePoint> {
-        rates.retain(|r| r.as_of_date == date && r.kind == kind);
-        rates.into_iter().max_by_key(|r| r.timestamp)
+    fn build_cached_price_file(prices: Vec<PricePoint>) -> CachedPriceFile {
+        Self::build_cached_point_file(
+            prices,
+            Self::sort_prices,
+            |price| (price.as_of_date, price.kind),
+            |price| price.timestamp,
+        )
+    }
+
+    fn build_cached_fx_file(rates: Vec<FxRatePoint>) -> CachedFxFile {
+        Self::build_cached_point_file(
+            rates,
+            Self::sort_fx_rates,
+            |rate| (rate.as_of_date, rate.kind),
+            |rate| rate.timestamp,
+        )
     }
 
     async fn read_cached_price_file(&self, path: &Path) -> Result<Vec<PricePoint>> {
@@ -226,14 +263,13 @@ impl JsonlMarketDataStore {
             let cache = self.cache.lock().expect("market data cache poisoned");
             if let Some(cached) = cache.price_files.get(path) {
                 if cached.key == key {
-                    return Ok(cached.value.clone());
+                    return Ok(cached.value.items.clone());
                 }
             }
         }
 
-        let mut prices = self.read_jsonl::<PricePoint>(path).await?;
-        Self::sort_prices(&mut prices);
-        let value = prices.clone();
+        let value = Self::build_cached_price_file(self.read_jsonl::<PricePoint>(path).await?);
+        let prices = value.items.clone();
         self.cache
             .lock()
             .expect("market data cache poisoned")
@@ -242,26 +278,77 @@ impl JsonlMarketDataStore {
         Ok(prices)
     }
 
+    async fn get_cached_price_from_file(
+        &self,
+        path: &Path,
+        date: NaiveDate,
+        kind: PriceKind,
+    ) -> Result<Option<PricePoint>> {
+        let key = Self::fs_cache_key(path).await?;
+        {
+            let cache = self.cache.lock().expect("market data cache poisoned");
+            if let Some(cached) = cache.price_files.get(path) {
+                if cached.key == key {
+                    return Ok(cached.value.latest_by_date_kind.get(&(date, kind)).cloned());
+                }
+            }
+        }
+
+        let value = Self::build_cached_price_file(self.read_jsonl::<PricePoint>(path).await?);
+        let result = value.latest_by_date_kind.get(&(date, kind)).cloned();
+        self.cache
+            .lock()
+            .expect("market data cache poisoned")
+            .price_files
+            .insert(path.to_path_buf(), CachedRead { key, value });
+        Ok(result)
+    }
+
     async fn read_cached_fx_file(&self, path: &Path) -> Result<Vec<FxRatePoint>> {
         let key = Self::fs_cache_key(path).await?;
         {
             let cache = self.cache.lock().expect("market data cache poisoned");
             if let Some(cached) = cache.fx_files.get(path) {
                 if cached.key == key {
-                    return Ok(cached.value.clone());
+                    return Ok(cached.value.items.clone());
                 }
             }
         }
 
-        let mut rates = self.read_jsonl::<FxRatePoint>(path).await?;
-        Self::sort_fx_rates(&mut rates);
-        let value = rates.clone();
+        let value = Self::build_cached_fx_file(self.read_jsonl::<FxRatePoint>(path).await?);
+        let rates = value.items.clone();
         self.cache
             .lock()
             .expect("market data cache poisoned")
             .fx_files
             .insert(path.to_path_buf(), CachedRead { key, value });
         Ok(rates)
+    }
+
+    async fn get_cached_fx_from_file(
+        &self,
+        path: &Path,
+        date: NaiveDate,
+        kind: FxRateKind,
+    ) -> Result<Option<FxRatePoint>> {
+        let key = Self::fs_cache_key(path).await?;
+        {
+            let cache = self.cache.lock().expect("market data cache poisoned");
+            if let Some(cached) = cache.fx_files.get(path) {
+                if cached.key == key {
+                    return Ok(cached.value.latest_by_date_kind.get(&(date, kind)).cloned());
+                }
+            }
+        }
+
+        let value = Self::build_cached_fx_file(self.read_jsonl::<FxRatePoint>(path).await?);
+        let result = value.latest_by_date_kind.get(&(date, kind)).cloned();
+        self.cache
+            .lock()
+            .expect("market data cache poisoned")
+            .fx_files
+            .insert(path.to_path_buf(), CachedRead { key, value });
+        Ok(result)
     }
 
     async fn list_cached_jsonl_files(&self, dir: &Path, is_fx: bool) -> Result<Vec<PathBuf>> {
@@ -352,7 +439,7 @@ impl JsonlMarketDataStore {
                 path.to_path_buf(),
                 CachedRead {
                     key,
-                    value: prices.to_vec(),
+                    value: Self::build_cached_price_file(prices.to_vec()),
                 },
             );
         Ok(())
@@ -368,7 +455,7 @@ impl JsonlMarketDataStore {
                 path.to_path_buf(),
                 CachedRead {
                     key,
-                    value: rates.to_vec(),
+                    value: Self::build_cached_fx_file(rates.to_vec()),
                 },
             );
         Ok(())
@@ -406,8 +493,7 @@ impl MarketDataStore for JsonlMarketDataStore {
         kind: PriceKind,
     ) -> Result<Option<PricePoint>> {
         let path = self.price_file(asset_id, date);
-        let prices = self.read_cached_price_file(&path).await?;
-        Ok(self.select_latest_price(prices, date, kind))
+        self.get_cached_price_from_file(&path, date, kind).await
     }
 
     async fn get_all_prices(&self, asset_id: &AssetId) -> Result<Vec<PricePoint>> {
@@ -460,8 +546,7 @@ impl MarketDataStore for JsonlMarketDataStore {
         kind: FxRateKind,
     ) -> Result<Option<FxRatePoint>> {
         let path = self.fx_file(base, quote, date);
-        let rates = self.read_cached_fx_file(&path).await?;
-        Ok(self.select_latest_fx(rates, date, kind))
+        self.get_cached_fx_from_file(&path, date, kind).await
     }
 
     async fn get_all_fx_rates(&self, base: &str, quote: &str) -> Result<Vec<FxRatePoint>> {
@@ -784,6 +869,99 @@ mod tests {
                 NaiveDate::from_ymd_opt(2024, 4, 8).unwrap(),
             ]
         );
+
+        let _ = fs::remove_dir_all(&base_path).await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn get_price_cache_returns_latest_timestamp_for_date_and_kind() -> Result<()> {
+        let base_path = std::env::temp_dir().join(format!("keepbook-md-{}", Uuid::new_v4()));
+        fs::create_dir_all(&base_path).await?;
+        let store = JsonlMarketDataStore::new(&base_path);
+        let asset_id = AssetId::from_asset(&Asset::equity("AAPL"));
+
+        store
+            .put_prices(&[
+                make_price(
+                    "2024-04-08",
+                    Utc.with_ymd_and_hms(2024, 4, 8, 16, 0, 0).unwrap(),
+                    "190.00",
+                ),
+                make_price(
+                    "2024-04-08",
+                    Utc.with_ymd_and_hms(2024, 4, 8, 20, 0, 0).unwrap(),
+                    "195.00",
+                ),
+            ])
+            .await?;
+
+        let first = store
+            .get_price(
+                &asset_id,
+                NaiveDate::from_ymd_opt(2024, 4, 8).unwrap(),
+                PriceKind::Close,
+            )
+            .await?
+            .expect("price should exist");
+        let second = store
+            .get_price(
+                &asset_id,
+                NaiveDate::from_ymd_opt(2024, 4, 8).unwrap(),
+                PriceKind::Close,
+            )
+            .await?
+            .expect("cached price should exist");
+
+        assert_eq!(first.price, "195.00");
+        assert_eq!(second.price, "195.00");
+
+        let _ = fs::remove_dir_all(&base_path).await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn get_fx_rate_cache_returns_latest_timestamp_for_date_and_kind() -> Result<()> {
+        let base_path = std::env::temp_dir().join(format!("keepbook-md-{}", Uuid::new_v4()));
+        fs::create_dir_all(&base_path).await?;
+        let store = JsonlMarketDataStore::new(&base_path);
+
+        store
+            .put_fx_rates(&[
+                make_fx(
+                    "2024-04-08",
+                    Utc.with_ymd_and_hms(2024, 4, 8, 16, 0, 0).unwrap(),
+                    "0.9200",
+                ),
+                make_fx(
+                    "2024-04-08",
+                    Utc.with_ymd_and_hms(2024, 4, 8, 20, 0, 0).unwrap(),
+                    "0.9300",
+                ),
+            ])
+            .await?;
+
+        let first = store
+            .get_fx_rate(
+                "USD",
+                "EUR",
+                NaiveDate::from_ymd_opt(2024, 4, 8).unwrap(),
+                FxRateKind::Close,
+            )
+            .await?
+            .expect("FX rate should exist");
+        let second = store
+            .get_fx_rate(
+                "USD",
+                "EUR",
+                NaiveDate::from_ymd_opt(2024, 4, 8).unwrap(),
+                FxRateKind::Close,
+            )
+            .await?
+            .expect("cached FX rate should exist");
+
+        assert_eq!(first.rate, "0.9300");
+        assert_eq!(second.rate, "0.9300");
 
         let _ = fs::remove_dir_all(&base_path).await;
         Ok(())
