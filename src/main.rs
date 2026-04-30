@@ -158,6 +158,10 @@ enum Command {
     #[command(subcommand)]
     Import(ImportCommand),
 
+    /// Apply stored rules to existing data
+    #[command(subcommand)]
+    Apply(ApplyCommand),
+
     /// Sync data from connections
     #[command(subcommand)]
     Sync(SyncCommand),
@@ -553,6 +557,24 @@ enum ImportCommand {
     /// Schwab import commands
     #[command(subcommand)]
     Schwab(SchwabImportCommand),
+}
+
+#[derive(Subcommand)]
+enum ApplyCommand {
+    /// Apply transaction annotation rules to existing transactions
+    TransactionRules {
+        /// Rules JSONL file (default: data_dir/transaction_category_rules.jsonl)
+        #[arg(long)]
+        rules_file: Option<PathBuf>,
+
+        /// Show changes without writing annotation patches
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Replace existing annotation fields instead of only filling missing fields
+        #[arg(long)]
+        overwrite: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1178,6 +1200,26 @@ async fn main() -> Result<()> {
                     println!("{}", serde_json::to_string_pretty(&result)?);
                 }
             },
+        },
+
+        Some(Command::Apply(apply_cmd)) => match apply_cmd {
+            ApplyCommand::TransactionRules {
+                rules_file,
+                dry_run,
+                overwrite,
+            } => {
+                let result = app::apply_transaction_annotation_rules(
+                    storage_arc.as_ref(),
+                    &config,
+                    app::ApplyTransactionAnnotationRulesOptions {
+                        rules_path: rules_file,
+                        dry_run,
+                        overwrite,
+                    },
+                )
+                .await?;
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
         },
 
         Some(Command::Sync(sync_cmd)) => match sync_cmd {
