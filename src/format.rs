@@ -1,5 +1,61 @@
 use rust_decimal::{Decimal, RoundingStrategy};
 
+/// Return the common display symbol for a currency identifier when one is
+/// known.
+///
+/// The input can be an ISO 4217 alpha code (`USD`) or a common currency name
+/// (`US Dollar`). Some symbols are shared by multiple currencies; this function
+/// intentionally returns the character users usually expect for display, not a
+/// globally unique currency label.
+pub fn currency_symbol(currency: &str) -> Option<&'static str> {
+    let normalized = currency
+        .trim()
+        .to_ascii_uppercase()
+        .replace(['_', '-'], " ");
+    let collapsed = normalized.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    match collapsed.as_str() {
+        "USD" | "US DOLLAR" | "UNITED STATES DOLLAR" | "DOLLAR" => Some("$"),
+        "AUD" | "AUSTRALIAN DOLLAR" => Some("$"),
+        "CAD" | "CANADIAN DOLLAR" => Some("$"),
+        "NZD" | "NEW ZEALAND DOLLAR" => Some("$"),
+        "SGD" | "SINGAPORE DOLLAR" => Some("$"),
+        "HKD" | "HONG KONG DOLLAR" => Some("$"),
+        "TWD" | "NEW TAIWAN DOLLAR" => Some("$"),
+        "MXN" | "MEXICAN PESO" => Some("$"),
+        "ARS" | "ARGENTINE PESO" => Some("$"),
+        "CLP" | "CHILEAN PESO" => Some("$"),
+        "COP" | "COLOMBIAN PESO" => Some("$"),
+        "BRL" | "BRAZILIAN REAL" => Some("R$"),
+        "EUR" | "EURO" => Some("€"),
+        "GBP" | "POUND" | "POUND STERLING" | "BRITISH POUND" => Some("£"),
+        "JPY" | "JAPANESE YEN" | "YEN" => Some("¥"),
+        "CNY" | "RMB" | "YUAN" | "CHINESE YUAN" | "RENMINBI" => Some("¥"),
+        "KRW" | "SOUTH KOREAN WON" | "WON" => Some("₩"),
+        "INR" | "INDIAN RUPEE" | "RUPEE" => Some("₹"),
+        "RUB" | "RUSSIAN RUBLE" | "RUBLE" => Some("₽"),
+        "TRY" | "TURKISH LIRA" | "LIRA" => Some("₺"),
+        "ILS" | "ISRAELI NEW SHEKEL" | "SHEKEL" => Some("₪"),
+        "PHP" | "PHILIPPINE PESO" => Some("₱"),
+        "THB" | "THAI BAHT" | "BAHT" => Some("฿"),
+        "VND" | "VIETNAMESE DONG" | "DONG" => Some("₫"),
+        "NGN" | "NIGERIAN NAIRA" | "NAIRA" => Some("₦"),
+        "UAH" | "UKRAINIAN HRYVNIA" | "HRYVNIA" => Some("₴"),
+        "KZT" | "KAZAKHSTANI TENGE" | "TENGE" => Some("₸"),
+        "LAK" | "LAO KIP" | "KIP" => Some("₭"),
+        "CRC" | "COSTA RICAN COLON" | "COLON" => Some("₡"),
+        "PYG" | "PARAGUAYAN GUARANI" | "GUARANI" => Some("₲"),
+        "GHS" | "GHANAIAN CEDI" | "CEDI" => Some("₵"),
+        "MNT" | "MONGOLIAN TOGROG" | "TOGROG" | "TUGRIK" => Some("₮"),
+        "AFN" | "AFGHAN AFGHANI" | "AFGHANI" => Some("؋"),
+        "GEL" | "GEORGIAN LARI" | "LARI" => Some("₾"),
+        "AMD" | "ARMENIAN DRAM" | "DRAM" => Some("֏"),
+        "AZN" | "AZERBAIJANI MANAT" | "MANAT" => Some("₼"),
+        "KHR" | "CAMBODIAN RIEL" | "RIEL" => Some("៛"),
+        _ => None,
+    }
+}
+
 /// Format a value denominated in the output/base currency.
 ///
 /// - When `currency_decimals` is set, the value is rounded (half away from zero)
@@ -124,6 +180,15 @@ pub fn format_base_currency_display(
 mod tests {
     use super::*;
     use std::str::FromStr;
+
+    #[test]
+    fn currency_symbol_maps_codes_and_names() {
+        assert_eq!(currency_symbol("USD"), Some("$"));
+        assert_eq!(currency_symbol("us-dollar"), Some("$"));
+        assert_eq!(currency_symbol("Euro"), Some("€"));
+        assert_eq!(currency_symbol("GBP"), Some("£"));
+        assert_eq!(currency_symbol("unknown"), None);
+    }
 
     #[test]
     fn format_base_currency_display_defaults_match_numeric_format() {

@@ -6,9 +6,10 @@ use anyhow::{Context, Result};
 use chrono::{NaiveDate, Utc};
 use rust_decimal::Decimal;
 
-use crate::config::ResolvedConfig;
+use crate::config::{DisplayConfig, ResolvedConfig};
+use crate::format::{currency_symbol, format_base_currency_display};
 use crate::market_data::{MarketDataServiceBuilder, PriceSourceRegistry};
-use crate::models::{Id, TransactionAnnotation};
+use crate::models::{Asset, Id, TransactionAnnotation};
 use crate::storage::Storage;
 
 use super::ignore_rules::{TransactionIgnoreInput, TransactionIgnoreMatcher};
@@ -115,6 +116,29 @@ pub fn list_price_sources(data_dir: &Path) -> Result<Vec<PriceSourceOutput>> {
     Ok(output)
 }
 
+fn format_currency_amount_display(
+    amount: &str,
+    currency: &str,
+    display: &DisplayConfig,
+    symbol_override: Option<&str>,
+) -> Option<String> {
+    let value = Decimal::from_str(amount).ok()?;
+    let currency = currency.trim().to_uppercase();
+    let symbol = symbol_override.or_else(|| currency_symbol(&currency));
+    let formatted = format_base_currency_display(
+        value,
+        display.currency_decimals,
+        display.currency_grouping,
+        symbol,
+        display.currency_fixed_decimals,
+    );
+    Some(if symbol.is_some() {
+        formatted
+    } else {
+        format!("{formatted} {currency}")
+    })
+}
+
 pub async fn list_balances(
     storage: &dyn Storage,
     config: &ResolvedConfig,
@@ -169,13 +193,49 @@ pub async fn list_balances(
                     )
                     .await?;
 
+                    let reporting_currency = config.reporting_currency.to_uppercase();
+                    let reporting_currency_symbol = config
+                        .display
+                        .currency_symbol
+                        .as_deref()
+                        .or_else(|| currency_symbol(&reporting_currency));
+                    let amount_display = match &balance.asset {
+                        Asset::Currency { iso_code } => {
+                            let symbol_override =
+                                if iso_code.eq_ignore_ascii_case(&reporting_currency) {
+                                    reporting_currency_symbol
+                                } else {
+                                    None
+                                };
+                            format_currency_amount_display(
+                                &balance.amount,
+                                iso_code,
+                                &config.display,
+                                symbol_override,
+                            )
+                        }
+                        Asset::Equity { .. } | Asset::Crypto { .. } => None,
+                    };
+                    let value_in_reporting_currency_display =
+                        value_in_reporting_currency.as_deref().and_then(|value| {
+                            format_currency_amount_display(
+                                value,
+                                &reporting_currency,
+                                &config.display,
+                                reporting_currency_symbol,
+                            )
+                        });
+
                     output.push(BalanceOutput {
                         account_id: account_id.to_string(),
                         asset: serde_json::to_value(&balance.asset)?,
                         amount: balance.amount,
+                        amount_display,
                         cost_basis: balance.cost_basis,
                         value_in_reporting_currency,
-                        reporting_currency: config.reporting_currency.to_uppercase(),
+                        value_in_reporting_currency_display,
+                        reporting_currency,
+                        reporting_currency_symbol: reporting_currency_symbol.map(str::to_string),
                         timestamp: snapshot.timestamp.to_rfc3339(),
                     });
                 }

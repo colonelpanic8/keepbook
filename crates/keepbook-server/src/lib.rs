@@ -18,7 +18,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{Local, Utc};
 use keepbook::config::{default_config_path, ResolvedConfig};
-use keepbook::format::format_base_currency_display;
+use keepbook::format::{currency_symbol, format_base_currency_display};
 use keepbook::models::Asset;
 use keepbook::storage::{JsonFileStorage, Storage};
 use rust_decimal::Decimal;
@@ -99,6 +99,7 @@ impl ApiState {
             config_path: state.config_path.display().to_string(),
             data_dir: state.config.data_dir.display().to_string(),
             reporting_currency: state.config.reporting_currency.clone(),
+            reporting_currency_symbol: reporting_currency_symbol(&state.config),
             history_defaults: history_defaults(&state.config),
             filtering: filtering_output(&state.config, &state.config, None),
         }
@@ -157,6 +158,7 @@ impl ApiState {
             config_path: state.config_path.display().to_string(),
             data_dir: state.config.data_dir.display().to_string(),
             reporting_currency: state.config.reporting_currency.clone(),
+            reporting_currency_symbol: reporting_currency_symbol(&state.config),
             history_defaults: history_defaults(&state.config),
             filtering: filtering_output(
                 &state.config,
@@ -588,6 +590,8 @@ pub struct ConfigOutput {
     pub config_path: String,
     pub data_dir: String,
     pub reporting_currency: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reporting_currency_symbol: Option<String>,
     pub history_defaults: HistoryDefaultsOutput,
     pub filtering: FilteringOutput,
 }
@@ -714,6 +718,8 @@ pub struct OverviewOutput {
     pub config_path: String,
     pub data_dir: String,
     pub reporting_currency: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reporting_currency_symbol: Option<String>,
     pub history_defaults: HistoryDefaultsOutput,
     pub filtering: FilteringOutput,
     pub connections: serde_json::Value,
@@ -840,14 +846,13 @@ fn json_value<T: Serialize>(value: T) -> Result<serde_json::Value> {
     serde_json::to_value(value).context("failed to encode keepbook API output")
 }
 
-fn default_currency_symbol(currency: &str) -> Option<&'static str> {
-    match currency.to_ascii_uppercase().as_str() {
-        "USD" => Some("$"),
-        "EUR" => Some("€"),
-        "GBP" => Some("£"),
-        "JPY" => Some("¥"),
-        _ => None,
-    }
+fn reporting_currency_symbol(config: &ResolvedConfig) -> Option<String> {
+    config
+        .display
+        .currency_symbol
+        .as_deref()
+        .or_else(|| currency_symbol(&config.reporting_currency))
+        .map(str::to_string)
 }
 
 fn format_tray_currency(value: &str, currency: &str, config: &ResolvedConfig) -> String {
@@ -856,7 +861,7 @@ fn format_tray_currency(value: &str, currency: &str, config: &ResolvedConfig) ->
         .display
         .currency_symbol
         .as_deref()
-        .or_else(|| default_currency_symbol(currency));
+        .or_else(|| currency_symbol(currency));
     match Decimal::from_str(value) {
         Ok(d) => {
             let formatted = format_base_currency_display(

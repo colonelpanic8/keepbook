@@ -65,7 +65,13 @@ async fn list_balances_falls_back_to_accounts_by_connection_id() -> Result<()> {
         balances[0].value_in_reporting_currency.as_deref(),
         Some("100")
     );
+    assert_eq!(balances[0].amount_display.as_deref(), Some("$100"));
+    assert_eq!(
+        balances[0].value_in_reporting_currency_display.as_deref(),
+        Some("$100")
+    );
     assert_eq!(balances[0].reporting_currency, "USD");
+    assert_eq!(balances[0].reporting_currency_symbol.as_deref(), Some("$"));
 
     Ok(())
 }

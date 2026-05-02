@@ -42,9 +42,15 @@ pub struct BalanceOutput {
     pub asset: serde_json::Value,
     pub amount: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub amount_display: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cost_basis: Option<String>,
     pub value_in_reporting_currency: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value_in_reporting_currency_display: Option<String>,
     pub reporting_currency: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reporting_currency_symbol: Option<String>,
     pub timestamp: String,
 }
 

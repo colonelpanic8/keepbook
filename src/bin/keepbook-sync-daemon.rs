@@ -9,7 +9,7 @@ use chrono::{DateTime, Local, NaiveDate};
 use clap::Parser;
 use keepbook::app;
 use keepbook::config::{default_config_path, ResolvedConfig};
-use keepbook::format::format_base_currency_display;
+use keepbook::format::{currency_symbol, format_base_currency_display};
 use keepbook::storage::{JsonFileStorage, Storage};
 use keepbook::sync::TransactionSyncMode;
 use ksni::menu::*;
@@ -680,16 +680,6 @@ fn local_now_plus(duration: Duration) -> DateTime<Local> {
     }
 }
 
-fn default_currency_symbol(currency: &str) -> Option<&'static str> {
-    match currency.to_ascii_uppercase().as_str() {
-        "USD" => Some("$"),
-        "EUR" => Some("€"),
-        "GBP" => Some("£"),
-        "JPY" => Some("¥"),
-        _ => None,
-    }
-}
-
 fn format_tray_currency(
     value: &str,
     currency: &str,
@@ -701,7 +691,7 @@ fn format_tray_currency(
     let symbol = display
         .currency_symbol
         .as_deref()
-        .or_else(|| default_currency_symbol(currency));
+        .or_else(|| currency_symbol(currency));
     match Decimal::from_str(value) {
         Ok(d) => {
             let formatted = format_base_currency_display(

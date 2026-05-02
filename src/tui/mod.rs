@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::app::{self, HistoryPoint, TransactionOutput};
 use crate::config::ResolvedConfig;
-use crate::format::format_base_currency_display;
+use crate::format::{currency_symbol, format_base_currency_display};
 use crate::storage::Storage;
 
 const LOAD_START_DATE: &str = "1900-01-01";
@@ -1875,7 +1875,11 @@ fn transaction_amount_string(tx: &TransactionOutput, config: &ResolvedConfig) ->
             amount,
             config.display.currency_decimals,
             config.display.currency_grouping,
-            config.display.currency_symbol.as_deref(),
+            config
+                .display
+                .currency_symbol
+                .as_deref()
+                .or_else(|| currency_symbol(&config.reporting_currency)),
             config.display.currency_fixed_decimals,
         )
     } else {
@@ -2010,7 +2014,11 @@ fn transaction_spending_summary_line(app_state: &AppState, config: &ResolvedConf
             summary.total,
             config.display.currency_decimals,
             config.display.currency_grouping,
-            config.display.currency_symbol.as_deref(),
+            config
+                .display
+                .currency_symbol
+                .as_deref()
+                .or_else(|| currency_symbol(&config.reporting_currency)),
             config.display.currency_fixed_decimals,
         );
         parts.push(format!(
