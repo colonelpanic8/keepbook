@@ -484,6 +484,20 @@ small,
   gap: 10px;
 }
 
+.compact-check {
+  align-items: center;
+  color: #62727f;
+  display: inline-flex;
+  font-size: 0.82rem;
+  font-weight: 700;
+  gap: 6px;
+  min-height: 34px;
+}
+
+.compact-check input {
+  margin: 0;
+}
+
 .inline-actions {
   flex-direction: row;
   justify-content: flex-end;

@@ -292,6 +292,16 @@ struct GitSyncOutput {
     branch: String,
 }
 
+#[derive(Clone, Debug, Serialize, PartialEq)]
+struct SyncPricesInput {
+    scope: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target: Option<String>,
+    force: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    quote_staleness_seconds: Option<u64>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 struct NetWorthDataPoint {
     date: String,
@@ -584,6 +594,10 @@ async fn sync_git_repo(input: GitSyncInput) -> Result<GitSyncOutput, String> {
     sync_git_repo_impl(input).await
 }
 
+async fn sync_prices(input: SyncPricesInput) -> Result<serde_json::Value, String> {
+    sync_prices_impl(input).await
+}
+
 async fn fetch_proposed_transaction_edits() -> Result<Vec<ProposedTransactionEdit>, String> {
     fetch_proposed_transaction_edits_impl().await
 }
@@ -674,6 +688,27 @@ async fn sync_git_repo_impl(input: GitSyncInput) -> Result<GitSyncOutput, String
         .json::<GitSyncOutput>()
         .await
         .map_err(|error| format!("Could not decode Git sync result: {error}"))
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn sync_prices_impl(input: SyncPricesInput) -> Result<serde_json::Value, String> {
+    let response = Request::post(&format!("{API_BASE}/api/sync/prices"))
+        .json(&input)
+        .map_err(|error| format!("Could not encode price sync request: {error}"))?
+        .send()
+        .await
+        .map_err(|error| format!("Could not reach keepbook-server at {API_BASE}: {error}"))?;
+
+    if !response.ok() {
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+        return Err(format!("keepbook-server returned HTTP {status}: {text}"));
+    }
+
+    response
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|error| format!("Could not decode price sync result: {error}"))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -769,6 +804,19 @@ async fn sync_git_repo_impl(input: GitSyncInput) -> Result<GitSyncOutput, String
         .await
         .map_err(|error| format!("Sync failed: {error:#}"))?;
     from_native_output(output, "Git sync result")
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn sync_prices_impl(input: SyncPricesInput) -> Result<serde_json::Value, String> {
+    native_api_state()?
+        .sync_prices(keepbook_server::SyncPricesInput {
+            scope: Some(input.scope),
+            target: input.target,
+            force: input.force,
+            quote_staleness_seconds: input.quote_staleness_seconds,
+        })
+        .await
+        .map_err(|error| format!("Price sync failed: {error:#}"))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1000,6 +1048,7 @@ fn Dashboard(
                             balances: overview.balances.clone(),
                             snapshot: overview.snapshot.clone(),
                             currency: overview.reporting_currency.clone(),
+                            onrefresh: move |_| onrefresh.call(()),
                         }
                     },
                     ActiveView::Connections => rsx! {
@@ -2515,17 +2564,70 @@ fn AccountsView(
     balances: Vec<Balance>,
     snapshot: PortfolioSnapshot,
     currency: String,
+    onrefresh: EventHandler<()>,
 ) -> Element {
+    let mut price_busy = use_signal(|| false);
+    let mut force_prices = use_signal(|| false);
+    let mut price_status = use_signal(String::new);
     let virtual_accounts = virtual_account_summaries(&snapshot);
     let account_count = accounts.len() + virtual_accounts.len();
     let account_summaries = snapshot.by_account.clone();
     let _ = balances;
+    let is_price_busy = price_busy();
+    let price_status_text = price_status();
 
     rsx! {
         section { class: "panel",
             div { class: "panel-header",
-                h2 { "Accounts" }
-                span { "{account_count}" }
+                div { class: "panel-title",
+                    h2 { "Accounts" }
+                    span { "{account_count}" }
+                }
+                div { class: "settings-actions inline-actions",
+                    label { class: "compact-check",
+                        input {
+                            r#type: "checkbox",
+                            checked: force_prices(),
+                            disabled: is_price_busy,
+                            onchange: move |event| force_prices.set(event.checked())
+                        }
+                        span { "Force prices" }
+                    }
+                    button {
+                        class: "control-button",
+                        disabled: is_price_busy,
+                        onclick: move |_| {
+                            price_busy.set(true);
+                            let input = SyncPricesInput {
+                                scope: "all".to_string(),
+                                target: None,
+                                force: force_prices(),
+                                quote_staleness_seconds: None,
+                            };
+                            price_status.set(if input.force {
+                                "Refreshing all prices...".to_string()
+                            } else {
+                                "Refreshing stale prices...".to_string()
+                            });
+                            spawn(async move {
+                                match sync_prices(input).await {
+                                    Ok(result) => {
+                                        price_status.set(price_sync_result_summary(&result));
+                                        onrefresh.call(());
+                                    }
+                                    Err(error) => {
+                                        price_status.set(format!("Price sync failed: {error}"));
+                                    }
+                                }
+                                price_busy.set(false);
+                            });
+                        },
+                        if is_price_busy { "Refreshing" } else { "Sync prices" }
+                    }
+                }
+            }
+            if !price_status_text.is_empty() {
+                p { class: "settings-status", "{price_status_text}" }
             }
             div { class: "group-list",
                 if !virtual_accounts.is_empty() {
@@ -2713,6 +2815,30 @@ fn ConnectionsView(connections: Vec<Connection>) -> Element {
                 }
             }
         }
+    }
+}
+
+fn price_sync_result_summary(result: &serde_json::Value) -> String {
+    let Some(refresh) = result.get("result") else {
+        return "Price sync finished.".to_string();
+    };
+    let fetched = refresh
+        .get("fetched")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+    let skipped = refresh
+        .get("skipped")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+    let failed = refresh
+        .get("failed_count")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+
+    if failed == 0 {
+        format!("Price sync complete: {fetched} fetched, {skipped} skipped.")
+    } else {
+        format!("Price sync complete: {fetched} fetched, {skipped} skipped, {failed} failed.")
     }
 }
 

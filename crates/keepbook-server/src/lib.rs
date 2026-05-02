@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 #[cfg(feature = "http")]
@@ -325,6 +326,41 @@ impl ApiState {
             branch,
         })
     }
+
+    pub async fn sync_prices(&self, input: SyncPricesInput) -> Result<serde_json::Value> {
+        let snapshot = self.snapshot().await;
+        let target = input
+            .target
+            .as_deref()
+            .map(str::trim)
+            .filter(|target| !target.is_empty());
+        let scope_name = input.scope.as_deref().unwrap_or("all").trim();
+        let scope = match scope_name {
+            "" | "all" => keepbook::app::SyncPricesScopeArg::All,
+            "connection" => {
+                let Some(target) = target else {
+                    anyhow::bail!("price sync connection scope requires target");
+                };
+                keepbook::app::SyncPricesScopeArg::Connection(Some(target))
+            }
+            "account" => {
+                let Some(target) = target else {
+                    anyhow::bail!("price sync account scope requires target");
+                };
+                keepbook::app::SyncPricesScopeArg::Account(Some(target))
+            }
+            other => anyhow::bail!("unknown price sync scope: {other}"),
+        };
+
+        keepbook::app::sync_prices(
+            snapshot.storage,
+            &snapshot.config,
+            scope,
+            input.force,
+            input.quote_staleness_seconds.map(Duration::from_secs),
+        )
+        .await
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -409,6 +445,18 @@ pub struct GitSyncOutput {
     pub data_dir: String,
     pub remote_url: String,
     pub branch: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SyncPricesInput {
+    #[serde(default)]
+    pub scope: Option<String>,
+    #[serde(default)]
+    pub target: Option<String>,
+    #[serde(default)]
+    pub force: bool,
+    #[serde(default)]
+    pub quote_staleness_seconds: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -595,6 +643,7 @@ pub fn router(state: ApiState) -> Router {
             get(git_settings).put(save_git_settings),
         )
         .route("/api/git/sync", post(sync_git_repo))
+        .route("/api/sync/prices", post(sync_prices))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(state)
@@ -723,6 +772,14 @@ async fn sync_git_repo(
     Json(input): Json<GitSyncInput>,
 ) -> Result<Json<GitSyncOutput>, ApiError> {
     Ok(Json(state.sync_git_repo(input).await?))
+}
+
+#[cfg(feature = "http")]
+async fn sync_prices(
+    State(state): State<ApiState>,
+    Json(input): Json<SyncPricesInput>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    Ok(Json(state.sync_prices(input).await?))
 }
 
 fn load_config_doc(config_path: &Path) -> Result<DocumentMut> {
