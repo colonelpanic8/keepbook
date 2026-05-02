@@ -3646,7 +3646,7 @@ dependencies = [
 
 [[package]]
 name = "keepbook"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "age",
  "anyhow",
@@ -3685,7 +3685,7 @@ dependencies = [
 
 [[package]]
 name = "keepbook-dioxus"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "chrono",
  "dioxus",
@@ -3703,7 +3703,7 @@ dependencies = [
 
 [[package]]
 name = "keepbook-server"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "anyhow",
  "axum",
