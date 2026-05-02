@@ -605,6 +605,10 @@ fn App() -> Element {
             onrefresh: move |_| overview.restart(),
         }
         document::Title { "Keepbook" }
+        document::Meta {
+            name: "viewport",
+            content: "width=device-width, initial-scale=1, viewport-fit=cover",
+        }
         document::Link { rel: "icon", href: "data:," }
         document::Style { "{APP_CSS}" }
         document::Script { "{SSH_KEY_FILE_PICKER_BRIDGE_JS}" }
