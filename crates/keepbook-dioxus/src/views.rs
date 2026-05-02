@@ -285,6 +285,14 @@ fn Dashboard(
                     }
                 }
             }
+            if nav_open() {
+                button {
+                    class: "nav-backdrop",
+                    aria_label: "Close menu",
+                    title: "Close menu",
+                    onclick: move |_| nav_open.set(false),
+                }
+            }
             div { class: "workspace",
                 header { class: "topbar",
                     button {
@@ -299,7 +307,7 @@ fn Dashboard(
                         h1 { "{active.label()}" }
                     }
                     button {
-                        class: "icon-button",
+                        class: "topbar-button",
                         title: "Refresh",
                         onclick: move |_| onrefresh.call(()),
                         "Refresh"
