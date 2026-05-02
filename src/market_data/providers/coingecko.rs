@@ -198,7 +198,7 @@ impl CoinGeckoPriceSource {
             .header("Accept", "application/json")
             .header(
                 "User-Agent",
-                "keepbook/0.1.1 (https://github.com/keepbook/keepbook)",
+                "keepbook/0.2.0 (https://github.com/keepbook/keepbook)",
             )
             .send()
             .await?;
@@ -300,7 +300,7 @@ impl CryptoPriceSource for CoinGeckoPriceSource {
             .header("Accept", "application/json")
             .header(
                 "User-Agent",
-                "keepbook/0.1.1 (https://github.com/keepbook/keepbook)",
+                "keepbook/0.2.0 (https://github.com/keepbook/keepbook)",
             )
             .send()
             .await?;

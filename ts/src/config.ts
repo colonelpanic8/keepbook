@@ -131,6 +131,20 @@ export interface IgnoreConfig {
   transaction_rules: TransactionIgnoreRule[];
 }
 
+export interface AiOpenAiConfig {
+  /** Model used for transaction rule suggestions. */
+  model: string;
+  /** Environment variable that contains the API key. Defaults to OPENAI_API_KEY. */
+  api_key_env?: string;
+  /** Optional credential-store config exposing an `api_key` field. */
+  credentials?: Record<string, unknown>;
+}
+
+export interface AiConfig {
+  /** OpenAI Responses API settings. */
+  openai: AiOpenAiConfig;
+}
+
 export interface Config {
   /** Optional path to the data directory. */
   data_dir?: string;
@@ -150,6 +164,8 @@ export interface Config {
   portfolio: PortfolioConfig;
   /** Global ignore rules. */
   ignore: IgnoreConfig;
+  /** AI assistant settings. */
+  ai: AiConfig;
   /** Git integration settings. */
   git: GitConfig;
 }
@@ -173,6 +189,8 @@ export interface ResolvedConfig {
   portfolio: PortfolioConfig;
   /** Global ignore rules. */
   ignore: IgnoreConfig;
+  /** AI assistant settings. */
+  ai: AiConfig;
   /** Git integration settings. */
   git: GitConfig;
 }
@@ -228,6 +246,12 @@ export const DEFAULT_IGNORE_CONFIG: IgnoreConfig = {
   transaction_rules: [],
 };
 
+export const DEFAULT_AI_CONFIG: AiConfig = {
+  openai: {
+    model: 'gpt-5.5',
+  },
+};
+
 export const DEFAULT_CONFIG: Config = {
   data_dir: undefined,
   reporting_currency: 'USD',
@@ -248,6 +272,9 @@ export const DEFAULT_CONFIG: Config = {
   },
   ignore: {
     transaction_rules: [...DEFAULT_IGNORE_CONFIG.transaction_rules],
+  },
+  ai: {
+    openai: { ...DEFAULT_AI_CONFIG.openai },
   },
   git: { ...DEFAULT_GIT_CONFIG },
 };
@@ -274,6 +301,7 @@ export function parseConfig(tomlStr: string): Config {
   const spendingRaw = (raw.spending ?? {}) as Record<string, unknown>;
   const portfolioRaw = (raw.portfolio ?? {}) as Record<string, unknown>;
   const ignoreRaw = (raw.ignore ?? {}) as Record<string, unknown>;
+  const aiRaw = (raw.ai ?? {}) as Record<string, unknown>;
   const gitRaw = (raw.git ?? {}) as Record<string, unknown>;
   const displayRaw = (raw.display ?? {}) as Record<string, unknown>;
 
@@ -432,6 +460,25 @@ export function parseConfig(tomlStr: string): Config {
       : [],
   };
 
+  const openAiRaw = (aiRaw.openai ?? {}) as Record<string, unknown>;
+  const ai: AiConfig = {
+    openai: {
+      model:
+        typeof openAiRaw.model === 'string' && openAiRaw.model.trim().length > 0
+          ? openAiRaw.model.trim()
+          : DEFAULT_AI_CONFIG.openai.model,
+      ...(typeof openAiRaw.api_key_env === 'string' && openAiRaw.api_key_env.trim().length > 0
+        ? { api_key_env: openAiRaw.api_key_env.trim() }
+        : {}),
+      ...(openAiRaw.credentials !== undefined &&
+      openAiRaw.credentials !== null &&
+      typeof openAiRaw.credentials === 'object' &&
+      !Array.isArray(openAiRaw.credentials)
+        ? { credentials: openAiRaw.credentials as Record<string, unknown> }
+        : {}),
+    },
+  };
+
   const config: Config = {
     reporting_currency:
       typeof raw.reporting_currency === 'string'
@@ -444,6 +491,7 @@ export function parseConfig(tomlStr: string): Config {
     spending,
     portfolio,
     ignore,
+    ai,
     git,
   };
 

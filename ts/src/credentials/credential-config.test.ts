@@ -107,6 +107,9 @@ describe('CredentialConfig JSON round-trip', () => {
 
     expect(parsed).toEqual(config);
     expect(parsed.backend).toBe('pass');
+    if (parsed.backend !== 'pass') {
+      throw new Error(`expected pass config, got ${parsed.backend}`);
+    }
     expect(parsed.path).toBe('finance/coinbase-api');
     expect(parsed.fields).toEqual({
       key_name: 'key-name',

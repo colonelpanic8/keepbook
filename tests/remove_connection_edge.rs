@@ -21,6 +21,7 @@ fn resolved_config(data_dir: &Path) -> ResolvedConfig {
         spending: SpendingConfig::default(),
         portfolio: keepbook::config::PortfolioConfig::default(),
         ignore: IgnoreConfig::default(),
+        ai: keepbook::config::AiConfig::default(),
         git: GitConfig::default(),
     }
 }

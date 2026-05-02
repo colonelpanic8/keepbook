@@ -52,6 +52,7 @@ function makeConfig(overrides?: Partial<ResolvedConfig>): ResolvedConfig {
       latent_capital_gains_tax: { enabled: false, account_name: 'Latent Capital Gains Tax' },
     },
     ignore: { transaction_rules: [] },
+    ai: { openai: { model: 'gpt-5.5' } },
     git: {
       auto_commit: false,
       auto_push: false,

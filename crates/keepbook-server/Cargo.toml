@@ -1,6 +1,6 @@
 [package]
 name = "keepbook-server"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "HTTP API server for keepbook clients"
 license = "MIT OR Apache-2.0"
@@ -43,6 +43,8 @@ keepbook = { path = "../..", default-features = false, features = [
   "staleness",
   "sync",
 ] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "gzip", "deflate", "brotli"] }
+secrecy = "0.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["sync"] }

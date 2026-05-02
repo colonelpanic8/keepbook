@@ -37,6 +37,7 @@ async fn portfolio_snapshot_offline_uses_cached_quote() -> Result<()> {
         spending: SpendingConfig::default(),
         portfolio: keepbook::config::PortfolioConfig::default(),
         ignore: IgnoreConfig::default(),
+        ai: keepbook::config::AiConfig::default(),
         git: GitConfig::default(),
     };
 

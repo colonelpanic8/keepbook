@@ -16,6 +16,8 @@ export {
   GitConfig,
   HistoryConfig,
   SpendingConfig,
+  AiConfig,
+  AiOpenAiConfig,
   parseConfig,
   resolveDataDir,
   DEFAULT_CONFIG,
@@ -23,6 +25,7 @@ export {
   DEFAULT_GIT_CONFIG,
   DEFAULT_HISTORY_CONFIG,
   DEFAULT_SPENDING_CONFIG,
+  DEFAULT_AI_CONFIG,
 } from './config.js';
 export {
   StalenessCheck,
@@ -143,6 +146,7 @@ export {
   FxRateRouter,
 } from './market-data/sources.js';
 export { MarketDataService } from './market-data/service.js';
+export { KEEPBOOK_MARKET_DATA_USER_AGENT } from './market-data/user-agent.js';
 
 // ---------------------------------------------------------------------------
 // Credentials

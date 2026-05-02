@@ -389,6 +389,46 @@ struct SyncPricesInput {
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
+struct AiRuleTransactionInput {
+    id: String,
+    account_id: String,
+    account_name: String,
+    timestamp: String,
+    description: String,
+    amount: String,
+    status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    category: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    subcategory: Option<String>,
+    ignored_from_spending: bool,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq)]
+struct AiRuleSuggestionInput {
+    prompt: String,
+    transactions: Vec<AiRuleTransactionInput>,
+    existing_categories: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+struct AiRuleSuggestionsOutput {
+    model: String,
+    selected_transaction_count: usize,
+    suggestions: Vec<AiRuleToolCallOutput>,
+    #[serde(default)]
+    message: Option<String>,
+    #[serde(default)]
+    response_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+struct AiRuleToolCallOutput {
+    name: String,
+    arguments: serde_json::Value,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq)]
 struct SetTransactionCategoryInput {
     account_id: String,
     transaction_id: String,
@@ -764,6 +804,10 @@ async fn sync_prices(input: SyncPricesInput) -> Result<serde_json::Value, String
     sync_prices_impl(input).await
 }
 
+async fn suggest_ai_rules(input: AiRuleSuggestionInput) -> Result<AiRuleSuggestionsOutput, String> {
+    suggest_ai_rules_impl(input).await
+}
+
 async fn set_transaction_category(input: SetTransactionCategoryInput) -> Result<(), String> {
     set_transaction_category_impl(input).await
 }
@@ -945,6 +989,29 @@ async fn sync_prices_impl(input: SyncPricesInput) -> Result<serde_json::Value, S
 }
 
 #[cfg(target_arch = "wasm32")]
+async fn suggest_ai_rules_impl(
+    input: AiRuleSuggestionInput,
+) -> Result<AiRuleSuggestionsOutput, String> {
+    let response = Request::post(&format!("{API_BASE}/api/ai/rules/suggest"))
+        .json(&input)
+        .map_err(|error| format!("Could not encode AI rule request: {error}"))?
+        .send()
+        .await
+        .map_err(|error| format!("Could not reach keepbook-server at {API_BASE}: {error}"))?;
+
+    if !response.ok() {
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+        return Err(format!("keepbook-server returned HTTP {status}: {text}"));
+    }
+
+    response
+        .json::<AiRuleSuggestionsOutput>()
+        .await
+        .map_err(|error| format!("Could not decode AI rule suggestions: {error}"))
+}
+
+#[cfg(target_arch = "wasm32")]
 async fn set_transaction_category_impl(input: SetTransactionCategoryInput) -> Result<(), String> {
     let response = Request::post(&format!("{API_BASE}/api/transactions/category"))
         .json(&input)
@@ -1102,6 +1169,36 @@ async fn sync_prices_impl(input: SyncPricesInput) -> Result<serde_json::Value, S
         })
         .await
         .map_err(|error| format!("Price sync failed: {error:#}"))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn suggest_ai_rules_impl(
+    input: AiRuleSuggestionInput,
+) -> Result<AiRuleSuggestionsOutput, String> {
+    let output = native_api_state()?
+        .suggest_ai_rules(keepbook_server::AiRuleSuggestionInput {
+            prompt: input.prompt,
+            transactions: input
+                .transactions
+                .into_iter()
+                .map(|transaction| keepbook_server::AiRuleTransactionInput {
+                    id: transaction.id,
+                    account_id: transaction.account_id,
+                    account_name: transaction.account_name,
+                    timestamp: transaction.timestamp,
+                    description: transaction.description,
+                    amount: transaction.amount,
+                    status: transaction.status,
+                    category: transaction.category,
+                    subcategory: transaction.subcategory,
+                    ignored_from_spending: transaction.ignored_from_spending,
+                })
+                .collect(),
+            existing_categories: input.existing_categories,
+        })
+        .await
+        .map_err(|error| format!("AI rule suggestion failed: {error:#}"))?;
+    from_native_output(output, "AI rule suggestions")
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1426,6 +1523,11 @@ fn SpendingView(currency: String) -> Element {
     let mut transaction_sort_field = use_signal(|| TransactionSortField::Date);
     let mut transaction_sort_direction = use_signal(|| SortDirection::Desc);
     let mut show_ignored_transactions = use_signal(|| false);
+    let mut transaction_title_filter = use_signal(String::new);
+    let mut selected_transaction_keys = use_signal(HashSet::<String>::new);
+    let mut ai_prompt = use_signal(String::new);
+    let mut ai_result = use_signal(|| None::<AiRuleSuggestionsOutput>);
+    let mut ai_status = use_signal(|| None::<String>);
     let mut category_update_status = use_signal(|| None::<String>);
     let spending = use_resource({
         let currency = currency.clone();
@@ -1454,6 +1556,8 @@ fn SpendingView(currency: String) -> Element {
     let selected_sort_field = transaction_sort_field();
     let selected_sort_direction = transaction_sort_direction();
     let show_ignored = show_ignored_transactions();
+    let title_filter = transaction_title_filter();
+    let selected_keys = selected_transaction_keys();
     let state = spending.cloned();
     let loaded = match &state {
         Some(Ok(data)) => Some(data),
@@ -1485,12 +1589,18 @@ fn SpendingView(currency: String) -> Element {
             filtered_transactions(
                 &data.transactions,
                 selected.as_deref(),
+                &title_filter,
                 selected_sort_field,
                 selected_sort_direction,
                 show_ignored,
             )
         })
         .unwrap_or_default();
+    let selected_ai_transactions = filtered_transactions
+        .iter()
+        .filter(|transaction| selected_keys.contains(&transaction_key(transaction)))
+        .map(ai_rule_transaction_input)
+        .collect::<Vec<_>>();
     let page_size = 100usize;
     let page_count = filtered_transactions.len().max(1).div_ceil(page_size);
     let current_page = transaction_page().min(page_count.saturating_sub(1));
@@ -1679,6 +1789,8 @@ fn SpendingView(currency: String) -> Element {
                         sort_field: selected_sort_field,
                         sort_direction: selected_sort_direction,
                         show_ignored,
+                        title_filter: title_filter.clone(),
+                        selected_keys: selected_keys.clone(),
                         page: current_page,
                         page_count,
                         category_options: category_options.clone(),
@@ -1694,11 +1806,70 @@ fn SpendingView(currency: String) -> Element {
                             transaction_sort_direction.set(direction);
                             transaction_page.set(0);
                         },
+                        ontitlefilterchange: move |value| {
+                            transaction_title_filter.set(value);
+                            transaction_page.set(0);
+                        },
+                        ontoggleselection: move |key: String| {
+                            let mut next = selected_transaction_keys();
+                            if !next.insert(key.clone()) {
+                                next.remove(&key);
+                            }
+                            selected_transaction_keys.set(next);
+                        },
+                        onselectpage: move |_| {
+                            let mut next = selected_transaction_keys();
+                            for transaction in &page_transactions {
+                                next.insert(transaction_key(transaction));
+                            }
+                            selected_transaction_keys.set(next);
+                        },
+                        onclearselection: move |_| selected_transaction_keys.set(HashSet::new()),
                         onprev: move |_| transaction_page.set(current_page.saturating_sub(1)),
                         onnext: move |_| {
                             if current_page + 1 < page_count {
                                 transaction_page.set(current_page + 1);
                             }
+                        },
+                        ai_prompt: ai_prompt(),
+                        ai_status: ai_status(),
+                        ai_result: ai_result(),
+                        onpromptchange: move |value| ai_prompt.set(value),
+                        onairulesubmit: move |_| {
+                            let prompt = ai_prompt().trim().to_string();
+                            let transactions = selected_ai_transactions.clone();
+                            let existing_categories = category_options.clone();
+                            ai_result.set(None);
+                            if prompt.is_empty() {
+                                ai_status.set(Some("Enter a prompt for the rule assistant.".to_string()));
+                                return;
+                            }
+                            if transactions.is_empty() {
+                                ai_status.set(Some("Select at least one matching transaction.".to_string()));
+                                return;
+                            }
+                            ai_status.set(Some("Requesting AI rule suggestions...".to_string()));
+                            spawn({
+                                let mut ai_status = ai_status;
+                                let mut ai_result = ai_result;
+                                async move {
+                                    match suggest_ai_rules(AiRuleSuggestionInput {
+                                        prompt,
+                                        transactions,
+                                        existing_categories,
+                                    }).await {
+                                        Ok(output) => {
+                                            ai_status.set(Some(format!(
+                                                "Received {} suggestion(s) from {}.",
+                                                output.suggestions.len(),
+                                                output.model
+                                            )));
+                                            ai_result.set(Some(output));
+                                        }
+                                        Err(error) => ai_status.set(Some(error)),
+                                    }
+                                }
+                            });
                         },
                         oncategorysave: move |input: SetTransactionCategoryInput| {
                             category_update_status.set(Some("Saving category...".to_string()));
@@ -1816,16 +1987,29 @@ fn TransactionList(
     sort_field: TransactionSortField,
     sort_direction: SortDirection,
     show_ignored: bool,
+    title_filter: String,
+    selected_keys: HashSet<String>,
     page: usize,
     page_count: usize,
     category_options: Vec<String>,
     onshowignoredchange: EventHandler<bool>,
     onsortfieldchange: EventHandler<TransactionSortField>,
     onsortdirectionchange: EventHandler<SortDirection>,
+    ontitlefilterchange: EventHandler<String>,
+    ontoggleselection: EventHandler<String>,
+    onselectpage: EventHandler<MouseEvent>,
+    onclearselection: EventHandler<MouseEvent>,
     onprev: EventHandler<MouseEvent>,
     onnext: EventHandler<MouseEvent>,
+    ai_prompt: String,
+    ai_status: Option<String>,
+    ai_result: Option<AiRuleSuggestionsOutput>,
+    onpromptchange: EventHandler<String>,
+    onairulesubmit: EventHandler<MouseEvent>,
     oncategorysave: EventHandler<SetTransactionCategoryInput>,
 ) -> Element {
+    let selected_count = selected_keys.len();
+    let has_transactions = !transactions.is_empty();
     rsx! {
         div { class: "transaction-panel",
             div { class: "panel-header transaction-header",
@@ -1852,6 +2036,13 @@ fn TransactionList(
                 }
             }
             div { class: "transaction-controls",
+                input {
+                    class: "transaction-search-input",
+                    r#type: "search",
+                    value: "{title_filter}",
+                    placeholder: "Filter titles",
+                    oninput: move |event| ontitlefilterchange.call(event.value())
+                }
                 label { class: "compact-check",
                     input {
                         r#type: "checkbox",
@@ -1860,8 +2051,46 @@ fn TransactionList(
                     }
                     span { "Show ignored" }
                 }
+                button {
+                    class: "control-button",
+                    onclick: move |event| onselectpage.call(event),
+                    disabled: !has_transactions,
+                    "Select Page"
+                }
+                button {
+                    class: "control-button",
+                    onclick: move |event| onclearselection.call(event),
+                    disabled: selected_count == 0,
+                    "Clear"
+                }
             }
-            if transactions.is_empty() {
+            div { class: "ai-rule-panel",
+                div { class: "ai-rule-copy",
+                    strong { "AI rule assistant" }
+                    small { "{selected_count} selected" }
+                }
+                textarea {
+                    class: "ai-rule-prompt",
+                    value: "{ai_prompt}",
+                    placeholder: "Ask for a categorization, ignore, or rename rule for the selected transactions.",
+                    oninput: move |event| onpromptchange.call(event.value())
+                }
+                div { class: "ai-rule-actions",
+                    button {
+                        class: "control-button selected",
+                        onclick: move |event| onairulesubmit.call(event),
+                        disabled: selected_count == 0 || ai_prompt.trim().is_empty(),
+                        "Ask AI"
+                    }
+                    if let Some(status) = ai_status.clone() {
+                        span { class: "ai-rule-status", "{status}" }
+                    }
+                }
+                if let Some(result) = ai_result.clone() {
+                    AiRuleSuggestions { result }
+                }
+            }
+            if !has_transactions {
                 div { class: "chart-empty transaction-empty",
                     strong { "No matching transactions" }
                     small { "Select another category or range." }
@@ -1869,6 +2098,7 @@ fn TransactionList(
             } else {
                 div { class: "data-table transaction-table",
                     div { class: "table-head",
+                        span { "" }
                         TransactionSortHeader {
                             label: "Date",
                             field: TransactionSortField::Date,
@@ -1910,11 +2140,18 @@ fn TransactionList(
                             onsortdirectionchange,
                         }
                     }
-                    for tx in transactions {
+                    for tx in transactions.clone() {
                         div {
                             key: "{transaction_key(&tx)}",
                             class: "{transaction_row_class(&tx)}",
                             title: if tx.ignored_from_spending { "Not counted in spending totals" } else { "" },
+                            label { class: "transaction-select-cell",
+                                input {
+                                    r#type: "checkbox",
+                                    checked: selected_keys.contains(&transaction_key(&tx)),
+                                    onchange: move |_| ontoggleselection.call(transaction_key(&tx))
+                                }
+                            }
                             span { "{transaction_date(&tx)}" }
                             strong { "{transaction_description(&tx)}" }
                             span { class: "transaction-category-cell",
@@ -1951,6 +2188,23 @@ fn TransactionList(
                         onclick: move |event| onnext.call(event),
                         "Next"
                     }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn AiRuleSuggestions(result: AiRuleSuggestionsOutput) -> Element {
+    rsx! {
+        div { class: "ai-rule-suggestions",
+            if let Some(message) = result.message.clone() {
+                p { class: "ai-rule-message", "{message}" }
+            }
+            for suggestion in result.suggestions {
+                div { class: "ai-rule-suggestion",
+                    strong { "{ai_tool_label(&suggestion.name)}" }
+                    pre { "{format_json_value(&suggestion.arguments)}" }
                 }
             }
         }
@@ -2110,14 +2364,23 @@ fn transaction_category_options(
 fn filtered_transactions(
     transactions: &[Transaction],
     category: Option<&str>,
+    title_filter: &str,
     sort_field: TransactionSortField,
     sort_direction: SortDirection,
     show_ignored: bool,
 ) -> Vec<Transaction> {
+    let normalized_title_filter = title_filter.trim().to_lowercase();
     let mut filtered = transactions
         .iter()
         .filter(|transaction| {
             if transaction.ignored_from_spending && !show_ignored {
+                return false;
+            }
+            if !normalized_title_filter.is_empty()
+                && !transaction_description(transaction)
+                    .to_lowercase()
+                    .contains(&normalized_title_filter)
+            {
                 return false;
             }
             category
@@ -2165,6 +2428,34 @@ fn compare_transactions(
         .then_with(|| b.timestamp.cmp(&a.timestamp))
         .then_with(|| a.account_name.cmp(&b.account_name))
         .then_with(|| a.id.cmp(&b.id))
+}
+
+fn ai_rule_transaction_input(transaction: &Transaction) -> AiRuleTransactionInput {
+    AiRuleTransactionInput {
+        id: transaction.id.clone(),
+        account_id: transaction.account_id.clone(),
+        account_name: transaction.account_name.clone(),
+        timestamp: transaction.timestamp.clone(),
+        description: transaction_description(transaction),
+        amount: transaction.amount.clone(),
+        status: transaction.status.clone(),
+        category: transaction_category_value(transaction),
+        subcategory: transaction_subcategory(transaction),
+        ignored_from_spending: transaction.ignored_from_spending,
+    }
+}
+
+fn ai_tool_label(name: &str) -> &'static str {
+    match name {
+        "propose_categorization_rule" => "Categorization rule",
+        "propose_ignore_rule" => "Ignore rule",
+        "propose_rename_rule" => "Rename rule",
+        _ => "Tool call",
+    }
+}
+
+fn format_json_value(value: &serde_json::Value) -> String {
+    serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
 }
 
 fn default_transaction_sort_direction(field: TransactionSortField) -> SortDirection {
@@ -2332,6 +2623,15 @@ fn transaction_category(transaction: &Transaction) -> String {
         .or_else(|| transaction.category.clone())
         .unwrap_or_default();
     normalize_spending_category_key(&category)
+}
+
+fn transaction_category_value(transaction: &Transaction) -> Option<String> {
+    let category = transaction_category(transaction);
+    if category == "Uncategorized" {
+        None
+    } else {
+        Some(category)
+    }
 }
 
 fn transaction_subcategory(transaction: &Transaction) -> Option<String> {

@@ -25,6 +25,12 @@ use tower_http::cors::CorsLayer;
 #[cfg(feature = "http")]
 use tower_http::trace::TraceLayer;
 
+mod ai_rules;
+
+pub use ai_rules::{
+    AiRuleSuggestionInput, AiRuleSuggestionsOutput, AiRuleToolCallOutput, AiRuleTransactionInput,
+};
+
 #[derive(Clone)]
 pub struct ApiState {
     inner: Arc<RwLock<ApiStateInner>>,
@@ -512,6 +518,14 @@ impl ApiState {
         )
         .await
     }
+
+    pub async fn suggest_ai_rules(
+        &self,
+        input: AiRuleSuggestionInput,
+    ) -> Result<AiRuleSuggestionsOutput> {
+        let snapshot = self.snapshot().await;
+        ai_rules::suggest_rules(&snapshot.config_path, &snapshot.config, input).await
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -843,6 +857,7 @@ pub fn router(state: ApiState) -> Router {
         .route("/api/git/sync", post(sync_git_repo))
         .route("/api/sync/connections", post(sync_connections))
         .route("/api/sync/prices", post(sync_prices))
+        .route("/api/ai/rules/suggest", post(suggest_ai_rules))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(state)
@@ -1003,6 +1018,14 @@ async fn sync_prices(
     Json(input): Json<SyncPricesInput>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     Ok(Json(state.sync_prices(input).await?))
+}
+
+#[cfg(feature = "http")]
+async fn suggest_ai_rules(
+    State(state): State<ApiState>,
+    Json(input): Json<AiRuleSuggestionInput>,
+) -> Result<Json<AiRuleSuggestionsOutput>, ApiError> {
+    Ok(Json(state.suggest_ai_rules(input).await?))
 }
 
 fn load_config_doc(config_path: &Path) -> Result<DocumentMut> {

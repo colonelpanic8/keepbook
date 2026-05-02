@@ -9,6 +9,7 @@ import {
   DEFAULT_SPENDING_CONFIG,
   DEFAULT_PORTFOLIO_CONFIG,
   DEFAULT_IGNORE_CONFIG,
+  DEFAULT_AI_CONFIG,
   DEFAULT_CONFIG,
   expandTildePath,
   parseConfig,
@@ -88,6 +89,10 @@ describe('default constants', () => {
     it('has default ignore config', () => {
       expect(DEFAULT_CONFIG.ignore).toEqual(DEFAULT_IGNORE_CONFIG);
     });
+
+    it('has default ai config', () => {
+      expect(DEFAULT_CONFIG.ai).toEqual(DEFAULT_AI_CONFIG);
+    });
   });
 });
 
@@ -108,6 +113,7 @@ describe('parseConfig', () => {
     expect(config.spending).toEqual(DEFAULT_SPENDING_CONFIG);
     expect(config.portfolio).toEqual(DEFAULT_PORTFOLIO_CONFIG);
     expect(config.ignore).toEqual(DEFAULT_IGNORE_CONFIG);
+    expect(config.ai).toEqual(DEFAULT_AI_CONFIG);
   });
 
   it('parses display currency formatting options', () => {
@@ -134,7 +140,35 @@ currency_decimals = 2
     expect(config.history).toEqual(DEFAULT_HISTORY_CONFIG);
     expect(config.spending).toEqual(DEFAULT_SPENDING_CONFIG);
     expect(config.ignore).toEqual(DEFAULT_IGNORE_CONFIG);
+    expect(config.ai).toEqual(DEFAULT_AI_CONFIG);
     expect(config.git).toEqual(DEFAULT_GIT_CONFIG);
+  });
+
+  it('parses AI OpenAI config', () => {
+    const toml = `
+[ai.openai]
+model = "gpt-5.4"
+api_key_env = "KEEPBOOK_OPENAI_API_KEY"
+
+[ai.openai.credentials]
+backend = "pass"
+path = "api/openai"
+
+[ai.openai.credentials.fields]
+api_key = "api-key"
+`;
+    const config = parseConfig(toml);
+    expect(config.ai.openai).toEqual({
+      model: 'gpt-5.4',
+      api_key_env: 'KEEPBOOK_OPENAI_API_KEY',
+      credentials: {
+        backend: 'pass',
+        path: 'api/openai',
+        fields: {
+          api_key: 'api-key',
+        },
+      },
+    });
   });
 
   it('parses tray config', () => {

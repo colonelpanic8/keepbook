@@ -130,6 +130,45 @@ pub struct IgnoreConfig {
     pub transaction_rules: Vec<TransactionIgnoreRule>,
 }
 
+fn default_openai_model() -> String {
+    "gpt-5.5".to_string()
+}
+
+/// AI assistant configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct AiConfig {
+    /// OpenAI Responses API settings.
+    pub openai: AiOpenAiConfig,
+}
+
+/// OpenAI Responses API settings for local assistant features.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AiOpenAiConfig {
+    /// Model used for transaction rule suggestions.
+    #[serde(default = "default_openai_model")]
+    pub model: String,
+
+    /// Environment variable that contains the API key. Defaults to OPENAI_API_KEY.
+    pub api_key_env: Option<String>,
+
+    /// Optional credential-store config. Supports the same backend table shape as connection
+    /// credentials and should expose an `api_key` field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub credentials: Option<toml::Value>,
+}
+
+impl Default for AiOpenAiConfig {
+    fn default() -> Self {
+        Self {
+            model: default_openai_model(),
+            api_key_env: None,
+            credentials: None,
+        }
+    }
+}
+
 /// A single transaction ignore rule.
 ///
 /// All configured fields are matched as regex patterns and must match (AND semantics)
@@ -344,6 +383,10 @@ pub struct Config {
     #[serde(default)]
     pub ignore: IgnoreConfig,
 
+    /// AI assistant settings.
+    #[serde(default)]
+    pub ai: AiConfig,
+
     /// Git-related settings.
     #[serde(default)]
     pub git: GitConfig,
@@ -361,6 +404,7 @@ impl Default for Config {
             spending: SpendingConfig::default(),
             portfolio: PortfolioConfig::default(),
             ignore: IgnoreConfig::default(),
+            ai: AiConfig::default(),
             git: GitConfig::default(),
         }
     }
@@ -429,6 +473,9 @@ pub struct ResolvedConfig {
 
     /// Global ignore rules.
     pub ignore: IgnoreConfig,
+
+    /// AI assistant settings.
+    pub ai: AiConfig,
 
     /// Git-related settings.
     pub git: GitConfig,
@@ -527,6 +574,7 @@ impl ResolvedConfig {
             spending: config.spending,
             portfolio: config.portfolio,
             ignore: config.ignore,
+            ai: config.ai,
             git: config.git,
         })
     }
@@ -565,6 +613,7 @@ impl ResolvedConfig {
                 spending: SpendingConfig::default(),
                 portfolio: PortfolioConfig::default(),
                 ignore: IgnoreConfig::default(),
+                ai: AiConfig::default(),
                 git: GitConfig::default(),
             })
         }

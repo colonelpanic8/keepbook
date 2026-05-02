@@ -995,6 +995,7 @@ mod tests {
             spending: crate::config::SpendingConfig::default(),
             portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
+            ai: crate::config::AiConfig::default(),
             git: crate::config::GitConfig::default(),
         };
 
@@ -1082,6 +1083,7 @@ mod tests {
             spending: crate::config::SpendingConfig::default(),
             portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
+            ai: crate::config::AiConfig::default(),
             git: crate::config::GitConfig::default(),
         };
 
@@ -1186,6 +1188,7 @@ mod tests {
             spending: crate::config::SpendingConfig::default(),
             portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
+            ai: crate::config::AiConfig::default(),
             git: crate::config::GitConfig::default(),
         };
 
@@ -1286,6 +1289,7 @@ mod tests {
             spending: crate::config::SpendingConfig::default(),
             portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
+            ai: crate::config::AiConfig::default(),
             git: crate::config::GitConfig::default(),
         };
 
@@ -1415,6 +1419,7 @@ mod tests {
             },
             portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
+            ai: crate::config::AiConfig::default(),
             git: crate::config::GitConfig::default(),
         };
 
@@ -1510,6 +1515,7 @@ mod tests {
                     ..Default::default()
                 }],
             },
+            ai: crate::config::AiConfig::default(),
             git: crate::config::GitConfig::default(),
         };
 
@@ -1594,6 +1600,7 @@ mod tests {
             spending: crate::config::SpendingConfig::default(),
             portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
+            ai: crate::config::AiConfig::default(),
             git: crate::config::GitConfig::default(),
         };
 
@@ -1679,6 +1686,7 @@ mod tests {
             spending: crate::config::SpendingConfig::default(),
             portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
+            ai: crate::config::AiConfig::default(),
             git: crate::config::GitConfig::default(),
         };
 

@@ -2186,6 +2186,7 @@ mod tests {
             spending: SpendingConfig::default(),
             portfolio: crate::config::PortfolioConfig::default(),
             ignore: IgnoreConfig::default(),
+            ai: crate::config::AiConfig::default(),
             git: GitConfig::default(),
         }
     }

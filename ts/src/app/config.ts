@@ -23,6 +23,7 @@ import {
   DEFAULT_SPENDING_CONFIG,
   DEFAULT_PORTFOLIO_CONFIG,
   DEFAULT_IGNORE_CONFIG,
+  DEFAULT_AI_CONFIG,
   DEFAULT_TRAY_CONFIG,
 } from '../config.js';
 
@@ -93,6 +94,7 @@ export async function loadConfig(
       spending: parsed.spending,
       portfolio: parsed.portfolio,
       ignore: parsed.ignore,
+      ai: parsed.ai,
       git: parsed.git,
     };
 
@@ -123,6 +125,9 @@ export async function loadConfig(
     },
     ignore: {
       transaction_rules: [...DEFAULT_IGNORE_CONFIG.transaction_rules],
+    },
+    ai: {
+      openai: { ...DEFAULT_AI_CONFIG.openai },
     },
     git: { ...DEFAULT_GIT_CONFIG },
   };
