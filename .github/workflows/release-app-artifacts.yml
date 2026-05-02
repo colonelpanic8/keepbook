@@ -1,0 +1,132 @@
+name: Release App Artifacts
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing GitHub release tag to upload artifacts to. Leave blank to only save workflow artifacts.
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.release_tag }}
+
+jobs:
+  android:
+    name: Build Android release artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v27
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+
+      - name: Configure Nix cache
+        uses: cachix/cachix-action@v15
+        with:
+          name: nix-community
+          skipPush: true
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-dioxus-android-gradle-${{ hashFiles('flake.lock', 'Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-dioxus-android-gradle-
+
+      - name: Build Android release APK and AAB
+        run: nix run .#dioxus-android-release
+
+      - name: Collect Android artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p release-artifacts/android
+          mapfile -t artifacts < <(
+            find target/dx/keepbook-dioxus/release/android \
+              \( -path '*/build/outputs/apk/release/*.apk' -o -path '*/build/outputs/bundle/release/*.aab' \) \
+              -type f \
+              | sort
+          )
+
+          if [ "${#artifacts[@]}" -eq 0 ]; then
+            echo "No Android APK/AAB artifacts were produced" >&2
+            exit 1
+          fi
+
+          for artifact in "${artifacts[@]}"; do
+            cp -v "$artifact" "release-artifacts/android/keepbook-dioxus-android-$(basename "$artifact")"
+          done
+
+          ls -lh release-artifacts/android
+
+      - name: Save Android workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: keepbook-dioxus-android-release
+          path: release-artifacts/android/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload Android artifacts to release
+        if: ${{ env.RELEASE_TAG != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$RELEASE_TAG" release-artifacts/android/* --clobber
+
+  desktop:
+    name: Build Linux desktop release artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v27
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+
+      - name: Configure Nix cache
+        uses: cachix/cachix-action@v15
+        with:
+          name: nix-community
+          skipPush: true
+
+      - name: Build Linux desktop bundle
+        env:
+          KEEPBOOK_DIOXUS_DESKTOP_OUT_DIR: ${{ github.workspace }}/release-artifacts/desktop
+        run: nix run .#dioxus-desktop-release
+
+      - name: Save desktop workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: keepbook-dioxus-linux-desktop-release
+          path: release-artifacts/desktop/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload desktop artifacts to release
+        if: ${{ env.RELEASE_TAG != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$RELEASE_TAG" release-artifacts/desktop/* --clobber

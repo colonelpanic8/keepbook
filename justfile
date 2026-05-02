@@ -33,6 +33,10 @@ run-tray *args:
 run-dioxus-desktop *args:
     {{keepbook_dioxus_desktop_cmd}} "$@"
 
+# Build the Dioxus Linux desktop app as a release bundle.
+dioxus-desktop-release *args:
+    nix run .#dioxus-desktop-release -- "$@"
+
 # Build the Dioxus client as an iOS simulator app bundle.
 dioxus-ios-build *args:
     #!/usr/bin/env bash

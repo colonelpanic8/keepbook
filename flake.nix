@@ -272,6 +272,37 @@
               fi
             '';
           };
+        dioxusDesktopBuildScript = pkgs.writeShellApplication {
+          name = "keepbook-dioxus-desktop-release";
+          runtimeInputs = [
+            pkgs.coreutils
+            pkgs.findutils
+            pkgs.nix
+          ];
+          text = ''
+            set -euo pipefail
+
+            repo="''${KEEPBOOK_ROOT:-$PWD}"
+            out_dir="''${KEEPBOOK_DIOXUS_DESKTOP_OUT_DIR:-$repo/target/release-artifacts/desktop}"
+
+            cd "$repo"
+            rm -rf "$out_dir"
+            mkdir -p "$out_dir"
+
+            nix develop "$repo" --command dx bundle \
+              --desktop \
+              --package-types deb \
+              --out-dir "$out_dir" \
+              --package keepbook-dioxus \
+              --no-default-features \
+              --features desktop \
+              --release \
+              --locked \
+              "$@"
+
+            find "$out_dir" -type f -print
+          '';
+        };
         keepbookAgeRecipientsScript = pkgs.writeShellApplication {
           name = "keepbook-age-recipients";
           runtimeInputs = [
@@ -460,6 +491,7 @@
             };
             keepbook-dioxus-android-debug-runner = dioxusAndroidBuildScript false;
             keepbook-dioxus-android-release-runner = dioxusAndroidBuildScript true;
+            keepbook-dioxus-desktop-release-runner = dioxusDesktopBuildScript;
           };
 
         apps = {
@@ -488,6 +520,14 @@
           keepbook-dioxus-android-release = {
             type = "app";
             program = "${dioxusAndroidBuildScript true}/bin/keepbook-dioxus-android-release";
+          };
+          dioxus-desktop-release = {
+            type = "app";
+            program = "${dioxusDesktopBuildScript}/bin/keepbook-dioxus-desktop-release";
+          };
+          keepbook-dioxus-desktop-release = {
+            type = "app";
+            program = "${dioxusDesktopBuildScript}/bin/keepbook-dioxus-desktop-release";
           };
         };
 
