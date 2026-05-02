@@ -570,6 +570,28 @@ enum LoadState {
     Failed(String),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct PullStart {
+    x: f64,
+    y: f64,
+}
+
+const PULL_REFRESH_START_MAX_Y: f64 = 132.0;
+const PULL_REFRESH_TRIGGER_PX: f64 = 84.0;
+const PULL_REFRESH_MAX_OFFSET_PX: f64 = 64.0;
+const PULL_REFRESH_HORIZONTAL_SLOP_PX: f64 = 48.0;
+
+fn first_touch_position(event: &TouchEvent) -> Option<(f64, f64)> {
+    event.touches().first().map(|touch| {
+        let position = touch.client_coordinates();
+        (position.x, position.y)
+    })
+}
+
+fn pull_refresh_offset(distance: f64) -> f64 {
+    (distance.max(0.0) * 0.45).min(PULL_REFRESH_MAX_OFFSET_PX)
+}
+
 fn main() {
     #[cfg(feature = "desktop")]
     {
@@ -3869,6 +3891,8 @@ fn AccountsView(
     let mut price_busy = use_signal(|| false);
     let mut force_prices = use_signal(|| false);
     let mut price_status = use_signal(String::new);
+    let mut pull_start = use_signal(|| None::<PullStart>);
+    let mut pull_distance = use_signal(|| 0.0);
     let virtual_accounts = virtual_account_summaries(&snapshot);
     let account_count = accounts.len() + virtual_accounts.len();
     let active_accounts = accounts.iter().filter(|account| account.active).count();
@@ -3877,95 +3901,156 @@ fn AccountsView(
     let _ = balances;
     let is_price_busy = price_busy();
     let price_status_text = price_status();
+    let pull_distance_value = pull_distance();
+    let pull_offset = pull_refresh_offset(pull_distance_value);
+    let pull_ready = pull_distance_value >= PULL_REFRESH_TRIGGER_PX;
+    let pull_indicator_class = if pull_ready {
+        "pull-refresh-indicator ready"
+    } else {
+        "pull-refresh-indicator"
+    };
+    let pull_style = format!("transform: translateY({pull_offset}px);");
 
     rsx! {
-        section { class: "summary-grid",
-            MetricCard {
-                label: "Net worth",
-                value: format_full_money(net_worth, &currency),
-                detail: snapshot.as_of_date.clone()
-            }
-            MetricCard {
-                label: "Accounts",
-                value: active_accounts.to_string(),
-                detail: format!("{account_count} total")
-            }
-            MetricCard {
-                label: "Connections",
-                value: connection_count.to_string(),
-                detail: "Configured sources".to_string()
-            }
-        }
-        section { class: "panel",
-            div { class: "panel-header",
-                div { class: "panel-title",
-                    h2 { "Accounts" }
-                    span { "{account_count}" }
+        div {
+            class: "pull-refresh-surface",
+            ontouchstart: move |event| {
+                if let Some((x, y)) = first_touch_position(&event) {
+                    if y <= PULL_REFRESH_START_MAX_Y {
+                        pull_start.set(Some(PullStart { x, y }));
+                    }
                 }
-                div { class: "settings-actions inline-actions",
-                    label { class: "compact-check",
-                        input {
-                            r#type: "checkbox",
-                            checked: force_prices(),
-                            disabled: is_price_busy,
-                            onchange: move |event| force_prices.set(event.checked())
+            },
+            ontouchmove: move |event| {
+                let Some(start) = pull_start() else {
+                    return;
+                };
+                let Some((x, y)) = first_touch_position(&event) else {
+                    return;
+                };
+                let horizontal_distance = (x - start.x).abs();
+                let vertical_distance = y - start.y;
+                if horizontal_distance > PULL_REFRESH_HORIZONTAL_SLOP_PX {
+                    pull_start.set(None);
+                    pull_distance.set(0.0);
+                } else if vertical_distance > 0.0 {
+                    pull_distance.set(vertical_distance);
+                } else {
+                    pull_distance.set(0.0);
+                }
+            },
+            ontouchend: move |_| {
+                if pull_distance() >= PULL_REFRESH_TRIGGER_PX {
+                    onrefresh.call(());
+                }
+                pull_start.set(None);
+                pull_distance.set(0.0);
+            },
+            ontouchcancel: move |_| {
+                pull_start.set(None);
+                pull_distance.set(0.0);
+            },
+            div {
+                class: "{pull_indicator_class}",
+                aria_label: "Refresh",
+                aria_live: "polite",
+                style: "height: {pull_offset}px; opacity: {pull_offset / PULL_REFRESH_MAX_OFFSET_PX};",
+                if pull_ready {
+                    span { class: "activity-spinner" }
+                } else {
+                    span { class: "pull-refresh-dot" }
+                }
+            }
+            div { class: "pull-refresh-content", style: "{pull_style}",
+                section { class: "summary-grid",
+                    MetricCard {
+                        label: "Net worth",
+                        value: format_full_money(net_worth, &currency),
+                        detail: snapshot.as_of_date.clone()
+                    }
+                    MetricCard {
+                        label: "Accounts",
+                        value: active_accounts.to_string(),
+                        detail: format!("{account_count} total")
+                    }
+                    MetricCard {
+                        label: "Connections",
+                        value: connection_count.to_string(),
+                        detail: "Configured sources".to_string()
+                    }
+                }
+                section { class: "panel",
+                    div { class: "panel-header",
+                        div { class: "panel-title",
+                            h2 { "Accounts" }
+                            span { "{account_count}" }
                         }
-                        span { "Force prices" }
-                    }
-                    button {
-                        class: "control-button",
-                        disabled: is_price_busy,
-                        onclick: move |_| {
-                            price_busy.set(true);
-                            let input = SyncPricesInput {
-                                scope: "all".to_string(),
-                                target: None,
-                                force: force_prices(),
-                                quote_staleness_seconds: None,
-                            };
-                            price_status.set(if input.force {
-                                "Refreshing all prices...".to_string()
-                            } else {
-                                "Refreshing stale prices...".to_string()
-                            });
-                            spawn(async move {
-                                match sync_prices(input).await {
-                                    Ok(result) => {
-                                        price_status.set(price_sync_result_summary(&result));
-                                        onrefresh.call(());
-                                    }
-                                    Err(error) => {
-                                        price_status.set(format!("Price sync failed: {error}"));
-                                    }
+                        div { class: "settings-actions inline-actions",
+                            label { class: "compact-check",
+                                input {
+                                    r#type: "checkbox",
+                                    checked: force_prices(),
+                                    disabled: is_price_busy,
+                                    onchange: move |event| force_prices.set(event.checked())
                                 }
-                                price_busy.set(false);
-                            });
-                        },
-                        if is_price_busy { "Refreshing" } else { "Sync prices" }
+                                span { "Force prices" }
+                            }
+                            button {
+                                class: "control-button",
+                                disabled: is_price_busy,
+                                onclick: move |_| {
+                                    price_busy.set(true);
+                                    let input = SyncPricesInput {
+                                        scope: "all".to_string(),
+                                        target: None,
+                                        force: force_prices(),
+                                        quote_staleness_seconds: None,
+                                    };
+                                    price_status.set(if input.force {
+                                        "Refreshing all prices...".to_string()
+                                    } else {
+                                        "Refreshing stale prices...".to_string()
+                                    });
+                                    spawn(async move {
+                                        match sync_prices(input).await {
+                                            Ok(result) => {
+                                                price_status.set(price_sync_result_summary(&result));
+                                                onrefresh.call(());
+                                            }
+                                            Err(error) => {
+                                                price_status.set(format!("Price sync failed: {error}"));
+                                            }
+                                        }
+                                        price_busy.set(false);
+                                    });
+                                },
+                                if is_price_busy { "Refreshing" } else { "Sync prices" }
+                            }
+                        }
                     }
-                }
-            }
-            if !price_status_text.is_empty() {
-                p { class: "settings-status", "{price_status_text}" }
-            }
-            div { class: "group-list",
-                if !virtual_accounts.is_empty() {
-                    VirtualAccountGroup {
-                        accounts: virtual_accounts,
-                        currency: currency.clone(),
+                    if !price_status_text.is_empty() {
+                        p { class: "settings-status", "{price_status_text}" }
                     }
-                }
-                for connection in connections {
-                    AccountGroup {
-                        connection: connection.clone(),
-                        accounts: accounts
-                            .iter()
-                            .filter(|account| account.connection_id == connection.id)
-                            .cloned()
-                            .collect::<Vec<_>>(),
-                        account_summaries: account_summaries.clone(),
-                        currency: currency.clone(),
-                    }
+                    div { class: "group-list",
+                        if !virtual_accounts.is_empty() {
+                            VirtualAccountGroup {
+                                accounts: virtual_accounts,
+                                currency: currency.clone(),
+                            }
+                        }
+                        for connection in connections {
+                            AccountGroup {
+                                connection: connection.clone(),
+                                accounts: accounts
+                                    .iter()
+                                    .filter(|account| account.connection_id == connection.id)
+                                    .cloned()
+                                    .collect::<Vec<_>>(),
+                                account_summaries: account_summaries.clone(),
+                                currency: currency.clone(),
+                            }
+                        }
+                                    }
                 }
             }
         }

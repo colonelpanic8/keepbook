@@ -280,6 +280,42 @@ small,
   }
 }
 
+.pull-refresh-surface {
+  overscroll-behavior-y: contain;
+  position: relative;
+  touch-action: pan-y;
+}
+
+.pull-refresh-indicator {
+  align-items: center;
+  color: #24443d;
+  display: flex;
+  justify-content: center;
+  overflow: hidden;
+  pointer-events: none;
+  transition:
+    height 120ms ease,
+    opacity 120ms ease;
+}
+
+.pull-refresh-indicator.ready {
+  color: #1f6f8b;
+}
+
+.pull-refresh-dot {
+  background: #b8d3cb;
+  border: 1px solid #7ca99c;
+  border-radius: 999px;
+  display: block;
+  height: 8px;
+  width: 8px;
+}
+
+.pull-refresh-content {
+  transition: transform 120ms ease;
+  will-change: transform;
+}
+
 .chart-controls {
   display: flex;
   flex-direction: column;
