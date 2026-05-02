@@ -1,5 +1,27 @@
 use super::*;
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct PullStart {
+    x: f64,
+    y: f64,
+}
+
+const PULL_REFRESH_START_MAX_Y: f64 = 132.0;
+const PULL_REFRESH_TRIGGER_PX: f64 = 84.0;
+const PULL_REFRESH_MAX_OFFSET_PX: f64 = 64.0;
+const PULL_REFRESH_HORIZONTAL_SLOP_PX: f64 = 48.0;
+
+fn first_touch_position(event: &TouchEvent) -> Option<(f64, f64)> {
+    event.touches().first().map(|touch| {
+        let position = touch.client_coordinates();
+        (position.x, position.y)
+    })
+}
+
+fn pull_refresh_offset(distance: f64) -> f64 {
+    (distance.max(0.0) * 0.45).min(PULL_REFRESH_MAX_OFFSET_PX)
+}
+
 #[component]
 pub(super) fn AccountsView(
     accounts: Vec<Account>,
