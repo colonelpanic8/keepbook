@@ -3909,7 +3909,6 @@ fn AccountsView(
     } else {
         "pull-refresh-indicator"
     };
-    let pull_style = format!("transform: translateY({pull_offset}px);");
 
     rsx! {
         div {
@@ -3961,7 +3960,7 @@ fn AccountsView(
                     span { class: "pull-refresh-dot" }
                 }
             }
-            div { class: "pull-refresh-content", style: "{pull_style}",
+            div { class: "pull-refresh-content",
                 section { class: "summary-grid",
                     MetricCard {
                         label: "Net worth",
