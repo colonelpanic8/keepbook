@@ -167,6 +167,63 @@ auto_push = false
 merge_master_before_command = false
 #+END_SRC
 
+* Encrypted Credentials
+
+Connection credentials can use =pass=, =env=, or =age= backends. The mobile
+Dioxus path should prefer =age= so credentials can live encrypted in the
+keepbook data repo without depending on =pass=.
+
+The keepbook data repo should contain a public =keys.nix= file that lists the
+SSH public keys allowed to decrypt age credential files. The source flake reads
+that repo-local file by default; it does not reference any external checkout at
+runtime. For this data repo, =keys.nix= owns the same recipient grouping used
+for existing agenix secrets:
+
+#+BEGIN_SRC nix
+# keys.nix in the keepbook data repo
+{
+  agenixKeys = hostKeys ++ kanivanKeys;
+}
+#+END_SRC
+
+Print the exact SSH public key recipients used by =age -R=:
+
+#+BEGIN_SRC bash
+# Run from the keepbook data repo.
+nix run /path/to/keepbook-source#keepbook-age-recipients
+#+END_SRC
+
+Use a different key attribute when needed:
+
+#+BEGIN_SRC bash
+nix run /path/to/keepbook-source#keepbook-age-recipients -- --attr hostKeys
+KEEPBOOK_AGE_KEYS_ATTR=hostKeys nix run /path/to/keepbook-source#keepbook-age-recipients
+#+END_SRC
+
+Encrypt a pass-style credential payload:
+
+#+BEGIN_SRC bash
+cd /path/to/keepbook-data
+pass show finance/coinbase-api \
+  | nix run /path/to/keepbook-source#keepbook-age-encrypt -- \
+      -o connections/<connection-id>/credentials.age
+#+END_SRC
+
+Point the connection at the encrypted file:
+
+#+BEGIN_SRC toml
+[credentials]
+backend = "age"
+path = "credentials/coinbase.age"
+
+# Optional. If omitted in the Dioxus/server path, keepbook uses the saved
+# [git_sync].ssh_key_path from keepbook.toml as the age identity.
+# identity_path = ".ssh/keepbook_sync_key"
+#+END_SRC
+
+The decrypted payload uses the same field format as =pass show= output. For
+Coinbase, the relevant fields are =key-name= and =private-key=.
+
 * Storage Layout
 
 Primary storage root is the resolved =data_dir=.

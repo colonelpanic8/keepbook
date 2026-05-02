@@ -142,6 +142,28 @@
           JAVA_HOME = pkgs.jdk17.home;
           OPENSSL_NO_VENDOR = "0";
         };
+        dioxusLinuxBuildInputs = lib.optionals isLinux [
+          pkgs.dbus
+          pkgs.glib
+          pkgs.gtk3
+          pkgs.libappindicator-gtk3
+          pkgs.webkitgtk_4_1
+          pkgs.xdotool
+        ];
+        dioxusLinuxLibraryPathInputs = lib.optionals isLinux [
+          pkgs.cairo
+          pkgs.gdk-pixbuf
+          pkgs.glib
+          pkgs.gtk3
+          pkgs.harfbuzz
+          pkgs.libappindicator-gtk3
+          pkgs.libsoup_3
+          pkgs.openssl
+          pkgs.pango
+          pkgs.webkitgtk_4_1
+          pkgs.xdotool
+          pkgs.zlib
+        ];
         dioxusAndroidBuildScript = release:
           pkgs.writeShellApplication {
             name = "keepbook-dioxus-android-${
@@ -250,6 +272,158 @@
               fi
             '';
           };
+        keepbookAgeRecipientsScript = pkgs.writeShellApplication {
+          name = "keepbook-age-recipients";
+          runtimeInputs = [
+            pkgs.coreutils
+            pkgs.jq
+            pkgs.nix
+          ];
+          text = ''
+            set -euo pipefail
+
+            keys_file="''${KEEPBOOK_AGE_KEYS_FILE:-keys.nix}"
+            keys_attr="''${KEEPBOOK_AGE_KEYS_ATTR:-agenixKeys}"
+
+            usage() {
+              cat <<'EOF'
+            Usage: keepbook-age-recipients [--keys-file PATH] [--attr ATTR]
+
+            Prints SSH public keys from a keepbook data repo keys file in age
+            recipient-file format.
+
+            Defaults:
+              --keys-file  keys.nix
+              --attr       agenixKeys
+            EOF
+            }
+
+            while [[ $# -gt 0 ]]; do
+              case "$1" in
+                --keys-file)
+                  keys_file="''${2:?missing value for --keys-file}"
+                  shift 2
+                  ;;
+                --attr)
+                  keys_attr="''${2:?missing value for --attr}"
+                  shift 2
+                  ;;
+                -h|--help)
+                  usage
+                  exit 0
+                  ;;
+                *)
+                  echo "unknown argument: $1" >&2
+                  usage >&2
+                  exit 2
+                  ;;
+              esac
+            done
+
+            if [[ ! -f "$keys_file" ]]; then
+              echo "keys file does not exist: $keys_file" >&2
+              exit 1
+            fi
+
+            keys_file="$(realpath "$keys_file")"
+            keys_path_json="$(jq -Rnr --arg path "$keys_file" '$path | @json')"
+            keys_attr_json="$(jq -Rnr --arg attr "$keys_attr" '$attr | @json')"
+            nix_expr="let keys = import (builtins.toPath $keys_path_json); in builtins.getAttr $keys_attr_json keys"
+
+            nix eval --impure --json --expr "$nix_expr" \
+              | jq -r '.[]' \
+              | grep -v '^[[:space:]]*$' \
+              | sort -u
+          '';
+        };
+        keepbookAgeEncryptScript = pkgs.writeShellApplication {
+          name = "keepbook-age-encrypt";
+          runtimeInputs = [
+            pkgs.age
+            pkgs.coreutils
+            pkgs.jq
+            pkgs.nix
+          ];
+          text = ''
+            set -euo pipefail
+
+            keys_file="''${KEEPBOOK_AGE_KEYS_FILE:-keys.nix}"
+            keys_attr="''${KEEPBOOK_AGE_KEYS_ATTR:-agenixKeys}"
+            output=""
+            input=""
+
+            usage() {
+              cat <<'EOF'
+            Usage: keepbook-age-encrypt [--keys-file PATH] [--attr ATTR] [-o OUTPUT] [PLAINTEXT]
+
+            Encrypts a pass-style credential payload to SSH public keys from a
+            keepbook data repo keys file. If PLAINTEXT is omitted, stdin is used.
+
+            Defaults:
+              --keys-file  keys.nix
+              --attr       agenixKeys
+            EOF
+            }
+
+            while [[ $# -gt 0 ]]; do
+              case "$1" in
+                --keys-file)
+                  keys_file="''${2:?missing value for --keys-file}"
+                  shift 2
+                  ;;
+                --attr)
+                  keys_attr="''${2:?missing value for --attr}"
+                  shift 2
+                  ;;
+                -o|--output)
+                  output="''${2:?missing value for --output}"
+                  shift 2
+                  ;;
+                -h|--help)
+                  usage
+                  exit 0
+                  ;;
+                -*)
+                  echo "unknown argument: $1" >&2
+                  usage >&2
+                  exit 2
+                  ;;
+                *)
+                  if [[ -n "$input" ]]; then
+                    echo "only one plaintext path may be provided" >&2
+                    exit 2
+                  fi
+                  input="$1"
+                  shift
+                  ;;
+              esac
+            done
+
+            recipients_file="$(mktemp)"
+            trap 'rm -f "$recipients_file"' EXIT
+
+            ${keepbookAgeRecipientsScript}/bin/keepbook-age-recipients \
+              --keys-file "$keys_file" \
+              --attr "$keys_attr" \
+              > "$recipients_file"
+
+            if [[ ! -s "$recipients_file" ]]; then
+              echo "no age recipients derived from $keys_file attr $keys_attr" >&2
+              exit 1
+            fi
+
+            args=(--armor --recipients-file "$recipients_file")
+            if [[ -n "$output" ]]; then
+              mkdir -p "$(dirname "$output")"
+              args+=(--output "$output")
+            fi
+            if [[ -n "$input" ]]; then
+              args+=("$input")
+            fi
+
+            age "''${args[@]}"
+          '';
+        };
         mkKeepbookPackage = {
           pname,
           cargoPackage ? "keepbook",
@@ -275,6 +449,8 @@
           {
             default = mkKeepbookPackage {pname = "keepbook";};
             keepbook = mkKeepbookPackage {pname = "keepbook";};
+            keepbook-age-recipients = keepbookAgeRecipientsScript;
+            keepbook-age-encrypt = keepbookAgeEncryptScript;
           }
           // lib.optionalAttrs isLinux {
             keepbook-tray = mkKeepbookPackage {
@@ -286,7 +462,17 @@
             keepbook-dioxus-android-release-runner = dioxusAndroidBuildScript true;
           };
 
-        apps = lib.optionalAttrs isLinux {
+        apps = {
+          keepbook-age-recipients = {
+            type = "app";
+            program = "${keepbookAgeRecipientsScript}/bin/keepbook-age-recipients";
+          };
+          keepbook-age-encrypt = {
+            type = "app";
+            program = "${keepbookAgeEncryptScript}/bin/keepbook-age-encrypt";
+          };
+        }
+        // lib.optionalAttrs isLinux {
           dioxus-android-debug = {
             type = "app";
             program = "${dioxusAndroidBuildScript false}/bin/keepbook-dioxus-android-debug";
@@ -316,32 +502,13 @@
                 pkgs.openssl
                 pkgs.just
                 pkgs.jq
+                pkgs.age
                 pkgs.nodejs_22
                 pkgs.yarn
               ]
-              ++ lib.optionals isLinux [
-                pkgs.dbus
-                pkgs.glib
-                pkgs.gtk3
-                pkgs.libappindicator-gtk3
-                pkgs.webkitgtk_4_1
-                pkgs.xdotool
-              ];
+              ++ dioxusLinuxBuildInputs;
 
-            LD_LIBRARY_PATH = lib.optionalString isLinux (lib.makeLibraryPath [
-              pkgs.cairo
-              pkgs.gdk-pixbuf
-              pkgs.glib
-              pkgs.gtk3
-              pkgs.harfbuzz
-              pkgs.libappindicator-gtk3
-              pkgs.libsoup_3
-              pkgs.openssl
-              pkgs.pango
-              pkgs.webkitgtk_4_1
-              pkgs.xdotool
-              pkgs.zlib
-            ]);
+            LD_LIBRARY_PATH = lib.optionalString isLinux (lib.makeLibraryPath dioxusLinuxLibraryPathInputs);
 
             OPENSSL_NO_VENDOR = "1";
             WEBKIT_DISABLE_DMABUF_RENDERER = "1";
@@ -359,7 +526,11 @@
                 pkgs.just
                 pkgs.jq
                 pkgs.gradle_9
-              ];
+              ]
+              ++ dioxusLinuxBuildInputs;
+
+              LD_LIBRARY_PATH = lib.optionalString isLinux (lib.makeLibraryPath dioxusLinuxLibraryPathInputs);
+              WEBKIT_DISABLE_DMABUF_RENDERER = "1";
 
               shellHook = ''
                 export PATH=${androidHome}/emulator:${androidHome}/platform-tools:${androidHome}/cmdline-tools/${androidCmdLineToolsVersion}/bin:$PATH
