@@ -66,7 +66,7 @@ cli = [
 app = []
 tui = ["app", "config", "dep:dialoguer", "dep:ratatui", "dep:crossterm", "dep:reqwest"]
 config = []
-credentials = []
+credentials = ["dep:age"]
 git = []
 market_data = ["dep:reqwest"]
 portfolio = []
@@ -123,6 +123,7 @@ crossterm = { version = "0.28", optional = true }
 
 # For reading pass credentials
 secrecy = "0.10"
+age = { version = "0.11.3", features = ["armor", "ssh"], optional = true }
 
 # For finding cache/config directories
 dirs = "6"

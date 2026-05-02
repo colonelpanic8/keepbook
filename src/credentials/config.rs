@@ -8,6 +8,8 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
+use super::age::{AgeConfig, AgeCredentialStore};
+use super::env::{EnvConfig, EnvCredentialStore};
 use super::pass::{PassConfig, PassCredentialStore};
 use super::CredentialStore;
 
@@ -35,9 +37,18 @@ pub enum CredentialConfig {
         #[serde(flatten)]
         config: PassConfig,
     },
-    // Future backends:
-    // Env { ... },
-    // Age { ... },
+
+    /// Process environment variable backend.
+    Env {
+        #[serde(flatten)]
+        config: EnvConfig,
+    },
+
+    /// age-encrypted file backend.
+    Age {
+        #[serde(flatten)]
+        config: AgeConfig,
+    },
     // Vault { ... },
 }
 
@@ -62,8 +73,22 @@ impl CredentialConfig {
 
     /// Build a credential store from this configuration.
     pub fn build(&self) -> Box<dyn CredentialStore> {
+        self.build_with_base_dir(None)
+    }
+
+    /// Build a credential store, resolving relative file paths from `base_dir`
+    /// for backends that read files.
+    pub fn build_with_base_dir(&self, base_dir: Option<&Path>) -> Box<dyn CredentialStore> {
         match self {
             CredentialConfig::Pass { config } => Box::new(PassCredentialStore::new(config.clone())),
+            CredentialConfig::Env { config } => Box::new(EnvCredentialStore::new(config.clone())),
+            CredentialConfig::Age { config } => match base_dir {
+                Some(base_dir) => Box::new(AgeCredentialStore::with_base_dir(
+                    config.clone(),
+                    base_dir.to_path_buf(),
+                )),
+                None => Box::new(AgeCredentialStore::new(config.clone())),
+            },
         }
     }
 }
@@ -100,6 +125,7 @@ private_key = "private-key"
                     Some(&"private-key".to_string())
                 );
             }
+            _ => panic!("expected pass credential config"),
         }
 
         Ok(())
@@ -123,6 +149,69 @@ path = "my-api-key"
                 assert_eq!(config.path, "my-api-key");
                 assert!(config.fields.is_empty());
             }
+            _ => panic!("expected pass credential config"),
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_env_config() -> Result<()> {
+        let mut file = NamedTempFile::new()?;
+        writeln!(
+            file,
+            r#"
+backend = "env"
+prefix = "KEEPBOOK_COINBASE_"
+
+[fields]
+key_name = "KEEPBOOK_COINBASE_KEY_NAME"
+"#
+        )?;
+
+        let config = CredentialConfig::load(file.path())?;
+
+        match config {
+            CredentialConfig::Env { config } => {
+                assert_eq!(config.prefix.as_deref(), Some("KEEPBOOK_COINBASE_"));
+                assert_eq!(
+                    config.fields.get("key_name"),
+                    Some(&"KEEPBOOK_COINBASE_KEY_NAME".to_string())
+                );
+            }
+            _ => panic!("expected env credential config"),
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_age_config() -> Result<()> {
+        let mut file = NamedTempFile::new()?;
+        writeln!(
+            file,
+            r#"
+backend = "age"
+path = "credentials/coinbase.age"
+identity_path = ".ssh/keepbook_sync_key"
+
+[fields]
+key_name = "key-name"
+"#
+        )?;
+
+        let config = CredentialConfig::load(file.path())?;
+
+        match config {
+            CredentialConfig::Age { config } => {
+                assert_eq!(config.path, "credentials/coinbase.age");
+                assert_eq!(
+                    config.identity_path.as_deref(),
+                    Some(".ssh/keepbook_sync_key")
+                );
+                assert_eq!(config.fields.get("key_name"), Some(&"key-name".to_string()));
+            }
+            _ => panic!("expected age credential config"),
         }
 
         Ok(())

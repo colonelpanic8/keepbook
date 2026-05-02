@@ -2,7 +2,7 @@
 //!
 //! Defines the structure for `source.toml` files that configure price sources.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -129,6 +129,8 @@ impl PriceSourceConfig {
 pub struct LoadedPriceSource {
     /// Directory name (used as identifier).
     pub name: String,
+    /// Directory containing the source.toml file.
+    pub base_dir: PathBuf,
     /// The source configuration.
     pub config: PriceSourceConfig,
 }

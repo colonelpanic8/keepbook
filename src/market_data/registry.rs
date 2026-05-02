@@ -68,7 +68,11 @@ impl PriceSourceRegistry {
             match PriceSourceConfig::load(&source_toml) {
                 Ok(config) => {
                     if config.enabled {
-                        self.loaded.push(LoadedPriceSource { name, config });
+                        self.loaded.push(LoadedPriceSource {
+                            name,
+                            base_dir: path,
+                            config,
+                        });
                     }
                 }
                 Err(e) => {
@@ -105,7 +109,7 @@ impl PriceSourceRegistry {
                             loaded.name, loaded.config.source_type
                         )
                     })?;
-                    let store = credentials.build();
+                    let store = credentials.build_with_base_dir(Some(&loaded.base_dir));
                     let source = EodhdPriceSource::from_credentials(store.as_ref()).await?;
                     Arc::new(source) as Arc<dyn EquityPriceSource>
                 }
@@ -116,7 +120,7 @@ impl PriceSourceRegistry {
                             loaded.name, loaded.config.source_type
                         )
                     })?;
-                    let store = credentials.build();
+                    let store = credentials.build_with_base_dir(Some(&loaded.base_dir));
                     let source = TwelveDataPriceSource::from_credentials(store.as_ref()).await?;
                     Arc::new(source) as Arc<dyn EquityPriceSource>
                 }
@@ -127,7 +131,7 @@ impl PriceSourceRegistry {
                             loaded.name, loaded.config.source_type
                         )
                     })?;
-                    let store = credentials.build();
+                    let store = credentials.build_with_base_dir(Some(&loaded.base_dir));
                     let source = AlphaVantagePriceSource::from_credentials(store.as_ref()).await?;
                     Arc::new(source) as Arc<dyn EquityPriceSource>
                 }
@@ -138,7 +142,7 @@ impl PriceSourceRegistry {
                             loaded.name, loaded.config.source_type
                         )
                     })?;
-                    let store = credentials.build();
+                    let store = credentials.build_with_base_dir(Some(&loaded.base_dir));
                     let source = MarketstackPriceSource::from_credentials(store.as_ref()).await?;
                     Arc::new(source) as Arc<dyn EquityPriceSource>
                 }
@@ -165,7 +169,7 @@ impl PriceSourceRegistry {
                 }
                 PriceSourceType::Cryptocompare => {
                     let mut provider = if let Some(credentials) = &loaded.config.credentials {
-                        let store = credentials.build();
+                        let store = credentials.build_with_base_dir(Some(&loaded.base_dir));
                         CryptoComparePriceSource::from_credentials(store.as_ref()).await?
                     } else {
                         CryptoComparePriceSource::new()
@@ -186,7 +190,7 @@ impl PriceSourceRegistry {
                 }
                 PriceSourceType::Coincap => {
                     let mut provider = if let Some(credentials) = &loaded.config.credentials {
-                        let store = credentials.build();
+                        let store = credentials.build_with_base_dir(Some(&loaded.base_dir));
                         CoinCapPriceSource::from_credentials(store.as_ref()).await?
                     } else {
                         CoinCapPriceSource::new()
@@ -253,6 +257,7 @@ mod tests {
         let mut registry = PriceSourceRegistry::new(dir.path());
         registry.loaded = vec![LoadedPriceSource {
             name: "bad-eodhd".to_string(),
+            base_dir: dir.path().join("bad-eodhd"),
             config: PriceSourceConfig {
                 source_type: PriceSourceType::Eodhd,
                 enabled: true,

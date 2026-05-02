@@ -11,6 +11,7 @@ use async_trait::async_trait;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 
+use super::field_entry::FieldEntry;
 use super::CredentialStore;
 
 /// Configuration for a pass credential store.
@@ -61,7 +62,7 @@ impl PassCredentialStore {
     }
 
     /// Read and parse the pass entry.
-    fn read_entry(&self) -> Result<PassEntry> {
+    fn read_entry(&self) -> Result<FieldEntry> {
         let output = Command::new("pass")
             .arg("show")
             .arg(&self.config.path)
@@ -75,7 +76,7 @@ impl PassCredentialStore {
 
         let content = String::from_utf8(output.stdout).context("Invalid UTF-8 in pass output")?;
 
-        Ok(PassEntry::parse(&content))
+        Ok(FieldEntry::parse(&content))
     }
 
     /// Write a field to the pass entry.
@@ -134,59 +135,6 @@ impl CredentialStore for PassCredentialStore {
     }
 }
 
-/// Parsed pass entry.
-#[derive(Debug, Default)]
-struct PassEntry {
-    /// The first line (traditionally the password).
-    password: Option<String>,
-    /// Additional fields in `name: value` format.
-    fields: HashMap<String, String>,
-}
-
-impl PassEntry {
-    /// Parse a pass entry from its raw content.
-    fn parse(content: &str) -> Self {
-        let mut lines = content.lines();
-        let password = lines.next().map(|s| s.to_string());
-        let mut fields = HashMap::new();
-
-        // First line is also accessible as "password" field
-        if let Some(ref pw) = password {
-            fields.insert("password".to_string(), pw.clone());
-        }
-
-        for line in lines {
-            if let Some((key, value)) = line.split_once(": ") {
-                // Handle escaped newlines in values
-                let value = value.replace("\\n", "\n");
-                fields.insert(key.to_string(), value);
-            }
-        }
-
-        Self { password, fields }
-    }
-}
-
-impl std::fmt::Display for PassEntry {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Write password line first
-        if let Some(ref password) = self.password {
-            writeln!(f, "{password}")?;
-        }
-
-        // Write other fields (excluding "password" since it's the first line)
-        for (key, value) in &self.fields {
-            if key != "password" {
-                // Escape newlines in values
-                let escaped = value.replace('\n', "\\n");
-                writeln!(f, "{key}: {escaped}")?;
-            }
-        }
-
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -195,7 +143,7 @@ mod tests {
     fn test_parse_entry() {
         let content = "mysecretpassword\nkey-name: organizations/abc\nprivate-key: -----BEGIN EC PRIVATE KEY-----\\nMIGk...\\n-----END EC PRIVATE KEY-----";
 
-        let entry = PassEntry::parse(content);
+        let entry = FieldEntry::parse(content);
 
         assert_eq!(entry.password, Some("mysecretpassword".to_string()));
         assert_eq!(
@@ -231,11 +179,11 @@ mod tests {
     #[test]
     fn test_entry_roundtrip() {
         let content = "mysecret\napi-key: abc123\ntoken: xyz789";
-        let entry = PassEntry::parse(content);
+        let entry = FieldEntry::parse(content);
         let serialized = entry.to_string();
 
         // Parse again and verify
-        let reparsed = PassEntry::parse(&serialized);
+        let reparsed = FieldEntry::parse(&serialized);
         assert_eq!(reparsed.password, entry.password);
         assert_eq!(reparsed.fields.get("api-key"), entry.fields.get("api-key"));
         assert_eq!(reparsed.fields.get("token"), entry.fields.get("token"));

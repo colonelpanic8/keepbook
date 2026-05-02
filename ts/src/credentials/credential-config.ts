@@ -1,8 +1,7 @@
 /**
  * CredentialConfig types and parsing (port of Rust credentials/config.rs).
  *
- * A discriminated union tagged on `backend`. Currently only the "pass" variant
- * is supported.
+ * A discriminated union tagged on `backend`.
  */
 import * as toml from 'toml';
 
@@ -15,11 +14,26 @@ export interface PassConfig {
   fields: Record<string, string>;
 }
 
+/** Configuration for the environment-variable credential backend. */
+export interface EnvConfig {
+  backend: 'env';
+  prefix?: string;
+  fields: Record<string, string>;
+}
+
+/** Configuration for the age-encrypted credential backend. */
+export interface AgeConfig {
+  backend: 'age';
+  path: string;
+  identity_path?: string;
+  fields: Record<string, string>;
+}
+
 /**
  * Discriminated union of all supported credential backends.
  * Extend with additional variants as needed.
  */
-export type CredentialConfig = PassConfig;
+export type CredentialConfig = PassConfig | EnvConfig | AgeConfig;
 
 /**
  * Parse a TOML string into a `CredentialConfig`.
@@ -59,13 +73,8 @@ export function parseCredentialConfigValue(input: unknown): CredentialConfig {
     throw new Error('Missing or invalid "backend" field in credential config');
   }
 
-  if (backend !== 'pass') {
+  if (backend !== 'pass' && backend !== 'env' && backend !== 'age') {
     throw new Error(`Unsupported credential backend: "${backend}"`);
-  }
-
-  const path = raw['path'];
-  if (typeof path !== 'string') {
-    throw new Error('Missing or invalid "path" field in credential config');
   }
 
   const rawFields = raw['fields'];
@@ -83,6 +92,36 @@ export function parseCredentialConfigValue(input: unknown): CredentialConfig {
     }
   } else {
     throw new Error('"fields" must be a table/object');
+  }
+
+  if (backend === 'env') {
+    const prefix = raw['prefix'];
+    if (prefix !== undefined && typeof prefix !== 'string') {
+      throw new Error('"prefix" must be a string when present');
+    }
+    return {
+      backend: 'env',
+      ...(prefix !== undefined ? { prefix } : {}),
+      fields,
+    };
+  }
+
+  const path = raw['path'];
+  if (typeof path !== 'string') {
+    throw new Error('Missing or invalid "path" field in credential config');
+  }
+
+  if (backend === 'age') {
+    const identityPath = raw['identity_path'];
+    if (identityPath !== undefined && typeof identityPath !== 'string') {
+      throw new Error('"identity_path" must be a string when present');
+    }
+    return {
+      backend: 'age',
+      path,
+      ...(identityPath !== undefined ? { identity_path: identityPath } : {}),
+      fields,
+    };
   }
 
   return { backend: 'pass', path, fields };

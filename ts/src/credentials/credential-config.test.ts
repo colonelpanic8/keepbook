@@ -57,6 +57,38 @@ backend = "pass"
 `;
     expect(() => parseCredentialConfig(toml)).toThrow();
   });
+
+  it('parses env backend config', () => {
+    const toml = `
+backend = "env"
+prefix = "KEEPBOOK_COINBASE_"
+
+[fields]
+key_name = "KEEPBOOK_COINBASE_KEY_NAME"
+`;
+    expect(parseCredentialConfig(toml)).toEqual({
+      backend: 'env',
+      prefix: 'KEEPBOOK_COINBASE_',
+      fields: { key_name: 'KEEPBOOK_COINBASE_KEY_NAME' },
+    });
+  });
+
+  it('parses age backend config', () => {
+    const toml = `
+backend = "age"
+path = "credentials/coinbase.age"
+identity_path = ".ssh/keepbook_sync_key"
+
+[fields]
+key_name = "key-name"
+`;
+    expect(parseCredentialConfig(toml)).toEqual({
+      backend: 'age',
+      path: 'credentials/coinbase.age',
+      identity_path: '.ssh/keepbook_sync_key',
+      fields: { key_name: 'key-name' },
+    });
+  });
 });
 
 describe('CredentialConfig JSON round-trip', () => {

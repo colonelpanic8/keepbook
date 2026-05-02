@@ -17,11 +17,16 @@
 //! private_key = "private-key"
 //! ```
 
+mod age;
 mod config;
+mod env;
+mod field_entry;
 mod pass;
 mod session;
 
+pub use age::{AgeConfig, AgeCredentialStore};
 pub use config::CredentialConfig;
+pub use env::{EnvConfig, EnvCredentialStore};
 pub use pass::{PassConfig, PassCredentialStore};
 pub use session::{SessionCache, SessionData, StoredCookie};
 

@@ -46,6 +46,8 @@ import {
   type TransactionMetadataBackfillStats,
 } from './storage.js';
 import { parseCredentialConfigValue } from '../credentials/credential-config.js';
+import { AgeCredentialStore } from '../credentials/age.js';
+import { EnvCredentialStore } from '../credentials/env.js';
 import { PassCredentialStore } from '../credentials/pass.js';
 
 // ---------------------------------------------------------------------------
@@ -404,6 +406,12 @@ export class JsonFileStorage implements Storage, CompactionStorage, MetadataBack
         if (cfg.backend === 'pass') {
           return new PassCredentialStore(cfg);
         }
+        if (cfg.backend === 'env') {
+          return new EnvCredentialStore(cfg);
+        }
+        if (cfg.backend === 'age') {
+          return new AgeCredentialStore(cfg, path.dirname(configPath));
+        }
       }
 
       // Fallback: separate credentials.toml (backwards compatibility with Rust).
@@ -413,6 +421,12 @@ export class JsonFileStorage implements Storage, CompactionStorage, MetadataBack
         const cfg = parseCredentialConfigValue(rawCreds);
         if (cfg.backend === 'pass') {
           return new PassCredentialStore(cfg);
+        }
+        if (cfg.backend === 'env') {
+          return new EnvCredentialStore(cfg);
+        }
+        if (cfg.backend === 'age') {
+          return new AgeCredentialStore(cfg, path.dirname(credsPath));
         }
       }
 

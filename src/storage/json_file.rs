@@ -134,7 +134,8 @@ impl JsonFileStorage {
             let config: ConnectionConfig = toml::from_str(&content)
                 .with_context(|| format!("Failed to parse {}", config_path.display()))?;
             if let Some(cred_config) = config.credentials {
-                return Ok(Some(cred_config.build()));
+                let base_dir = config_path.parent();
+                return Ok(Some(cred_config.build_with_base_dir(base_dir)));
             }
         }
 
@@ -142,7 +143,8 @@ impl JsonFileStorage {
         let creds_path = self.connection_dir(connection_id)?.join("credentials.toml");
         if creds_path.exists() {
             let config = crate::credentials::CredentialConfig::load(&creds_path)?;
-            return Ok(Some(config.build()));
+            let base_dir = creds_path.parent();
+            return Ok(Some(config.build_with_base_dir(base_dir)));
         }
 
         Ok(None)
