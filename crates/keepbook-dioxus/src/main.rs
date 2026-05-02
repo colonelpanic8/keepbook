@@ -2518,6 +2518,8 @@ fn AccountsView(
 ) -> Element {
     let virtual_accounts = virtual_account_summaries(&snapshot);
     let account_count = accounts.len() + virtual_accounts.len();
+    let account_summaries = snapshot.by_account.clone();
+    let _ = balances;
 
     rsx! {
         section { class: "panel",
@@ -2540,7 +2542,7 @@ fn AccountsView(
                             .filter(|account| account.connection_id == connection.id)
                             .cloned()
                             .collect::<Vec<_>>(),
-                        balances: balances.clone(),
+                        account_summaries: account_summaries.clone(),
                         currency: currency.clone(),
                     }
                 }
@@ -2601,7 +2603,7 @@ fn VirtualAccountRow(account: AccountSummary, currency: String) -> Element {
 fn AccountGroup(
     connection: Connection,
     accounts: Vec<Account>,
-    balances: Vec<Balance>,
+    account_summaries: Vec<AccountSummary>,
     currency: String,
 ) -> Element {
     let active_count = accounts.iter().filter(|account| account.active).count();
@@ -2637,7 +2639,7 @@ fn AccountGroup(
                 for account in accounts {
                     AccountRow {
                         account,
-                        balances: balances.clone(),
+                        account_summaries: account_summaries.clone(),
                         currency: currency.clone(),
                     }
                 }
@@ -2647,7 +2649,11 @@ fn AccountGroup(
 }
 
 #[component]
-fn AccountRow(account: Account, balances: Vec<Balance>, currency: String) -> Element {
+fn AccountRow(
+    account: Account,
+    account_summaries: Vec<AccountSummary>,
+    currency: String,
+) -> Element {
     let status = if account.exclude_from_portfolio {
         "Ignored"
     } else if account.active {
@@ -2666,7 +2672,7 @@ fn AccountRow(account: Account, balances: Vec<Balance>, currency: String) -> Ele
         "status"
     };
     let tags = account.tags.join(", ");
-    let balance = account_base_value(&account.id, &balances)
+    let balance = account_snapshot_value(&account.id, &account_summaries)
         .map(|value| format_full_money(value, &currency))
         .unwrap_or_else(|| "N/A".to_string());
 
@@ -3458,20 +3464,12 @@ fn parse_money_input(value: &str) -> Option<f64> {
     }
 }
 
-fn account_base_value(account_id: &str, balances: &[Balance]) -> Option<f64> {
-    let account_balances = balances
+fn account_snapshot_value(account_id: &str, account_summaries: &[AccountSummary]) -> Option<f64> {
+    account_summaries
         .iter()
-        .filter(|balance| balance.account_id == account_id)
-        .collect::<Vec<_>>();
-
-    if account_balances.is_empty() {
-        return None;
-    }
-
-    account_balances.iter().try_fold(0.0, |total, balance| {
-        let value = balance.value_in_reporting_currency.as_deref()?;
-        parse_money_input(value).map(|parsed| total + parsed)
-    })
+        .find(|summary| summary.account_id == account_id)
+        .and_then(|summary| summary.value_in_base.as_deref())
+        .and_then(parse_money_input)
 }
 
 fn virtual_account_summaries(snapshot: &PortfolioSnapshot) -> Vec<AccountSummary> {
@@ -3782,6 +3780,22 @@ mod tests {
         };
 
         assert_eq!(current_net_worth_from_snapshot(&snapshot), 1234.56);
+    }
+
+    #[test]
+    fn account_value_uses_portfolio_snapshot_account_total() {
+        let account_summaries = vec![AccountSummary {
+            account_id: "empower".to_string(),
+            account_name: "Empower Retirement".to_string(),
+            connection_name: "Empower".to_string(),
+            value_in_base: Some("113738.71".to_string()),
+        }];
+
+        assert_eq!(
+            account_snapshot_value("empower", &account_summaries),
+            Some(113738.71)
+        );
+        assert_eq!(account_snapshot_value("missing", &account_summaries), None);
     }
 
     #[test]
