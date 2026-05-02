@@ -9,6 +9,9 @@ pub(super) fn GraphsView(
     connections: Vec<Connection>,
     filter_overrides: FilterOverrides,
 ) -> Element {
+    let _ = accounts;
+    let _ = connections;
+
     rsx! {
         section { class: "panel graph-panel",
             HistoryGraphPanel {
@@ -22,13 +25,6 @@ pub(super) fn GraphsView(
                 account: None,
                 show_header: true,
             }
-        }
-        AccountGraphPanel {
-            accounts,
-            connections,
-            currency,
-            defaults,
-            filter_overrides,
         }
     }
 }

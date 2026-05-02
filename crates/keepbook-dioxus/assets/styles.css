@@ -1474,6 +1474,27 @@ small,
   padding: 10px 12px;
 }
 
+.data-table button.table-row {
+  background: transparent;
+  border-left: 0;
+  border-right: 0;
+  border-top: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  width: 100%;
+}
+
+.data-table button.table-row:hover,
+.data-table button.table-row:focus-visible {
+  background: #f2f7f5;
+}
+
+.account-click-row {
+  appearance: none;
+}
+
 .data-table .table-head {
   background: #f7faf9;
   color: #62727f;

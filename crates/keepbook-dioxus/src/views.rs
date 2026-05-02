@@ -12,7 +12,7 @@ mod shared;
 mod spending;
 
 use accounts::AccountsView;
-use charts::{AccountGraphPanel, HistoryGraphPanel};
+use charts::HistoryGraphPanel;
 use connections::ConnectionsView;
 use graph_settings::{GraphsView, SettingsView};
 use proposed_edits::ProposedEditsView;
@@ -317,6 +317,8 @@ fn Dashboard(
                             balances: overview.balances.clone(),
                             snapshot: overview.snapshot.clone(),
                             currency: overview.reporting_currency.clone(),
+                            defaults: overview.history_defaults.clone(),
+                            filter_overrides,
                             connection_count: overview.connections.len(),
                             onrefresh: move |_| onrefresh.call(()),
                         }

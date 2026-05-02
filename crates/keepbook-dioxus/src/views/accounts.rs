@@ -11,6 +11,13 @@ const PULL_REFRESH_TRIGGER_PX: f64 = 84.0;
 const PULL_REFRESH_MAX_OFFSET_PX: f64 = 64.0;
 const PULL_REFRESH_HORIZONTAL_SLOP_PX: f64 = 48.0;
 
+#[derive(Clone, Debug, PartialEq)]
+struct AccountGraphSelection {
+    id: String,
+    name: String,
+    connection_name: String,
+}
+
 fn first_touch_position(event: &TouchEvent) -> Option<(f64, f64)> {
     event.touches().first().map(|touch| {
         let position = touch.client_coordinates();
@@ -29,6 +36,8 @@ pub(super) fn AccountsView(
     balances: Vec<Balance>,
     snapshot: PortfolioSnapshot,
     currency: String,
+    defaults: HistoryDefaults,
+    filter_overrides: FilterOverrides,
     connection_count: usize,
     onrefresh: EventHandler<()>,
 ) -> Element {
@@ -37,6 +46,7 @@ pub(super) fn AccountsView(
     let mut price_status = use_signal(String::new);
     let mut pull_start = use_signal(|| None::<PullStart>);
     let mut pull_distance = use_signal(|| 0.0);
+    let mut selected_graph = use_signal(|| None::<AccountGraphSelection>);
     let virtual_accounts = virtual_account_summaries(&snapshot);
     let account_count = accounts.len() + virtual_accounts.len();
     let active_accounts = accounts.iter().filter(|account| account.active).count();
@@ -122,6 +132,33 @@ pub(super) fn AccountsView(
                         detail: "Configured sources".to_string()
                     }
                 }
+                if let Some(selection) = selected_graph() {
+                    section { class: "panel graph-panel account-detail-graph",
+                        div { class: "panel-header",
+                            div { class: "panel-title",
+                                h2 { "{selection.name}" }
+                                span { "{selection.connection_name}" }
+                            }
+                            button {
+                                class: "icon-button",
+                                title: "Close",
+                                onclick: move |_| selected_graph.set(None),
+                                "x"
+                            }
+                        }
+                        HistoryGraphPanel {
+                            title: selection.name.clone(),
+                            scope_label: selection.connection_name.clone(),
+                            empty_title: "No account history".to_string(),
+                            empty_detail: "Refresh balances for this account to populate the chart.".to_string(),
+                            currency: currency.clone(),
+                            defaults: defaults.clone(),
+                            filter_overrides,
+                            account: Some(selection.id.clone()),
+                            show_header: false,
+                        }
+                    }
+                }
                 section { class: "panel",
                     div { class: "panel-header",
                         div { class: "panel-title",
@@ -179,6 +216,7 @@ pub(super) fn AccountsView(
                             VirtualAccountGroup {
                                 accounts: virtual_accounts,
                                 currency: currency.clone(),
+                                onselect: move |selection| selected_graph.set(Some(selection)),
                             }
                         }
                         for connection in connections {
@@ -191,6 +229,7 @@ pub(super) fn AccountsView(
                                     .collect::<Vec<_>>(),
                                 account_summaries: account_summaries.clone(),
                                 currency: currency.clone(),
+                                onselect: move |selection| selected_graph.set(Some(selection)),
                             }
                         }
                                     }
@@ -201,7 +240,11 @@ pub(super) fn AccountsView(
 }
 
 #[component]
-fn VirtualAccountGroup(accounts: Vec<AccountSummary>, currency: String) -> Element {
+fn VirtualAccountGroup(
+    accounts: Vec<AccountSummary>,
+    currency: String,
+    onselect: EventHandler<AccountGraphSelection>,
+) -> Element {
     rsx! {
         section { class: "tree-group virtual-group",
             div { class: "tree-parent",
@@ -222,6 +265,7 @@ fn VirtualAccountGroup(accounts: Vec<AccountSummary>, currency: String) -> Eleme
                     VirtualAccountRow {
                         account,
                         currency: currency.clone(),
+                        onselect,
                     }
                 }
             }
@@ -230,16 +274,28 @@ fn VirtualAccountGroup(accounts: Vec<AccountSummary>, currency: String) -> Eleme
 }
 
 #[component]
-fn VirtualAccountRow(account: AccountSummary, currency: String) -> Element {
+fn VirtualAccountRow(
+    account: AccountSummary,
+    currency: String,
+    onselect: EventHandler<AccountGraphSelection>,
+) -> Element {
     let value = account
         .value_in_base
         .as_deref()
         .and_then(parse_money_input)
         .map(|value| format_full_money(value, &currency))
         .unwrap_or_else(|| "N/A".to_string());
+    let selection = AccountGraphSelection {
+        id: account.account_id.clone(),
+        name: account.account_name.clone(),
+        connection_name: account.connection_name.clone(),
+    };
 
     rsx! {
-        div { class: "table-row virtual-account-row",
+        button {
+            class: "table-row virtual-account-row account-click-row",
+            title: "View graph",
+            onclick: move |_| onselect.call(selection.clone()),
             strong { "{account.account_name}" }
             span { "{value}" }
             span { class: "status liability-status", "Virtual" }
@@ -254,6 +310,7 @@ fn AccountGroup(
     accounts: Vec<Account>,
     account_summaries: Vec<AccountSummary>,
     currency: String,
+    onselect: EventHandler<AccountGraphSelection>,
 ) -> Element {
     let active_count = accounts.iter().filter(|account| account.active).count();
     let ignored_count = accounts
@@ -288,8 +345,10 @@ fn AccountGroup(
                 for account in accounts {
                     AccountRow {
                         account,
+                        connection_name: connection.name.clone(),
                         account_summaries: account_summaries.clone(),
                         currency: currency.clone(),
+                        onselect,
                     }
                 }
             }
@@ -300,8 +359,10 @@ fn AccountGroup(
 #[component]
 fn AccountRow(
     account: Account,
+    connection_name: String,
     account_summaries: Vec<AccountSummary>,
     currency: String,
+    onselect: EventHandler<AccountGraphSelection>,
 ) -> Element {
     let status = if account.exclude_from_portfolio {
         "Ignored"
@@ -324,9 +385,17 @@ fn AccountRow(
     let balance = account_snapshot_value(&account.id, &account_summaries)
         .map(|value| format_full_money(value, &currency))
         .unwrap_or_else(|| "N/A".to_string());
+    let selection = AccountGraphSelection {
+        id: account.id.clone(),
+        name: account.name.clone(),
+        connection_name,
+    };
 
     rsx! {
-        div { class: "{row_class}",
+        button {
+            class: "{row_class} account-click-row",
+            title: "View graph",
+            onclick: move |_| onselect.call(selection.clone()),
             strong { "{account.name}" }
             span { "{balance}" }
             span { class: "{status_class}", "{status}" }
