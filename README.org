@@ -10,21 +10,6 @@ Keepbook is a local-first personal finance toolkit focused on data ownership.
 - The on-disk format is human-readable and easy to inspect/edit with normal tools.
 - The data directory is fully portable: copy it, back it up, version it, and keep it long-term without lock-in.
 
-* Implementations
-
-Keepbook currently has two implementations in this repository:
-
-- Rust: =src/= (reference CLI and library).
-- TypeScript: =ts/= (port of the library/CLI surface).
-
-Project policy is to keep business logic and output shapes aligned between both implementations.
-Current TypeScript CLI gaps (as of this README update):
-
-- =sync prices= returns a not-implemented error.
-- =sync symlinks= is currently a stub response.
-- =market-data fetch= returns a not-implemented error.
-- Synchronizer support is partial relative to Rust.
-
 * CLI
 
 The main Rust binary is =keepbook=. Commands emit JSON.
@@ -283,8 +268,6 @@ Implemented source types:
 * Development
 
 - Rust tests: =cargo test=
-- TypeScript tests: =cd ts && yarn test=
-- TypeScript package manager: use =yarn= in =ts/=
 
 Useful helper commands from =justfile=:
 
@@ -302,14 +285,6 @@ Rust modules:
 - =src/app/= - application command handlers/types.
 - =src/main.rs= - CLI entrypoint.
 - =src/bin/keepbook-sync-daemon.rs= - optional tray sync daemon.
-
-TypeScript modules:
-
-- =ts/src/app= - app-layer command handlers/types.
-- =ts/src/storage= - storage trait + JSON file implementation.
-- =ts/src/market-data= - market data store and services.
-- =ts/src/portfolio= - valuation/history/change points.
-- =ts/src/cli/main.ts= - CLI entrypoint.
 
 * Why "Keepbook"?
 

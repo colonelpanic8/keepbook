@@ -44,9 +44,7 @@
               ".worktrees"
               ".playwright-cli"
               "target"
-              "node_modules"
               "dist"
-              "ts"
               "plans"
               "docs"
               "contracts"
@@ -546,8 +544,6 @@
                 pkgs.just
                 pkgs.jq
                 pkgs.age
-                pkgs.nodejs_22
-                pkgs.yarn
                 rustWarningsShim
               ]
               ++ dioxusLinuxBuildInputs;

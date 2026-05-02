@@ -2,16 +2,9 @@
 
 ## Overview
 
-Keepbook is a local-first personal finance toolkit. Data is stored in plain JSON/TOML/JSONL files. The core has **two implementations that must stay in sync**:
+Keepbook is a local-first personal finance toolkit. Data is stored in plain JSON/TOML/JSONL files. The in-repo implementation is Rust, with Dioxus for app UI surfaces.
 
-1. **Rust** (`src/`, `Cargo.toml`) - the original CLI and library
-2. **TypeScript** (`ts/`, `ts/package.json`) - a port of the library and CLI
-
-## Dual-Implementation Rules
-
-**Any change to business logic, output format, or data structures must be applied to both implementations.**
-
-### What must stay in sync
+## Compatibility Rules
 
 - **CLI command structure**: command names, flags, arguments, help text
 - **JSON output format**: field names (snake_case), field types, null vs omitted semantics
@@ -21,21 +14,11 @@ Keepbook is a local-first personal finance toolkit. Data is stored in plain JSON
 - **Storage format**: JSON/JSONL file structure, field names, serialization rules
 - **Business logic**: portfolio valuation, change point collection, balance aggregation, account counting
 
-### null vs undefined (critical)
-
-Rust uses `#[serde(skip_serializing_if)]` to omit fields. In TypeScript:
-- Fields **without** `skip_serializing_if` in Rust -> use `| null` in TS (serialized as `null`)
-- Fields **with** `skip_serializing_if` in Rust -> use `?:` in TS (omitted from JSON)
-
-See `ts/src/app/types.ts` for the complete mapping.
-
 ### When making changes
 
-1. Implement in one language first
-2. Write/update tests that verify exact JSON output
-3. Port to the other language
-4. Run both test suites: `cargo test` (Rust) and `cd ts && yarn test` (TS)
-5. Diff JSON output of both CLIs against the same data directory to verify compatibility
+1. Update the Rust app/library behavior.
+2. Write/update tests that verify exact JSON output when output formats change.
+3. Run `cargo test` and any narrower validation relevant to the touched crates.
 
 ## UI Value Sourcing
 
@@ -52,22 +35,16 @@ Examples:
   `exclude_from_portfolio`, price lookup, formatting, or account validity rules
   can affect the answer.
 - If the current API does not expose the needed derived value, extend the
-  headless Rust/TypeScript app-layer output first, then consume that output in
-  the UI.
+  headless Rust app-layer output first, then consume that output in the UI.
 
 This applies to all UI surfaces, including Dioxus, Expo/React Native, web
 components, tray/menu views, and any future frontend.
-
-## TypeScript Package Manager
-
-- Prefer `yarn` for TypeScript workflows in `ts/` (install, build, test, and CLI execution).
-- Use `npm`/`npx` only when explicitly required.
 
 ## Development Environment
 
 - Run repository commands in the direnv-provided environment.
 - If the current shell has not already loaded direnv, use `direnv exec . <command>` from the repository root instead of `nix develop --command <command>`.
-- Prefer direct commands such as `cargo test` or `cd ts && yarn test` only when the active shell is already inside the direnv context.
+- Prefer direct commands such as `cargo test` only when the active shell is already inside the direnv context.
 
 ## Project Structure
 
@@ -78,23 +55,6 @@ src/                    # Rust implementation
   sync/                 # Synchronizer traits, orchestration, auth flows
   market_data/          # Store, source adapters, routers, service builder
   portfolio/            # Valuation, history, change-point logic
-
-ts/                     # TypeScript implementation
-  src/
-    app/                # CLI command handlers (mirrors Rust src/app.rs)
-      format.ts         # Timestamp/decimal formatting utilities
-      types.ts          # Output type interfaces (mirrors Rust app structs)
-      config.ts         # Config loading
-      list.ts           # List commands
-      mutations.ts      # Add/remove/set commands
-      portfolio.ts      # Portfolio snapshot/history/change-points
-      sync.ts           # Sync stubs
-    cli/
-      main.ts           # Commander.js CLI entry point
-    models/             # Core domain types (mirrors Rust models)
-    storage/            # Storage trait + implementations
-    market-data/        # Market data store + service
-    portfolio/          # Portfolio service + change points
 ```
 
 ## CLI Commands
@@ -130,13 +90,11 @@ auto_push = false
 ## Testing
 
 - Rust: `cargo test`
-- TypeScript: `cd ts && yarn test`
 
-Both must pass before any push.
+Tests should pass before any push.
 
 ## Key Reference Files
 
 When modifying output formats, consult:
 - **Rust**: `src/app.rs` (output structs and command handlers)
-- **TypeScript**: `ts/src/app/types.ts` (output interfaces) and `ts/src/app/format.ts` (formatting)
-- **Integration tests**: `ts/src/app/integration.test.ts` (JSON compatibility verification)
+- **Contract tests**: `tests/contracts.rs` and `contracts/*.json`

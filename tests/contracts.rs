@@ -303,31 +303,6 @@ fn run_rust_cli(config_path: &Path, args: &[String]) -> Result<serde_json::Value
     serde_json::from_str(&stdout).context("Rust CLI output was not valid JSON")
 }
 
-fn run_ts_cli(config_path: &Path, args: &[String]) -> Result<serde_json::Value> {
-    let entry = repo_root()
-        .join("ts")
-        .join("dist")
-        .join("cli")
-        .join("main.js");
-    if !entry.exists() {
-        anyhow::bail!("Missing TS CLI entrypoint: {}", entry.display());
-    }
-
-    let output = Command::new("node")
-        .arg(entry)
-        .args(["--config", config_path.to_str().unwrap()])
-        .args(args)
-        .output()
-        .context("Failed to execute TS CLI (node)")?;
-
-    if !output.status.success() {
-        anyhow::bail!("TS CLI failed: {output:?}");
-    }
-
-    let stdout = String::from_utf8(output.stdout).context("TS CLI stdout not UTF-8")?;
-    serde_json::from_str(&stdout).context("TS CLI output was not valid JSON")
-}
-
 fn load_expected(name: &str) -> Result<serde_json::Value> {
     let path = contracts_dir().join(format!("{name}.json"));
     let content = std::fs::read_to_string(&path)
@@ -336,7 +311,7 @@ fn load_expected(name: &str) -> Result<serde_json::Value> {
 }
 
 #[test]
-fn contracts_match_both_clis() -> Result<()> {
+fn contracts_match_rust_cli() -> Result<()> {
     let cases = load_cases()?;
 
     let rt = tokio::runtime::Runtime::new().context("Failed to create tokio runtime")?;
@@ -353,8 +328,6 @@ fn contracts_match_both_clis() -> Result<()> {
 
         let rust_json = run_rust_cli(&config_path, &case.command)
             .with_context(|| format!("Case '{}' (Rust CLI)", case.name))?;
-        let ts_json = run_ts_cli(&config_path, &case.command)
-            .with_context(|| format!("Case '{}' (TS CLI)", case.name))?;
         let expected = load_expected(&case.name)?;
 
         if rust_json != expected {
@@ -363,24 +336,6 @@ fn contracts_match_both_clis() -> Result<()> {
                 case.name,
                 serde_json::to_string_pretty(&rust_json).unwrap_or_default(),
                 serde_json::to_string_pretty(&expected).unwrap_or_default()
-            );
-        }
-
-        if ts_json != expected {
-            anyhow::bail!(
-                "Contract '{}' mismatch (TS vs expected)\nTS: {}\nExpected: {}",
-                case.name,
-                serde_json::to_string_pretty(&ts_json).unwrap_or_default(),
-                serde_json::to_string_pretty(&expected).unwrap_or_default()
-            );
-        }
-
-        if rust_json != ts_json {
-            anyhow::bail!(
-                "Contract '{}' mismatch (Rust vs TS)\nRust: {}\nTS: {}",
-                case.name,
-                serde_json::to_string_pretty(&rust_json).unwrap_or_default(),
-                serde_json::to_string_pretty(&ts_json).unwrap_or_default()
             );
         }
     }
