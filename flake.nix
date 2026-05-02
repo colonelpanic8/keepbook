@@ -455,6 +455,9 @@
             age "''${args[@]}"
           '';
         };
+        rustWarningsShim = pkgs.writeShellScriptBin "warnings" ''
+          exec env "RUSTFLAGS=-D warnings" "$@"
+        '';
         mkKeepbookPackage = {
           pname,
           cargoPackage ? "keepbook",
@@ -545,6 +548,7 @@
                 pkgs.age
                 pkgs.nodejs_22
                 pkgs.yarn
+                rustWarningsShim
               ]
               ++ dioxusLinuxBuildInputs;
 
