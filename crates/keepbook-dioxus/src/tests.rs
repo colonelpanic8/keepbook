@@ -408,6 +408,19 @@ fn account_value_uses_portfolio_snapshot_account_total() {
 }
 
 #[test]
+fn money_formatting_uses_usd_symbol() {
+    assert_eq!(format_full_money(1571.17, "USD"), "$1,571.17");
+    assert_eq!(format_full_money(-1571.17, "usd"), "-$1,571.17");
+    assert_eq!(format_full_money(1.999, "USD"), "$2.00");
+    assert_eq!(format_compact_money(1571.17, "USD"), "$1.6K");
+}
+
+#[test]
+fn money_formatting_keeps_unknown_currency_code() {
+    assert_eq!(format_full_money(1571.17, "CHF"), "CHF 1,571.17");
+}
+
+#[test]
 fn portfolio_snapshot_deserializes_virtual_accounts() {
     let snapshot: PortfolioSnapshot = serde_json::from_value(serde_json::json!({
         "as_of_date": "2026-04-26",

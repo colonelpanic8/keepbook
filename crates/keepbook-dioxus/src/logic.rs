@@ -550,24 +550,44 @@ pub(crate) fn format_compact_money(value: f64, currency: &str) -> String {
     } else {
         (value, "")
     };
-    format!("{currency} {}{suffix}", format_number(scaled, 1))
+    format_money_display(scaled, currency, 1, suffix)
 }
 
 pub(crate) fn format_full_money(value: f64, currency: &str) -> String {
+    format_money_display(value, currency, 2, "")
+}
+
+fn format_money_display(value: f64, currency: &str, decimals: usize, suffix: &str) -> String {
     let sign = if value < 0.0 { "-" } else { "" };
-    let abs = value.abs();
-    let integer = abs.trunc() as i64;
-    let decimals = ((abs.fract() * 100.0).round() as i64).min(99);
-    let prefix = if currency.is_empty() {
-        String::new()
-    } else {
-        format!("{currency} ")
+    let rounded = format!("{:.*}", decimals, value.abs());
+    let amount = match rounded.split_once('.') {
+        Some((integer, fraction)) => {
+            format!(
+                "{}.{fraction}{suffix}",
+                format_digit_string_with_commas(integer)
+            )
+        }
+        None => format!("{}{suffix}", format_digit_string_with_commas(&rounded)),
     };
-    format!(
-        "{prefix}{sign}{}.{:02}",
-        format_integer_with_commas(integer),
-        decimals
-    )
+
+    match currency_display_symbol(currency) {
+        Some(symbol) => format!("{sign}{symbol}{amount}"),
+        None => {
+            let currency = currency.trim();
+            if currency.is_empty() {
+                format!("{sign}{amount}")
+            } else {
+                format!("{} {sign}{amount}", currency.to_uppercase())
+            }
+        }
+    }
+}
+
+fn currency_display_symbol(currency: &str) -> Option<&'static str> {
+    match currency.trim().to_ascii_uppercase().as_str() {
+        "USD" | "US DOLLAR" | "UNITED STATES DOLLAR" | "DOLLAR" => Some("$"),
+        _ => None,
+    }
 }
 
 pub(crate) fn format_signed_money(value: f64, currency: &str) -> String {
@@ -578,8 +598,7 @@ pub(crate) fn format_signed_money(value: f64, currency: &str) -> String {
     }
 }
 
-pub(crate) fn format_integer_with_commas(value: i64) -> String {
-    let digits = value.to_string();
+fn format_digit_string_with_commas(digits: &str) -> String {
     let mut formatted = String::new();
     for (index, ch) in digits.chars().rev().enumerate() {
         if index > 0 && index % 3 == 0 {
