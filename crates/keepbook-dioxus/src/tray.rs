@@ -1,9 +1,6 @@
-use crate::{
-    logic::{current_net_worth_from_snapshot, format_full_money},
-    AccountSummary, Overview,
-};
+use crate::{Overview, TraySnapshot};
 use dioxus::desktop::trayicon::{
-    menu::{Menu, MenuId, MenuItem, Submenu},
+    menu::{Menu, MenuId, MenuItem, PredefinedMenuItem, Submenu},
     Icon, TrayIconBuilder,
 };
 use dioxus::desktop::{use_tray_menu_event_handler, window};
@@ -12,21 +9,33 @@ use image::ImageReader;
 use std::io::Cursor;
 
 const SHOW_HIDE_ID: &str = "keepbook-show-hide";
-const SHOW_GRAPHS_ID: &str = "keepbook-show-graphs";
+const OPEN_APP_ID: &str = "keepbook-open-app";
 const SHOW_SETTINGS_ID: &str = "keepbook-show-settings";
-const REFRESH_ID: &str = "keepbook-refresh";
+const SYNC_NOW_ID: &str = "keepbook-sync-now";
 const QUIT_ID: &str = "keepbook-quit";
-const TOP_ACCOUNT_ROWS: usize = 5;
 
 #[derive(Clone)]
 struct TrayState {
     tray: dioxus::desktop::trayicon::TrayIcon,
-    title_item: MenuItem,
-    net_worth_item: MenuItem,
-    accounts_item: MenuItem,
-    connections_item: MenuItem,
-    as_of_item: MenuItem,
-    top_accounts: Vec<MenuItem>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TrayRuntime {
+    pub status_text: String,
+    pub last_cycle_text: String,
+    pub next_cycle_text: String,
+    pub last_summary: String,
+}
+
+impl Default for TrayRuntime {
+    fn default() -> Self {
+        Self {
+            status_text: "Idle".to_string(),
+            last_cycle_text: "Last price refresh: never".to_string(),
+            next_cycle_text: "Next price refresh: unscheduled".to_string(),
+            last_summary: "No price refresh has run yet".to_string(),
+        }
+    }
 }
 
 pub fn show_window() {
@@ -46,38 +55,42 @@ fn toggle_window_visibility() {
 }
 
 #[component]
-pub fn KeepbookTray(overview: Option<Overview>, onrefresh: EventHandler<()>) -> Element {
+pub fn KeepbookTray(
+    overview: Option<Overview>,
+    tray_snapshot: Option<Result<TraySnapshot, String>>,
+    runtime: TrayRuntime,
+    onsyncnow: EventHandler<()>,
+) -> Element {
     let tray_state = use_hook(create_tray_state);
 
     use_tray_menu_event_handler(move |event| match event.id().as_ref() {
+        OPEN_APP_ID => show_window(),
         SHOW_HIDE_ID => toggle_window_visibility(),
-        REFRESH_ID => {
+        SYNC_NOW_ID => {
             show_window();
-            onrefresh.call(());
+            onsyncnow.call(());
         }
         QUIT_ID => std::process::exit(0),
         _ => {}
     });
 
-    use_effect(move || {
+    use_effect(use_reactive!(|overview, tray_snapshot, runtime| {
         if let Some(tray_state) = tray_state.as_ref() {
-            update_tray_state(tray_state, overview.as_ref());
+            update_tray_state(
+                tray_state,
+                overview.as_ref(),
+                tray_snapshot.as_ref(),
+                &runtime,
+            );
         }
-    });
+    }));
 
     rsx! {}
 }
 
 #[component]
-pub fn TrayViewActions(
-    onshowgraphs: EventHandler<()>,
-    onshowsettings: EventHandler<()>,
-) -> Element {
+pub fn TrayViewActions(onshowsettings: EventHandler<()>) -> Element {
     use_tray_menu_event_handler(move |event| match event.id().as_ref() {
-        SHOW_GRAPHS_ID => {
-            show_window();
-            onshowgraphs.call(());
-        }
         SHOW_SETTINGS_ID => {
             show_window();
             onshowsettings.call(());
@@ -99,50 +112,7 @@ fn create_tray_state() -> Option<TrayState> {
 }
 
 fn create_tray_state_inner() -> Result<TrayState, String> {
-    let title_item = MenuItem::new("Keepbook", false, None);
-    let net_worth_item = MenuItem::new("Net worth: loading", false, None);
-    let accounts_item = MenuItem::new("Accounts: loading", false, None);
-    let connections_item = MenuItem::new("Connections: loading", false, None);
-    let as_of_item = MenuItem::new("As of: loading", false, None);
-    let show_hide_item =
-        MenuItem::with_id(MenuId::new(SHOW_HIDE_ID), "Show/Hide Window", true, None);
-    let graphs_item = MenuItem::with_id(MenuId::new(SHOW_GRAPHS_ID), "Open Graphs", true, None);
-    let settings_item = MenuItem::with_id(MenuId::new(SHOW_SETTINGS_ID), "Settings", true, None);
-    let refresh_item = MenuItem::with_id(MenuId::new(REFRESH_ID), "Refresh", true, None);
-    let quit_item = MenuItem::with_id(MenuId::new(QUIT_ID), "Quit", true, None);
-
-    let top_accounts_menu = Submenu::new("Top Accounts", true);
-    let top_accounts: Vec<MenuItem> = (0..TOP_ACCOUNT_ROWS)
-        .map(|_| MenuItem::new("Account: loading", false, None))
-        .collect();
-    for item in &top_accounts {
-        top_accounts_menu
-            .append(item)
-            .map_err(|error| format!("failed to append tray account row: {error}"))?;
-    }
-
-    let separator_1 = MenuItem::new("", false, None);
-    let separator_2 = MenuItem::new("", false, None);
-    let separator_3 = MenuItem::new("", false, None);
-    let menu = Menu::new();
-    menu.append_items(&[
-        &show_hide_item,
-        &separator_1,
-        &title_item,
-        &net_worth_item,
-        &as_of_item,
-        &accounts_item,
-        &connections_item,
-        &top_accounts_menu,
-        &separator_2,
-        &graphs_item,
-        &settings_item,
-        &refresh_item,
-        &separator_3,
-        &quit_item,
-    ])
-    .map_err(|error| format!("failed to append keepbook tray menu: {error}"))?;
-
+    let menu = build_menu(None, None, &TrayRuntime::default())?;
     let tray = TrayIconBuilder::new()
         .with_tooltip("Keepbook")
         .with_icon(load_tray_icon()?)
@@ -151,103 +121,213 @@ fn create_tray_state_inner() -> Result<TrayState, String> {
         .build()
         .map_err(|error| format!("failed to build keepbook tray icon: {error}"))?;
 
-    Ok(TrayState {
-        tray,
-        title_item,
-        net_worth_item,
-        accounts_item,
-        connections_item,
-        as_of_item,
-        top_accounts,
-    })
+    Ok(TrayState { tray })
 }
 
-fn update_tray_state(state: &TrayState, overview: Option<&Overview>) {
-    let Some(overview) = overview else {
-        state.title_item.set_text("Keepbook");
-        state.net_worth_item.set_text("Net worth: loading");
-        state.accounts_item.set_text("Accounts: loading");
-        state.connections_item.set_text("Connections: loading");
-        state.as_of_item.set_text("As of: loading");
-        for item in &state.top_accounts {
-            item.set_text("Account: loading");
-            item.set_enabled(false);
-        }
-        return;
-    };
+fn update_tray_state(
+    state: &TrayState,
+    overview: Option<&Overview>,
+    tray_snapshot: Option<&Result<TraySnapshot, String>>,
+    runtime: &TrayRuntime,
+) {
+    match build_menu(overview, tray_snapshot, runtime) {
+        Ok(menu) => state.tray.set_menu(Some(Box::new(menu))),
+        Err(error) => eprintln!("Failed to update keepbook tray menu: {error}"),
+    }
 
-    let total = current_net_worth_from_snapshot(&overview.snapshot);
-    let total_label = format_full_money(total, &overview.reporting_currency);
-    let active_accounts = overview
-        .accounts
-        .iter()
-        .filter(|account| account.active)
-        .count();
-    let tooltip = format!(
-        "Keepbook\nNet worth: {total_label}\nAs of: {}",
-        overview.snapshot.as_of_date
-    );
-
-    state.title_item.set_text("Keepbook");
-    state
-        .net_worth_item
-        .set_text(format!("Net worth: {total_label}"));
-    state
-        .as_of_item
-        .set_text(format!("As of: {}", overview.snapshot.as_of_date));
-    state.accounts_item.set_text(format!(
-        "Accounts: {active_accounts}/{} active",
-        overview.accounts.len()
-    ));
-    state
-        .connections_item
-        .set_text(format!("Connections: {}", overview.connections.len()));
+    let tooltip = tray_tooltip(tray_snapshot, runtime);
     let _ = state.tray.set_tooltip(Some(tooltip));
-    state.tray.set_title(Some(short_title(&total_label)));
-    update_top_accounts(
-        &state.top_accounts,
-        &overview.snapshot.by_account,
-        &overview.snapshot.currency,
-    );
+
+    if let Some(Ok(snapshot)) = tray_snapshot {
+        state
+            .tray
+            .set_title(Some(short_title(&snapshot.total_label)));
+    } else {
+        state.tray.set_title(Some("Keepbook"));
+    }
 }
 
-fn update_top_accounts(items: &[MenuItem], accounts: &[AccountSummary], currency: &str) {
-    let mut account_rows = accounts
-        .iter()
-        .filter_map(|account| {
-            let value = account
-                .value_in_base
-                .as_deref()
-                .and_then(|raw| raw.parse::<f64>().ok())?;
-            Some((account, value))
-        })
-        .collect::<Vec<_>>();
-    account_rows.sort_by(|(_, left), (_, right)| {
-        right.partial_cmp(left).unwrap_or(std::cmp::Ordering::Equal)
-    });
+fn build_menu(
+    overview: Option<&Overview>,
+    tray_snapshot: Option<&Result<TraySnapshot, String>>,
+    runtime: &TrayRuntime,
+) -> Result<Menu, String> {
+    let menu = Menu::new();
 
-    for (index, item) in items.iter().enumerate() {
-        if let Some((account, value)) = account_rows.get(index) {
-            item.set_text(format!(
-                "{}: {}",
-                account.account_name,
-                format_full_money(*value, currency)
-            ));
-            item.set_enabled(false);
-        } else if index == 0 {
-            item.set_text("No account breakdown available");
-            item.set_enabled(false);
-        } else {
-            item.set_text("");
-            item.set_enabled(false);
+    append_disabled(&menu, "keepbook")?;
+    append_separator(&menu)?;
+    append_disabled(&menu, format!("Status: {}", runtime.status_text))?;
+    append_disabled(&menu, &runtime.last_cycle_text)?;
+    append_disabled(&menu, &runtime.next_cycle_text)?;
+    append_disabled(&menu, &runtime.last_summary)?;
+    append_separator(&menu)?;
+
+    let (history_lines, breakdown_lines, spending_lines, transaction_lines) =
+        tray_lines(tray_snapshot, overview);
+
+    append_submenu(&menu, "Recent Portfolio History", &history_lines)?;
+    append_submenu(&menu, "Portfolio Breakdown", &breakdown_lines)?;
+    append_disabled(&menu, "Recent Spending")?;
+    append_disabled_lines(&menu, &spending_lines)?;
+    append_submenu(&menu, "Recent Transactions", &transaction_lines)?;
+    append_separator(&menu)?;
+
+    append_action(&menu, SYNC_NOW_ID, "Refresh Prices")?;
+    append_action(&menu, OPEN_APP_ID, "Open App")?;
+    append_action(&menu, SHOW_SETTINGS_ID, "Settings")?;
+    append_action(&menu, SHOW_HIDE_ID, "Show/Hide Window")?;
+    append_separator(&menu)?;
+    append_action(&menu, QUIT_ID, "Quit")?;
+
+    Ok(menu)
+}
+
+fn tray_lines(
+    tray_snapshot: Option<&Result<TraySnapshot, String>>,
+    overview: Option<&Overview>,
+) -> (Vec<String>, Vec<String>, Vec<String>, Vec<String>) {
+    match tray_snapshot {
+        Some(Ok(snapshot)) => (
+            fallback_line(&snapshot.history_lines, "No portfolio history available"),
+            fallback_line(
+                &snapshot.portfolio_breakdown_lines,
+                "No portfolio breakdown available",
+            ),
+            fallback_line(&snapshot.spending_lines, "No spending metrics available"),
+            fallback_line(&snapshot.transaction_lines, "No recent transactions"),
+        ),
+        Some(Err(error)) => {
+            let breakdown = overview
+                .map(overview_breakdown_lines)
+                .unwrap_or_else(|| vec!["No portfolio breakdown available".to_string()]);
+            (
+                vec![format!("History unavailable: {error}")],
+                breakdown,
+                vec![format!("Spending unavailable: {error}")],
+                vec![format!("Transactions unavailable: {error}")],
+            )
+        }
+        None => {
+            let breakdown = overview
+                .map(overview_breakdown_lines)
+                .unwrap_or_else(|| vec!["Portfolio breakdown loading".to_string()]);
+            (
+                vec!["Portfolio history loading".to_string()],
+                breakdown,
+                vec!["Spending metrics loading".to_string()],
+                vec!["Transactions loading".to_string()],
+            )
         }
     }
 }
 
+fn overview_breakdown_lines(overview: &Overview) -> Vec<String> {
+    let mut lines = vec![format!(
+        "Total: {}",
+        overview
+            .snapshot
+            .total_value
+            .parse::<f64>()
+            .ok()
+            .filter(|value| value.is_finite())
+            .map(|value| crate::logic::format_full_money(value, &overview.snapshot.currency))
+            .unwrap_or_else(|| overview.snapshot.total_value.clone())
+    )];
+
+    if overview.snapshot.by_account.is_empty() {
+        lines.push("No accounts with balances".to_string());
+        return lines;
+    }
+
+    lines.extend(overview.snapshot.by_account.iter().map(|account| {
+        let value = account
+            .value_in_base
+            .as_deref()
+            .and_then(|raw| raw.parse::<f64>().ok())
+            .filter(|value| value.is_finite())
+            .map(|value| crate::logic::format_full_money(value, &overview.snapshot.currency))
+            .unwrap_or_else(|| "unpriced".to_string());
+        format!(
+            "{} / {}: {}",
+            account.connection_name, account.account_name, value
+        )
+    }));
+
+    lines
+}
+
+fn fallback_line(lines: &[String], fallback: &str) -> Vec<String> {
+    if lines.is_empty() {
+        vec![fallback.to_string()]
+    } else {
+        lines.to_vec()
+    }
+}
+
+fn append_disabled(menu: &Menu, label: impl AsRef<str>) -> Result<(), String> {
+    let item = MenuItem::new(label.as_ref(), false, None);
+    menu.append(&item)
+        .map_err(|error| format!("failed to append tray row: {error}"))
+}
+
+fn append_disabled_lines(menu: &Menu, lines: &[String]) -> Result<(), String> {
+    for line in lines {
+        append_disabled(menu, line)?;
+    }
+    Ok(())
+}
+
+fn append_action(menu: &Menu, id: &str, label: &str) -> Result<(), String> {
+    let item = MenuItem::with_id(MenuId::new(id), label, true, None);
+    menu.append(&item)
+        .map_err(|error| format!("failed to append tray action: {error}"))
+}
+
+fn append_submenu(menu: &Menu, label: &str, lines: &[String]) -> Result<(), String> {
+    let submenu = Submenu::new(label, true);
+    for line in lines {
+        let item = MenuItem::new(line, false, None);
+        submenu
+            .append(&item)
+            .map_err(|error| format!("failed to append tray submenu row: {error}"))?;
+    }
+    menu.append(&submenu)
+        .map_err(|error| format!("failed to append tray submenu: {error}"))
+}
+
+fn append_separator(menu: &Menu) -> Result<(), String> {
+    let separator = PredefinedMenuItem::separator();
+    menu.append(&separator)
+        .map_err(|error| format!("failed to append tray separator: {error}"))
+}
+
+fn tray_tooltip(
+    tray_snapshot: Option<&Result<TraySnapshot, String>>,
+    runtime: &TrayRuntime,
+) -> String {
+    let mut lines = vec![
+        "Keepbook".to_string(),
+        runtime.status_text.clone(),
+        runtime.last_cycle_text.clone(),
+        runtime.next_cycle_text.clone(),
+        runtime.last_summary.clone(),
+    ];
+
+    match tray_snapshot {
+        Some(Ok(snapshot)) => {
+            lines.push(format!("Net worth: {}", snapshot.total_label));
+            lines.push(format!("As of: {}", snapshot.as_of_date));
+        }
+        Some(Err(error)) => lines.push(format!("Tray data unavailable: {error}")),
+        None => lines.push("Tray data loading".to_string()),
+    }
+
+    lines.join("\n")
+}
+
 fn short_title(label: &str) -> String {
     label
-        .replace('$', "")
-        .replace(',', "")
+        .replace(['$', ','], "")
         .split('.')
         .next()
         .unwrap_or(label)

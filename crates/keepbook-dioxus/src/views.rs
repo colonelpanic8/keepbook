@@ -91,11 +91,53 @@ pub(crate) fn App() -> Element {
         let overrides = filter_overrides();
         async move { fetch_overview(overrides).await }
     });
+    let mut tray_status_text = use_signal(|| "Idle".to_string());
+    let mut tray_last_cycle_text = use_signal(|| "Last price refresh: never".to_string());
+    let mut tray_last_summary = use_signal(|| "No price refresh has run yet".to_string());
+    let mut tray_snapshot = use_resource(fetch_tray_snapshot);
 
     rsx! {
         DesktopTrayBridge {
             overview: overview.cloned().and_then(Result::ok),
-            onrefresh: move |_| overview.restart(),
+            tray_snapshot: tray_snapshot.cloned(),
+            status_text: tray_status_text(),
+            last_cycle_text: tray_last_cycle_text(),
+            next_cycle_text: "Next price refresh: unscheduled".to_string(),
+            last_summary: tray_last_summary(),
+            onsyncnow: move |_| {
+                tray_status_text.set("Refreshing prices...".to_string());
+                tray_last_summary.set("Running price refresh (manual)".to_string());
+                spawn(async move {
+                    let price_input = SyncPricesInput {
+                        scope: "all".to_string(),
+                        target: None,
+                        force: false,
+                        quote_staleness_seconds: None,
+                    };
+
+                    let mut had_error = false;
+                    let summary = match sync_prices(price_input).await {
+                        Ok(price_result) => {
+                            had_error |= price_sync_result_has_failures(&price_result);
+                            price_sync_result_summary(&price_result)
+                        }
+                        Err(error) => {
+                            had_error = true;
+                            format!("Price refresh failed: {error}")
+                        }
+                    };
+
+                    tray_status_text.set(if had_error {
+                        format!("Error: {summary}")
+                    } else {
+                        "Idle".to_string()
+                    });
+                    tray_last_cycle_text.set("Last price refresh: just now".to_string());
+                    tray_last_summary.set(summary);
+                    overview.restart();
+                    tray_snapshot.restart();
+                });
+            },
         }
         document::Title { "Keepbook" }
         document::Meta {
@@ -113,7 +155,10 @@ pub(crate) fn App() -> Element {
                         overview: data,
                         filter_overrides: filter_overrides(),
                         onfilterchange: move |overrides| filter_overrides.set(overrides),
-                        onrefresh: move |_| overview.restart()
+                        onrefresh: move |_| {
+                            overview.restart();
+                            tray_snapshot.restart();
+                        }
                     }
                 },
                 Some(Err(error)) => rsx! {
@@ -129,11 +174,26 @@ pub(crate) fn App() -> Element {
     not(any(target_os = "ios", target_os = "android"))
 ))]
 #[component]
-fn DesktopTrayBridge(overview: Option<Overview>, onrefresh: EventHandler<()>) -> Element {
+fn DesktopTrayBridge(
+    overview: Option<Overview>,
+    tray_snapshot: Option<Result<TraySnapshot, String>>,
+    status_text: String,
+    last_cycle_text: String,
+    next_cycle_text: String,
+    last_summary: String,
+    onsyncnow: EventHandler<()>,
+) -> Element {
     rsx! {
         tray::KeepbookTray {
             overview,
-            onrefresh,
+            tray_snapshot,
+            runtime: tray::TrayRuntime {
+                status_text,
+                last_cycle_text,
+                next_cycle_text,
+                last_summary,
+            },
+            onsyncnow,
         }
     }
 }
@@ -143,9 +203,22 @@ fn DesktopTrayBridge(overview: Option<Overview>, onrefresh: EventHandler<()>) ->
     not(any(target_os = "ios", target_os = "android"))
 )))]
 #[component]
-fn DesktopTrayBridge(overview: Option<Overview>, onrefresh: EventHandler<()>) -> Element {
+fn DesktopTrayBridge(
+    overview: Option<Overview>,
+    tray_snapshot: Option<Result<TraySnapshot, String>>,
+    status_text: String,
+    last_cycle_text: String,
+    next_cycle_text: String,
+    last_summary: String,
+    onsyncnow: EventHandler<()>,
+) -> Element {
     let _ = overview;
-    let _ = onrefresh;
+    let _ = tray_snapshot;
+    let _ = status_text;
+    let _ = last_cycle_text;
+    let _ = next_cycle_text;
+    let _ = last_summary;
+    let _ = onsyncnow;
     rsx! {}
 }
 
@@ -162,6 +235,15 @@ fn StatusPanel(state: LoadState) -> Element {
             p { "{message}" }
         }
     }
+}
+
+fn price_sync_result_has_failures(result: &serde_json::Value) -> bool {
+    result
+        .get("result")
+        .and_then(|value| value.get("failed_count"))
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0)
+        > 0
 }
 
 #[component]
@@ -183,7 +265,6 @@ fn Dashboard(
     rsx! {
         div { class: "app-shell",
             DesktopTrayViewActions {
-                onshowgraphs: move |_| active_view.set(ActiveView::Graphs),
                 onshowsettings: move |_| active_view.set(ActiveView::Settings),
             }
             aside { class: "{nav_class}",
@@ -282,13 +363,9 @@ fn Dashboard(
     not(any(target_os = "ios", target_os = "android"))
 ))]
 #[component]
-fn DesktopTrayViewActions(
-    onshowgraphs: EventHandler<()>,
-    onshowsettings: EventHandler<()>,
-) -> Element {
+fn DesktopTrayViewActions(onshowsettings: EventHandler<()>) -> Element {
     rsx! {
         tray::TrayViewActions {
-            onshowgraphs,
             onshowsettings,
         }
     }
@@ -299,11 +376,7 @@ fn DesktopTrayViewActions(
     not(any(target_os = "ios", target_os = "android"))
 )))]
 #[component]
-fn DesktopTrayViewActions(
-    onshowgraphs: EventHandler<()>,
-    onshowsettings: EventHandler<()>,
-) -> Element {
-    let _ = onshowgraphs;
+fn DesktopTrayViewActions(onshowsettings: EventHandler<()>) -> Element {
     let _ = onshowsettings;
     rsx! {}
 }

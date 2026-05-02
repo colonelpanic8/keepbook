@@ -302,6 +302,16 @@ struct PortfolioSnapshot {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
+struct TraySnapshot {
+    total_label: String,
+    as_of_date: String,
+    history_lines: Vec<String>,
+    portfolio_breakdown_lines: Vec<String>,
+    spending_lines: Vec<String>,
+    transaction_lines: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 struct AccountSummary {
     account_id: String,
     account_name: String,

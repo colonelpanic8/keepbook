@@ -3712,6 +3712,7 @@ dependencies = [
  "git2",
  "keepbook",
  "reqwest",
+ "rust_decimal",
  "secrecy",
  "serde",
  "serde_json",

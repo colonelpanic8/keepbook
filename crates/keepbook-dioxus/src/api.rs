@@ -78,6 +78,10 @@ pub(crate) async fn fetch_spending_dashboard(
     })
 }
 
+pub(crate) async fn fetch_tray_snapshot() -> Result<TraySnapshot, String> {
+    fetch_tray_snapshot_impl().await
+}
+
 pub(crate) async fn fetch_git_settings() -> Result<GitSettingsOutput, String> {
     fetch_git_settings_impl().await
 }
@@ -187,6 +191,27 @@ pub(crate) async fn fetch_transactions_impl(query: String) -> Result<Vec<Transac
         .json::<Vec<Transaction>>()
         .await
         .map_err(|error| format!("Could not decode transactions: {error}"))
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn fetch_tray_snapshot_impl() -> Result<TraySnapshot, String> {
+    let response = Request::get(&format!("{API_BASE}/api/tray"))
+        .send()
+        .await
+        .map_err(|error| format!("Could not reach keepbook-server at {API_BASE}: {error}"))?;
+
+    if !response.ok() {
+        return Err(format!(
+            "keepbook-server returned HTTP {} {}",
+            response.status(),
+            response.status_text()
+        ));
+    }
+
+    response
+        .json::<TraySnapshot>()
+        .await
+        .map_err(|error| format!("Could not decode tray snapshot: {error}"))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -415,6 +440,15 @@ pub(crate) async fn fetch_transactions_impl(query: String) -> Result<Vec<Transac
         .await
         .map_err(|error| format!("Could not load transactions: {error:#}"))?;
     from_native_output(output, "transactions")
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn fetch_tray_snapshot_impl() -> Result<TraySnapshot, String> {
+    let output = native_api_state()?
+        .tray_snapshot()
+        .await
+        .map_err(|error| format!("Could not load tray snapshot: {error:#}"))?;
+    from_native_output(output, "tray snapshot")
 }
 
 #[cfg(not(target_arch = "wasm32"))]

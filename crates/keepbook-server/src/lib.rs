@@ -1,5 +1,7 @@
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -14,9 +16,12 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 #[cfg(feature = "http")]
 use axum::{Json, Router};
-use chrono::Utc;
+use chrono::{Local, Utc};
 use keepbook::config::{default_config_path, ResolvedConfig};
+use keepbook::format::format_base_currency_display;
+use keepbook::models::Asset;
 use keepbook::storage::{JsonFileStorage, Storage};
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use toml_edit::{value, DocumentMut, Item, Table};
@@ -163,6 +168,51 @@ impl ApiState {
             balances: json_value(balances)?,
             snapshot: json_value(snapshot)?,
             history,
+        })
+    }
+
+    pub async fn tray_snapshot(&self) -> Result<TraySnapshotOutput> {
+        let state = self.snapshot().await;
+        let portfolio_result = keepbook::app::portfolio_snapshot(
+            state.storage.clone(),
+            &state.config,
+            None,
+            None,
+            "account".to_string(),
+            false,
+            None,
+            None,
+            None,
+            false,
+            true,
+            false,
+            false,
+        )
+        .await;
+
+        let (total_label, as_of_date, portfolio_breakdown_lines) = match portfolio_result {
+            Ok(snapshot) => (
+                format_tray_currency(&snapshot.total_value, &snapshot.currency, &state.config),
+                snapshot.as_of_date.to_string(),
+                build_portfolio_breakdown_lines(&snapshot, &state.config),
+            ),
+            Err(err) => (
+                "unavailable".to_string(),
+                "unavailable".to_string(),
+                vec![format!("Portfolio unavailable: {err}")],
+            ),
+        };
+        let history_lines = tray_history_lines(state.storage.clone(), &state.config).await;
+        let spending_lines = tray_spending_lines(state.storage.clone(), &state.config).await;
+        let transaction_lines = tray_transaction_lines(state.storage, &state.config).await;
+
+        Ok(TraySnapshotOutput {
+            total_label,
+            as_of_date,
+            history_lines,
+            portfolio_breakdown_lines,
+            spending_lines,
+            transaction_lines,
         })
     }
 
@@ -674,6 +724,16 @@ pub struct OverviewOutput {
     pub history: Option<serde_json::Value>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct TraySnapshotOutput {
+    pub total_label: String,
+    pub as_of_date: String,
+    pub history_lines: Vec<String>,
+    pub portfolio_breakdown_lines: Vec<String>,
+    pub spending_lines: Vec<String>,
+    pub transaction_lines: Vec<String>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct TransactionQuery {
     pub start: Option<String>,
@@ -780,6 +840,284 @@ fn json_value<T: Serialize>(value: T) -> Result<serde_json::Value> {
     serde_json::to_value(value).context("failed to encode keepbook API output")
 }
 
+fn default_currency_symbol(currency: &str) -> Option<&'static str> {
+    match currency.to_ascii_uppercase().as_str() {
+        "USD" => Some("$"),
+        "EUR" => Some("€"),
+        "GBP" => Some("£"),
+        "JPY" => Some("¥"),
+        _ => None,
+    }
+}
+
+fn format_tray_currency(value: &str, currency: &str, config: &ResolvedConfig) -> String {
+    let dp = config.display.currency_decimals.or(Some(2));
+    let symbol = config
+        .display
+        .currency_symbol
+        .as_deref()
+        .or_else(|| default_currency_symbol(currency));
+    match Decimal::from_str(value) {
+        Ok(d) => {
+            let formatted = format_base_currency_display(
+                d,
+                dp,
+                config.display.currency_grouping,
+                symbol,
+                config.display.currency_fixed_decimals,
+            );
+            if symbol.is_some() {
+                formatted
+            } else {
+                format!("{formatted} {currency}")
+            }
+        }
+        Err(_) => value.to_string(),
+    }
+}
+
+fn format_history_change_for_tray(percentage_change: Option<&str>) -> String {
+    match percentage_change {
+        Some("N/A") | None => "N/A".to_string(),
+        Some(value) if value.starts_with('-') => format!("{value}%"),
+        Some(value) => format!("+{value}%"),
+    }
+}
+
+fn normalize_spending_windows_days(windows: &[u32]) -> Vec<u32> {
+    let mut normalized: Vec<u32> = windows.iter().copied().filter(|days| *days > 0).collect();
+    normalized.sort_unstable();
+    normalized.dedup();
+    normalized
+}
+
+fn format_spending_window_label(days: u32) -> String {
+    match days {
+        365 => "year".to_string(),
+        _ if days.is_multiple_of(365) => format!("{} years", days / 365),
+        _ => format!("{days}d"),
+    }
+}
+
+fn last_n_days_range(days: u32) -> (chrono::NaiveDate, chrono::NaiveDate) {
+    let end = Local::now().date_naive();
+    let start = end - chrono::Duration::days(days.saturating_sub(1) as i64);
+    (start, end)
+}
+
+fn build_portfolio_breakdown_lines(
+    snapshot: &keepbook::portfolio::PortfolioSnapshot,
+    config: &ResolvedConfig,
+) -> Vec<String> {
+    let mut lines = vec![format!(
+        "Total: {}",
+        format_tray_currency(&snapshot.total_value, &snapshot.currency, config)
+    )];
+
+    let Some(accounts) = snapshot.by_account.as_ref() else {
+        lines.push("No account breakdown available".to_string());
+        return lines;
+    };
+
+    if accounts.is_empty() {
+        lines.push("No accounts with balances".to_string());
+        return lines;
+    }
+
+    lines.extend(accounts.iter().map(|account| {
+        let value = account
+            .value_in_base
+            .as_deref()
+            .map(|value| format_tray_currency(value, &snapshot.currency, config))
+            .unwrap_or_else(|| "unpriced".to_string());
+        format!(
+            "{} / {}: {}",
+            account.connection_name, account.account_name, value
+        )
+    }));
+
+    lines
+}
+
+async fn tray_history_lines(storage: Arc<dyn Storage>, config: &ResolvedConfig) -> Vec<String> {
+    match keepbook::app::portfolio_recent_history(
+        storage,
+        config,
+        None,
+        true,
+        Local::now().date_naive(),
+    )
+    .await
+    {
+        Ok(history_points) => {
+            let mut lines: Vec<String> = history_points
+                .iter()
+                .rev()
+                .take(config.tray.history_points)
+                .map(|point| {
+                    let value = format_tray_currency(
+                        &point.total_value,
+                        &config.reporting_currency,
+                        config,
+                    );
+                    let percentage_change = format_history_change_for_tray(
+                        point.percentage_change_from_previous.as_deref(),
+                    );
+                    format!("{}: {} ({} vs prev)", point.date, value, percentage_change)
+                })
+                .collect();
+
+            if lines.is_empty() {
+                lines.push("No portfolio history available".to_string());
+            }
+            lines
+        }
+        Err(err) => vec![format!("History unavailable: {err}")],
+    }
+}
+
+async fn tray_spending_line_for_days(
+    storage: &Arc<dyn Storage>,
+    config: &ResolvedConfig,
+    days: u32,
+) -> String {
+    let label = format_spending_window_label(days);
+    let (start, end) = last_n_days_range(days);
+    let opts = keepbook::app::SpendingReportOptions {
+        currency: None,
+        start: Some(start.format("%Y-%m-%d").to_string()),
+        end: Some(end.format("%Y-%m-%d").to_string()),
+        period: "range".to_string(),
+        period_alignment: None,
+        tz: None,
+        week_start: None,
+        bucket: None,
+        account: None,
+        connection: None,
+        status: "posted".to_string(),
+        direction: "outflow".to_string(),
+        group_by: "none".to_string(),
+        top: None,
+        lookback_days: 7,
+        include_noncurrency: false,
+        include_empty: false,
+    };
+
+    match keepbook::app::spending_report(storage.as_ref(), config, opts).await {
+        Ok(report) => {
+            let value = format_tray_currency(&report.total, &report.currency, config);
+            let tx_label = if report.transaction_count == 1 {
+                "txn"
+            } else {
+                "txns"
+            };
+            format!(
+                "Last {label}: {} ({} {})",
+                value, report.transaction_count, tx_label
+            )
+        }
+        Err(_) => format!("Last {label}: unavailable"),
+    }
+}
+
+async fn tray_spending_lines(storage: Arc<dyn Storage>, config: &ResolvedConfig) -> Vec<String> {
+    let windows = normalize_spending_windows_days(&config.tray.spending_windows_days);
+    let mut lines = Vec::with_capacity(windows.len().max(1));
+    for days in windows {
+        lines.push(tray_spending_line_for_days(&storage, config, days).await);
+    }
+    if lines.is_empty() {
+        lines.push("No spending windows configured".to_string());
+    }
+    lines
+}
+
+async fn tray_transaction_lines(storage: Arc<dyn Storage>, config: &ResolvedConfig) -> Vec<String> {
+    if config.tray.transaction_count == 0 {
+        return vec!["Transaction display disabled".to_string()];
+    }
+
+    let result: Result<Vec<String>> = async {
+        let connections = storage.list_connections().await?;
+        let accounts = storage.list_accounts().await?;
+        let conn_name_by_id: HashMap<String, String> = connections
+            .iter()
+            .map(|c| (c.id().to_string(), c.config.name.clone()))
+            .collect();
+        let account_conn_name: HashMap<String, String> = accounts
+            .iter()
+            .map(|a| {
+                let conn_name = conn_name_by_id
+                    .get(&a.connection_id.to_string())
+                    .cloned()
+                    .unwrap_or_else(|| "Unknown".to_string());
+                (a.id.to_string(), conn_name)
+            })
+            .collect();
+
+        struct TxRow {
+            timestamp: chrono::DateTime<chrono::Utc>,
+            source: String,
+            amount: String,
+            description: String,
+            asset: Asset,
+        }
+
+        let cutoff = chrono::Utc::now() - chrono::Duration::days(30);
+        let mut rows = Vec::new();
+        for account in &accounts {
+            let txns = storage.get_transactions(&account.id).await?;
+            let source = account_conn_name
+                .get(&account.id.to_string())
+                .cloned()
+                .unwrap_or_else(|| "Unknown".to_string());
+
+            for tx in txns {
+                if tx.timestamp < cutoff {
+                    continue;
+                }
+                rows.push(TxRow {
+                    timestamp: tx.timestamp,
+                    source: source.clone(),
+                    amount: tx.amount,
+                    description: tx.description,
+                    asset: tx.asset,
+                });
+            }
+        }
+
+        rows.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        rows.truncate(config.tray.transaction_count);
+
+        Ok(rows
+            .iter()
+            .map(|row| {
+                let date = row.timestamp.with_timezone(&Local).format("%m-%d");
+                let currency = match &row.asset {
+                    Asset::Currency { iso_code } => iso_code.as_str(),
+                    Asset::Equity { ticker, .. } => ticker.as_str(),
+                    Asset::Crypto { symbol, .. } => symbol.as_str(),
+                };
+                let amount = format_tray_currency(&row.amount, currency, config);
+                let desc = if row.description.chars().count() > 30 {
+                    let truncated: String = row.description.chars().take(27).collect();
+                    format!("{truncated}...")
+                } else {
+                    row.description.clone()
+                };
+                format!("{} | {} | {} | {}", date, row.source, amount, desc)
+            })
+            .collect())
+    }
+    .await;
+
+    match result {
+        Ok(lines) if lines.is_empty() => vec!["No transactions in last 30 days".to_string()],
+        Ok(lines) => lines,
+        Err(err) => vec![format!("Transactions unavailable: {err}")],
+    }
+}
+
 fn history_defaults(config: &ResolvedConfig) -> HistoryDefaultsOutput {
     HistoryDefaultsOutput {
         portfolio_granularity: config.history.portfolio_granularity.clone(),
@@ -832,6 +1170,7 @@ pub fn router(state: ApiState) -> Router {
         .route("/api/transactions", get(transactions))
         .route("/api/transactions/category", post(set_transaction_category))
         .route("/api/spending", get(spending))
+        .route("/api/tray", get(tray))
         .route(
             "/api/proposed-transaction-edits",
             get(proposed_transaction_edits),
@@ -934,6 +1273,11 @@ async fn spending(
     Query(query): Query<SpendingQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     Ok(Json(state.spending(query).await?))
+}
+
+#[cfg(feature = "http")]
+async fn tray(State(state): State<ApiState>) -> Result<Json<TraySnapshotOutput>, ApiError> {
+    Ok(Json(state.tray_snapshot().await?))
 }
 
 #[cfg(feature = "http")]
