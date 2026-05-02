@@ -1,4 +1,7 @@
-use crate::{current_net_worth_from_snapshot, format_full_money, AccountSummary, Overview};
+use crate::{
+    logic::{current_net_worth_from_snapshot, format_full_money},
+    AccountSummary, Overview,
+};
 use dioxus::desktop::trayicon::{
     menu::{Menu, MenuId, MenuItem, Submenu},
     Icon, TrayIconBuilder,
