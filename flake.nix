@@ -465,7 +465,7 @@
         }:
           rustPlatform.buildRustPackage {
             inherit pname buildFeatures;
-            version = "0.2.0";
+            version = "0.2.2";
             src = cleanSrc;
             cargoLock = {
               lockFile = ./Cargo.lock;
