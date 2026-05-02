@@ -6,8 +6,11 @@ use anyhow::{Context, Result};
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 
-use crate::app::portfolio_history;
 use crate::app::types::HistoryOutput;
+use crate::app::{
+    latent_capital_gains_tax_history, portfolio_history, portfolio_history_for_accounts,
+    resolve_portfolio_history_selection, PortfolioHistorySelection,
+};
 use crate::config::ResolvedConfig;
 use crate::storage::Storage;
 
@@ -22,6 +25,8 @@ struct GraphConfigFile {
     currency: Option<String>,
     granularity: Option<String>,
     include_prices: Option<bool>,
+    account: Option<String>,
+    connection: Option<String>,
     output: Option<PathBuf>,
     svg_output: Option<PathBuf>,
     title: Option<String>,
@@ -40,6 +45,8 @@ pub struct PortfolioGraphOptions {
     pub currency: Option<String>,
     pub granularity: Option<String>,
     pub include_prices: Option<bool>,
+    pub account: Option<String>,
+    pub connection: Option<String>,
     pub output: Option<PathBuf>,
     pub svg_output: Option<PathBuf>,
     pub title: Option<String>,
@@ -57,6 +64,8 @@ struct ResolvedGraphOptions {
     currency: Option<String>,
     granularity: String,
     include_prices: bool,
+    account: Option<String>,
+    connection: Option<String>,
     output: PathBuf,
     svg_output: PathBuf,
     title: String,
@@ -84,16 +93,52 @@ pub async fn portfolio_graph(
     options: PortfolioGraphOptions,
 ) -> Result<PortfolioGraphOutput> {
     let resolved = resolve_graph_options(options, config)?;
-    let history = portfolio_history(
-        storage,
+    let selection = resolve_portfolio_history_selection(
+        storage.as_ref(),
         config,
-        resolved.currency.clone(),
-        resolved.start.clone(),
-        resolved.end.clone(),
-        resolved.granularity.clone(),
-        resolved.include_prices,
+        resolved.account.as_deref(),
+        resolved.connection.as_deref(),
     )
     .await?;
+    let history = match selection {
+        PortfolioHistorySelection::Portfolio => {
+            portfolio_history(
+                storage,
+                config,
+                resolved.currency.clone(),
+                resolved.start.clone(),
+                resolved.end.clone(),
+                resolved.granularity.clone(),
+                resolved.include_prices,
+            )
+            .await?
+        }
+        PortfolioHistorySelection::Accounts(account_ids) => {
+            portfolio_history_for_accounts(
+                storage,
+                config,
+                resolved.currency.clone(),
+                resolved.start.clone(),
+                resolved.end.clone(),
+                resolved.granularity.clone(),
+                resolved.include_prices,
+                account_ids,
+            )
+            .await?
+        }
+        PortfolioHistorySelection::LatentCapitalGainsTax => {
+            latent_capital_gains_tax_history(
+                storage,
+                config,
+                resolved.currency.clone(),
+                resolved.start.clone(),
+                resolved.end.clone(),
+                resolved.granularity.clone(),
+                resolved.include_prices,
+            )
+            .await?
+        }
+    };
 
     let svg = render_net_worth_svg(&history, &resolved)?;
     let html = render_graph_html(&resolved, &history);
@@ -157,6 +202,8 @@ fn resolve_graph_options(
     let start = options.start.or(file_options.start);
     let end = options.end.or(file_options.end);
     let currency = options.currency.or(file_options.currency);
+    let account = options.account.or(file_options.account);
+    let connection = options.connection.or(file_options.connection);
     let granularity = options
         .granularity
         .or(file_options.granularity)
@@ -165,10 +212,15 @@ fn resolve_graph_options(
         .include_prices
         .or(file_options.include_prices)
         .unwrap_or(config.history.include_prices);
-    let title = options
-        .title
-        .or(file_options.title)
-        .unwrap_or_else(|| "Keepbook Net Worth".to_string());
+    let title = options.title.or(file_options.title).unwrap_or_else(|| {
+        if account.is_some() {
+            "Keepbook Account Value".to_string()
+        } else if connection.is_some() {
+            "Keepbook Connection Value".to_string()
+        } else {
+            "Keepbook Net Worth".to_string()
+        }
+    });
     let subtitle = options.subtitle.or(file_options.subtitle);
     let width = options
         .width
@@ -190,10 +242,14 @@ fn resolve_graph_options(
         }
     }
 
-    let output = options
-        .output
-        .or(file_options.output)
-        .unwrap_or_else(|| default_graph_output_path(start.as_deref(), end.as_deref()));
+    let output = options.output.or(file_options.output).unwrap_or_else(|| {
+        default_graph_output_path(
+            account.as_deref(),
+            connection.as_deref(),
+            start.as_deref(),
+            end.as_deref(),
+        )
+    });
     let svg_output = options
         .svg_output
         .or(file_options.svg_output)
@@ -205,6 +261,8 @@ fn resolve_graph_options(
         currency,
         granularity,
         include_prices,
+        account,
+        connection,
         output,
         svg_output,
         title,
@@ -216,14 +274,46 @@ fn resolve_graph_options(
     })
 }
 
-fn default_graph_output_path(start: Option<&str>, end: Option<&str>) -> PathBuf {
+fn default_graph_output_path(
+    account: Option<&str>,
+    connection: Option<&str>,
+    start: Option<&str>,
+    end: Option<&str>,
+) -> PathBuf {
+    let prefix = if let Some(account) = account {
+        format!("account-{}", file_name_token(account))
+    } else if let Some(connection) = connection {
+        format!("connection-{}", file_name_token(connection))
+    } else {
+        "net-worth".to_string()
+    };
     let name = match (start, end) {
-        (Some(start), Some(end)) => format!("net-worth-{start}-to-{end}.html"),
-        (Some(start), None) => format!("net-worth-since-{start}.html"),
-        (None, Some(end)) => format!("net-worth-through-{end}.html"),
-        (None, None) => "net-worth.html".to_string(),
+        (Some(start), Some(end)) => format!("{prefix}-{start}-to-{end}.html"),
+        (Some(start), None) => format!("{prefix}-since-{start}.html"),
+        (None, Some(end)) => format!("{prefix}-through-{end}.html"),
+        (None, None) => format!("{prefix}.html"),
     };
     PathBuf::from("artifacts").join(name)
+}
+
+fn file_name_token(value: &str) -> String {
+    let token = value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string();
+    if token.is_empty() {
+        "selected".to_string()
+    } else {
+        token
+    }
 }
 
 fn render_graph_html(options: &ResolvedGraphOptions, history: &HistoryOutput) -> String {
@@ -552,8 +642,21 @@ mod tests {
     #[test]
     fn default_output_path_uses_range() {
         assert_eq!(
-            default_graph_output_path(Some("2026-03-01"), Some("2026-04-01")),
+            default_graph_output_path(None, None, Some("2026-03-01"), Some("2026-04-01")),
             PathBuf::from("artifacts/net-worth-2026-03-01-to-2026-04-01.html")
+        );
+    }
+
+    #[test]
+    fn account_default_output_path_uses_scope() {
+        assert_eq!(
+            default_graph_output_path(
+                Some("Cash Account"),
+                None,
+                Some("2026-03-01"),
+                Some("2026-04-01")
+            ),
+            PathBuf::from("artifacts/account-cash-account-2026-03-01-to-2026-04-01.html")
         );
     }
 
@@ -590,6 +693,8 @@ mod tests {
             currency: None,
             granularity: "daily".to_string(),
             include_prices: true,
+            account: None,
+            connection: None,
             output: PathBuf::from("graph.html"),
             svg_output: PathBuf::from("graph.svg"),
             title: "Test Graph".to_string(),

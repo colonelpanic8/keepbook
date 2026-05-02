@@ -17,6 +17,8 @@ type GraphConfigFile = {
   currency?: string;
   granularity?: string;
   include_prices?: boolean;
+  account?: string;
+  connection?: string;
   output?: string;
   svg_output?: string;
   title?: string;
@@ -34,6 +36,8 @@ export type PortfolioGraphOptions = {
   currency?: string;
   granularity?: string;
   includePrices?: boolean;
+  account?: string;
+  connection?: string;
   output?: string;
   svgOutput?: string;
   title?: string;
@@ -50,6 +54,8 @@ export type ResolvedGraphOptions = {
   currency?: string;
   granularity: string;
   includePrices: boolean;
+  account?: string;
+  connection?: string;
   output: string;
   svgOutput: string;
   title: string;
@@ -83,6 +89,8 @@ export async function portfolioGraph(
     end: resolved.end,
     granularity: resolved.granularity,
     includePrices: resolved.includePrices,
+    account: resolved.account,
+    connection: resolved.connection,
   };
   const history = await portfolioHistory(storage, marketDataStore, config, historyOptions);
 
@@ -114,11 +122,20 @@ async function resolveGraphOptions(
   const start = options.start ?? fileOptions.start;
   const end = options.end ?? fileOptions.end;
   const currency = options.currency ?? fileOptions.currency;
+  const account = options.account ?? fileOptions.account;
+  const connection = options.connection ?? fileOptions.connection;
   const granularity =
     options.granularity ?? fileOptions.granularity ?? config.history.portfolio_granularity;
   const includePrices =
     options.includePrices ?? fileOptions.include_prices ?? config.history.include_prices;
-  const title = options.title ?? fileOptions.title ?? 'Keepbook Net Worth';
+  const title =
+    options.title ??
+    fileOptions.title ??
+    (account !== undefined
+      ? 'Keepbook Account Value'
+      : connection !== undefined
+        ? 'Keepbook Connection Value'
+        : 'Keepbook Net Worth');
   const subtitle = options.subtitle ?? fileOptions.subtitle;
   const width = options.width ?? fileOptions.width ?? DEFAULT_WIDTH;
   const height = options.height ?? fileOptions.height ?? DEFAULT_HEIGHT;
@@ -132,7 +149,8 @@ async function resolveGraphOptions(
     throw new Error('Graph min-value must be less than max-value');
   }
 
-  const output = options.output ?? fileOptions.output ?? defaultGraphOutputPath(start, end);
+  const output =
+    options.output ?? fileOptions.output ?? defaultGraphOutputPath(account, connection, start, end);
   const svgOutput =
     options.svgOutput ??
     fileOptions.svg_output ??
@@ -144,6 +162,8 @@ async function resolveGraphOptions(
     currency,
     granularity,
     includePrices,
+    account,
+    connection,
     output,
     svgOutput,
     title,
@@ -165,6 +185,8 @@ async function readGraphConfig(filePath: string): Promise<GraphConfigFile> {
     'end',
     'currency',
     'granularity',
+    'account',
+    'connection',
     'output',
     'svg_output',
     'title',
@@ -189,18 +211,38 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
-function defaultGraphOutputPath(start?: string, end?: string): string {
+function defaultGraphOutputPath(
+  account?: string,
+  connection?: string,
+  start?: string,
+  end?: string,
+): string {
+  const prefix =
+    account !== undefined
+      ? `account-${fileNameToken(account)}`
+      : connection !== undefined
+        ? `connection-${fileNameToken(connection)}`
+        : 'net-worth';
   let name: string;
   if (start !== undefined && end !== undefined) {
-    name = `net-worth-${start}-to-${end}.html`;
+    name = `${prefix}-${start}-to-${end}.html`;
   } else if (start !== undefined) {
-    name = `net-worth-since-${start}.html`;
+    name = `${prefix}-since-${start}.html`;
   } else if (end !== undefined) {
-    name = `net-worth-through-${end}.html`;
+    name = `${prefix}-through-${end}.html`;
   } else {
-    name = 'net-worth.html';
+    name = `${prefix}.html`;
   }
   return path.join('artifacts', name);
+}
+
+function fileNameToken(value: string): string {
+  const token = value
+    .split('')
+    .map((char) => (/^[A-Za-z0-9_-]$/.test(char) ? char.toLowerCase() : '-'))
+    .join('')
+    .replace(/^-+|-+$/g, '');
+  return token.length > 0 ? token : 'selected';
 }
 
 function renderGraphHtml(options: ResolvedGraphOptions, history: HistoryOutput): string {
