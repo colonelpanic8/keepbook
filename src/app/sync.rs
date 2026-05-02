@@ -61,6 +61,8 @@ async fn build_sync_service_with_quote_staleness(
         .await;
     let auth_prompter: Arc<dyn AuthPrompter> = if env_enabled("KEEPBOOK_AUTO_LOGIN") {
         Arc::new(FixedAuthPrompter::allow())
+    } else if env_enabled("KEEPBOOK_NONINTERACTIVE") {
+        Arc::new(FixedAuthPrompter::deny())
     } else {
         Arc::new(StdinPrompter)
     };

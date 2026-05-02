@@ -190,6 +190,71 @@ impl ApiState {
         )
     }
 
+    pub async fn spending(&self, query: SpendingQuery) -> Result<serde_json::Value> {
+        let state = self.snapshot().await;
+        json_value(
+            keepbook::app::spending_report(
+                state.storage.as_ref(),
+                &state.config,
+                keepbook::app::SpendingReportOptions {
+                    currency: query.currency,
+                    start: query.start,
+                    end: query.end,
+                    period: query.period.unwrap_or_else(|| "range".to_string()),
+                    period_alignment: query
+                        .period_alignment
+                        .or_else(|| Some("calendar".to_string())),
+                    tz: query.tz,
+                    week_start: query.week_start,
+                    bucket: query
+                        .bucket_days
+                        .map(|days| Duration::from_secs(days.saturating_mul(86_400))),
+                    account: query.account,
+                    connection: query.connection,
+                    status: query.status.unwrap_or_else(|| "posted".to_string()),
+                    direction: query.direction.unwrap_or_else(|| "outflow".to_string()),
+                    group_by: query.group_by.unwrap_or_else(|| "category".to_string()),
+                    top: query.top,
+                    lookback_days: query.lookback_days.unwrap_or(7),
+                    include_noncurrency: query.include_noncurrency,
+                    include_empty: query.include_empty,
+                },
+            )
+            .await?,
+        )
+    }
+
+    pub async fn set_transaction_category(
+        &self,
+        input: TransactionCategoryInput,
+    ) -> Result<serde_json::Value> {
+        let state = self.snapshot().await;
+        let category = input
+            .category
+            .map(|category| category.trim().to_string())
+            .filter(|category| !category.is_empty());
+        keepbook::app::set_transaction_annotation(
+            state.storage.as_ref(),
+            &state.config,
+            &input.account_id,
+            &input.transaction_id,
+            None,
+            false,
+            None,
+            false,
+            category,
+            input.clear_category,
+            None,
+            false,
+            Vec::new(),
+            false,
+            false,
+            None,
+            false,
+        )
+        .await
+    }
+
     pub async fn proposed_transaction_edits(
         &self,
         query: ProposedTransactionEditsQuery,
@@ -232,18 +297,53 @@ impl ApiState {
         let include_prices = query
             .include_prices
             .unwrap_or(effective_config.history.include_prices);
-        json_value(
-            keepbook::app::portfolio_history(
-                state.storage.clone(),
-                &effective_config,
-                query.currency,
-                query.start,
-                query.end,
-                granularity,
-                include_prices,
-            )
-            .await?,
+        let selection = keepbook::app::resolve_portfolio_history_selection(
+            state.storage.as_ref(),
+            &effective_config,
+            query.account.as_deref(),
+            query.connection.as_deref(),
         )
+        .await?;
+        let output = match selection {
+            keepbook::app::PortfolioHistorySelection::Portfolio => {
+                keepbook::app::portfolio_history(
+                    state.storage.clone(),
+                    &effective_config,
+                    query.currency,
+                    query.start,
+                    query.end,
+                    granularity,
+                    include_prices,
+                )
+                .await?
+            }
+            keepbook::app::PortfolioHistorySelection::Accounts(account_ids) => {
+                keepbook::app::portfolio_history_for_accounts(
+                    state.storage.clone(),
+                    &effective_config,
+                    query.currency,
+                    query.start,
+                    query.end,
+                    granularity,
+                    include_prices,
+                    account_ids,
+                )
+                .await?
+            }
+            keepbook::app::PortfolioHistorySelection::LatentCapitalGainsTax => {
+                keepbook::app::latent_capital_gains_tax_history(
+                    state.storage.clone(),
+                    &effective_config,
+                    query.currency,
+                    query.start,
+                    query.end,
+                    granularity,
+                    include_prices,
+                )
+                .await?
+            }
+        };
+        json_value(output)
     }
 
     pub async fn merge_origin_master(&self) -> Result<serde_json::Value> {
@@ -327,8 +427,59 @@ impl ApiState {
         })
     }
 
+    pub async fn sync_connections(&self, input: SyncConnectionsInput) -> Result<serde_json::Value> {
+        let snapshot = self.snapshot().await;
+        activate_age_identity_from_git_settings(&snapshot.config_path)?;
+        std::env::set_var("KEEPBOOK_NONINTERACTIVE", "1");
+        let transactions = if input.full_transactions {
+            keepbook::sync::TransactionSyncMode::Full
+        } else {
+            keepbook::sync::TransactionSyncMode::Auto
+        };
+
+        match input
+            .target
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            Some(target) => {
+                if input.if_stale {
+                    keepbook::app::sync_connection_if_stale(
+                        snapshot.storage,
+                        &snapshot.config,
+                        target,
+                        transactions,
+                    )
+                    .await
+                } else {
+                    keepbook::app::sync_connection(
+                        snapshot.storage,
+                        &snapshot.config,
+                        target,
+                        transactions,
+                    )
+                    .await
+                }
+            }
+            None => {
+                if input.if_stale {
+                    keepbook::app::sync_all_if_stale(
+                        snapshot.storage,
+                        &snapshot.config,
+                        transactions,
+                    )
+                    .await
+                } else {
+                    keepbook::app::sync_all(snapshot.storage, &snapshot.config, transactions).await
+                }
+            }
+        }
+    }
+
     pub async fn sync_prices(&self, input: SyncPricesInput) -> Result<serde_json::Value> {
         let snapshot = self.snapshot().await;
+        activate_age_identity_from_git_settings(&snapshot.config_path)?;
         let target = input
             .target
             .as_deref()
@@ -448,6 +599,16 @@ pub struct GitSyncOutput {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct SyncConnectionsInput {
+    #[serde(default)]
+    pub target: Option<String>,
+    #[serde(default)]
+    pub if_stale: bool,
+    #[serde(default)]
+    pub full_transactions: bool,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct SyncPricesInput {
     #[serde(default)]
     pub scope: Option<String>,
@@ -509,6 +670,39 @@ pub struct TransactionQuery {
     pub include_ignored: bool,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct TransactionCategoryInput {
+    pub account_id: String,
+    pub transaction_id: String,
+    #[serde(default)]
+    pub category: Option<String>,
+    #[serde(default)]
+    pub clear_category: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SpendingQuery {
+    pub currency: Option<String>,
+    pub start: Option<String>,
+    pub end: Option<String>,
+    pub period: Option<String>,
+    pub period_alignment: Option<String>,
+    pub tz: Option<String>,
+    pub week_start: Option<String>,
+    pub bucket_days: Option<u64>,
+    pub account: Option<String>,
+    pub connection: Option<String>,
+    pub status: Option<String>,
+    pub direction: Option<String>,
+    pub group_by: Option<String>,
+    pub top: Option<usize>,
+    pub lookback_days: Option<u32>,
+    #[serde(default)]
+    pub include_noncurrency: bool,
+    #[serde(default)]
+    pub include_empty: bool,
+}
+
 #[derive(Debug, Deserialize, Default)]
 pub struct ProposedTransactionEditsQuery {
     #[serde(default)]
@@ -523,6 +717,8 @@ pub struct HistoryQuery {
     pub granularity: Option<String>,
     pub include_prices: Option<bool>,
     pub include_latent_capital_gains_tax: Option<bool>,
+    pub account: Option<String>,
+    pub connection: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -620,6 +816,8 @@ pub fn router(state: ApiState) -> Router {
         .route("/api/accounts", get(accounts))
         .route("/api/balances", get(balances))
         .route("/api/transactions", get(transactions))
+        .route("/api/transactions/category", post(set_transaction_category))
+        .route("/api/spending", get(spending))
         .route(
             "/api/proposed-transaction-edits",
             get(proposed_transaction_edits),
@@ -643,6 +841,7 @@ pub fn router(state: ApiState) -> Router {
             get(git_settings).put(save_git_settings),
         )
         .route("/api/git/sync", post(sync_git_repo))
+        .route("/api/sync/connections", post(sync_connections))
         .route("/api/sync/prices", post(sync_prices))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
@@ -704,6 +903,22 @@ async fn transactions(
     Query(query): Query<TransactionQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     Ok(Json(state.transactions(query).await?))
+}
+
+#[cfg(feature = "http")]
+async fn set_transaction_category(
+    State(state): State<ApiState>,
+    Json(input): Json<TransactionCategoryInput>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    Ok(Json(state.set_transaction_category(input).await?))
+}
+
+#[cfg(feature = "http")]
+async fn spending(
+    State(state): State<ApiState>,
+    Query(query): Query<SpendingQuery>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    Ok(Json(state.spending(query).await?))
 }
 
 #[cfg(feature = "http")]
@@ -772,6 +987,14 @@ async fn sync_git_repo(
     Json(input): Json<GitSyncInput>,
 ) -> Result<Json<GitSyncOutput>, ApiError> {
     Ok(Json(state.sync_git_repo(input).await?))
+}
+
+#[cfg(feature = "http")]
+async fn sync_connections(
+    State(state): State<ApiState>,
+    Json(input): Json<SyncConnectionsInput>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    Ok(Json(state.sync_connections(input).await?))
 }
 
 #[cfg(feature = "http")]
@@ -1003,8 +1226,24 @@ fn resolve_git_private_key(
         })
 }
 
+fn activate_age_identity_from_git_settings(config_path: &Path) -> Result<()> {
+    let settings = load_git_remote_settings(config_path)?;
+    let Some(ssh_key_path) = settings
+        .ssh_key_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+    else {
+        return Ok(());
+    };
+
+    let resolved = resolve_config_relative_path(config_path, ssh_key_path);
+    std::env::set_var("KEEPBOOK_CREDENTIALS_AGE_IDENTITY_PATH", resolved);
+    Ok(())
+}
+
 fn resolve_config_relative_path(config_path: &Path, path: &str) -> PathBuf {
-    let path = PathBuf::from(path);
+    let path = expand_home_path(path);
     if path.is_absolute() {
         path
     } else {
@@ -1013,6 +1252,22 @@ fn resolve_config_relative_path(config_path: &Path, path: &str) -> PathBuf {
             .map(|parent| parent.join(path.clone()))
             .unwrap_or(path)
     }
+}
+
+fn expand_home_path(path: &str) -> PathBuf {
+    if path == "~" {
+        return std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(path));
+    }
+
+    if let Some(rest) = path.strip_prefix("~/") {
+        if let Some(home) = std::env::var_os("HOME") {
+            return PathBuf::from(home).join(rest);
+        }
+    }
+
+    PathBuf::from(path)
 }
 
 fn log_git_sync_event(message: impl AsRef<str>) {

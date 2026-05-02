@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 #[cfg(target_arch = "wasm32")]
 use gloo_net::http::Request;
@@ -220,6 +221,83 @@ struct HistorySummary {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
+struct SpendingOutput {
+    currency: String,
+    start_date: String,
+    end_date: String,
+    total: String,
+    transaction_count: usize,
+    periods: Vec<SpendingPeriod>,
+    skipped_transaction_count: usize,
+    missing_price_transaction_count: usize,
+    missing_fx_transaction_count: usize,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+struct SpendingPeriod {
+    start_date: String,
+    end_date: String,
+    total: String,
+    transaction_count: usize,
+    #[serde(default)]
+    breakdown: Vec<SpendingBreakdownEntry>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+struct SpendingBreakdownEntry {
+    key: String,
+    total: String,
+    transaction_count: usize,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+struct SpendingDashboardData {
+    spending: SpendingOutput,
+    transactions: Vec<Transaction>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+struct Transaction {
+    id: String,
+    account_id: String,
+    account_name: String,
+    timestamp: String,
+    description: String,
+    amount: String,
+    status: String,
+    #[serde(default)]
+    category: Option<String>,
+    #[serde(default)]
+    subcategory: Option<String>,
+    #[serde(default)]
+    annotation: Option<TransactionAnnotation>,
+    #[serde(default)]
+    ignored_from_spending: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+struct TransactionAnnotation {
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    category: Option<String>,
+    #[serde(default)]
+    subcategory: Option<String>,
+    #[serde(default)]
+    effective_date: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct PieSlice {
+    key: String,
+    total: f64,
+    transaction_count: usize,
+    percentage: f64,
+    path: String,
+    color: &'static str,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 struct PortfolioSnapshot {
     as_of_date: String,
     currency: String,
@@ -293,6 +371,14 @@ struct GitSyncOutput {
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
+struct SyncConnectionsInput {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target: Option<String>,
+    if_stale: bool,
+    full_transactions: bool,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq)]
 struct SyncPricesInput {
     scope: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -300,6 +386,15 @@ struct SyncPricesInput {
     force: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     quote_staleness_seconds: Option<u64>,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq)]
+struct SetTransactionCategoryInput {
+    account_id: String,
+    transaction_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    category: Option<String>,
+    clear_category: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -342,6 +437,38 @@ enum SamplingGranularity {
     Weekly,
     Monthly,
     Yearly,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TransactionSortField {
+    Date,
+    Amount,
+    Description,
+    Category,
+    Account,
+    Counted,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SortDirection {
+    Asc,
+    Desc,
+}
+
+impl SortDirection {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Asc => "Ascending",
+            Self::Desc => "Descending",
+        }
+    }
+
+    fn toggle(self) -> Self {
+        match self {
+            Self::Asc => Self::Desc,
+            Self::Desc => Self::Asc,
+        }
+    }
 }
 
 impl SamplingGranularity {
@@ -407,37 +534,31 @@ fn normalize_config_key(value: &str) -> String {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ActiveView {
-    Summary,
+    Spending,
     Graphs,
     Accounts,
     Connections,
-    Balances,
     ProposedEdits,
-    History,
     Settings,
 }
 
 impl ActiveView {
-    const ALL: [Self; 8] = [
-        Self::Summary,
-        Self::Graphs,
+    const ALL: [Self; 6] = [
         Self::Accounts,
+        Self::Spending,
+        Self::Graphs,
         Self::Connections,
-        Self::Balances,
         Self::ProposedEdits,
-        Self::History,
         Self::Settings,
     ];
 
     fn label(self) -> &'static str {
         match self {
-            Self::Summary => "Summary",
+            Self::Spending => "Spending",
             Self::Graphs => "Graphs",
             Self::Accounts => "Accounts",
             Self::Connections => "Connections",
-            Self::Balances => "Balances",
             Self::ProposedEdits => "Proposed Edits",
-            Self::History => "History",
             Self::Settings => "Settings",
         }
     }
@@ -582,6 +703,21 @@ async fn fetch_history(query: String) -> Result<History, String> {
     fetch_history_impl(query).await
 }
 
+async fn fetch_spending_dashboard(query: String) -> Result<SpendingDashboardData, String> {
+    let spending = fetch_spending_impl(query).await?;
+    let tx_query = transaction_query_string(&spending.start_date, &spending.end_date, false);
+    let counted_transactions = fetch_transactions_impl(tx_query).await?;
+    let all_tx_query = transaction_query_string(&spending.start_date, &spending.end_date, true);
+    let transactions = mark_transactions_excluded_from_spending(
+        fetch_transactions_impl(all_tx_query).await?,
+        &counted_transactions,
+    );
+    Ok(SpendingDashboardData {
+        spending,
+        transactions,
+    })
+}
+
 async fn fetch_git_settings() -> Result<GitSettingsOutput, String> {
     fetch_git_settings_impl().await
 }
@@ -594,8 +730,16 @@ async fn sync_git_repo(input: GitSyncInput) -> Result<GitSyncOutput, String> {
     sync_git_repo_impl(input).await
 }
 
+async fn sync_connections(input: SyncConnectionsInput) -> Result<serde_json::Value, String> {
+    sync_connections_impl(input).await
+}
+
 async fn sync_prices(input: SyncPricesInput) -> Result<serde_json::Value, String> {
     sync_prices_impl(input).await
+}
+
+async fn set_transaction_category(input: SetTransactionCategoryInput) -> Result<(), String> {
+    set_transaction_category_impl(input).await
 }
 
 async fn fetch_proposed_transaction_edits() -> Result<Vec<ProposedTransactionEdit>, String> {
@@ -625,6 +769,48 @@ async fn fetch_history_impl(query: String) -> Result<History, String> {
         .json::<History>()
         .await
         .map_err(|error| format!("Could not decode net worth history: {error}"))
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn fetch_spending_impl(query: String) -> Result<SpendingOutput, String> {
+    let response = Request::get(&format!("{API_BASE}/api/spending?{query}"))
+        .send()
+        .await
+        .map_err(|error| format!("Could not reach keepbook-server at {API_BASE}: {error}"))?;
+
+    if !response.ok() {
+        return Err(format!(
+            "keepbook-server returned HTTP {} {}",
+            response.status(),
+            response.status_text()
+        ));
+    }
+
+    response
+        .json::<SpendingOutput>()
+        .await
+        .map_err(|error| format!("Could not decode spending data: {error}"))
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn fetch_transactions_impl(query: String) -> Result<Vec<Transaction>, String> {
+    let response = Request::get(&format!("{API_BASE}/api/transactions?{query}"))
+        .send()
+        .await
+        .map_err(|error| format!("Could not reach keepbook-server at {API_BASE}: {error}"))?;
+
+    if !response.ok() {
+        return Err(format!(
+            "keepbook-server returned HTTP {} {}",
+            response.status(),
+            response.status_text()
+        ));
+    }
+
+    response
+        .json::<Vec<Transaction>>()
+        .await
+        .map_err(|error| format!("Could not decode transactions: {error}"))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -691,6 +877,27 @@ async fn sync_git_repo_impl(input: GitSyncInput) -> Result<GitSyncOutput, String
 }
 
 #[cfg(target_arch = "wasm32")]
+async fn sync_connections_impl(input: SyncConnectionsInput) -> Result<serde_json::Value, String> {
+    let response = Request::post(&format!("{API_BASE}/api/sync/connections"))
+        .json(&input)
+        .map_err(|error| format!("Could not encode sync request: {error}"))?
+        .send()
+        .await
+        .map_err(|error| format!("Could not reach keepbook-server at {API_BASE}: {error}"))?;
+
+    if !response.ok() {
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+        return Err(format!("keepbook-server returned HTTP {status}: {text}"));
+    }
+
+    response
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|error| format!("Could not decode sync result: {error}"))
+}
+
+#[cfg(target_arch = "wasm32")]
 async fn sync_prices_impl(input: SyncPricesInput) -> Result<serde_json::Value, String> {
     let response = Request::post(&format!("{API_BASE}/api/sync/prices"))
         .json(&input)
@@ -709,6 +916,24 @@ async fn sync_prices_impl(input: SyncPricesInput) -> Result<serde_json::Value, S
         .json::<serde_json::Value>()
         .await
         .map_err(|error| format!("Could not decode price sync result: {error}"))
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn set_transaction_category_impl(input: SetTransactionCategoryInput) -> Result<(), String> {
+    let response = Request::post(&format!("{API_BASE}/api/transactions/category"))
+        .json(&input)
+        .map_err(|error| format!("Could not encode category update: {error}"))?
+        .send()
+        .await
+        .map_err(|error| format!("Could not reach keepbook-server at {API_BASE}: {error}"))?;
+
+    if !response.ok() {
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+        return Err(format!("keepbook-server returned HTTP {status}: {text}"));
+    }
+
+    Ok(())
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -765,6 +990,28 @@ async fn fetch_history_impl(query: String) -> Result<History, String> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+async fn fetch_spending_impl(query: String) -> Result<SpendingOutput, String> {
+    let query = serde_urlencoded::from_str::<keepbook_server::SpendingQuery>(&query)
+        .map_err(|error| format!("Could not encode spending query: {error}"))?;
+    let output = native_api_state()?
+        .spending(query)
+        .await
+        .map_err(|error| format!("Could not load spending data: {error:#}"))?;
+    from_native_output(output, "spending data")
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn fetch_transactions_impl(query: String) -> Result<Vec<Transaction>, String> {
+    let query = serde_urlencoded::from_str::<keepbook_server::TransactionQuery>(&query)
+        .map_err(|error| format!("Could not encode transaction query: {error}"))?;
+    let output = native_api_state()?
+        .transactions(query)
+        .await
+        .map_err(|error| format!("Could not load transactions: {error:#}"))?;
+    from_native_output(output, "transactions")
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 async fn fetch_git_settings_impl() -> Result<GitSettingsOutput, String> {
     let output = native_api_state()?
         .git_settings()
@@ -807,6 +1054,18 @@ async fn sync_git_repo_impl(input: GitSyncInput) -> Result<GitSyncOutput, String
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+async fn sync_connections_impl(input: SyncConnectionsInput) -> Result<serde_json::Value, String> {
+    native_api_state()?
+        .sync_connections(keepbook_server::SyncConnectionsInput {
+            target: input.target,
+            if_stale: input.if_stale,
+            full_transactions: input.full_transactions,
+        })
+        .await
+        .map_err(|error| format!("Sync failed: {error:#}"))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 async fn sync_prices_impl(input: SyncPricesInput) -> Result<serde_json::Value, String> {
     native_api_state()?
         .sync_prices(keepbook_server::SyncPricesInput {
@@ -817,6 +1076,20 @@ async fn sync_prices_impl(input: SyncPricesInput) -> Result<serde_json::Value, S
         })
         .await
         .map_err(|error| format!("Price sync failed: {error:#}"))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn set_transaction_category_impl(input: SetTransactionCategoryInput) -> Result<(), String> {
+    native_api_state()?
+        .set_transaction_category(keepbook_server::TransactionCategoryInput {
+            account_id: input.account_id,
+            transaction_id: input.transaction_id,
+            category: input.category,
+            clear_category: input.clear_category,
+        })
+        .await
+        .map_err(|error| format!("Category update failed: {error:#}"))?;
+    Ok(())
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -963,16 +1236,9 @@ fn Dashboard(
     onfilterchange: EventHandler<FilterOverrides>,
     onrefresh: EventHandler<()>,
 ) -> Element {
-    let mut active_view = use_signal(|| ActiveView::Summary);
+    let mut active_view = use_signal(|| ActiveView::Accounts);
     let mut nav_open = use_signal(|| false);
     let active = active_view();
-    let total = current_net_worth_from_snapshot(&overview.snapshot);
-    let last_date = overview.snapshot.as_of_date.clone();
-    let active_accounts = overview
-        .accounts
-        .iter()
-        .filter(|account| account.active)
-        .count();
     let nav_class = if nav_open() {
         "app-nav open"
     } else {
@@ -1024,20 +1290,17 @@ fn Dashboard(
                     }
                 }
                 match active {
-                    ActiveView::Summary => rsx! {
-                        SummaryView {
-                            net_worth: total,
+                    ActiveView::Spending => rsx! {
+                        SpendingView {
                             currency: overview.reporting_currency.clone(),
-                            last_date: last_date.to_string(),
-                            active_accounts,
-                            total_accounts: overview.accounts.len(),
-                            connection_count: overview.connections.len(),
                         }
                     },
                     ActiveView::Graphs => rsx! {
                         GraphsView {
                             currency: overview.reporting_currency.clone(),
                             defaults: overview.history_defaults.clone(),
+                            accounts: overview.accounts.clone(),
+                            connections: overview.connections.clone(),
                             filter_overrides,
                         }
                     },
@@ -1048,25 +1311,19 @@ fn Dashboard(
                             balances: overview.balances.clone(),
                             snapshot: overview.snapshot.clone(),
                             currency: overview.reporting_currency.clone(),
+                            connection_count: overview.connections.len(),
                             onrefresh: move |_| onrefresh.call(()),
                         }
                     },
                     ActiveView::Connections => rsx! {
-                        ConnectionsView { connections: overview.connections.clone() }
-                    },
-                    ActiveView::Balances => rsx! {
-                        BalancesView { balances: overview.balances.clone() }
+                        ConnectionsView {
+                            connections: overview.connections.clone(),
+                            onrefresh: move |_| onrefresh.call(())
+                        }
                     },
                     ActiveView::ProposedEdits => rsx! {
                         ProposedEditsView {
                             onrefresh: move |_| onrefresh.call(())
-                        }
-                    },
-                    ActiveView::History => rsx! {
-                        HistoryView {
-                            currency: overview.reporting_currency.clone(),
-                            defaults: overview.history_defaults.clone(),
-                            filter_overrides,
                         }
                     },
                     ActiveView::Settings => rsx! {
@@ -1134,44 +1391,967 @@ fn NavButton(label: &'static str, selected: bool, onclick: EventHandler<MouseEve
 }
 
 #[component]
-fn SummaryView(
-    net_worth: f64,
-    currency: String,
-    last_date: String,
-    active_accounts: usize,
-    total_accounts: usize,
-    connection_count: usize,
-) -> Element {
+fn SpendingView(currency: String) -> Element {
+    let mut range_preset = use_signal(|| RangePreset::NinetyDays);
+    let mut start_override = use_signal(String::new);
+    let mut end_override = use_signal(String::new);
+    let mut selected_category = use_signal(|| None::<String>);
+    let mut transaction_page = use_signal(|| 0usize);
+    let mut transaction_sort_field = use_signal(|| TransactionSortField::Date);
+    let mut transaction_sort_direction = use_signal(|| SortDirection::Desc);
+    let mut show_ignored_transactions = use_signal(|| false);
+    let mut category_update_status = use_signal(|| None::<String>);
+    let spending = use_resource({
+        let currency = currency.clone();
+        move || {
+            let selected_range = range_preset();
+            let start_text = start_override();
+            let end_text = end_override();
+            let currency = currency.clone();
+            async move {
+                fetch_spending_dashboard(spending_query_string(
+                    selected_range,
+                    &start_text,
+                    &end_text,
+                    &current_date_string(),
+                    &currency,
+                ))
+                .await
+            }
+        }
+    });
+
+    let selected_range = range_preset();
+    let start_text = start_override();
+    let end_text = end_override();
+    let selected = selected_category();
+    let selected_sort_field = transaction_sort_field();
+    let selected_sort_direction = transaction_sort_direction();
+    let show_ignored = show_ignored_transactions();
+    let state = spending.cloned();
+    let loaded = match &state {
+        Some(Ok(data)) => Some(data),
+        _ => None,
+    };
+    let resolved_start = loaded
+        .map(|data| data.spending.start_date.clone())
+        .unwrap_or_else(|| start_text.clone());
+    let resolved_end = loaded
+        .map(|data| data.spending.end_date.clone())
+        .unwrap_or_else(|| end_text.clone());
+    let categories = loaded
+        .map(|data| spending_categories(&data.spending))
+        .unwrap_or_default();
+    let category_options = loaded
+        .map(|data| transaction_category_options(&data.transactions, &categories))
+        .unwrap_or_default();
+    let total = loaded
+        .and_then(|data| parse_money_input(&data.spending.total))
+        .unwrap_or_default();
+    let selected_total = selected.as_ref().and_then(|category| {
+        categories
+            .iter()
+            .find(|entry| &entry.key == category)
+            .and_then(|entry| parse_money_input(&entry.total))
+    });
+    let filtered_transactions = loaded
+        .map(|data| {
+            filtered_transactions(
+                &data.transactions,
+                selected.as_deref(),
+                selected_sort_field,
+                selected_sort_direction,
+                show_ignored,
+            )
+        })
+        .unwrap_or_default();
+    let page_size = 100usize;
+    let page_count = filtered_transactions.len().max(1).div_ceil(page_size);
+    let current_page = transaction_page().min(page_count.saturating_sub(1));
+    if current_page != transaction_page() {
+        transaction_page.set(current_page);
+    }
+    let page_start = current_page * page_size;
+    let page_transactions = filtered_transactions
+        .iter()
+        .skip(page_start)
+        .take(page_size)
+        .cloned()
+        .collect::<Vec<_>>();
+    let transaction_range = if filtered_transactions.is_empty() {
+        "0 of 0".to_string()
+    } else {
+        let first = page_start + 1;
+        let last = (page_start + page_transactions.len()).min(filtered_transactions.len());
+        format!("{first}-{last} of {}", filtered_transactions.len())
+    };
+    let selected_label = selected.as_deref().unwrap_or("All categories");
+
     rsx! {
-        section { class: "summary-grid",
-            MetricCard {
-                label: "Net worth",
-                value: format_full_money(net_worth, &currency),
-                detail: last_date
+        section { class: "panel spending-panel",
+            div { class: "panel-header",
+                div { class: "panel-title",
+                    h2 { "Spending Categories" }
+                    span { "{selected_label}" }
+                }
+                span { "{currency}" }
             }
-            MetricCard {
-                label: "Accounts",
-                value: active_accounts.to_string(),
-                detail: format!("{total_accounts} total")
+            if state.is_none() {
+                BackendActivity { message: "Waiting on backend spending data" }
             }
-            MetricCard {
-                label: "Connections",
-                value: connection_count.to_string(),
-                detail: "Configured sources".to_string()
+            if let Some(message) = category_update_status() {
+                div { class: "inline-notice", "{message}" }
+            }
+            div { class: "chart-controls",
+                div { class: "preset-row",
+                    span { class: "control-label", "Range" }
+                    SpendingPresetButton {
+                        label: "30D",
+                        selected: selected_range == RangePreset::OneMonth,
+                        onclick: move |_| {
+                            range_preset.set(RangePreset::OneMonth);
+                            start_override.set(String::new());
+                            end_override.set(String::new());
+                            selected_category.set(None);
+                            transaction_page.set(0);
+                        }
+                    }
+                    SpendingPresetButton {
+                        label: "90D",
+                        selected: selected_range == RangePreset::NinetyDays,
+                        onclick: move |_| {
+                            range_preset.set(RangePreset::NinetyDays);
+                            start_override.set(String::new());
+                            end_override.set(String::new());
+                            selected_category.set(None);
+                            transaction_page.set(0);
+                        }
+                    }
+                    SpendingPresetButton {
+                        label: "6M",
+                        selected: selected_range == RangePreset::SixMonths,
+                        onclick: move |_| {
+                            range_preset.set(RangePreset::SixMonths);
+                            start_override.set(String::new());
+                            end_override.set(String::new());
+                            selected_category.set(None);
+                            transaction_page.set(0);
+                        }
+                    }
+                    SpendingPresetButton {
+                        label: "1Y",
+                        selected: selected_range == RangePreset::OneYear,
+                        onclick: move |_| {
+                            range_preset.set(RangePreset::OneYear);
+                            start_override.set(String::new());
+                            end_override.set(String::new());
+                            selected_category.set(None);
+                            transaction_page.set(0);
+                        }
+                    }
+                    SpendingPresetButton {
+                        label: "Max",
+                        selected: selected_range == RangePreset::Max,
+                        onclick: move |_| {
+                            range_preset.set(RangePreset::Max);
+                            start_override.set(String::new());
+                            end_override.set(String::new());
+                            selected_category.set(None);
+                            transaction_page.set(0);
+                        }
+                    }
+                    button {
+                        class: "control-button",
+                        disabled: selected.is_none(),
+                        onclick: move |_| {
+                            selected_category.set(None);
+                            transaction_page.set(0);
+                        },
+                        "All"
+                    }
+                }
+                div { class: "control-grid spending-date-grid",
+                    DateInput {
+                        label: "Start",
+                        value: resolved_start.clone(),
+                        min: String::new(),
+                        max: resolved_end.clone(),
+                        oninput: move |value| {
+                            start_override.set(value);
+                            range_preset.set(RangePreset::Custom);
+                            selected_category.set(None);
+                            transaction_page.set(0);
+                        }
+                    }
+                    DateInput {
+                        label: "End",
+                        value: resolved_end.clone(),
+                        min: resolved_start.clone(),
+                        max: current_date_string(),
+                        oninput: move |value| {
+                            end_override.set(value);
+                            range_preset.set(RangePreset::Custom);
+                            selected_category.set(None);
+                            transaction_page.set(0);
+                        }
+                    }
+                }
+            }
+            match state {
+                None => rsx! {
+                    GraphLoadingPanel {
+                        range: range_summary_text(&resolved_start, &resolved_end),
+                        sampling: "Categories"
+                    }
+                },
+                Some(Err(error)) => rsx! {
+                    InlineStatus { title: "Spending Categories", message: error }
+                },
+                Some(Ok(data)) => rsx! {
+                    div { class: "spending-layout",
+                        div { class: "spending-chart-area",
+                            SpendingPieChart {
+                                categories: categories.clone(),
+                                selected: selected.clone(),
+                                currency: data.spending.currency.clone(),
+                                onclick: move |category| {
+                                    selected_category.set(Some(category));
+                                    transaction_page.set(0);
+                                }
+                            }
+                        }
+                        div { class: "category-list",
+                            div { class: "spending-total",
+                                span { class: "metric-label", "Total" }
+                                strong { "{format_full_money(total, &data.spending.currency)}" }
+                                small { "{data.spending.transaction_count} transactions / {data.spending.start_date} to {data.spending.end_date}" }
+                            }
+                            if let Some(value) = selected_total {
+                                div { class: "spending-total selected-total",
+                                    span { class: "metric-label", "Selected" }
+                                    strong { "{format_full_money(value, &data.spending.currency)}" }
+                                    small { "{selected_label}" }
+                                }
+                            }
+                            for entry in categories.iter() {
+                                CategoryRow {
+                                    entry: entry.clone(),
+                                    currency: data.spending.currency.clone(),
+                                    selected: selected.as_ref() == Some(&entry.key),
+                                    onclick: move |category| {
+                                        selected_category.set(Some(category));
+                                        transaction_page.set(0);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    TransactionList {
+                        transactions: page_transactions.clone(),
+                        currency: data.spending.currency.clone(),
+                        range_text: transaction_range.clone(),
+                        sort_field: selected_sort_field,
+                        sort_direction: selected_sort_direction,
+                        show_ignored,
+                        page: current_page,
+                        page_count,
+                        category_options: category_options.clone(),
+                        onshowignoredchange: move |checked| {
+                            show_ignored_transactions.set(checked);
+                            transaction_page.set(0);
+                        },
+                        onsortfieldchange: move |field| {
+                            transaction_sort_field.set(field);
+                            transaction_page.set(0);
+                        },
+                        onsortdirectionchange: move |direction| {
+                            transaction_sort_direction.set(direction);
+                            transaction_page.set(0);
+                        },
+                        onprev: move |_| transaction_page.set(current_page.saturating_sub(1)),
+                        onnext: move |_| {
+                            if current_page + 1 < page_count {
+                                transaction_page.set(current_page + 1);
+                            }
+                        },
+                        oncategorysave: move |input: SetTransactionCategoryInput| {
+                            category_update_status.set(Some("Saving category...".to_string()));
+                            spawn({
+                                let mut spending = spending;
+                                let mut category_update_status = category_update_status;
+                                async move {
+                                    match set_transaction_category(input).await {
+                                        Ok(()) => {
+                                            category_update_status.set(Some("Category saved.".to_string()));
+                                            spending.restart();
+                                        }
+                                        Err(error) => {
+                                            category_update_status.set(Some(error));
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                    }
+                    if data.spending.skipped_transaction_count > 0 {
+                        p { class: "range-summary",
+                            "Skipped {data.spending.skipped_transaction_count} transactions because market data was unavailable."
+                        }
+                    }
+                },
             }
         }
     }
 }
 
 #[component]
+fn SpendingPresetButton(
+    label: &'static str,
+    selected: bool,
+    onclick: EventHandler<MouseEvent>,
+) -> Element {
+    rsx! {
+        GraphPresetButton {
+            label: label,
+            selected: selected,
+            onclick: move |event| onclick.call(event),
+        }
+    }
+}
+
+#[component]
+fn SpendingPieChart(
+    categories: Vec<SpendingBreakdownEntry>,
+    selected: Option<String>,
+    currency: String,
+    onclick: EventHandler<String>,
+) -> Element {
+    let slices = pie_slices(&categories);
+    if slices.is_empty() {
+        return rsx! {
+            div { class: "chart-empty spending-empty",
+                strong { "No spending in range" }
+                small { "Sync transactions or adjust the range." }
+            }
+        };
+    }
+
+    rsx! {
+        svg {
+            class: "spending-pie",
+            view_box: "0 0 260 260",
+            role: "img",
+            for slice in slices {
+                path {
+                    class: if selected.as_ref() == Some(&slice.key) { "pie-slice selected" } else { "pie-slice" },
+                    d: "{slice.path}",
+                    fill: "{slice.color}",
+                    onclick: move |_| onclick.call(slice.key.clone()),
+                    title { "{slice.key}: {format_full_money(slice.total, &currency)}" }
+                }
+            }
+            circle { class: "pie-hole", cx: "130", cy: "130", r: "56" }
+            text { class: "pie-center-label", x: "130", y: "124", "Spend" }
+            text { class: "pie-center-value", x: "130", y: "145", "{categories.len()}" }
+        }
+    }
+}
+
+#[component]
+fn CategoryRow(
+    entry: SpendingBreakdownEntry,
+    currency: String,
+    selected: bool,
+    onclick: EventHandler<String>,
+) -> Element {
+    let class = if selected {
+        "category-row selected"
+    } else {
+        "category-row"
+    };
+    let total = parse_money_input(&entry.total).unwrap_or_default();
+
+    rsx! {
+        button {
+            class: "{class}",
+            onclick: move |_| onclick.call(entry.key.clone()),
+            span { class: "category-name", "{entry.key}" }
+            strong { "{format_full_money(total, &currency)}" }
+            small { "{entry.transaction_count} tx" }
+        }
+    }
+}
+
+#[component]
+fn TransactionList(
+    transactions: Vec<Transaction>,
+    currency: String,
+    range_text: String,
+    sort_field: TransactionSortField,
+    sort_direction: SortDirection,
+    show_ignored: bool,
+    page: usize,
+    page_count: usize,
+    category_options: Vec<String>,
+    onshowignoredchange: EventHandler<bool>,
+    onsortfieldchange: EventHandler<TransactionSortField>,
+    onsortdirectionchange: EventHandler<SortDirection>,
+    onprev: EventHandler<MouseEvent>,
+    onnext: EventHandler<MouseEvent>,
+    oncategorysave: EventHandler<SetTransactionCategoryInput>,
+) -> Element {
+    rsx! {
+        div { class: "transaction-panel",
+            div { class: "panel-header transaction-header",
+                div { class: "panel-title",
+                    h2 { "Transactions" }
+                    span { "{range_text}" }
+                }
+                div { class: "pagination-controls",
+                    button {
+                        class: "icon-button",
+                        title: "Previous page",
+                        disabled: page == 0,
+                        onclick: move |event| onprev.call(event),
+                        "‹"
+                    }
+                    span { "{page + 1} / {page_count}" }
+                    button {
+                        class: "icon-button",
+                        title: "Next page",
+                        disabled: page + 1 >= page_count,
+                        onclick: move |event| onnext.call(event),
+                        "›"
+                    }
+                }
+            }
+            div { class: "transaction-controls",
+                label { class: "compact-check",
+                    input {
+                        r#type: "checkbox",
+                        checked: show_ignored,
+                        onchange: move |event| onshowignoredchange.call(event.checked())
+                    }
+                    span { "Show ignored" }
+                }
+            }
+            if transactions.is_empty() {
+                div { class: "chart-empty transaction-empty",
+                    strong { "No matching transactions" }
+                    small { "Select another category or range." }
+                }
+            } else {
+                div { class: "data-table transaction-table",
+                    div { class: "table-head",
+                        TransactionSortHeader {
+                            label: "Date",
+                            field: TransactionSortField::Date,
+                            selected_field: sort_field,
+                            direction: sort_direction,
+                            onsortfieldchange,
+                            onsortdirectionchange,
+                        }
+                        TransactionSortHeader {
+                            label: "Description",
+                            field: TransactionSortField::Description,
+                            selected_field: sort_field,
+                            direction: sort_direction,
+                            onsortfieldchange,
+                            onsortdirectionchange,
+                        }
+                        TransactionSortHeader {
+                            label: "Category / Subcategory",
+                            field: TransactionSortField::Category,
+                            selected_field: sort_field,
+                            direction: sort_direction,
+                            onsortfieldchange,
+                            onsortdirectionchange,
+                        }
+                        TransactionSortHeader {
+                            label: "Account",
+                            field: TransactionSortField::Account,
+                            selected_field: sort_field,
+                            direction: sort_direction,
+                            onsortfieldchange,
+                            onsortdirectionchange,
+                        }
+                        TransactionSortHeader {
+                            label: "Amount",
+                            field: TransactionSortField::Amount,
+                            selected_field: sort_field,
+                            direction: sort_direction,
+                            onsortfieldchange,
+                            onsortdirectionchange,
+                        }
+                    }
+                    for tx in transactions {
+                        div {
+                            key: "{transaction_key(&tx)}",
+                            class: "{transaction_row_class(&tx)}",
+                            title: if tx.ignored_from_spending { "Not counted in spending totals" } else { "" },
+                            span { "{transaction_date(&tx)}" }
+                            strong { "{transaction_description(&tx)}" }
+                            span { class: "transaction-category-cell",
+                                div { class: "transaction-category-stack",
+                                    TransactionCategoryEditor {
+                                        transaction: tx.clone(),
+                                        category_options: category_options.clone(),
+                                        oncategorysave,
+                                    }
+                                    if let Some(subcategory) = transaction_subcategory(&tx) {
+                                        small { class: "transaction-subcategory", "{subcategory}" }
+                                    }
+                                }
+                                if tx.ignored_from_spending {
+                                    small { class: "ignored-badge", "Not counted" }
+                                }
+                            }
+                            span { "{tx.account_name}" }
+                            strong { "{format_transaction_amount(&tx, &currency)}" }
+                        }
+                    }
+                }
+                div { class: "pagination-footer",
+                    button {
+                        class: "control-button",
+                        disabled: page == 0,
+                        onclick: move |event| onprev.call(event),
+                        "Previous"
+                    }
+                    span { "{page + 1} / {page_count}" }
+                    button {
+                        class: "control-button selected",
+                        disabled: page + 1 >= page_count,
+                        onclick: move |event| onnext.call(event),
+                        "Next"
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn TransactionCategoryEditor(
+    transaction: Transaction,
+    category_options: Vec<String>,
+    oncategorysave: EventHandler<SetTransactionCategoryInput>,
+) -> Element {
+    let current_category = transaction_category(&transaction);
+    let mut draft_category = use_signal(|| {
+        if current_category == "Uncategorized" {
+            String::new()
+        } else {
+            current_category.clone()
+        }
+    });
+    let draft = draft_category();
+    let trimmed = draft.trim().to_string();
+    let normalized_draft = normalize_spending_category_key(&trimmed);
+    let changed = if trimmed.is_empty() {
+        current_category != "Uncategorized"
+    } else {
+        normalized_draft != current_category
+    };
+    let list_id = format!(
+        "category-options-{}-{}",
+        transaction.account_id, transaction.id
+    );
+
+    rsx! {
+        div { class: "category-editor",
+            input {
+                class: "category-editor-input",
+                r#type: "text",
+                list: "{list_id}",
+                value: "{draft}",
+                placeholder: "Uncategorized",
+                oninput: move |event| draft_category.set(event.value())
+            }
+            datalist { id: "{list_id}",
+                for category in category_options {
+                    option { value: "{category}" }
+                }
+            }
+            button {
+                class: "category-editor-button",
+                title: "Save category",
+                disabled: !changed,
+                onclick: move |_| {
+                    let category = draft_category().trim().to_string();
+                    oncategorysave.call(SetTransactionCategoryInput {
+                        account_id: transaction.account_id.clone(),
+                        transaction_id: transaction.id.clone(),
+                        clear_category: category.is_empty(),
+                        category: if category.is_empty() { None } else { Some(category) },
+                    });
+                },
+                "Save"
+            }
+        }
+    }
+}
+
+#[component]
+fn TransactionSortHeader(
+    label: &'static str,
+    field: TransactionSortField,
+    selected_field: TransactionSortField,
+    direction: SortDirection,
+    onsortfieldchange: EventHandler<TransactionSortField>,
+    onsortdirectionchange: EventHandler<SortDirection>,
+) -> Element {
+    let selected = field == selected_field;
+    let class = if selected {
+        "sort-header-button selected"
+    } else {
+        "sort-header-button"
+    };
+    let title = if selected {
+        format!("Sort {label} {}", direction.toggle().label().to_lowercase())
+    } else {
+        format!("Sort by {label}")
+    };
+    let next_direction = if selected {
+        direction.toggle()
+    } else {
+        default_transaction_sort_direction(field)
+    };
+
+    rsx! {
+        button {
+            class: "{class}",
+            title: "{title}",
+            onclick: move |_| {
+                onsortfieldchange.call(field);
+                onsortdirectionchange.call(next_direction);
+            },
+            span { "{label}" }
+            span { class: "sort-arrow",
+                if selected {
+                    "{sort_direction_arrow(direction)}"
+                }
+            }
+        }
+    }
+}
+
+fn spending_categories(spending: &SpendingOutput) -> Vec<SpendingBreakdownEntry> {
+    let mut totals: Vec<SpendingBreakdownEntry> = Vec::new();
+    for period in &spending.periods {
+        for entry in &period.breakdown {
+            let key = normalize_spending_category_key(&entry.key);
+            if let Some(existing) = totals.iter_mut().find(|item| item.key == key) {
+                let current = parse_money_input(&existing.total).unwrap_or_default();
+                let next = parse_money_input(&entry.total).unwrap_or_default();
+                existing.total = format_number(current + next, 2);
+                existing.transaction_count += entry.transaction_count;
+            } else {
+                totals.push(SpendingBreakdownEntry {
+                    key,
+                    total: entry.total.clone(),
+                    transaction_count: entry.transaction_count,
+                });
+            }
+        }
+    }
+    totals.sort_by(|a, b| {
+        let left = parse_money_input(&a.total).unwrap_or_default();
+        let right = parse_money_input(&b.total).unwrap_or_default();
+        right
+            .partial_cmp(&left)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.key.cmp(&b.key))
+    });
+    totals
+}
+
+fn transaction_category_options(
+    transactions: &[Transaction],
+    categories: &[SpendingBreakdownEntry],
+) -> Vec<String> {
+    let mut options = categories
+        .iter()
+        .map(|entry| entry.key.clone())
+        .chain(transactions.iter().map(transaction_category))
+        .filter(|category| category != "Uncategorized")
+        .collect::<Vec<_>>();
+    options.sort_by(|a, b| compare_case_insensitive(a, b));
+    options.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+    options
+}
+
+fn filtered_transactions(
+    transactions: &[Transaction],
+    category: Option<&str>,
+    sort_field: TransactionSortField,
+    sort_direction: SortDirection,
+    show_ignored: bool,
+) -> Vec<Transaction> {
+    let mut filtered = transactions
+        .iter()
+        .filter(|transaction| {
+            if transaction.ignored_from_spending && !show_ignored {
+                return false;
+            }
+            category
+                .map(|category| transaction_category(transaction) == category)
+                .unwrap_or(true)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    filtered.sort_by(|a, b| compare_transactions(a, b, sort_field, sort_direction));
+    filtered
+}
+
+fn compare_transactions(
+    a: &Transaction,
+    b: &Transaction,
+    sort_field: TransactionSortField,
+    sort_direction: SortDirection,
+) -> std::cmp::Ordering {
+    let primary = match sort_field {
+        TransactionSortField::Date => a.timestamp.cmp(&b.timestamp),
+        TransactionSortField::Amount => compare_transaction_amounts(a, b),
+        TransactionSortField::Description => {
+            compare_case_insensitive(&transaction_description(a), &transaction_description(b))
+        }
+        TransactionSortField::Category => {
+            compare_case_insensitive(&transaction_category(a), &transaction_category(b)).then_with(
+                || {
+                    compare_case_insensitive(
+                        &transaction_subcategory(a).unwrap_or_default(),
+                        &transaction_subcategory(b).unwrap_or_default(),
+                    )
+                },
+            )
+        }
+        TransactionSortField::Account => compare_case_insensitive(&a.account_name, &b.account_name),
+        TransactionSortField::Counted => a.ignored_from_spending.cmp(&b.ignored_from_spending),
+    };
+
+    let primary = match sort_direction {
+        SortDirection::Asc => primary,
+        SortDirection::Desc => primary.reverse(),
+    };
+
+    primary
+        .then_with(|| b.timestamp.cmp(&a.timestamp))
+        .then_with(|| a.account_name.cmp(&b.account_name))
+        .then_with(|| a.id.cmp(&b.id))
+}
+
+fn default_transaction_sort_direction(field: TransactionSortField) -> SortDirection {
+    match field {
+        TransactionSortField::Date | TransactionSortField::Amount => SortDirection::Desc,
+        TransactionSortField::Description
+        | TransactionSortField::Category
+        | TransactionSortField::Account
+        | TransactionSortField::Counted => SortDirection::Asc,
+    }
+}
+
+fn sort_direction_arrow(direction: SortDirection) -> &'static str {
+    match direction {
+        SortDirection::Asc => "↑",
+        SortDirection::Desc => "↓",
+    }
+}
+
+fn compare_transaction_amounts(a: &Transaction, b: &Transaction) -> std::cmp::Ordering {
+    let left = parse_money_input(&a.amount);
+    let right = parse_money_input(&b.amount);
+    match (left, right) {
+        (Some(left), Some(right)) => left
+            .partial_cmp(&right)
+            .unwrap_or(std::cmp::Ordering::Equal),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => a.amount.cmp(&b.amount),
+    }
+}
+
+fn compare_case_insensitive(a: &str, b: &str) -> std::cmp::Ordering {
+    a.to_lowercase()
+        .cmp(&b.to_lowercase())
+        .then_with(|| a.cmp(b))
+}
+
+fn mark_transactions_excluded_from_spending(
+    mut transactions: Vec<Transaction>,
+    counted_transactions: &[Transaction],
+) -> Vec<Transaction> {
+    let counted_ids = counted_transactions
+        .iter()
+        .map(transaction_key)
+        .collect::<HashSet<_>>();
+    for transaction in &mut transactions {
+        transaction.ignored_from_spending = !counted_ids.contains(&transaction_key(transaction))
+            || !is_spending_transaction(transaction);
+    }
+    transactions
+}
+
+fn transaction_key(transaction: &Transaction) -> String {
+    format!("{}:{}", transaction.account_id, transaction.id)
+}
+
+fn transaction_row_class(transaction: &Transaction) -> &'static str {
+    if transaction.ignored_from_spending {
+        "table-row ignored-transaction-row"
+    } else {
+        "table-row"
+    }
+}
+
+fn is_spending_transaction(transaction: &Transaction) -> bool {
+    transaction.status == "posted"
+        && parse_money_input(&transaction.amount)
+            .map(|amount| amount < 0.0)
+            .unwrap_or(false)
+}
+
+fn normalize_spending_category_key(category: &str) -> String {
+    let trimmed = category.trim();
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("uncategorized") {
+        "Uncategorized".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn pie_slices(categories: &[SpendingBreakdownEntry]) -> Vec<PieSlice> {
+    const COLORS: [&str; 10] = [
+        "#1f6f8b", "#238a57", "#8a5cf6", "#bf6b21", "#b83280", "#52677a", "#2f9e9e", "#9b6a28",
+        "#6f7d1f", "#bf3d3d",
+    ];
+
+    let values = categories
+        .iter()
+        .map(|entry| parse_money_input(&entry.total).unwrap_or_default().abs())
+        .collect::<Vec<_>>();
+    let total = values.iter().sum::<f64>();
+    if total <= 0.0 {
+        return Vec::new();
+    }
+
+    let mut cursor = -std::f64::consts::FRAC_PI_2;
+    categories
+        .iter()
+        .zip(values.iter())
+        .enumerate()
+        .filter_map(|(index, (entry, value))| {
+            if *value <= 0.0 {
+                return None;
+            }
+            let angle = (*value / total) * std::f64::consts::TAU;
+            let start = cursor;
+            let end = cursor + angle;
+            cursor = end;
+            Some(PieSlice {
+                key: entry.key.clone(),
+                total: *value,
+                transaction_count: entry.transaction_count,
+                percentage: (*value / total) * 100.0,
+                path: pie_slice_path(130.0, 130.0, 104.0, start, end),
+                color: COLORS[index % COLORS.len()],
+            })
+        })
+        .collect()
+}
+
+fn pie_slice_path(cx: f64, cy: f64, radius: f64, start: f64, end: f64) -> String {
+    let start_x = cx + radius * start.cos();
+    let start_y = cy + radius * start.sin();
+    let end_x = cx + radius * end.cos();
+    let end_y = cy + radius * end.sin();
+    let large_arc = if end - start > std::f64::consts::PI {
+        1
+    } else {
+        0
+    };
+    format!(
+        "M {:.2} {:.2} L {:.2} {:.2} A {:.2} {:.2} 0 {} 1 {:.2} {:.2} Z",
+        cx, cy, start_x, start_y, radius, radius, large_arc, end_x, end_y
+    )
+}
+
+fn transaction_date(transaction: &Transaction) -> String {
+    transaction
+        .annotation
+        .as_ref()
+        .and_then(|annotation| annotation.effective_date.clone())
+        .unwrap_or_else(|| {
+            transaction
+                .timestamp
+                .get(..10)
+                .unwrap_or(&transaction.timestamp)
+                .to_string()
+        })
+}
+
+fn transaction_description(transaction: &Transaction) -> String {
+    transaction
+        .annotation
+        .as_ref()
+        .and_then(|annotation| annotation.description.clone())
+        .unwrap_or_else(|| transaction.description.clone())
+}
+
+fn transaction_category(transaction: &Transaction) -> String {
+    let category = transaction
+        .annotation
+        .as_ref()
+        .and_then(|annotation| annotation.category.clone())
+        .or_else(|| transaction.category.clone())
+        .unwrap_or_default();
+    normalize_spending_category_key(&category)
+}
+
+fn transaction_subcategory(transaction: &Transaction) -> Option<String> {
+    transaction
+        .annotation
+        .as_ref()
+        .and_then(|annotation| annotation.subcategory.clone())
+        .or_else(|| transaction.subcategory.clone())
+        .map(|value| normalize_spending_category_key(&value))
+        .filter(|value| !value.is_empty() && value != "Uncategorized")
+}
+
+fn format_transaction_amount(transaction: &Transaction, currency: &str) -> String {
+    parse_money_input(&transaction.amount)
+        .map(|amount| format_full_money(amount, currency))
+        .unwrap_or_else(|| transaction.amount.clone())
+}
+
+#[component]
 fn GraphsView(
     currency: String,
     defaults: HistoryDefaults,
+    accounts: Vec<Account>,
+    connections: Vec<Connection>,
     filter_overrides: FilterOverrides,
 ) -> Element {
     rsx! {
         section { class: "panel graph-panel",
-            NetWorthPanel { currency, defaults, filter_overrides }
+            HistoryGraphPanel {
+                title: "Net Worth Over Time".to_string(),
+                scope_label: currency.clone(),
+                empty_title: "No net worth history".to_string(),
+                empty_detail: "Sync balances to populate the chart.".to_string(),
+                currency: currency.clone(),
+                defaults: defaults.clone(),
+                filter_overrides,
+                account: None,
+                show_header: true,
+            }
+        }
+        AccountGraphPanel {
+            accounts,
+            connections,
+            currency,
+            defaults,
+            filter_overrides,
         }
     }
 }
@@ -1796,7 +2976,7 @@ fn short_commit(commit: &str) -> String {
 }
 
 #[component]
-fn InlineStatus(title: &'static str, message: String) -> Element {
+fn InlineStatus(title: String, message: String) -> Element {
     rsx! {
         div { class: "inline-status",
             h2 { "{title}" }
@@ -1817,10 +2997,117 @@ fn MetricCard(label: String, value: String, detail: String) -> Element {
 }
 
 #[component]
-fn NetWorthPanel(
+fn AccountGraphPanel(
+    accounts: Vec<Account>,
+    connections: Vec<Connection>,
     currency: String,
     defaults: HistoryDefaults,
     filter_overrides: FilterOverrides,
+) -> Element {
+    let initial_account_id = accounts
+        .iter()
+        .find(|account| account.active)
+        .or_else(|| accounts.first())
+        .map(|account| account.id.clone())
+        .unwrap_or_default();
+    let mut selected_account_id = use_signal(move || initial_account_id.clone());
+    let account_options = accounts
+        .iter()
+        .filter(|account| account.active)
+        .cloned()
+        .collect::<Vec<_>>();
+    let account_options = if account_options.is_empty() {
+        accounts.clone()
+    } else {
+        account_options
+    };
+    let current_selection = selected_account_id();
+    let selected_account = account_options
+        .iter()
+        .find(|account| account.id == current_selection)
+        .or_else(|| account_options.first());
+    let selected_id = selected_account
+        .map(|account| account.id.clone())
+        .unwrap_or_default();
+    let selected_name = selected_account
+        .map(|account| account.name.clone())
+        .unwrap_or_else(|| "No account selected".to_string());
+    let selected_connection = selected_account
+        .and_then(|account| {
+            connections
+                .iter()
+                .find(|connection| connection.id == account.connection_id)
+        })
+        .map(|connection| connection.name.clone())
+        .unwrap_or_else(|| "Unknown connection".to_string());
+
+    rsx! {
+        section { class: "panel graph-panel",
+            div { class: "panel-header",
+                div { class: "panel-title",
+                    h2 { "Account Value Over Time" }
+                    span { "{selected_connection}" }
+                }
+                if !account_options.is_empty() {
+                    label { class: "graph-scope-control",
+                        span { "Account" }
+                        select {
+                            class: "control-input",
+                            value: "{selected_id}",
+                            onchange: move |event| selected_account_id.set(event.value()),
+                            for account in account_options.clone() {
+                                {
+                                    let connection_name = connections
+                                        .iter()
+                                        .find(|connection| connection.id == account.connection_id)
+                                        .map(|connection| connection.name.clone())
+                                        .unwrap_or_else(|| "Unknown".to_string());
+                                    let label = format!("{} - {}", account.name, connection_name);
+                                    rsx! {
+                                        option {
+                                            value: "{account.id}",
+                                            "{label}"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if selected_id.is_empty() {
+                div { class: "chart-empty",
+                    strong { "No accounts" }
+                    small { "Sync or add an account to populate account charts." }
+                }
+            } else {
+                HistoryGraphPanel {
+                    title: selected_name.clone(),
+                    scope_label: selected_connection.clone(),
+                    empty_title: "No account history".to_string(),
+                    empty_detail: "Sync balances for this account to populate the chart.".to_string(),
+                    currency,
+                    defaults,
+                    filter_overrides,
+                    account: Some(selected_id),
+                    show_header: false,
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn HistoryGraphPanel(
+    title: String,
+    scope_label: String,
+    empty_title: String,
+    empty_detail: String,
+    currency: String,
+    defaults: HistoryDefaults,
+    filter_overrides: FilterOverrides,
+    account: Option<String>,
+    show_header: bool,
 ) -> Element {
     let initial_range_preset = range_preset_from_config(&defaults.graph_range);
     let initial_sampling_granularity =
@@ -1836,6 +3123,7 @@ fn NetWorthPanel(
         let start_text = start_override();
         let end_text = end_override();
         let selected_sampling = sampling_granularity();
+        let selected_account = account.clone();
         async move {
             fetch_history(history_query_string(
                 selected_range,
@@ -1844,6 +3132,7 @@ fn NetWorthPanel(
                 selected_sampling,
                 &current_date_string(),
                 filter_overrides,
+                selected_account.as_deref(),
             ))
             .await
         }
@@ -1921,14 +3210,16 @@ fn NetWorthPanel(
         .as_ref()
         .map(|bounds| bounds.1.clone())
         .unwrap_or_default();
-    let header_currency = loaded_history
+    let header_label = loaded_history
         .map(|history| history.currency.clone())
-        .unwrap_or_else(|| currency.clone());
+        .unwrap_or(scope_label);
 
     rsx! {
-        div { class: "panel-header",
-            h2 { "Net Worth Over Time" }
-            span { "{header_currency}" }
+        if show_header {
+            div { class: "panel-header",
+                h2 { "{title}" }
+                span { "{header_label}" }
+            }
         }
         if is_history_loading {
             BackendActivity { message: "Waiting on backend graph data" }
@@ -2020,13 +3311,15 @@ fn NetWorthPanel(
                 }
             },
             Some(Err(error)) => rsx! {
-                InlineStatus { title: "Net Worth Over Time", message: error }
+                InlineStatus { title: title.clone(), message: error }
             },
             Some(Ok(_)) => rsx! {
                 NetWorthChart {
                     data: sampled_data.clone(),
                     currency: currency.clone(),
-                    y_domain
+                    y_domain,
+                    empty_title: empty_title.clone(),
+                    empty_detail: empty_detail.clone(),
                 }
                 if !sampled_data.is_empty() {
                     div { class: "chart-stats",
@@ -2179,6 +3472,8 @@ fn NetWorthChart(
     data: Vec<NetWorthDataPoint>,
     currency: String,
     y_domain: Option<(f64, f64)>,
+    empty_title: String,
+    empty_detail: String,
 ) -> Element {
     let values = data
         .iter()
@@ -2188,8 +3483,8 @@ fn NetWorthChart(
     if values.is_empty() {
         return rsx! {
             div { class: "chart-empty",
-                strong { "No net worth history" }
-                small { "Sync balances to populate the chart." }
+                strong { "{empty_title}" }
+                small { "{empty_detail}" }
             }
         };
     }
@@ -2564,6 +3859,7 @@ fn AccountsView(
     balances: Vec<Balance>,
     snapshot: PortfolioSnapshot,
     currency: String,
+    connection_count: usize,
     onrefresh: EventHandler<()>,
 ) -> Element {
     let mut price_busy = use_signal(|| false);
@@ -2571,12 +3867,31 @@ fn AccountsView(
     let mut price_status = use_signal(String::new);
     let virtual_accounts = virtual_account_summaries(&snapshot);
     let account_count = accounts.len() + virtual_accounts.len();
+    let active_accounts = accounts.iter().filter(|account| account.active).count();
+    let net_worth = current_net_worth_from_snapshot(&snapshot);
     let account_summaries = snapshot.by_account.clone();
     let _ = balances;
     let is_price_busy = price_busy();
     let price_status_text = price_status();
 
     rsx! {
+        section { class: "summary-grid",
+            MetricCard {
+                label: "Net worth",
+                value: format_full_money(net_worth, &currency),
+                detail: snapshot.as_of_date.clone()
+            }
+            MetricCard {
+                label: "Accounts",
+                value: active_accounts.to_string(),
+                detail: format!("{account_count} total")
+            }
+            MetricCard {
+                label: "Connections",
+                value: connection_count.to_string(),
+                detail: "Configured sources".to_string()
+            }
+        }
         section { class: "panel",
             div { class: "panel-header",
                 div { class: "panel-title",
@@ -2789,12 +4104,112 @@ fn AccountRow(
 }
 
 #[component]
-fn ConnectionsView(connections: Vec<Connection>) -> Element {
+fn ConnectionsView(connections: Vec<Connection>, onrefresh: EventHandler<()>) -> Element {
+    let mut busy_target = use_signal(String::new);
+    let mut status = use_signal(String::new);
+    let mut only_stale = use_signal(|| true);
+    let mut full_transactions = use_signal(|| false);
+    let mut force_prices = use_signal(|| false);
+    let busy = busy_target();
+    let is_busy = !busy.is_empty();
+    let status_text = status();
+
     rsx! {
         section { class: "panel",
             div { class: "panel-header",
-                h2 { "Connections" }
-                span { "{connections.len()}" }
+                div { class: "panel-title",
+                    h2 { "Connections" }
+                    span { "{connections.len()}" }
+                }
+                div { class: "settings-actions inline-actions",
+                    label { class: "compact-check",
+                        input {
+                            r#type: "checkbox",
+                            checked: only_stale(),
+                            disabled: is_busy,
+                            onchange: move |event| only_stale.set(event.checked())
+                        }
+                        span { "Stale only" }
+                    }
+                    label { class: "compact-check",
+                        input {
+                            r#type: "checkbox",
+                            checked: full_transactions(),
+                            disabled: is_busy,
+                            onchange: move |event| full_transactions.set(event.checked())
+                        }
+                        span { "Full transactions" }
+                    }
+                    label { class: "compact-check",
+                        input {
+                            r#type: "checkbox",
+                            checked: force_prices(),
+                            disabled: is_busy,
+                            onchange: move |event| force_prices.set(event.checked())
+                        }
+                        span { "Force prices" }
+                    }
+                    button {
+                        class: "control-button selected",
+                        disabled: is_busy,
+                        onclick: move |_| {
+                            busy_target.set("all".to_string());
+                            let input = SyncConnectionsInput {
+                                target: None,
+                                if_stale: only_stale(),
+                                full_transactions: full_transactions(),
+                            };
+                            status.set(if input.if_stale {
+                                "Syncing stale connections...".to_string()
+                            } else {
+                                "Syncing all connections...".to_string()
+                            });
+                            spawn(async move {
+                                match sync_connections(input).await {
+                                    Ok(result) => {
+                                        status.set(sync_result_summary(&result));
+                                        onrefresh.call(());
+                                    }
+                                    Err(error) => status.set(format!("Sync failed: {error}")),
+                                }
+                                busy_target.set(String::new());
+                            });
+                        },
+                        if busy == "all" { "Syncing" } else { "Sync all" }
+                    }
+                    button {
+                        class: "control-button",
+                        disabled: is_busy,
+                        onclick: move |_| {
+                            busy_target.set("prices:all".to_string());
+                            let input = SyncPricesInput {
+                                scope: "all".to_string(),
+                                target: None,
+                                force: force_prices(),
+                                quote_staleness_seconds: None,
+                            };
+                            status.set(if input.force {
+                                "Refreshing all prices...".to_string()
+                            } else {
+                                "Refreshing stale prices...".to_string()
+                            });
+                            spawn(async move {
+                                match sync_prices(input).await {
+                                    Ok(result) => {
+                                        status.set(price_sync_result_summary(&result));
+                                        onrefresh.call(());
+                                    }
+                                    Err(error) => status.set(format!("Price sync failed: {error}")),
+                                }
+                                busy_target.set(String::new());
+                            });
+                        },
+                        if busy == "prices:all" { "Refreshing" } else { "Sync prices" }
+                    }
+                }
+            }
+            if !status_text.is_empty() {
+                p { class: "settings-status", "{status_text}" }
             }
             div { class: "data-table connection-table",
                 div { class: "table-head",
@@ -2802,8 +4217,19 @@ fn ConnectionsView(connections: Vec<Connection>) -> Element {
                     span { "Sync" }
                     span { "Accounts" }
                     span { "Last sync" }
+                    span { "Actions" }
                 }
                 for connection in connections {
+                    {
+                        let target = connection.id.clone();
+                        let price_target = format!("prices:{target}");
+                        let row_busy = busy == target;
+                        let price_busy = busy == price_target;
+                        let sync_target = target.clone();
+                        let sync_name = connection.name.clone();
+                        let prices_target = target.clone();
+                        let prices_name = connection.name.clone();
+                        rsx! {
                     div { class: "table-row",
                         strong { "{connection.name}" }
                         span { class: "status", "{connection.status}" }
@@ -2811,10 +4237,111 @@ fn ConnectionsView(connections: Vec<Connection>) -> Element {
                         small {
                             "{connection.last_sync.clone().unwrap_or_else(|| \"Never\".to_string())}"
                         }
+                        div { class: "connection-actions",
+                            button {
+                                class: "control-button",
+                                disabled: is_busy,
+                                onclick: move |_| {
+                                    let target = sync_target.clone();
+                                    busy_target.set(target.clone());
+                                    let input = SyncConnectionsInput {
+                                        target: Some(target.clone()),
+                                        if_stale: only_stale(),
+                                        full_transactions: full_transactions(),
+                                    };
+                                    status.set(format!("Syncing {sync_name}..."));
+                                    spawn(async move {
+                                        match sync_connections(input).await {
+                                            Ok(result) => {
+                                                status.set(sync_result_summary(&result));
+                                                onrefresh.call(());
+                                            }
+                                            Err(error) => status.set(format!("Sync failed: {error}")),
+                                        }
+                                        busy_target.set(String::new());
+                                    });
+                                },
+                                if row_busy { "Syncing" } else { "Sync" }
+                            }
+                            button {
+                                class: "control-button",
+                                disabled: is_busy,
+                                onclick: move |_| {
+                                    let target = prices_target.clone();
+                                    let price_target = format!("prices:{target}");
+                                    busy_target.set(price_target);
+                                    let input = SyncPricesInput {
+                                        scope: "connection".to_string(),
+                                        target: Some(target),
+                                        force: force_prices(),
+                                        quote_staleness_seconds: None,
+                                    };
+                                    status.set(format!("Refreshing prices for {prices_name}..."));
+                                    spawn(async move {
+                                        match sync_prices(input).await {
+                                            Ok(result) => {
+                                                status.set(price_sync_result_summary(&result));
+                                                onrefresh.call(());
+                                            }
+                                            Err(error) => status.set(format!("Price sync failed: {error}")),
+                                        }
+                                        busy_target.set(String::new());
+                                    });
+                                },
+                                if price_busy { "Refreshing" } else { "Prices" }
+                            }
+                        }
+                    }
+                        }
                     }
                 }
             }
         }
+    }
+}
+
+fn sync_result_summary(result: &serde_json::Value) -> String {
+    if let Some(results) = result.get("results").and_then(|value| value.as_array()) {
+        let total = results.len();
+        let synced = results
+            .iter()
+            .filter(|row| row.get("success").and_then(|v| v.as_bool()) == Some(true))
+            .count();
+        let failed = results
+            .iter()
+            .filter(|row| row.get("success").and_then(|v| v.as_bool()) == Some(false))
+            .count();
+        let skipped = results
+            .iter()
+            .filter(|row| row.get("skipped").and_then(|v| v.as_bool()) == Some(true))
+            .count();
+        return format!("Sync complete: {synced}/{total} ok, {skipped} skipped, {failed} failed.");
+    }
+
+    let connection = result
+        .get("connection")
+        .and_then(|value| {
+            value
+                .as_str()
+                .or_else(|| value.get("name").and_then(|v| v.as_str()))
+        })
+        .unwrap_or("connection");
+    if result.get("success").and_then(|v| v.as_bool()) == Some(true) {
+        if result.get("skipped").and_then(|v| v.as_bool()) == Some(true) {
+            let reason = result
+                .get("reason")
+                .and_then(|value| value.as_str())
+                .unwrap_or("skipped");
+            format!("Sync skipped for {connection}: {reason}.")
+        } else {
+            format!("Sync complete for {connection}.")
+        }
+    } else {
+        let error = result
+            .get("error")
+            .and_then(|value| value.as_str())
+            .unwrap_or("unknown error");
+        format!("Sync failed for {connection}: {error}")
     }
 }
 
@@ -2842,36 +4369,18 @@ fn price_sync_result_summary(result: &serde_json::Value) -> String {
     }
 }
 
-#[component]
-fn BalancesView(balances: Vec<Balance>) -> Element {
-    rsx! {
-        section { class: "panel",
-            div { class: "panel-header",
-                h2 { "Balances" }
-                span { "{balances.len()}" }
-            }
-            div { class: "data-table balance-table",
-                div { class: "table-head",
-                    span { "Asset" }
-                    span { "Amount" }
-                    span { "Account" }
-                    span { "Value" }
-                    span { "Timestamp" }
-                }
-                for balance in balances {
-                    div { class: "table-row",
-                        strong { "{asset_label(&balance.asset)}" }
-                        span { "{balance.amount}" }
-                        small { "{balance.account_id}" }
-                        span {
-                            "{balance.value_in_reporting_currency.clone().unwrap_or_else(|| \"N/A\".to_string())} {balance.reporting_currency}"
-                        }
-                        small { "{balance.timestamp}" }
-                    }
-                }
-            }
-        }
+fn transaction_query_string(start: &str, end: &str, include_ignored: bool) -> String {
+    let mut params = Vec::new();
+    if !start.trim().is_empty() {
+        push_query_param(&mut params, "start", start);
     }
+    if !end.trim().is_empty() {
+        push_query_param(&mut params, "end", end);
+    }
+    if include_ignored {
+        push_query_param(&mut params, "include_ignored", "true");
+    }
+    params.join("&")
 }
 
 #[component]
@@ -2996,142 +4505,6 @@ fn ProposedEditRow(
     }
 }
 
-#[component]
-fn HistoryView(
-    currency: String,
-    defaults: HistoryDefaults,
-    filter_overrides: FilterOverrides,
-) -> Element {
-    let initial_range_preset = range_preset_from_config(&defaults.graph_range);
-    let initial_sampling_granularity =
-        sampling_granularity_from_config(&defaults.graph_granularity);
-    let history = use_resource(move || async move {
-        fetch_history(history_query_string(
-            initial_range_preset,
-            "",
-            "",
-            initial_sampling_granularity,
-            &current_date_string(),
-            filter_overrides,
-        ))
-        .await
-    });
-    rsx! {
-        section { class: "panel",
-            match history.cloned() {
-                None => rsx! { InlineStatus { title: "Net Worth History", message: "Loading history..." } },
-                Some(Ok(history)) => rsx! {
-                    HistoryTable { history, currency }
-                },
-                Some(Err(error)) => rsx! {
-                    InlineStatus { title: "Net Worth History", message: error }
-                },
-            }
-        }
-    }
-}
-
-#[component]
-fn HistoryTable(history: History, currency: String) -> Element {
-    let row_count = history.points.len();
-
-    rsx! {
-        div { class: "panel-header",
-            h2 { "Net Worth History" }
-            span { "{row_count}" }
-        }
-        div { class: "data-table history-table",
-            div { class: "table-head",
-                span { "Date" }
-                span { "Net worth" }
-                span { "Daily change" }
-            }
-            for point in history.points.iter().rev() {
-                HistoryPointRow {
-                    point: point.clone(),
-                    currency: currency.clone()
-                }
-            }
-        }
-    }
-}
-
-#[component]
-fn HistoryPointRow(point: HistoryPoint, currency: String) -> Element {
-    let total = point.total_value.parse::<f64>().unwrap_or_default();
-    let total_text = format_full_money(total, &currency);
-    let change_text = point
-        .percentage_change_from_previous
-        .map(|value| format!("{value}%"))
-        .unwrap_or_else(|| "N/A".to_string());
-
-    rsx! {
-        div { class: "table-row",
-            strong { "{point.date}" }
-            span { "{total_text}" }
-            small { "{change_text}" }
-        }
-    }
-}
-
-fn asset_label(asset: &serde_json::Value) -> String {
-    let Some(obj) = asset.as_object() else {
-        return asset
-            .as_str()
-            .map(ToOwned::to_owned)
-            .unwrap_or_else(|| asset.to_string());
-    };
-
-    match obj.get("type").and_then(|value| value.as_str()) {
-        Some("currency") => obj
-            .get("iso_code")
-            .or_else(|| obj.get("currency"))
-            .and_then(|value| value.as_str())
-            .map(normalize_currency_code_for_display)
-            .unwrap_or_else(|| "Currency".to_string()),
-        Some("equity") => {
-            let ticker = obj
-                .get("ticker")
-                .or_else(|| obj.get("symbol"))
-                .and_then(|value| value.as_str())
-                .unwrap_or("Equity");
-            match obj.get("exchange").and_then(|value| value.as_str()) {
-                Some(exchange) if !exchange.trim().is_empty() => {
-                    format!("{} ({})", ticker.trim(), exchange.trim())
-                }
-                _ => ticker.trim().to_string(),
-            }
-        }
-        Some("crypto") => {
-            let symbol = obj
-                .get("symbol")
-                .and_then(|value| value.as_str())
-                .unwrap_or("Crypto");
-            match obj.get("network").and_then(|value| value.as_str()) {
-                Some(network) if !network.trim().is_empty() => {
-                    format!("{} ({})", symbol.trim(), network.trim())
-                }
-                _ => symbol.trim().to_string(),
-            }
-        }
-        _ => obj
-            .get("symbol")
-            .and_then(|value| value.as_str())
-            .or_else(|| obj.get("ticker").and_then(|value| value.as_str()))
-            .or_else(|| obj.get("iso_code").and_then(|value| value.as_str()))
-            .or_else(|| obj.get("currency").and_then(|value| value.as_str()))
-            .map(ToOwned::to_owned)
-            .unwrap_or_else(|| asset.to_string()),
-    }
-}
-
-fn normalize_currency_code_for_display(value: &str) -> String {
-    match value.trim() {
-        "840" => "USD".to_string(),
-        trimmed => trimmed.to_uppercase(),
-    }
-}
-
 fn proposed_patch_summary(patch: &ProposedTransactionEditPatch) -> String {
     let mut parts = Vec::new();
     push_patch_part(&mut parts, "description", &patch.description);
@@ -3246,20 +4619,51 @@ fn history_query_string(
     selected_sampling: SamplingGranularity,
     today: &str,
     filter_overrides: FilterOverrides,
+    account: Option<&str>,
 ) -> String {
     let (start, end) = requested_history_date_range(preset, start_override, end_override, today);
     let granularity =
         history_request_granularity(selected_sampling, start.as_deref(), end.as_deref());
-    let mut params = vec![format!("granularity={granularity}")];
+    let mut params = vec![format!(
+        "granularity={}",
+        query_encode_component(granularity)
+    )];
 
+    if let Some(start) = start {
+        push_query_param(&mut params, "start", &start);
+    }
+    if let Some(end) = end {
+        push_query_param(&mut params, "end", &end);
+    }
+    if let Some(account) = account.filter(|account| !account.is_empty()) {
+        push_query_param(&mut params, "account", account);
+    }
+    append_filter_override_params(&mut params, filter_overrides);
+
+    params.join("&")
+}
+
+fn spending_query_string(
+    preset: RangePreset,
+    start_override: &str,
+    end_override: &str,
+    today: &str,
+    currency: &str,
+) -> String {
+    let (start, end) = requested_history_date_range(preset, start_override, end_override, today);
+    let mut params = vec![
+        "period=range".to_string(),
+        "group_by=category".to_string(),
+        "direction=outflow".to_string(),
+        "status=posted".to_string(),
+        format!("currency={currency}"),
+    ];
     if let Some(start) = start {
         params.push(format!("start={start}"));
     }
     if let Some(end) = end {
         params.push(format!("end={end}"));
     }
-    append_filter_override_params(&mut params, filter_overrides);
-
     params.join("&")
 }
 
@@ -3272,10 +4676,11 @@ fn filter_override_query_string(overrides: FilterOverrides) -> String {
 
 fn append_filter_override_params(params: &mut Vec<String>, overrides: FilterOverrides) {
     if let Some(enabled) = overrides.include_latent_capital_gains_tax {
-        params.push(format!(
-            "include_latent_capital_gains_tax={}",
-            bool_query_value(enabled)
-        ));
+        push_query_param(
+            params,
+            "include_latent_capital_gains_tax",
+            bool_query_value(enabled),
+        );
     }
 }
 
@@ -3285,6 +4690,23 @@ fn bool_query_value(value: bool) -> &'static str {
     } else {
         "false"
     }
+}
+
+fn push_query_param(params: &mut Vec<String>, key: &str, value: &str) {
+    params.push(format!("{key}={}", query_encode_component(value)));
+}
+
+fn query_encode_component(value: &str) -> String {
+    let mut encoded = String::new();
+    for byte in value.as_bytes() {
+        match *byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                encoded.push(*byte as char);
+            }
+            other => encoded.push_str(&format!("%{other:02X}")),
+        }
+    }
+    encoded
 }
 
 fn requested_history_date_range(
@@ -3768,7 +5190,8 @@ mod tests {
                 "",
                 DEFAULT_SAMPLING_GRANULARITY,
                 "2026-04-25",
-                FilterOverrides::default()
+                FilterOverrides::default(),
+                None,
             ),
             "granularity=weekly&start=2025-04-25&end=2026-04-25"
         );
@@ -3797,7 +5220,8 @@ mod tests {
                 "",
                 SamplingGranularity::Auto,
                 "2026-04-25",
-                FilterOverrides::default()
+                FilterOverrides::default(),
+                None,
             ),
             "granularity=daily&start=2026-01-25&end=2026-04-25"
         );
@@ -3812,9 +5236,26 @@ mod tests {
                 "",
                 SamplingGranularity::Auto,
                 "2026-04-25",
-                FilterOverrides::default()
+                FilterOverrides::default(),
+                None,
             ),
             "granularity=monthly"
+        );
+    }
+
+    #[test]
+    fn account_graph_query_scopes_history() {
+        assert_eq!(
+            history_query_string(
+                RangePreset::Max,
+                "",
+                "",
+                SamplingGranularity::Auto,
+                "2026-04-25",
+                FilterOverrides::default(),
+                Some("account id"),
+            ),
+            "granularity=monthly&account=account%20id"
         );
     }
 
@@ -3828,24 +5269,179 @@ mod tests {
         );
     }
 
+    fn transaction(id: &str, amount: &str, status: &str) -> Transaction {
+        Transaction {
+            id: id.to_string(),
+            account_id: "account-1".to_string(),
+            account_name: "Card".to_string(),
+            timestamp: "2026-04-25T12:00:00+00:00".to_string(),
+            description: "Test transaction".to_string(),
+            amount: amount.to_string(),
+            status: status.to_string(),
+            category: None,
+            subcategory: None,
+            annotation: None,
+            ignored_from_spending: false,
+        }
+    }
+
     #[test]
-    fn asset_label_formats_tagged_assets() {
+    fn inclusive_transaction_query_requests_ignored_rows() {
         assert_eq!(
-            asset_label(&serde_json::json!({"type":"currency","iso_code":"USD"})),
-            "USD"
+            transaction_query_string("2025-04-25", "2026-04-25", true),
+            "start=2025-04-25&end=2026-04-25&include_ignored=true"
+        );
+    }
+
+    #[test]
+    fn spending_transaction_marking_flags_rows_not_counted_in_totals() {
+        let counted = vec![transaction("counted", "-12.50", "posted")];
+        let rows = vec![
+            transaction("counted", "-12.50", "posted"),
+            transaction("ignored", "-8.00", "posted"),
+            transaction("inflow", "9.00", "posted"),
+            transaction("pending", "-4.00", "pending"),
+        ];
+
+        let marked = mark_transactions_excluded_from_spending(rows, &counted);
+
+        assert!(!marked[0].ignored_from_spending);
+        assert!(marked[1].ignored_from_spending);
+        assert!(marked[2].ignored_from_spending);
+        assert!(marked[3].ignored_from_spending);
+    }
+
+    #[test]
+    fn spending_transactions_sort_by_amount_in_both_directions() {
+        let rows = vec![
+            transaction("middle", "-12.50", "posted"),
+            transaction("largest", "-40.00", "posted"),
+            transaction("smallest", "-3.25", "posted"),
+        ];
+
+        let ascending = filtered_transactions(
+            &rows,
+            None,
+            TransactionSortField::Amount,
+            SortDirection::Asc,
+            true,
+        );
+        let descending = filtered_transactions(
+            &rows,
+            None,
+            TransactionSortField::Amount,
+            SortDirection::Desc,
+            true,
+        );
+
+        assert_eq!(ascending[0].id, "largest");
+        assert_eq!(ascending[2].id, "smallest");
+        assert_eq!(descending[0].id, "smallest");
+        assert_eq!(descending[2].id, "largest");
+    }
+
+    #[test]
+    fn spending_transactions_sort_by_each_visible_text_field() {
+        let mut card = transaction("card", "-12.50", "posted");
+        card.account_name = "Card".to_string();
+        card.category = Some("Dining".to_string());
+        card.subcategory = Some("Restaurants".to_string());
+        card.description = "Zulu".to_string();
+        card.ignored_from_spending = true;
+
+        let mut bank = transaction("bank", "-8.00", "posted");
+        bank.account_name = "Bank".to_string();
+        bank.category = Some("Bills".to_string());
+        bank.subcategory = Some("Utilities".to_string());
+        bank.description = "Alpha".to_string();
+
+        let rows = vec![card, bank];
+
+        assert_eq!(
+            filtered_transactions(
+                &rows,
+                None,
+                TransactionSortField::Description,
+                SortDirection::Asc,
+                true,
+            )[0]
+            .id,
+            "bank"
         );
         assert_eq!(
-            asset_label(&serde_json::json!({"type":"currency","iso_code":"840"})),
-            "USD"
+            filtered_transactions(
+                &rows,
+                None,
+                TransactionSortField::Category,
+                SortDirection::Asc,
+                true,
+            )[0]
+            .id,
+            "bank"
         );
         assert_eq!(
-            asset_label(&serde_json::json!({"type":"equity","ticker":"AAPL"})),
-            "AAPL"
+            filtered_transactions(
+                &rows,
+                None,
+                TransactionSortField::Account,
+                SortDirection::Asc,
+                true,
+            )[0]
+            .id,
+            "bank"
         );
         assert_eq!(
-            asset_label(&serde_json::json!({"type":"crypto","symbol":"ETH","network":"base"})),
-            "ETH (base)"
+            filtered_transactions(
+                &rows,
+                None,
+                TransactionSortField::Counted,
+                SortDirection::Asc,
+                true,
+            )[0]
+            .id,
+            "bank"
         );
+    }
+
+    #[test]
+    fn transaction_subcategory_prefers_annotation_value() {
+        let mut row = transaction("annotated", "-12.50", "posted");
+        row.subcategory = Some("Fallback".to_string());
+        row.annotation = Some(TransactionAnnotation {
+            description: None,
+            category: None,
+            subcategory: Some("Coffee".to_string()),
+            effective_date: None,
+        });
+
+        assert_eq!(transaction_subcategory(&row).as_deref(), Some("Coffee"));
+    }
+
+    #[test]
+    fn spending_transactions_can_hide_ignored_rows() {
+        let visible = transaction("visible", "-12.50", "posted");
+        let mut ignored = transaction("ignored", "-8.00", "posted");
+        ignored.ignored_from_spending = true;
+        let rows = vec![visible, ignored];
+
+        let without_ignored = filtered_transactions(
+            &rows,
+            None,
+            TransactionSortField::Date,
+            SortDirection::Desc,
+            false,
+        );
+        let with_ignored = filtered_transactions(
+            &rows,
+            None,
+            TransactionSortField::Date,
+            SortDirection::Desc,
+            true,
+        );
+
+        assert_eq!(without_ignored.len(), 1);
+        assert_eq!(without_ignored[0].id, "visible");
+        assert_eq!(with_ignored.len(), 2);
     }
 
     #[test]
