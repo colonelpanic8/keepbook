@@ -33,6 +33,10 @@ run-tray *args:
 run-dioxus-desktop *args:
     {{keepbook_dioxus_desktop_cmd}} "$@"
 
+# Run the Dioxus desktop app from the directory containing Dioxus.toml.
+dioxus-serve *args:
+    cd crates/keepbook-dioxus && dx serve --desktop --package keepbook-dioxus --no-default-features --features desktop "$@"
+
 # Build the Dioxus Linux desktop app as a release bundle.
 dioxus-desktop-release *args:
     nix run .#dioxus-desktop-release -- "$@"

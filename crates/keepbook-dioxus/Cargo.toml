@@ -10,7 +10,7 @@ name = "keepbook-dioxus"
 path = "src/main.rs"
 
 [dependencies]
-dioxus = { version = "=0.7.3", default-features = false, features = ["launch", "lib"] }
+dioxus = { version = "=0.7.6", default-features = false, features = ["launch", "lib"] }
 gloo-net = { version = "0.6", features = ["json"], optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -28,7 +28,7 @@ keepbook-server = { path = "../keepbook-server", default-features = false }
 serde_urlencoded = "0.7"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-js-sys = "=0.3.85"
-wasm-bindgen = "=0.2.108"
-wasm-bindgen-futures = "=0.4.58"
-web-sys = "=0.3.85"
+js-sys = "=0.3.95"
+wasm-bindgen = "=0.2.118"
+wasm-bindgen-futures = "=0.4.68"
+web-sys = "=0.3.95"

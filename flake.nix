@@ -618,6 +618,7 @@
                 pkgs.pkg-config
                 pkgs.binaryen
                 pkgs.dioxus-cli
+                pkgs.wasm-bindgen-cli_0_2_118
                 pkgs.openssl
                 pkgs.just
                 pkgs.jq
@@ -637,6 +638,7 @@
               buildInputs = [
                 toolchain
                 pkgs.dioxus-cli
+                pkgs.wasm-bindgen-cli_0_2_118
                 pkgs.jdk17
                 pkgs.pkg-config
                 pkgs.binaryen
