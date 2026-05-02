@@ -103,6 +103,17 @@ describe('defaultConfigPath', () => {
       path.join(realPath(cwd), 'relative-xdg-data', 'keepbook', 'keepbook.toml'),
     );
   });
+
+  it('expands tilde in XDG_DATA_HOME', () => {
+    const cwd = path.join(tmpDir, 'cwd');
+    fs.mkdirSync(cwd, { recursive: true });
+
+    process.chdir(cwd);
+    process.env.HOME = tmpDir;
+    process.env.XDG_DATA_HOME = '~/xdg-data';
+
+    expect(defaultConfigPath()).toBe(path.join(tmpDir, 'xdg-data', 'keepbook', 'keepbook.toml'));
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -194,6 +205,37 @@ describe('loadConfig', () => {
     const { config } = await loadConfig(configFile);
 
     expect(config.data_dir).toBe(absDataDir);
+  });
+
+  it('expands tilde in data_dir', async () => {
+    const originalHome = process.env.HOME;
+    process.env.HOME = tmpDir;
+    const tomlContent = 'data_dir = "~/keepbook-data"';
+    const configFile = path.join(tmpDir, 'keepbook.toml');
+    fs.writeFileSync(configFile, tomlContent, 'utf-8');
+
+    try {
+      const { config } = await loadConfig(configFile);
+      expect(config.data_dir).toBe(path.join(tmpDir, 'keepbook-data'));
+    } finally {
+      process.env.HOME = originalHome;
+    }
+  });
+
+  it('expands tilde in explicit configPath', async () => {
+    const originalHome = process.env.HOME;
+    process.env.HOME = tmpDir;
+    fs.mkdirSync(path.join(tmpDir, 'config'), { recursive: true });
+    const configFile = path.join(tmpDir, 'config', 'keepbook.toml');
+    fs.writeFileSync(configFile, '', 'utf-8');
+
+    try {
+      const { configPath, config } = await loadConfig('~/config/keepbook.toml');
+      expect(configPath).toBe(configFile);
+      expect(config.data_dir).toBe(path.dirname(configFile));
+    } finally {
+      process.env.HOME = originalHome;
+    }
   });
 
   it('uses config file parent as data_dir when data_dir is omitted', async () => {

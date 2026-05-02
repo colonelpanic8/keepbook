@@ -7,6 +7,7 @@
  */
 
 import path from 'node:path';
+import os from 'node:os';
 import toml from 'toml';
 import { parseDuration } from './duration.js';
 
@@ -485,6 +486,22 @@ export function parseConfig(tomlStr: string): Config {
 // ---------------------------------------------------------------------------
 
 /**
+ * Expand a leading `~` path segment to the current user's home directory.
+ *
+ * Node's path APIs intentionally do not apply shell expansion, but keepbook
+ * config paths are commonly written the same way users would type them.
+ */
+export function expandTildePath(inputPath: string): string {
+  if (inputPath === '~') {
+    return os.homedir();
+  }
+  if (inputPath.startsWith(`~${path.sep}`) || inputPath.startsWith('~/')) {
+    return path.join(os.homedir(), inputPath.slice(2));
+  }
+  return inputPath;
+}
+
+/**
  * Resolve the data directory for a config.
  *
  * - If `config.data_dir` is set and absolute, return it directly.
@@ -496,13 +513,15 @@ export function resolveDataDir(config: Config, configDir: string): string {
     return configDir;
   }
 
-  if (path.isAbsolute(config.data_dir)) {
-    return config.data_dir;
+  const dataDir = expandTildePath(config.data_dir);
+
+  if (path.isAbsolute(dataDir)) {
+    return dataDir;
   }
 
   // Match Rust `PathBuf::join` display semantics (preserve relative segments).
   if (configDir.endsWith(path.sep)) {
-    return `${configDir}${config.data_dir}`;
+    return `${configDir}${dataDir}`;
   }
-  return `${configDir}${path.sep}${config.data_dir}`;
+  return `${configDir}${path.sep}${dataDir}`;
 }

@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import os from 'node:os';
+import path from 'node:path';
 import {
   DEFAULT_REFRESH_CONFIG,
   DEFAULT_GIT_CONFIG,
@@ -8,6 +10,7 @@ import {
   DEFAULT_PORTFOLIO_CONFIG,
   DEFAULT_IGNORE_CONFIG,
   DEFAULT_CONFIG,
+  expandTildePath,
   parseConfig,
   resolveDataDir,
 } from './config.js';
@@ -315,6 +318,12 @@ merge_master_before_command = true
 });
 
 describe('resolveDataDir', () => {
+  it('expands bare tilde paths to the home directory', () => {
+    expect(expandTildePath('~')).toBe(os.homedir());
+    expect(expandTildePath('~/keepbook.toml')).toBe(path.join(os.homedir(), 'keepbook.toml'));
+    expect(expandTildePath('~other/keepbook.toml')).toBe('~other/keepbook.toml');
+  });
+
   it('returns configDir when no data_dir is set', () => {
     const config: Config = { ...DEFAULT_CONFIG };
     expect(resolveDataDir(config, '/home/user/.config/keepbook')).toBe(
@@ -344,5 +353,11 @@ describe('resolveDataDir', () => {
     const config: Config = { ...DEFAULT_CONFIG, data_dir: '/opt/keepbook/data' };
     const result = resolveDataDir(config, '/home/user/.config/keepbook');
     expect(result).toBe('/opt/keepbook/data');
+  });
+
+  it('expands tilde data_dir before resolving relative paths', () => {
+    const config: Config = { ...DEFAULT_CONFIG, data_dir: '~/keepbook-data' };
+    const result = resolveDataDir(config, '/home/user/.config/keepbook');
+    expect(result).toBe(path.join(os.homedir(), 'keepbook-data'));
   });
 });

@@ -13,6 +13,7 @@ import os from 'node:os';
 import {
   type Config,
   type ResolvedConfig,
+  expandTildePath,
   parseConfig,
   resolveDataDir,
   DEFAULT_CONFIG,
@@ -47,9 +48,10 @@ export function defaultConfigPath(): string {
 
   const configuredXdgDataHome =
     process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share');
-  const xdgDataHome = path.isAbsolute(configuredXdgDataHome)
-    ? configuredXdgDataHome
-    : path.resolve(configuredXdgDataHome);
+  const expandedXdgDataHome = expandTildePath(configuredXdgDataHome);
+  const xdgDataHome = path.isAbsolute(expandedXdgDataHome)
+    ? expandedXdgDataHome
+    : path.resolve(expandedXdgDataHome);
   const xdgConfig = path.join(xdgDataHome, 'keepbook', 'keepbook.toml');
   if (fs.existsSync(xdgConfig)) {
     return xdgConfig;
@@ -73,7 +75,7 @@ export function defaultConfigPath(): string {
 export async function loadConfig(
   configPath?: string,
 ): Promise<{ configPath: string; config: ResolvedConfig }> {
-  const resolvedPath = configPath ? path.resolve(configPath) : defaultConfigPath();
+  const resolvedPath = configPath ? path.resolve(expandTildePath(configPath)) : defaultConfigPath();
 
   if (fs.existsSync(resolvedPath)) {
     const tomlStr = fs.readFileSync(resolvedPath, 'utf-8');

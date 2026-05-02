@@ -392,8 +392,8 @@ impl Config {
     /// If `data_dir` is set and relative, it's resolved relative to `config_dir`.
     /// If `data_dir` is not set, returns `config_dir`.
     pub fn resolve_data_dir(&self, config_dir: &Path) -> PathBuf {
-        normalize_path_components(match &self.data_dir {
-            Some(data_dir) if data_dir.is_absolute() => data_dir.clone(),
+        normalize_path_components(match self.data_dir.as_deref().map(expand_tilde_path) {
+            Some(data_dir) if data_dir.is_absolute() => data_dir,
             Some(data_dir) => config_dir.join(data_dir),
             None => config_dir.to_path_buf(),
         })
@@ -455,6 +455,7 @@ pub fn default_config_path() -> PathBuf {
 }
 
 fn absolute_from_current_dir(path: PathBuf) -> PathBuf {
+    let path = expand_tilde_path(&path);
     if path.is_absolute() {
         return normalize_path_components(path);
     }
@@ -463,6 +464,23 @@ fn absolute_from_current_dir(path: PathBuf) -> PathBuf {
         .map(|cwd| cwd.join(&path))
         .map(normalize_path_components)
         .unwrap_or_else(|_| normalize_path_components(path))
+}
+
+fn expand_tilde_path(path: &Path) -> PathBuf {
+    let mut components = path.components();
+    let Some(first) = components.next() else {
+        return path.to_path_buf();
+    };
+
+    if first.as_os_str() != "~" {
+        return path.to_path_buf();
+    }
+
+    let Some(home_dir) = dirs::home_dir() else {
+        return path.to_path_buf();
+    };
+
+    components.fold(home_dir, |acc, component| acc.join(component.as_os_str()))
 }
 
 fn normalize_path_components(path: PathBuf) -> PathBuf {
@@ -488,7 +506,7 @@ impl ResolvedConfig {
     ///
     /// The data directory is resolved relative to the config file's parent directory.
     pub fn load(config_path: &Path) -> Result<Self> {
-        let config_path = config_path
+        let config_path = expand_tilde_path(config_path)
             .canonicalize()
             .with_context(|| format!("Config file not found: {}", config_path.display()))?;
 
@@ -518,16 +536,18 @@ impl ResolvedConfig {
     /// If the config file doesn't exist, uses the config file's intended
     /// parent directory as the data directory.
     pub fn load_or_default(config_path: &Path) -> Result<Self> {
+        let config_path = expand_tilde_path(config_path);
+
         if config_path.exists() {
-            Self::load(config_path)
+            Self::load(&config_path)
         } else {
             // Resolve the config path relative to current directory
             let config_path = if config_path.is_relative() {
                 std::env::current_dir()
                     .context("Failed to get current directory")?
-                    .join(config_path)
+                    .join(&config_path)
             } else {
-                config_path.to_path_buf()
+                config_path
             };
 
             // Use the intended config directory as data dir
@@ -590,6 +610,40 @@ mod tests {
         assert_eq!(
             config.resolve_data_dir(config_dir),
             PathBuf::from("/var/keepbook/data")
+        );
+    }
+
+    #[test]
+    fn test_tilde_data_dir_expands_to_home() {
+        let Some(home_dir) = dirs::home_dir() else {
+            return;
+        };
+
+        let config = Config {
+            data_dir: Some(PathBuf::from("~/keepbook-data")),
+            ..Default::default()
+        };
+        let config_dir = Path::new("/home/user/finances");
+        assert_eq!(
+            config.resolve_data_dir(config_dir),
+            home_dir.join("keepbook-data")
+        );
+    }
+
+    #[test]
+    fn test_expand_tilde_path() {
+        let Some(home_dir) = dirs::home_dir() else {
+            return;
+        };
+
+        assert_eq!(expand_tilde_path(Path::new("~")), home_dir);
+        assert_eq!(
+            expand_tilde_path(Path::new("~/keepbook.toml")),
+            dirs::home_dir().unwrap().join("keepbook.toml")
+        );
+        assert_eq!(
+            expand_tilde_path(Path::new("~other/keepbook.toml")),
+            PathBuf::from("~other/keepbook.toml")
         );
     }
 
@@ -850,6 +904,16 @@ mod tests {
         let path = absolute_from_current_dir(PathBuf::from("keepbook.toml"));
         assert!(path.is_absolute());
         assert!(path.ends_with("keepbook.toml"));
+    }
+
+    #[test]
+    fn test_absolute_from_current_dir_expands_tilde_paths() {
+        let Some(home_dir) = dirs::home_dir() else {
+            return;
+        };
+
+        let path = absolute_from_current_dir(PathBuf::from("~/keepbook.toml"));
+        assert_eq!(path, home_dir.join("keepbook.toml"));
     }
 
     #[test]
