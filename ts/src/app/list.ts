@@ -368,6 +368,7 @@ export async function listTransactions(
               ...(ann.description !== undefined ? { description: ann.description } : {}),
               ...(ann.note !== undefined ? { note: ann.note } : {}),
               ...(ann.category !== undefined ? { category: ann.category } : {}),
+              ...(ann.subcategory !== undefined ? { subcategory: ann.subcategory } : {}),
               ...(ann.tags !== undefined ? { tags: ann.tags } : {}),
               ...(ann.effective_date !== undefined ? { effective_date: ann.effective_date } : {}),
             }
@@ -391,6 +392,13 @@ export async function listTransactions(
         asset: assetForListOutput(tx.asset),
         status: tx.status,
       };
+      const category = ann?.category ?? tx.standardized_metadata?.merchant_category_label;
+      if (category !== undefined) {
+        out.category = category;
+      }
+      if (ann?.subcategory !== undefined) {
+        out.subcategory = ann.subcategory;
+      }
       if (annotation !== undefined) {
         out.annotation = annotation;
       }

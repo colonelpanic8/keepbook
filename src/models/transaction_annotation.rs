@@ -14,6 +14,8 @@ pub struct TransactionAnnotation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subcategory: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effective_date: Option<NaiveDate>,
@@ -26,6 +28,7 @@ impl TransactionAnnotation {
             description: None,
             note: None,
             category: None,
+            subcategory: None,
             tags: None,
             effective_date: None,
         }
@@ -35,6 +38,7 @@ impl TransactionAnnotation {
         self.description.is_none()
             && self.note.is_none()
             && self.category.is_none()
+            && self.subcategory.is_none()
             && self.tags.is_none()
             && self.effective_date.is_none()
     }
@@ -74,6 +78,12 @@ pub struct TransactionAnnotationPatch {
         skip_serializing_if = "Option::is_none",
         deserialize_with = "deserialize_patch_field"
     )]
+    pub subcategory: Option<Option<String>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_patch_field"
+    )]
     pub tags: Option<Option<Vec<String>>>,
     #[serde(
         default,
@@ -102,6 +112,9 @@ impl TransactionAnnotationPatch {
         if let Some(v) = &self.category {
             ann.category = v.clone();
         }
+        if let Some(v) = &self.subcategory {
+            ann.subcategory = v.clone();
+        }
         if let Some(v) = &self.tags {
             ann.tags = v.clone();
         }
@@ -128,6 +141,7 @@ mod tests {
             description: None,
             note: Some(Some("hello".to_string())),
             category: None,
+            subcategory: None,
             tags: None,
             effective_date: None,
         };
@@ -140,6 +154,7 @@ mod tests {
             description: None,
             note: Some(None),
             category: None,
+            subcategory: None,
             tags: None,
             effective_date: None,
         };

@@ -749,6 +749,7 @@ describe('JsonFileStorage', () => {
         transaction_id: Id.fromString('tx-anno'),
         timestamp: new Date('2024-02-04T12:00:00Z'),
         category: 'food',
+        subcategory: 'coffee',
       };
       const patchNote: TransactionAnnotationPatchType = {
         transaction_id: Id.fromString('tx-anno'),
@@ -800,6 +801,7 @@ describe('JsonFileStorage', () => {
       expect(patches[0].transaction_id.asStr()).toBe('tx-anno');
       expect(patches[0].note).toBe('memo');
       expect(patches[0].category).toBe('food');
+      expect(patches[0].subcategory).toBe('coffee');
     });
   });
 
@@ -934,11 +936,17 @@ describe('JsonFileStorage', () => {
         transaction_id: Id.fromString('tx-1'),
         timestamp: new Date('2024-06-15T12:00:00Z'),
         category: 'food',
+        subcategory: 'coffee',
         tags: ['coffee', 'treat'],
       };
       await storage.appendTransactionAnnotationPatches(acctId, [p]);
 
-      const filePath = path.join(tmpDir, 'accounts', acctId.asStr(), 'transaction_annotations.jsonl');
+      const filePath = path.join(
+        tmpDir,
+        'accounts',
+        acctId.asStr(),
+        'transaction_annotations.jsonl',
+      );
       const content = await fs.readFile(filePath, 'utf-8');
       const lines = content.trim().split('\n');
       expect(lines).toHaveLength(1);
@@ -946,6 +954,7 @@ describe('JsonFileStorage', () => {
       const parsed = JSON.parse(lines[0]);
       expect(parsed.transaction_id).toBe('tx-1');
       expect(parsed.category).toBe('food');
+      expect(parsed.subcategory).toBe('coffee');
       expect(parsed.tags).toEqual(['coffee', 'treat']);
     });
   });

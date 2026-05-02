@@ -95,6 +95,8 @@ struct SeedTransactionAnnotationPatch {
     #[serde(default)]
     category: Option<String>,
     #[serde(default)]
+    subcategory: Option<String>,
+    #[serde(default)]
     tags: Option<Vec<String>>,
 }
 
@@ -238,6 +240,7 @@ async fn seed_storage(storage: &dyn Storage, seed: &Seed) -> Result<()> {
             description: p.description.clone().map(Some),
             note: p.note.clone().map(Some),
             category: p.category.clone().map(Some),
+            subcategory: p.subcategory.clone().map(Some),
             tags: p.tags.clone().map(Some),
             effective_date: None,
         };

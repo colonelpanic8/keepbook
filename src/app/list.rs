@@ -316,11 +316,23 @@ pub async fn list_transactions(
                         description: ann.description.clone(),
                         note: ann.note.clone(),
                         category: ann.category.clone(),
+                        subcategory: ann.subcategory.clone(),
                         tags: ann.tags.clone(),
                         effective_date: ann.effective_date.map(|d| d.to_string()),
                     })
                 }
             });
+            let category = annotations_by_tx
+                .get(&tx.id)
+                .and_then(|ann| ann.category.clone())
+                .or_else(|| {
+                    tx.standardized_metadata
+                        .as_ref()
+                        .and_then(|metadata| metadata.merchant_category_label.clone())
+                });
+            let subcategory = annotations_by_tx
+                .get(&tx.id)
+                .and_then(|ann| ann.subcategory.clone());
             if skip_ignored
                 && annotations_by_tx
                     .get(&tx.id)
@@ -338,6 +350,8 @@ pub async fn list_transactions(
                 amount: tx.amount.clone(),
                 asset: serde_json::to_value(&tx.asset).unwrap_or_default(),
                 status,
+                category,
+                subcategory,
                 annotation,
                 standardized_metadata: tx.standardized_metadata.clone(),
             });
@@ -432,6 +446,7 @@ mod tests {
             description: None,
             note: None,
             category: Some(Some("food".to_string())),
+            subcategory: Some(Some("coffee".to_string())),
             tags: Some(Some(vec!["coffee".to_string()])),
             effective_date: None,
         };
@@ -464,6 +479,11 @@ mod tests {
         assert_eq!(
             out[0].annotation.as_ref().unwrap().category.as_deref(),
             Some("food")
+        );
+        assert_eq!(out[0].subcategory.as_deref(), Some("coffee"));
+        assert_eq!(
+            out[0].annotation.as_ref().unwrap().subcategory.as_deref(),
+            Some("coffee")
         );
         assert_eq!(
             out[0].annotation.as_ref().unwrap().tags.clone().unwrap(),
@@ -500,6 +520,7 @@ mod tests {
                     description: None,
                     note: None,
                     category: None,
+                    subcategory: None,
                     tags: None,
                     effective_date: Some(Some(
                         chrono::NaiveDate::from_ymd_opt(2026, 1, 31).unwrap(),
@@ -576,6 +597,7 @@ mod tests {
                     description: None,
                     note: Some(Some("Transfer; ignored from spending".to_string())),
                     category: None,
+                    subcategory: None,
                     tags: Some(Some(vec!["ignore_spending".to_string()])),
                     effective_date: None,
                 }],

@@ -49,6 +49,12 @@ pub struct ProposedTransactionEdit {
         skip_serializing_if = "Option::is_none",
         deserialize_with = "deserialize_patch_field"
     )]
+    pub subcategory: Option<Option<String>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_patch_field"
+    )]
     pub tags: Option<Option<Vec<String>>>,
     #[serde(
         default,
@@ -71,6 +77,7 @@ impl ProposedTransactionEdit {
         self.description.is_some()
             || self.note.is_some()
             || self.category.is_some()
+            || self.subcategory.is_some()
             || self.tags.is_some()
             || self.effective_date.is_some()
     }
@@ -90,6 +97,7 @@ impl ProposedTransactionEdit {
             description: self.description.clone(),
             note: self.note.clone(),
             category: self.category.clone(),
+            subcategory: self.subcategory.clone(),
             tags: self.tags.clone(),
             effective_date: self.effective_date,
         }

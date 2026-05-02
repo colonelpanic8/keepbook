@@ -406,6 +406,8 @@ export type SetTransactionAnnotationArgs = {
   clear_note?: boolean;
   category?: string;
   clear_category?: boolean;
+  subcategory?: string;
+  clear_subcategory?: boolean;
   tags?: string[];
   tags_empty?: boolean;
   clear_tags?: boolean;
@@ -432,6 +434,8 @@ export async function setTransactionAnnotation(
   const clearNote = args.clear_note ?? false;
   const category = args.category;
   const clearCategory = args.clear_category ?? false;
+  const subcategory = args.subcategory;
+  const clearSubcategory = args.clear_subcategory ?? false;
   const tags = args.tags ?? [];
   const tagsEmpty = args.tags_empty ?? false;
   const clearTags = args.clear_tags ?? false;
@@ -446,6 +450,9 @@ export async function setTransactionAnnotation(
   }
   if (clearCategory && category !== undefined) {
     return { success: false, error: 'Cannot use category and clear_category together' };
+  }
+  if (clearSubcategory && subcategory !== undefined) {
+    return { success: false, error: 'Cannot use subcategory and clear_subcategory together' };
   }
   if (clearTags && (tagsEmpty || tags.length > 0)) {
     return { success: false, error: 'Cannot use clear_tags with tags/tags_empty' };
@@ -474,6 +481,8 @@ export async function setTransactionAnnotation(
     clearNote ||
     category !== undefined ||
     clearCategory ||
+    subcategory !== undefined ||
+    clearSubcategory ||
     tags.length > 0 ||
     tagsEmpty ||
     clearTags ||
@@ -517,6 +526,11 @@ export async function setTransactionAnnotation(
         : {}),
     ...(clearNote ? { note: null } : note !== undefined ? { note } : {}),
     ...(clearCategory ? { category: null } : category !== undefined ? { category } : {}),
+    ...(clearSubcategory
+      ? { subcategory: null }
+      : subcategory !== undefined
+        ? { subcategory }
+        : {}),
     ...(clearTags
       ? { tags: null }
       : tagsEmpty
@@ -546,6 +560,7 @@ export async function setTransactionAnnotation(
   if (patchJson.description !== undefined) patchOut.description = patchJson.description;
   if (patchJson.note !== undefined) patchOut.note = patchJson.note;
   if (patchJson.category !== undefined) patchOut.category = patchJson.category;
+  if (patchJson.subcategory !== undefined) patchOut.subcategory = patchJson.subcategory;
   if (patchJson.tags !== undefined) patchOut.tags = patchJson.tags;
   if (patchJson.effective_date !== undefined) patchOut.effective_date = patchJson.effective_date;
 
@@ -555,6 +570,7 @@ export async function setTransactionAnnotation(
     if (ann.description !== undefined) m.description = ann.description;
     if (ann.note !== undefined) m.note = ann.note;
     if (ann.category !== undefined) m.category = ann.category;
+    if (ann.subcategory !== undefined) m.subcategory = ann.subcategory;
     if (ann.tags !== undefined) m.tags = ann.tags;
     if (ann.effective_date !== undefined) m.effective_date = ann.effective_date;
     annotationOut = m;
@@ -719,6 +735,8 @@ function buildTransactionAnnotationPatch(
   const clearNote = args.clear_note ?? false;
   const category = args.category;
   const clearCategory = args.clear_category ?? false;
+  const subcategory = args.subcategory;
+  const clearSubcategory = args.clear_subcategory ?? false;
   const tags = args.tags ?? [];
   const tagsEmpty = args.tags_empty ?? false;
   const clearTags = args.clear_tags ?? false;
@@ -733,6 +751,9 @@ function buildTransactionAnnotationPatch(
   }
   if (clearCategory && category !== undefined) {
     return { success: false, error: 'Cannot use category and clear_category together' };
+  }
+  if (clearSubcategory && subcategory !== undefined) {
+    return { success: false, error: 'Cannot use subcategory and clear_subcategory together' };
   }
   if (clearTags && (tagsEmpty || tags.length > 0)) {
     return { success: false, error: 'Cannot use clear_tags with tags/tags_empty' };
@@ -758,6 +779,8 @@ function buildTransactionAnnotationPatch(
     clearNote ||
     category !== undefined ||
     clearCategory ||
+    subcategory !== undefined ||
+    clearSubcategory ||
     tags.length > 0 ||
     tagsEmpty ||
     clearTags ||
@@ -774,6 +797,11 @@ function buildTransactionAnnotationPatch(
           : {}),
       ...(clearNote ? { note: null } : note !== undefined ? { note } : {}),
       ...(clearCategory ? { category: null } : category !== undefined ? { category } : {}),
+      ...(clearSubcategory
+        ? { subcategory: null }
+        : subcategory !== undefined
+          ? { subcategory }
+          : {}),
       ...(clearTags
         ? { tags: null }
         : tagsEmpty

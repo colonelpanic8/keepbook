@@ -629,6 +629,7 @@ describe('listTransactions', () => {
         transaction_id: Id.fromString('tx-1'),
         timestamp: new Date('2024-06-15T15:00:00Z'),
         category: 'food',
+        subcategory: 'coffee',
         tags: ['coffee', 'treat'],
       },
     ]);
@@ -644,7 +645,9 @@ describe('listTransactions', () => {
       amount: '-50.00',
       asset: { type: 'currency', iso_code: 'USD' },
       status: 'posted',
-      annotation: { category: 'food', tags: ['coffee', 'treat'] },
+      category: 'food',
+      subcategory: 'coffee',
+      annotation: { category: 'food', subcategory: 'coffee', tags: ['coffee', 'treat'] },
     });
   });
 

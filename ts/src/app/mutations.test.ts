@@ -667,7 +667,7 @@ describe('setTransactionAnnotation', () => {
       storage,
       'acct-1',
       'tx-1',
-      { category: 'food', tags: ['coffee', 'treat'] },
+      { category: 'food', subcategory: 'coffee', tags: ['coffee', 'treat'] },
       patchClock,
     );
 
@@ -678,10 +678,12 @@ describe('setTransactionAnnotation', () => {
       patch: {
         timestamp: '2024-06-15T15:00:00+00:00',
         category: 'food',
+        subcategory: 'coffee',
         tags: ['coffee', 'treat'],
       },
       annotation: {
         category: 'food',
+        subcategory: 'coffee',
         tags: ['coffee', 'treat'],
       },
     });

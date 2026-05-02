@@ -235,7 +235,7 @@ enum Command {
         #[arg(long, default_value = "outflow")]
         direction: String,
 
-        /// Grouping: none, category, merchant, account, tag (default: none)
+        /// Grouping: none, category, subcategory, merchant, account, tag (default: none)
         #[arg(long, default_value = "none")]
         group_by: String,
 
@@ -449,6 +449,14 @@ enum SetCommand {
         #[arg(long)]
         clear_category: bool,
 
+        /// Set subcategory
+        #[arg(long, conflicts_with = "clear_subcategory")]
+        subcategory: Option<String>,
+
+        /// Clear subcategory
+        #[arg(long)]
+        clear_subcategory: bool,
+
         /// Set tags (repeatable)
         #[arg(long, short)]
         tag: Vec<String>,
@@ -506,6 +514,14 @@ enum ProposeCommand {
         /// Clear category
         #[arg(long)]
         clear_category: bool,
+
+        /// Set subcategory
+        #[arg(long, conflicts_with = "clear_subcategory")]
+        subcategory: Option<String>,
+
+        /// Clear subcategory
+        #[arg(long)]
+        clear_subcategory: bool,
 
         /// Set tags (repeatable)
         #[arg(long, short)]
@@ -1072,6 +1088,8 @@ async fn main() -> Result<()> {
                 clear_note,
                 category,
                 clear_category,
+                subcategory,
+                clear_subcategory,
                 tag,
                 tags_empty,
                 clear_tags,
@@ -1089,6 +1107,8 @@ async fn main() -> Result<()> {
                     clear_note,
                     category,
                     clear_category,
+                    subcategory,
+                    clear_subcategory,
                     tag,
                     tags_empty,
                     clear_tags,
@@ -1110,6 +1130,8 @@ async fn main() -> Result<()> {
                 clear_note,
                 category,
                 clear_category,
+                subcategory,
+                clear_subcategory,
                 tag,
                 tags_empty,
                 clear_tags,
@@ -1127,6 +1149,8 @@ async fn main() -> Result<()> {
                     clear_note,
                     category,
                     clear_category,
+                    subcategory,
+                    clear_subcategory,
                     tag,
                     tags_empty,
                     clear_tags,

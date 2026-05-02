@@ -240,6 +240,7 @@ describe('spendingReport', () => {
         transaction_id: txAnn.id,
         timestamp: clock.now(),
         category: 'Dining',
+        subcategory: 'Restaurants',
       },
     ]);
 
@@ -261,6 +262,22 @@ describe('spendingReport', () => {
     expect(out.periods[0].breakdown).toEqual([
       { key: 'Dining', total: '20', transaction_count: 1 },
       { key: 'Groceries', total: '10', transaction_count: 1 },
+    ]);
+
+    const subcategoryOut = await spendingReport(storage, new NullMarketDataStore(), cfg, {
+      period: 'monthly',
+      start: '2026-02-01',
+      end: '2026-02-28',
+      tz: 'UTC',
+      account: 'acct-1',
+      status: 'posted',
+      direction: 'outflow',
+      group_by: 'subcategory',
+      lookback_days: 7,
+    });
+    expect(subcategoryOut.periods[0].breakdown).toEqual([
+      { key: 'Restaurants', total: '20', transaction_count: 1 },
+      { key: 'uncategorized', total: '10', transaction_count: 1 },
     ]);
   });
 

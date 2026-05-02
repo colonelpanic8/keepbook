@@ -60,6 +60,10 @@ pub struct TransactionOutput {
     pub asset: serde_json::Value,
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subcategory: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub annotation: Option<TransactionAnnotationOutput>,
     #[serde(skip_serializing)]
     pub standardized_metadata: Option<TransactionStandardizedMetadata>,
@@ -74,6 +78,8 @@ pub struct TransactionAnnotationOutput {
     pub note: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subcategory: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -103,6 +109,8 @@ pub struct TransactionAnnotationPatchOutput {
     pub note: Option<Option<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub category: Option<Option<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subcategory: Option<Option<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tags: Option<Option<Vec<String>>>,
     #[serde(skip_serializing_if = "Option::is_none")]

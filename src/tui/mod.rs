@@ -1004,6 +1004,8 @@ async fn handle_category_modal_key(
                         false,
                         category_value,
                         clear_category,
+                        None,
+                        false,
                         vec![],
                         false,
                         false,
@@ -2166,6 +2168,8 @@ mod tests {
             amount: amount.to_string(),
             asset: json!({"type":"currency","iso_code":"USD"}),
             status: "posted".to_string(),
+            category: None,
+            subcategory: None,
             annotation: None,
             standardized_metadata: None,
         }
@@ -2227,6 +2231,7 @@ mod tests {
             description: Some("override".to_string()),
             note: None,
             category: None,
+            subcategory: None,
             tags: None,
             effective_date: None,
         });
@@ -2257,6 +2262,7 @@ mod tests {
             description: None,
             note: None,
             category: Some("food".to_string()),
+            subcategory: None,
             tags: None,
             effective_date: None,
         });
@@ -2431,6 +2437,7 @@ mod tests {
             description: None,
             note: None,
             category: None,
+            subcategory: None,
             tags: Some(vec!["ignore_spending".to_string()]),
             effective_date: None,
         });

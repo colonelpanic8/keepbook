@@ -889,6 +889,7 @@ fn compact_transaction_annotation_patches(
             description: ann.description.map(Some),
             note: ann.note.map(Some),
             category: ann.category.map(Some),
+            subcategory: ann.subcategory.map(Some),
             tags: ann.tags.map(Some),
             effective_date: ann.effective_date.map(Some),
         });
@@ -1489,6 +1490,7 @@ mod tests {
             description: None,
             note: Some(Some("memo".to_string())),
             category: None,
+            subcategory: None,
             tags: None,
             effective_date: None,
         };
@@ -1498,6 +1500,7 @@ mod tests {
             description: None,
             note: None,
             category: Some(Some("food".to_string())),
+            subcategory: Some(Some("coffee".to_string())),
             tags: None,
             effective_date: None,
         };
@@ -1507,6 +1510,7 @@ mod tests {
             description: Some(Some("temp".to_string())),
             note: None,
             category: None,
+            subcategory: None,
             tags: None,
             effective_date: None,
         };
@@ -1516,6 +1520,7 @@ mod tests {
             description: Some(None),
             note: None,
             category: None,
+            subcategory: None,
             tags: None,
             effective_date: None,
         };
@@ -1564,6 +1569,10 @@ mod tests {
         assert_eq!(
             patches[0].category.as_ref().cloned().flatten(),
             Some("food".to_string())
+        );
+        assert_eq!(
+            patches[0].subcategory.as_ref().cloned().flatten(),
+            Some("coffee".to_string())
         );
 
         Ok(())

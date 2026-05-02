@@ -190,7 +190,11 @@ program
   .option('--connection <id_or_name>', 'filter to a single connection')
   .option('--status <status>', 'status: posted, posted+pending, all', 'posted')
   .option('--direction <dir>', 'direction: outflow, inflow, net', 'outflow')
-  .option('--group-by <mode>', 'grouping: none, category, merchant, account, tag', 'none')
+  .option(
+    '--group-by <mode>',
+    'grouping: none, category, subcategory, merchant, account, tag',
+    'none',
+  )
   .option('--top <n>', 'limit breakdown rows per period', (v: string) => Number.parseInt(v, 10))
   .option(
     '--lookback-days <n>',
@@ -485,6 +489,8 @@ set
   .option('--clear-note', 'clear note')
   .option('--category <text>', 'set category')
   .option('--clear-category', 'clear category')
+  .option('--subcategory <text>', 'set subcategory')
+  .option('--clear-subcategory', 'clear subcategory')
   .option(
     '--tag <tag>',
     'tag (repeatable)',
@@ -505,6 +511,8 @@ set
       clearNote?: boolean;
       category?: string;
       clearCategory?: boolean;
+      subcategory?: string;
+      clearSubcategory?: boolean;
       tag: string[];
       tagsEmpty?: boolean;
       clearTags?: boolean;
@@ -521,6 +529,8 @@ set
             clear_note: opts.clearNote,
             category: opts.category,
             clear_category: opts.clearCategory,
+            subcategory: opts.subcategory,
+            clear_subcategory: opts.clearSubcategory,
             tags: opts.tag,
             tags_empty: opts.tagsEmpty,
             clear_tags: opts.clearTags,
@@ -558,6 +568,8 @@ propose
   .option('--clear-note', 'clear note')
   .option('--category <text>', 'set category')
   .option('--clear-category', 'clear category')
+  .option('--subcategory <text>', 'set subcategory')
+  .option('--clear-subcategory', 'clear subcategory')
   .option(
     '--tag <tag>',
     'tag (repeatable)',
@@ -578,6 +590,8 @@ propose
       clearNote?: boolean;
       category?: string;
       clearCategory?: boolean;
+      subcategory?: string;
+      clearSubcategory?: boolean;
       tag: string[];
       tagsEmpty?: boolean;
       clearTags?: boolean;
@@ -594,6 +608,8 @@ propose
             clear_note: opts.clearNote,
             category: opts.category,
             clear_category: opts.clearCategory,
+            subcategory: opts.subcategory,
+            clear_subcategory: opts.clearSubcategory,
             tags: opts.tag,
             tags_empty: opts.tagsEmpty,
             clear_tags: opts.clearTags,

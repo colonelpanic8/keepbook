@@ -134,7 +134,7 @@ type Period =
 
 type Direction = 'outflow' | 'inflow' | 'net';
 type StatusFilter = 'posted' | 'posted+pending' | 'all';
-type GroupBy = 'none' | 'category' | 'merchant' | 'account' | 'tag';
+type GroupBy = 'none' | 'category' | 'subcategory' | 'merchant' | 'account' | 'tag';
 type WeekStart = 'sunday' | 'monday';
 type PeriodAlignment = 'calendar' | 'end-bound';
 
@@ -196,9 +196,18 @@ function parseStatusFilter(s: string | undefined): StatusFilter {
 
 function parseGroupBy(s: string | undefined): GroupBy {
   const v = (s ?? 'none').trim().toLowerCase();
-  if (v === 'none' || v === 'category' || v === 'merchant' || v === 'account' || v === 'tag')
+  if (
+    v === 'none' ||
+    v === 'category' ||
+    v === 'subcategory' ||
+    v === 'merchant' ||
+    v === 'account' ||
+    v === 'tag'
+  )
     return v;
-  throw new Error(`Invalid group_by '${s}'. Valid values: none, category, merchant, account, tag`);
+  throw new Error(
+    `Invalid group_by '${s}'. Valid values: none, category, subcategory, merchant, account, tag`,
+  );
 }
 
 function parseWeekStart(s: string | undefined): WeekStart {
@@ -668,6 +677,11 @@ export async function spendingReport(
         case 'category': {
           const cat = row.annotation?.category;
           keys = [cat ?? row.metadata_category ?? 'uncategorized'];
+          break;
+        }
+        case 'subcategory': {
+          const subcategory = row.annotation?.subcategory;
+          keys = [subcategory ?? 'uncategorized'];
           break;
         }
         case 'merchant': {

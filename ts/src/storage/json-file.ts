@@ -102,6 +102,9 @@ function compactTransactionAnnotationPatches(
         : {}),
       ...(state.annotation.note !== undefined ? { note: state.annotation.note } : {}),
       ...(state.annotation.category !== undefined ? { category: state.annotation.category } : {}),
+      ...(state.annotation.subcategory !== undefined
+        ? { subcategory: state.annotation.subcategory }
+        : {}),
       ...(state.annotation.tags !== undefined ? { tags: state.annotation.tags } : {}),
       ...(state.annotation.effective_date !== undefined
         ? { effective_date: state.annotation.effective_date }

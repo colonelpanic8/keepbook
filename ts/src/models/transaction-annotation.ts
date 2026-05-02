@@ -9,6 +9,7 @@ export interface TransactionAnnotationType {
   readonly description?: string;
   readonly note?: string;
   readonly category?: string;
+  readonly subcategory?: string;
   readonly tags?: string[];
   readonly effective_date?: string;
 }
@@ -18,6 +19,7 @@ export function isEmptyTransactionAnnotation(a: TransactionAnnotationType): bool
     a.description === undefined &&
     a.note === undefined &&
     a.category === undefined &&
+    a.subcategory === undefined &&
     a.tags === undefined &&
     a.effective_date === undefined
   );
@@ -39,6 +41,7 @@ export interface TransactionAnnotationPatchType {
   readonly description?: string | null;
   readonly note?: string | null;
   readonly category?: string | null;
+  readonly subcategory?: string | null;
   readonly tags?: string[] | null;
   readonly effective_date?: string | null;
 }
@@ -49,6 +52,7 @@ export interface TransactionAnnotationPatchJSON {
   description?: string | null;
   note?: string | null;
   category?: string | null;
+  subcategory?: string | null;
   tags?: string[] | null;
   effective_date?: string | null;
 }
@@ -62,6 +66,7 @@ export const TransactionAnnotationPatch = {
     if (p.description !== undefined) json.description = p.description;
     if (p.note !== undefined) json.note = p.note;
     if (p.category !== undefined) json.category = p.category;
+    if (p.subcategory !== undefined) json.subcategory = p.subcategory;
     if (p.tags !== undefined) json.tags = p.tags;
     if (p.effective_date !== undefined) json.effective_date = p.effective_date;
     return json;
@@ -75,6 +80,7 @@ export const TransactionAnnotationPatch = {
       description: json.description,
       note: json.note,
       category: json.category,
+      subcategory: json.subcategory,
       tags: json.tags,
       effective_date: json.effective_date,
     };
@@ -104,6 +110,12 @@ export function applyTransactionAnnotationPatch(
   if (patch.category !== undefined) {
     const { category: _old, ...rest } = out as TransactionAnnotationType & { category?: string };
     out = patch.category === null ? rest : { ...rest, category: patch.category };
+  }
+  if (patch.subcategory !== undefined) {
+    const { subcategory: _old, ...rest } = out as TransactionAnnotationType & {
+      subcategory?: string;
+    };
+    out = patch.subcategory === null ? rest : { ...rest, subcategory: patch.subcategory };
   }
   if (patch.tags !== undefined) {
     const { tags: _old, ...rest } = out as TransactionAnnotationType & { tags?: string[] };

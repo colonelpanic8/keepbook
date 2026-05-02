@@ -76,6 +76,7 @@ enum StatusFilter {
 enum GroupBy {
     None,
     Category,
+    Subcategory,
     Merchant,
     Account,
     Tag,
@@ -206,10 +207,13 @@ fn parse_group_by(s: &str) -> Result<(GroupBy, String)> {
     match s.trim().to_lowercase().as_str() {
         "none" => Ok((GroupBy::None, "none".to_string())),
         "category" => Ok((GroupBy::Category, "category".to_string())),
+        "subcategory" => Ok((GroupBy::Subcategory, "subcategory".to_string())),
         "merchant" => Ok((GroupBy::Merchant, "merchant".to_string())),
         "account" => Ok((GroupBy::Account, "account".to_string())),
         "tag" => Ok((GroupBy::Tag, "tag".to_string())),
-        _ => anyhow::bail!("Invalid group_by: {s}. Use: none, category, merchant, account, tag"),
+        _ => anyhow::bail!(
+            "Invalid group_by: {s}. Use: none, category, subcategory, merchant, account, tag"
+        ),
     }
 }
 
@@ -793,6 +797,11 @@ async fn spending_report_with_store(
                     .and_then(|a| a.category.clone())
                     .or_else(|| row.metadata_category.clone())
                     .unwrap_or_else(|| "uncategorized".to_string())],
+                GroupBy::Subcategory => vec![row
+                    .annotation
+                    .as_ref()
+                    .and_then(|a| a.subcategory.clone())
+                    .unwrap_or_else(|| "uncategorized".to_string())],
                 GroupBy::Merchant => vec![row
                     .annotation
                     .as_ref()
@@ -1260,6 +1269,7 @@ mod tests {
                     description: None,
                     note: None,
                     category: Some(Some("Dining".to_string())),
+                    subcategory: Some(Some("Restaurants".to_string())),
                     tags: None,
                     effective_date: None,
                 }],
@@ -1313,6 +1323,36 @@ mod tests {
         assert_eq!(out.periods[0].breakdown[0].total, "20");
         assert_eq!(out.periods[0].breakdown[1].key, "Groceries");
         assert_eq!(out.periods[0].breakdown[1].total, "10");
+
+        let subcategory_out = spending_report_with_store(
+            &storage,
+            &cfg,
+            SpendingReportOptions {
+                currency: None,
+                start: Some("2026-02-01".to_string()),
+                end: Some("2026-02-28".to_string()),
+                period: "monthly".to_string(),
+                period_alignment: None,
+                tz: Some("UTC".to_string()),
+                week_start: None,
+                bucket: None,
+                account: Some("acct-1".to_string()),
+                connection: None,
+                status: "posted".to_string(),
+                direction: "outflow".to_string(),
+                group_by: "subcategory".to_string(),
+                top: None,
+                lookback_days: 7,
+                include_noncurrency: false,
+                include_empty: false,
+            },
+            Arc::new(MemoryMarketDataStore::default()),
+        )
+        .await?;
+        assert_eq!(subcategory_out.periods[0].breakdown[0].key, "Restaurants");
+        assert_eq!(subcategory_out.periods[0].breakdown[0].total, "20");
+        assert_eq!(subcategory_out.periods[0].breakdown[1].key, "uncategorized");
+        assert_eq!(subcategory_out.periods[0].breakdown[1].total, "10");
         Ok(())
     }
 
@@ -1622,6 +1662,7 @@ mod tests {
                     description: None,
                     note: None,
                     category: None,
+                    subcategory: None,
                     tags: Some(Some(vec!["ignore_spending".to_string()])),
                     effective_date: None,
                 }],

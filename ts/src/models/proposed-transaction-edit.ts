@@ -18,6 +18,7 @@ export interface ProposedTransactionEditType {
   readonly description?: string | null;
   readonly note?: string | null;
   readonly category?: string | null;
+  readonly subcategory?: string | null;
   readonly tags?: string[] | null;
   readonly effective_date?: string | null;
 }
@@ -32,6 +33,7 @@ export interface ProposedTransactionEditJSON {
   description?: string | null;
   note?: string | null;
   category?: string | null;
+  subcategory?: string | null;
   tags?: string[] | null;
   effective_date?: string | null;
 }
@@ -49,6 +51,7 @@ export const ProposedTransactionEdit = {
     if (edit.description !== undefined) json.description = edit.description;
     if (edit.note !== undefined) json.note = edit.note;
     if (edit.category !== undefined) json.category = edit.category;
+    if (edit.subcategory !== undefined) json.subcategory = edit.subcategory;
     if (edit.tags !== undefined) json.tags = edit.tags;
     if (edit.effective_date !== undefined) json.effective_date = edit.effective_date;
     return json;
@@ -67,6 +70,7 @@ export const ProposedTransactionEdit = {
       description: json.description,
       note: json.note,
       category: json.category,
+      subcategory: json.subcategory,
       tags: json.tags,
       effective_date: json.effective_date,
     };
@@ -95,6 +99,7 @@ export const ProposedTransactionEdit = {
       ...(edit.description !== undefined ? { description: edit.description } : {}),
       ...(edit.note !== undefined ? { note: edit.note } : {}),
       ...(edit.category !== undefined ? { category: edit.category } : {}),
+      ...(edit.subcategory !== undefined ? { subcategory: edit.subcategory } : {}),
       ...(edit.tags !== undefined ? { tags: edit.tags } : {}),
       ...(edit.effective_date !== undefined ? { effective_date: edit.effective_date } : {}),
     };
@@ -107,6 +112,7 @@ export const ProposedTransactionEdit = {
       ...(edit.description !== undefined ? { description: edit.description } : {}),
       ...(edit.note !== undefined ? { note: edit.note } : {}),
       ...(edit.category !== undefined ? { category: edit.category } : {}),
+      ...(edit.subcategory !== undefined ? { subcategory: edit.subcategory } : {}),
       ...(edit.tags !== undefined ? { tags: edit.tags } : {}),
       ...(edit.effective_date !== undefined ? { effective_date: edit.effective_date } : {}),
     };

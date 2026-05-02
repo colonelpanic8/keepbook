@@ -353,6 +353,8 @@ pub async fn set_transaction_annotation(
     clear_note: bool,
     category: Option<String>,
     clear_category: bool,
+    subcategory: Option<String>,
+    clear_subcategory: bool,
     tags: Vec<String>,
     tags_empty: bool,
     clear_tags: bool,
@@ -367,6 +369,9 @@ pub async fn set_transaction_annotation(
     }
     if clear_category && category.is_some() {
         anyhow::bail!("Cannot use --category and --clear-category together");
+    }
+    if clear_subcategory && subcategory.is_some() {
+        anyhow::bail!("Cannot use --subcategory and --clear-subcategory together");
     }
     if clear_tags && (tags_empty || !tags.is_empty()) {
         anyhow::bail!("Cannot use --clear-tags with --tag/--tags-empty");
@@ -386,6 +391,8 @@ pub async fn set_transaction_annotation(
         || clear_note
         || category.is_some()
         || clear_category
+        || subcategory.is_some()
+        || clear_subcategory
         || !tags.is_empty()
         || tags_empty
         || clear_tags
@@ -421,6 +428,7 @@ pub async fn set_transaction_annotation(
         description: None,
         note: None,
         category: None,
+        subcategory: None,
         tags: None,
         effective_date: None,
     };
@@ -439,6 +447,11 @@ pub async fn set_transaction_annotation(
         patch.category = Some(None);
     } else if let Some(v) = category {
         patch.category = Some(Some(v));
+    }
+    if clear_subcategory {
+        patch.subcategory = Some(None);
+    } else if let Some(v) = subcategory {
+        patch.subcategory = Some(Some(v));
     }
     if clear_tags {
         patch.tags = Some(None);
@@ -496,6 +509,15 @@ pub async fn set_transaction_annotation(
             },
         );
     }
+    if let Some(v) = patch.subcategory {
+        patch_json.insert(
+            "subcategory".to_string(),
+            match v {
+                Some(s) => serde_json::json!(s),
+                None => serde_json::Value::Null,
+            },
+        );
+    }
     if let Some(v) = patch.tags {
         patch_json.insert(
             "tags".to_string(),
@@ -527,6 +549,9 @@ pub async fn set_transaction_annotation(
         }
         if let Some(v) = ann.category {
             m.insert("category".to_string(), serde_json::json!(v));
+        }
+        if let Some(v) = ann.subcategory {
+            m.insert("subcategory".to_string(), serde_json::json!(v));
         }
         if let Some(v) = ann.tags {
             m.insert("tags".to_string(), serde_json::json!(v));
@@ -568,6 +593,8 @@ pub async fn propose_transaction_edit(
     clear_note: bool,
     category: Option<String>,
     clear_category: bool,
+    subcategory: Option<String>,
+    clear_subcategory: bool,
     tags: Vec<String>,
     tags_empty: bool,
     clear_tags: bool,
@@ -585,6 +612,8 @@ pub async fn propose_transaction_edit(
         clear_note,
         category,
         clear_category,
+        subcategory,
+        clear_subcategory,
         tags,
         tags_empty,
         clear_tags,
@@ -608,6 +637,8 @@ pub async fn propose_transaction_edit_with(
     clear_note: bool,
     category: Option<String>,
     clear_category: bool,
+    subcategory: Option<String>,
+    clear_subcategory: bool,
     tags: Vec<String>,
     tags_empty: bool,
     clear_tags: bool,
@@ -623,6 +654,8 @@ pub async fn propose_transaction_edit_with(
         clear_note,
         category,
         clear_category,
+        subcategory,
+        clear_subcategory,
         tags,
         tags_empty,
         clear_tags,
@@ -655,6 +688,7 @@ pub async fn propose_transaction_edit_with(
         description: patch.description,
         note: patch.note,
         category: patch.category,
+        subcategory: patch.subcategory,
         tags: patch.tags,
         effective_date: patch.effective_date,
     };
@@ -789,6 +823,8 @@ fn build_transaction_annotation_patch(
     clear_note: bool,
     category: Option<String>,
     clear_category: bool,
+    subcategory: Option<String>,
+    clear_subcategory: bool,
     tags: Vec<String>,
     tags_empty: bool,
     clear_tags: bool,
@@ -803,6 +839,9 @@ fn build_transaction_annotation_patch(
     }
     if clear_category && category.is_some() {
         anyhow::bail!("Cannot use --category and --clear-category together");
+    }
+    if clear_subcategory && subcategory.is_some() {
+        anyhow::bail!("Cannot use --subcategory and --clear-subcategory together");
     }
     if clear_tags && (tags_empty || !tags.is_empty()) {
         anyhow::bail!("Cannot use --clear-tags with --tag/--tags-empty");
@@ -825,6 +864,8 @@ fn build_transaction_annotation_patch(
         || clear_note
         || category.is_some()
         || clear_category
+        || subcategory.is_some()
+        || clear_subcategory
         || !tags.is_empty()
         || tags_empty
         || clear_tags
@@ -840,6 +881,7 @@ fn build_transaction_annotation_patch(
         description: None,
         note: None,
         category: None,
+        subcategory: None,
         tags: None,
         effective_date: None,
     };
@@ -857,6 +899,11 @@ fn build_transaction_annotation_patch(
         patch.category = Some(None);
     } else if let Some(v) = category {
         patch.category = Some(Some(v));
+    }
+    if clear_subcategory {
+        patch.subcategory = Some(None);
+    } else if let Some(v) = subcategory {
+        patch.subcategory = Some(Some(v));
     }
     if clear_tags {
         patch.tags = Some(None);
@@ -923,6 +970,7 @@ fn proposal_patch_output(edit: &ProposedTransactionEdit) -> TransactionAnnotatio
         description: edit.description.clone(),
         note: edit.note.clone(),
         category: edit.category.clone(),
+        subcategory: edit.subcategory.clone(),
         tags: edit.tags.clone(),
         effective_date: edit
             .effective_date

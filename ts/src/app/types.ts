@@ -60,6 +60,8 @@ export interface TransactionOutput {
   amount: string;
   asset: AssetType;
   status: string;
+  category?: string;
+  subcategory?: string;
   annotation?: TransactionAnnotationOutput;
 }
 
@@ -67,6 +69,7 @@ export interface TransactionAnnotationOutput {
   description?: string;
   note?: string;
   category?: string;
+  subcategory?: string;
   tags?: string[];
   effective_date?: string;
 }
@@ -89,6 +92,7 @@ export interface TransactionAnnotationPatchOutput {
   description?: string | null;
   note?: string | null;
   category?: string | null;
+  subcategory?: string | null;
   tags?: string[] | null;
   effective_date?: string | null;
 }
