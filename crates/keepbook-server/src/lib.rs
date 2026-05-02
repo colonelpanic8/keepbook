@@ -1032,6 +1032,7 @@ fn load_git_remote_settings(config_path: &Path) -> Result<GitRemoteSettings> {
 
 fn table_string(table: Option<&Item>, key: &str) -> Option<String> {
     table?
+        .as_table_like()?
         .get(key)?
         .as_str()
         .map(|value| value.trim().to_string())
@@ -1046,8 +1047,11 @@ fn write_git_settings(config_path: &Path, input: &GitSettingsInput) -> Result<()
     }
 
     doc["data_dir"] = value(input.data_dir.trim());
-    if !doc["git_sync"].is_table() {
-        doc["git_sync"] = Item::Table(Table::new());
+    if !doc
+        .get("git_sync")
+        .is_some_and(|item| item.as_table_like().is_some())
+    {
+        doc.insert("git_sync", Item::Table(Table::new()));
     }
     doc["git_sync"]["host"] = value(non_empty(input.host.trim(), "github.com"));
     doc["git_sync"]["repo"] = value(input.repo.trim());
@@ -1420,6 +1424,7 @@ pub fn default_server_config_path() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[cfg(unix)]
     #[test]
@@ -1432,5 +1437,79 @@ mod tests {
     fn validate_git_data_dir_accepts_nested_path() {
         validate_git_data_dir(Path::new("/tmp/keepbook-data"))
             .expect("nested path should be valid");
+    }
+
+    #[test]
+    fn load_git_remote_settings_ignores_non_table_git_sync() -> Result<()> {
+        let config_path = unique_test_config_path("load-git-non-table");
+        write_test_config(&config_path, "git_sync = \"invalid\"\n")?;
+
+        let settings = load_git_remote_settings(&config_path)?;
+        let defaults = GitRemoteSettings::default();
+
+        assert_eq!(settings.host, defaults.host);
+        assert_eq!(settings.repo, defaults.repo);
+        assert_eq!(settings.branch, defaults.branch);
+        assert_eq!(settings.ssh_user, defaults.ssh_user);
+        assert_eq!(settings.ssh_key_path, defaults.ssh_key_path);
+        remove_test_config(config_path);
+        Ok(())
+    }
+
+    #[test]
+    fn write_git_settings_creates_missing_git_sync_table() -> Result<()> {
+        let config_path = unique_test_config_path("write-git-missing-table");
+        write_test_config(&config_path, "data_dir = \"./old-data\"\n")?;
+
+        write_git_settings(
+            &config_path,
+            &GitSettingsInput {
+                data_dir: "/tmp/keepbook-data".to_string(),
+                host: "github.com".to_string(),
+                repo: "colonelpanic8/keepbook-data".to_string(),
+                branch: "master".to_string(),
+                ssh_user: "git".to_string(),
+                ssh_key_path: Some(".ssh/keepbook_sync_key".to_string()),
+            },
+        )?;
+
+        let settings = load_git_remote_settings(&config_path)?;
+        assert_eq!(settings.host, "github.com");
+        assert_eq!(settings.repo, "colonelpanic8/keepbook-data");
+        assert_eq!(settings.branch, "master");
+        assert_eq!(settings.ssh_user, "git");
+        assert_eq!(
+            settings.ssh_key_path.as_deref(),
+            Some(".ssh/keepbook_sync_key")
+        );
+        let content = std::fs::read_to_string(&config_path)?;
+        assert!(content.contains("[git_sync]"));
+        remove_test_config(config_path);
+        Ok(())
+    }
+
+    fn unique_test_config_path(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after Unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "keepbook-server-{name}-{}-{nanos}/keepbook.toml",
+            std::process::id()
+        ))
+    }
+
+    fn write_test_config(path: &Path, contents: &str) -> Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(path, contents)?;
+        Ok(())
+    }
+
+    fn remove_test_config(path: PathBuf) {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::remove_dir_all(parent);
+        }
     }
 }
