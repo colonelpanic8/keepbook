@@ -50,6 +50,11 @@ jobs:
             ${{ runner.os }}-dioxus-android-gradle-
 
       - name: Build Android release APK and AAB
+        env:
+          ANDROID_SIGNING_KEYSTORE_BASE64: ${{ secrets.ANDROID_SIGNING_KEYSTORE_BASE64 }}
+          ANDROID_SIGNING_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEYSTORE_PASSWORD }}
+          ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_SIGNING_KEY_ALIAS }}
+          ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
         run: nix run .#dioxus-android-release
 
       - name: Collect Android artifacts
@@ -58,9 +63,21 @@ jobs:
           set -euo pipefail
 
           mkdir -p release-artifacts/android
+          mapfile -t signed_apks < <(
+            find target/dx/keepbook-dioxus/release/android \
+              -path '*/build/outputs/apk/release/*-signed.apk' \
+              -type f \
+              | sort
+          )
+
+          if [ "${#signed_apks[@]}" -eq 0 ]; then
+            echo "No signed Android APK was produced" >&2
+            exit 1
+          fi
+
           mapfile -t artifacts < <(
             find target/dx/keepbook-dioxus/release/android \
-              \( -path '*/build/outputs/apk/release/*.apk' -o -path '*/build/outputs/bundle/release/*.aab' \) \
+              \( -path '*/build/outputs/apk/release/*-signed.apk' -o -path '*/build/outputs/bundle/release/*.aab' \) \
               -type f \
               | sort
           )

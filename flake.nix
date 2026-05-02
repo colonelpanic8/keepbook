@@ -239,6 +239,83 @@
                 fi
               }
 
+              sign_release_apks() {
+                if [[ -z "''${ANDROID_SIGNING_KEYSTORE_BASE64:-}" && -z "''${ANDROID_SIGNING_KEYSTORE_FILE:-}" ]]; then
+                  echo "Android release signing skipped: no signing keystore was provided"
+                  return
+                fi
+
+                local required=(
+                  ANDROID_SIGNING_KEY_ALIAS
+                  ANDROID_SIGNING_KEYSTORE_PASSWORD
+                  ANDROID_SIGNING_KEY_PASSWORD
+                )
+
+                for var in "''${required[@]}"; do
+                  if [[ -z "''${!var:-}" ]]; then
+                    echo "Android release signing requires $var" >&2
+                    exit 1
+                  fi
+                done
+
+                local signing_dir
+                signing_dir="$(mktemp -d)"
+                trap 'rm -rf "$signing_dir"' RETURN
+
+                local keystore="$signing_dir/keepbook-release.keystore"
+                if [[ -n "''${ANDROID_SIGNING_KEYSTORE_FILE:-}" ]]; then
+                  cp "$ANDROID_SIGNING_KEYSTORE_FILE" "$keystore"
+                else
+                  printf '%s' "$ANDROID_SIGNING_KEYSTORE_BASE64" | base64 -d > "$keystore"
+                fi
+
+                local apk_dir="target/dx/keepbook-dioxus/release/android/app/app/build/outputs/apk/release"
+                shopt -s nullglob
+                local unsigned_apks=("$apk_dir"/*-unsigned.apk)
+                shopt -u nullglob
+
+                if ((''${#unsigned_apks[@]} == 0)); then
+                  echo "No unsigned release APKs were found to sign in $apk_dir" >&2
+                  exit 1
+                fi
+
+                for unsigned_apk in "''${unsigned_apks[@]}"; do
+                  local apk_base="''${unsigned_apk%-unsigned.apk}"
+                  local aligned_apk
+                  aligned_apk="$signing_dir/$(basename "$apk_base")-aligned.apk"
+                  local signed_apk="$apk_base-signed.apk"
+
+                  # shellcheck disable=SC2016
+                  nix develop "$repo#android" --command bash -lc '
+                    set -euo pipefail
+                    unsigned_apk="$1"
+                    aligned_apk="$2"
+                    signed_apk="$3"
+                    keystore="$4"
+                    key_alias="$5"
+                    storepass="$6"
+                    keypass="$7"
+
+                    "$ANDROID_HOME/build-tools/${androidBuildToolsVersion}/zipalign" -p -f 4 "$unsigned_apk" "$aligned_apk"
+                    "$ANDROID_HOME/build-tools/${androidBuildToolsVersion}/apksigner" sign \
+                      --ks "$keystore" \
+                      --ks-key-alias "$key_alias" \
+                      --ks-pass "pass:$storepass" \
+                      --key-pass "pass:$keypass" \
+                      --out "$signed_apk" \
+                      "$aligned_apk"
+                    "$ANDROID_HOME/build-tools/${androidBuildToolsVersion}/apksigner" verify --verbose "$signed_apk"
+                  ' bash \
+                    "$unsigned_apk" \
+                    "$aligned_apk" \
+                    "$signed_apk" \
+                    "$keystore" \
+                    "$ANDROID_SIGNING_KEY_ALIAS" \
+                    "$ANDROID_SIGNING_KEYSTORE_PASSWORD" \
+                    "$ANDROID_SIGNING_KEY_PASSWORD"
+                done
+              }
+
               rm -rf "target/dx/keepbook-dioxus/$profile/android"
               nix develop "$repo#android" --command "''${args[@]}" "$@"
               patch_android_project
@@ -250,6 +327,7 @@
               }; then
                 nix develop "$repo#android" --command bash -lc \
                   'cd target/dx/keepbook-dioxus/release/android/app && ./gradlew :app:bundleRelease :app:assembleRelease --no-daemon --console plain'
+                sign_release_apks
               else
                 nix develop "$repo#android" --command bash -lc \
                   'cd target/dx/keepbook-dioxus/debug/android/app && ./gradlew :app:assembleDebug --no-daemon --console plain'
