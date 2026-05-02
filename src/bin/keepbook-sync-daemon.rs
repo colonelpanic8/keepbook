@@ -106,7 +106,7 @@ fn normalize_spending_windows_days(windows: &[u32]) -> Vec<u32> {
 fn format_spending_window_label(days: u32) -> String {
     match days {
         365 => "year".to_string(),
-        _ if days % 365 == 0 => format!("{} years", days / 365),
+        _ if days.is_multiple_of(365) => format!("{} years", days / 365),
         _ => format!("{days}d"),
     }
 }
@@ -788,7 +788,7 @@ fn build_sparkline(values: &[f64]) -> String {
     }
 
     if (max - min).abs() < f64::EPSILON {
-        return std::iter::repeat(BLOCKS[3]).take(values.len()).collect();
+        return std::iter::repeat_n(BLOCKS[3], values.len()).collect();
     }
 
     values
