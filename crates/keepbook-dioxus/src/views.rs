@@ -38,7 +38,7 @@ impl ActiveView {
     fn label(self) -> &'static str {
         match self {
             Self::Spending => "Spending",
-            Self::Graphs => "Graphs",
+            Self::Graphs => "Net Worth",
             Self::Accounts => "Accounts",
             Self::Connections => "Connections",
             Self::ProposedEdits => "Proposed Edits",
