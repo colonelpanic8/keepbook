@@ -33,7 +33,6 @@ async fn value_in_reporting_currency_detailed_with_options(
     reporting_currency: &str,
     as_of_date: NaiveDate,
     currency_decimals: Option<u32>,
-    allow_quote_fallback: bool,
 ) -> Result<ValueInReportingCurrency> {
     let asset = asset.normalized();
     let amount = Decimal::from_str(amount)
@@ -71,7 +70,7 @@ async fn value_in_reporting_currency_detailed_with_options(
         }
         Asset::Equity { .. } | Asset::Crypto { .. } => {
             let Some(price) = market_data
-                .valuation_price_from_store(&asset, as_of_date, allow_quote_fallback)
+                .valuation_price_from_store(&asset, as_of_date)
                 .await?
             else {
                 return Ok(ValueInReportingCurrency {
@@ -135,7 +134,6 @@ pub async fn value_in_reporting_currency_detailed(
         reporting_currency,
         as_of_date,
         currency_decimals,
-        false,
     )
     .await
 }
@@ -155,7 +153,6 @@ pub async fn value_in_reporting_currency_detailed_best_effort(
         reporting_currency,
         as_of_date,
         currency_decimals,
-        true,
     )
     .await
 }
@@ -216,7 +213,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn strict_valuation_ignores_quote_but_best_effort_uses_it() -> Result<()> {
+    async fn valuation_uses_cached_quote() -> Result<()> {
         let store = Arc::new(MemoryMarketDataStore::new());
         let market_data = MarketDataService::new(store.clone(), None);
         let asset = Asset::equity("FXAIX");
@@ -229,7 +226,7 @@ mod tests {
             value_in_reporting_currency_detailed(&market_data, &asset, "2", "USD", date, None)
                 .await?
                 .value;
-        assert_eq!(strict, None);
+        assert_eq!(strict.as_deref(), Some("478.64"));
 
         let best_effort =
             value_in_reporting_currency_best_effort(&market_data, &asset, "2", "USD", date, None)
@@ -239,7 +236,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn best_effort_still_prefers_close_prices() -> Result<()> {
+    async fn valuation_uses_latest_same_day_price_timestamp() -> Result<()> {
         let store = Arc::new(MemoryMarketDataStore::new());
         let market_data = MarketDataService::new(store.clone(), None);
         let asset = Asset::equity("FXAIX");

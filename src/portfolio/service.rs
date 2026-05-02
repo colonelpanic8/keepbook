@@ -641,7 +641,7 @@ impl PortfolioService {
     }
 
     /// Value an asset in the target currency.
-    /// Uses live quotes when available, falls back to historical close prices.
+    /// Uses live quotes when available, falls back to cached or fetched historical prices.
     async fn value_asset(
         &self,
         asset: &Asset,
@@ -694,14 +694,14 @@ impl PortfolioService {
                 }
             }
             Asset::Equity { .. } | Asset::Crypto { .. } => {
-                // Use live pricing for today. Historical valuation prefers an exact-date close,
-                // then a same-day cached quote, before falling back to older closes.
+                // Use live pricing for today. Historical valuation uses cached/fetched prices
+                // at or before the requested date without special-casing price kind.
                 let price_result = if as_of_date == self.clock.today() {
                     self.market_data.price_latest(asset, as_of_date).await
                 } else {
                     match self
                         .market_data
-                        .valuation_price_from_store(asset, as_of_date, true)
+                        .valuation_price_from_store(asset, as_of_date)
                         .await?
                     {
                         Some(price) => Ok(price),
@@ -1488,7 +1488,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn historical_snapshot_uses_close_not_live_quote() -> Result<()> {
+    async fn historical_snapshot_does_not_fetch_live_quote_for_past_date() -> Result<()> {
         #[derive(Clone)]
         struct QuoteOnlySource {
             quote: PricePoint,

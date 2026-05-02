@@ -8,7 +8,7 @@ use crate::clock::{Clock, SystemClock};
 
 use super::{
     AssetId, CryptoPriceRouter, EquityPriceRouter, FxRateKind, FxRatePoint, FxRateRouter,
-    MarketDataSource, MarketDataStore, PriceKind, PricePoint,
+    MarketDataSource, MarketDataStore, PricePoint,
 };
 use crate::models::Asset;
 
@@ -19,7 +19,7 @@ pub struct MarketDataService {
     crypto_router: Option<Arc<CryptoPriceRouter>>,
     fx_router: Option<Arc<FxRateRouter>>,
     // When set, bounds store lookups to N days back from query date.
-    // When None, store lookups are unbounded and return the latest close <= query date.
+    // When None, store lookups are unbounded and return the latest price <= query date.
     store_lookback_days: Option<u32>,
     // Bounds external fetch attempts when an exact close is unavailable.
     fetch_lookback_days: u32,
@@ -87,7 +87,7 @@ impl MarketDataService {
     }
 
     /// Get price from store only, no external fetching.
-    /// Returns the latest close on or before `date`.
+    /// Returns the latest price on or before `date`, regardless of price kind.
     ///
     /// If `store_lookback_days` is set, limits lookup to that range.
     /// Otherwise (default), lookup is unbounded.
@@ -100,33 +100,27 @@ impl MarketDataService {
         let asset_id = AssetId::from_asset(&asset);
         debug!(asset_id = %asset_id, date = %date, "looking up price from store only");
 
+        let prices = self.store.get_all_prices(&asset_id).await?;
+
         if let Some(days) = self.store_lookback_days {
-            for offset in 0..=days {
-                let target_date = date - Duration::days(offset as i64);
-                if let Some(price) = self
-                    .store
-                    .get_price(&asset_id, target_date, PriceKind::Close)
-                    .await?
-                {
-                    debug!(
-                        asset_id = %asset_id,
-                        date = %target_date,
-                        price = %price.price,
-                        source = %price.source,
-                        "price found in bounded store lookup"
-                    );
-                    return Ok(Some(price));
-                }
+            let start = date - Duration::days(days as i64);
+            if let Some(price) = select_latest_price_in_range(prices.clone(), start, date) {
+                debug!(
+                    asset_id = %asset_id,
+                    date = %price.as_of_date,
+                    price = %price.price,
+                    source = %price.source,
+                    "price found in bounded store lookup"
+                );
+                return Ok(Some(price));
             }
             if !self.allow_future_projection {
                 return Ok(None);
             }
 
-            let prices = self.store.get_all_prices(&asset_id).await?;
             return Ok(select_earliest_price_on_or_after(prices, date));
         }
 
-        let prices = self.store.get_all_prices(&asset_id).await?;
         if let Some(price) = select_latest_price_on_or_before(prices.clone(), date) {
             return Ok(Some(price));
         }
@@ -140,71 +134,19 @@ impl MarketDataService {
 
     /// Get a valuation price from store only, no external fetching.
     ///
-    /// - First tries an exact-date close
-    /// - If none found and `allow_quote_fallback` is true, tries a same-day quote
-    /// - Finally falls back to older close prices via `price_from_store`
+    /// Price kind is ignored; the latest price observation on or before `date` wins.
     pub async fn valuation_price_from_store(
         &self,
         asset: &Asset,
         date: NaiveDate,
-        allow_quote_fallback: bool,
     ) -> Result<Option<PricePoint>> {
-        let asset = asset.normalized();
-        let asset_id = AssetId::from_asset(&asset);
-
-        if let Some(close) = self
-            .store
-            .get_price(&asset_id, date, PriceKind::Close)
-            .await?
-        {
-            return Ok(Some(close));
-        }
-
-        if allow_quote_fallback {
-            if let Some(quote) = self
-                .store
-                .get_price(&asset_id, date, PriceKind::Quote)
-                .await?
-            {
-                return Ok(Some(quote));
-            }
-        }
-
-        if let Some(days) = self.store_lookback_days {
-            for offset in 1..=days {
-                let target_date = date - Duration::days(offset as i64);
-                if let Some(price) = self
-                    .store
-                    .get_price(&asset_id, target_date, PriceKind::Close)
-                    .await?
-                {
-                    return Ok(Some(price));
-                }
-            }
-            if !self.allow_future_projection {
-                return Ok(None);
-            }
-
-            let prices = self.store.get_all_prices(&asset_id).await?;
-            return Ok(select_earliest_price_on_or_after(prices, date));
-        }
-
-        let prices = self.store.get_all_prices(&asset_id).await?;
-        if let Some(price) = select_latest_price_on_or_before(prices.clone(), date) {
-            return Ok(Some(price));
-        }
-
-        if self.allow_future_projection {
-            return Ok(select_earliest_price_on_or_after(prices, date));
-        }
-
-        Ok(None)
+        self.price_from_store(asset, date).await
     }
 
     pub async fn price_close(&self, asset: &Asset, date: NaiveDate) -> Result<PricePoint> {
         let asset = asset.normalized();
         let asset_id = AssetId::from_asset(&asset);
-        debug!(asset_id = %asset_id, date = %date, "looking up close price");
+        debug!(asset_id = %asset_id, date = %date, "looking up historical price");
 
         if let Some(price) = self.price_from_store(&asset, date).await? {
             debug!(
@@ -235,7 +177,7 @@ impl MarketDataService {
         }
 
         Err(anyhow::anyhow!(
-            "No close price found for asset {asset_id} on or before {date}"
+            "No price found for asset {asset_id} on or before {date}"
         ))
     }
 
@@ -268,7 +210,7 @@ impl MarketDataService {
         Ok((price, !had_cached))
     }
 
-    /// Fetch and store close prices for an asset over a date range.
+    /// Fetch and store historical prices for an asset over a date range.
     ///
     /// This bypasses per-date lookback loops and lets providers use native
     /// historical range endpoints when available.
@@ -296,8 +238,8 @@ impl MarketDataService {
     }
 
     /// Get the latest available price for an asset.
-    /// Tries real-time quote first, falls back to historical close.
-    /// If quote_staleness is set, returns cached quote if it's fresh enough.
+    /// Tries real-time quote first, falls back to the latest cached/fetched historical price.
+    /// If quote_staleness is set, returns a same-day cached price if it's fresh enough.
     pub async fn price_latest(&self, asset: &Asset, date: NaiveDate) -> Result<PricePoint> {
         Ok(self.price_latest_with_status(asset, date).await?.0)
     }
@@ -311,8 +253,9 @@ impl MarketDataService {
         self.price_latest_inner(asset, date, false).await
     }
 
-    /// Like [`Self::price_latest`] but always tries to fetch a new quote first (ignores cached quote
-    /// freshness), then falls back to close prices. Returns whether a new point was fetched/stored.
+    /// Like [`Self::price_latest`] but always tries to fetch a new quote first (ignores cached
+    /// freshness), then falls back to cached/fetched historical prices. Returns whether a new point
+    /// was fetched/stored.
     pub async fn price_latest_force(
         &self,
         asset: &Asset,
@@ -331,12 +274,13 @@ impl MarketDataService {
         let asset_id = AssetId::from_asset(&asset);
         debug!(asset_id = %asset_id, "looking up latest price (quote or close)");
 
-        // Check for a cached quote first if staleness is configured (unless forced).
+        let mut stale_cached_price = None;
+
+        // Check for a cached same-day price first if staleness is configured (unless forced).
         if !force {
             if let Some(staleness) = self.quote_staleness {
                 if let Some(cached) = self
-                    .store
-                    .get_price(&asset_id, date, PriceKind::Quote)
+                    .latest_price_on_date_from_store(&asset_id, date)
                     .await?
                 {
                     let age = (self.clock.now() - cached.timestamp)
@@ -351,11 +295,12 @@ impl MarketDataService {
                         );
                         return Ok((cached, false));
                     }
+                    stale_cached_price = Some(cached);
                     debug!(
                         asset_id = %asset_id,
                         age_secs = age.as_secs(),
                         staleness_secs = staleness.as_secs(),
-                        "cached quote is stale, fetching new one"
+                        "cached price is stale, fetching new quote"
                     );
                 }
             }
@@ -374,8 +319,17 @@ impl MarketDataService {
             return Ok((price, true));
         }
 
-        debug!(asset_id = %asset_id, "no live quote available, falling back to close price");
-        // Fall back to close price, but track whether we had to fetch.
+        if let Some(cached) = stale_cached_price {
+            debug!(
+                asset_id = %asset_id,
+                price = %cached.price,
+                "returning stale cached price after live quote fetch failed"
+            );
+            return Ok((cached, false));
+        }
+
+        debug!(asset_id = %asset_id, "no live quote available, falling back to cached/fetched price");
+        // Fall back to cached/fetched historical price, but track whether we had to fetch.
         if force {
             let (price, fetched) = self.price_close_force(&asset, date).await?;
             return Ok((price, fetched));
@@ -387,6 +341,15 @@ impl MarketDataService {
 
         let price = self.price_close(&asset, date).await?;
         Ok((price, true))
+    }
+
+    async fn latest_price_on_date_from_store(
+        &self,
+        asset_id: &AssetId,
+        date: NaiveDate,
+    ) -> Result<Option<PricePoint>> {
+        let prices = self.store.get_all_prices(asset_id).await?;
+        Ok(select_latest_price_on_date(prices, date))
     }
 
     pub async fn fx_close(&self, base: &str, quote: &str, date: NaiveDate) -> Result<FxRatePoint> {
@@ -690,7 +653,29 @@ fn select_latest_price_on_or_before(
 ) -> Option<PricePoint> {
     prices
         .into_iter()
-        .filter(|p| p.kind == PriceKind::Close && p.as_of_date <= date)
+        .filter(|p| p.as_of_date <= date)
+        .max_by(|a, b| {
+            a.as_of_date
+                .cmp(&b.as_of_date)
+                .then_with(|| a.timestamp.cmp(&b.timestamp))
+        })
+}
+
+fn select_latest_price_on_date(prices: Vec<PricePoint>, date: NaiveDate) -> Option<PricePoint> {
+    prices
+        .into_iter()
+        .filter(|p| p.as_of_date == date)
+        .max_by_key(|p| p.timestamp)
+}
+
+fn select_latest_price_in_range(
+    prices: Vec<PricePoint>,
+    start: NaiveDate,
+    end: NaiveDate,
+) -> Option<PricePoint> {
+    prices
+        .into_iter()
+        .filter(|p| p.as_of_date >= start && p.as_of_date <= end)
         .max_by(|a, b| {
             a.as_of_date
                 .cmp(&b.as_of_date)
@@ -704,11 +689,11 @@ fn select_earliest_price_on_or_after(
 ) -> Option<PricePoint> {
     prices
         .into_iter()
-        .filter(|p| p.kind == PriceKind::Close && p.as_of_date >= date)
+        .filter(|p| p.as_of_date >= date)
         .min_by(|a, b| {
             a.as_of_date
                 .cmp(&b.as_of_date)
-                .then_with(|| a.timestamp.cmp(&b.timestamp))
+                .then_with(|| b.timestamp.cmp(&a.timestamp))
         })
 }
 
@@ -897,6 +882,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn price_latest_with_status_uses_stale_quote_before_older_close_when_fetch_unavailable(
+    ) -> Result<()> {
+        let now = Utc.with_ymd_and_hms(2026, 2, 7, 12, 0, 0).unwrap();
+        let clock = Arc::new(FixedClock::new(now));
+
+        let store = Arc::new(MemoryMarketDataStore::default());
+        let svc = MarketDataService::new(store.clone(), None)
+            .with_quote_staleness(std::time::Duration::from_secs(3600))
+            .with_clock(clock);
+
+        let asset = Asset::equity("AAPL");
+        let asset_id = AssetId::from_asset(&asset);
+        let today = now.date_naive();
+
+        let older_close = make_close(
+            &asset_id,
+            today - chrono::Duration::days(4),
+            now - chrono::Duration::days(4),
+            "100",
+        );
+        let stale_quote = make_quote(&asset_id, today, now - chrono::Duration::hours(2), "120");
+        store.put_prices(&[older_close, stale_quote]).await?;
+
+        let (p, fetched) = svc.price_latest_with_status(&asset, today).await?;
+        assert!(!fetched);
+        assert_eq!(p.kind, PriceKind::Quote);
+        assert_eq!(p.as_of_date, today);
+        assert_eq!(p.price, "120");
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn price_latest_force_ignores_fresh_cached_quote() -> Result<()> {
         let now = Utc.with_ymd_and_hms(2026, 2, 6, 12, 0, 0).unwrap();
         let clock = Arc::new(FixedClock::new(now));
@@ -1040,9 +1057,7 @@ mod tests {
             ])
             .await?;
 
-        let found = svc
-            .valuation_price_from_store(&asset, query_date, true)
-            .await?;
+        let found = svc.valuation_price_from_store(&asset, query_date).await?;
         assert!(found.is_some());
         let found = found.unwrap();
         assert_eq!(found.kind, PriceKind::Quote);

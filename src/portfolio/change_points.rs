@@ -8,8 +8,8 @@ use anyhow::Result;
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::market_data::PricePoint;
 use crate::market_data::{AssetId, MarketDataStore};
-use crate::market_data::{PriceKind, PricePoint};
 use crate::models::{Asset, Id};
 use crate::storage::Storage;
 
@@ -97,17 +97,13 @@ impl ChangePointCollector {
     }
 }
 
+#[cfg(test)]
 fn date_to_timestamp(date: NaiveDate) -> DateTime<Utc> {
     date.and_hms_opt(23, 59, 59).expect("valid date").and_utc()
 }
 
 fn price_to_change_timestamp(price: &PricePoint) -> DateTime<Utc> {
-    match price.kind {
-        // Quotes represent intraday movements, so preserve the actual observation time.
-        PriceKind::Quote => price.timestamp,
-        // Closes should affect valuations on their as-of date, even if fetched later.
-        PriceKind::Close | PriceKind::AdjClose => date_to_timestamp(price.as_of_date),
-    }
+    price.timestamp
 }
 
 /// Granularity for filtering change points.
@@ -410,21 +406,19 @@ mod tests {
     }
 
     #[test]
-    fn price_to_change_timestamp_uses_end_of_day_for_closes() {
+    fn price_to_change_timestamp_ignores_kind() {
+        let ts = make_ts(2026, 2, 5, 9, 0);
         let price = PricePoint {
             asset_id: AssetId::from_asset(&Asset::equity("AAPL")),
             as_of_date: chrono::NaiveDate::from_ymd_opt(2026, 2, 1).unwrap(),
-            timestamp: make_ts(2026, 2, 5, 9, 0),
+            timestamp: ts,
             price: "200".to_string(),
             quote_currency: "USD".to_string(),
             kind: PriceKind::Close,
             source: "test".to_string(),
         };
 
-        assert_eq!(
-            price_to_change_timestamp(&price),
-            date_to_timestamp(price.as_of_date)
-        );
+        assert_eq!(price_to_change_timestamp(&price), ts);
     }
 
     #[test]
@@ -813,8 +807,7 @@ mod tests {
         )
         .await?;
 
-        let expected_price_ts =
-            date_to_timestamp(chrono::NaiveDate::from_ymd_opt(2024, 6, 15).unwrap());
+        let expected_price_ts = make_ts(2024, 6, 15, 16, 0);
         let price_point = points
             .iter()
             .find(|p| p.timestamp == expected_price_ts)

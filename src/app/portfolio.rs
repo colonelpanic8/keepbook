@@ -13,7 +13,7 @@ use crate::config::ResolvedConfig;
 use crate::format::format_base_currency_value;
 use crate::market_data::{
     AssetId, FxRateKind, FxRatePoint, JsonlMarketDataStore, MarketDataService,
-    MarketDataServiceBuilder, MarketDataStore, PriceKind, PricePoint,
+    MarketDataServiceBuilder, MarketDataStore, PricePoint,
 };
 use crate::models::{Account, Asset, Id};
 use crate::portfolio::{
@@ -925,7 +925,7 @@ pub async fn fetch_historical_prices(
                                 kind: "price".to_string(),
                                 date: current.to_string(),
                                 error: format!(
-                                    "No close price found for asset {} on or before {}",
+                                    "No price found for asset {} on or before {}",
                                     asset_cache.asset_id, current
                                 ),
                                 asset_id: Some(asset_cache.asset_id.to_string()),
@@ -1259,9 +1259,6 @@ async fn load_price_cache(
     let mut map: HashMap<NaiveDate, PricePoint> = HashMap::new();
 
     for price in prices {
-        if price.kind != PriceKind::Close {
-            continue;
-        }
         match map.get(&price.as_of_date) {
             Some(existing) if existing.timestamp >= price.timestamp => {}
             _ => {
@@ -1535,30 +1532,18 @@ pub async fn portfolio_snapshot(
                         }
                         seen_assets.insert(asset_key.clone());
 
-                        // Find most recent cached price (quote or close, with lookback)
-                        let mut cached_price = None;
-
-                        // Try Quote for today first
-                        if let Some(p) = store
-                            .get_price(&asset_id, query.as_of_date, PriceKind::Quote)
-                            .await?
-                        {
-                            cached_price = Some(p);
-                        }
-
-                        // If no quote, try Close with lookback (7 days)
-                        if cached_price.is_none() {
-                            for offset in 0..=7i64 {
-                                let target_date = query.as_of_date - Duration::days(offset);
-                                if let Some(p) = store
-                                    .get_price(&asset_id, target_date, PriceKind::Close)
-                                    .await?
-                                {
-                                    cached_price = Some(p);
-                                    break;
-                                }
-                            }
-                        }
+                        let prices = store.get_all_prices(&asset_id).await?;
+                        let cached_price = prices
+                            .into_iter()
+                            .filter(|price| {
+                                price.as_of_date <= query.as_of_date
+                                    && price.as_of_date >= query.as_of_date - Duration::days(7)
+                            })
+                            .max_by(|a, b| {
+                                a.as_of_date
+                                    .cmp(&b.as_of_date)
+                                    .then_with(|| a.timestamp.cmp(&b.timestamp))
+                            });
 
                         let check = check_price_staleness(
                             cached_price.as_ref(),
@@ -2447,6 +2432,7 @@ mod tests {
         DisplayConfig, GitConfig, HistoryConfig, LatentCapitalGainsTaxConfig, PortfolioConfig,
         RefreshConfig, ResolvedConfig, SpendingConfig, TrayConfig,
     };
+    use crate::market_data::PriceKind;
     use crate::models::FixedIdGenerator;
     use crate::models::{Account, AssetBalance, BalanceSnapshot, Connection, ConnectionConfig};
     use crate::storage::JsonFileStorage;
