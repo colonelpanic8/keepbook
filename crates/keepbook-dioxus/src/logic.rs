@@ -1085,7 +1085,9 @@ pub(crate) fn sync_result_summary(result: &serde_json::Value) -> String {
             .iter()
             .filter(|row| row.get("skipped").and_then(|v| v.as_bool()) == Some(true))
             .count();
-        return format!("Sync complete: {synced}/{total} ok, {skipped} skipped, {failed} failed.");
+        return format!(
+            "Balance refresh complete: {synced}/{total} ok, {skipped} skipped, {failed} failed."
+        );
     }
 
     let connection = result
@@ -1102,22 +1104,22 @@ pub(crate) fn sync_result_summary(result: &serde_json::Value) -> String {
                 .get("reason")
                 .and_then(|value| value.as_str())
                 .unwrap_or("skipped");
-            format!("Sync skipped for {connection}: {reason}.")
+            format!("Balance refresh skipped for {connection}: {reason}.")
         } else {
-            format!("Sync complete for {connection}.")
+            format!("Balance refresh complete for {connection}.")
         }
     } else {
         let error = result
             .get("error")
             .and_then(|value| value.as_str())
             .unwrap_or("unknown error");
-        format!("Sync failed for {connection}: {error}")
+        format!("Balance refresh failed for {connection}: {error}")
     }
 }
 
 pub(crate) fn price_sync_result_summary(result: &serde_json::Value) -> String {
     let Some(refresh) = result.get("result") else {
-        return "Price sync finished.".to_string();
+        return "Price refresh finished.".to_string();
     };
     let fetched = refresh
         .get("fetched")
@@ -1133,9 +1135,9 @@ pub(crate) fn price_sync_result_summary(result: &serde_json::Value) -> String {
         .unwrap_or(0);
 
     if failed == 0 {
-        format!("Price sync complete: {fetched} fetched, {skipped} skipped.")
+        format!("Price refresh complete: {fetched} fetched, {skipped} skipped.")
     } else {
-        format!("Price sync complete: {fetched} fetched, {skipped} skipped, {failed} failed.")
+        format!("Price refresh complete: {fetched} fetched, {skipped} skipped, {failed} failed.")
     }
 }
 

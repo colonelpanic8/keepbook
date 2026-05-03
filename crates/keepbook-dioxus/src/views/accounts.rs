@@ -198,13 +198,13 @@ pub(super) fn AccountsView(
                                                 onrefresh.call(());
                                             }
                                             Err(error) => {
-                                                price_status.set(format!("Price sync failed: {error}"));
+                                                price_status.set(format!("Price refresh failed: {error}"));
                                             }
                                         }
                                         price_busy.set(false);
                                     });
                                 },
-                                if is_price_busy { "Refreshing" } else { "Sync prices" }
+                                if is_price_busy { "Refreshing" } else { "Refresh prices" }
                             }
                         }
                     }

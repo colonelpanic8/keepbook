@@ -51,7 +51,7 @@ pub(super) fn ConnectionsView(
                         span { "Force prices" }
                     }
                     button {
-                        class: "control-button selected",
+                        class: "control-button",
                         disabled: is_busy,
                         onclick: move |_| {
                             busy_target.set("all".to_string());
@@ -61,9 +61,9 @@ pub(super) fn ConnectionsView(
                                 full_transactions: full_transactions(),
                             };
                             status.set(if input.if_stale {
-                                "Syncing stale connections...".to_string()
+                                "Refreshing stale balances...".to_string()
                             } else {
-                                "Syncing all connections...".to_string()
+                                "Refreshing balances for all connections...".to_string()
                             });
                             spawn(async move {
                                 match sync_connections(input).await {
@@ -71,15 +71,15 @@ pub(super) fn ConnectionsView(
                                         status.set(sync_result_summary(&result));
                                         onrefresh.call(());
                                     }
-                                    Err(error) => status.set(format!("Sync failed: {error}")),
+                                    Err(error) => status.set(format!("Balance refresh failed: {error}")),
                                 }
                                 busy_target.set(String::new());
                             });
                         },
-                        if busy == "all" { "Syncing" } else { "Sync all" }
+                        if busy == "all" { "Refreshing" } else { "Refresh balances" }
                     }
                     button {
-                        class: "control-button",
+                        class: "control-button selected",
                         disabled: is_busy,
                         onclick: move |_| {
                             busy_target.set("prices:all".to_string());
@@ -100,12 +100,12 @@ pub(super) fn ConnectionsView(
                                         status.set(price_sync_result_summary(&result));
                                         onrefresh.call(());
                                     }
-                                    Err(error) => status.set(format!("Price sync failed: {error}")),
+                                    Err(error) => status.set(format!("Price refresh failed: {error}")),
                                 }
                                 busy_target.set(String::new());
                             });
                         },
-                        if busy == "prices:all" { "Refreshing" } else { "Sync prices" }
+                        if busy == "prices:all" { "Refreshing" } else { "Refresh prices" }
                     }
                 }
             }
@@ -115,9 +115,9 @@ pub(super) fn ConnectionsView(
             div { class: "data-table connection-table",
                 div { class: "table-head",
                     span { "Name" }
-                    span { "Sync" }
+                    span { "Source" }
                     span { "Accounts" }
-                    span { "Last sync" }
+                    span { "Last balance refresh" }
                     span { "Actions" }
                 }
                 for connection in connections {
@@ -150,19 +150,19 @@ pub(super) fn ConnectionsView(
                                         if_stale: only_stale(),
                                         full_transactions: full_transactions(),
                                     };
-                                    status.set(format!("Syncing {sync_name}..."));
+                                    status.set(format!("Refreshing balances for {sync_name}..."));
                                     spawn(async move {
                                         match sync_connections(input).await {
                                             Ok(result) => {
                                                 status.set(sync_result_summary(&result));
                                                 onrefresh.call(());
                                             }
-                                            Err(error) => status.set(format!("Sync failed: {error}")),
+                                            Err(error) => status.set(format!("Balance refresh failed: {error}")),
                                         }
                                         busy_target.set(String::new());
                                     });
                                 },
-                                if row_busy { "Syncing" } else { "Sync" }
+                                if row_busy { "Refreshing" } else { "Balances" }
                             }
                             button {
                                 class: "control-button",
@@ -184,7 +184,7 @@ pub(super) fn ConnectionsView(
                                                 status.set(price_sync_result_summary(&result));
                                                 onrefresh.call(());
                                             }
-                                            Err(error) => status.set(format!("Price sync failed: {error}")),
+                                            Err(error) => status.set(format!("Price refresh failed: {error}")),
                                         }
                                         busy_target.set(String::new());
                                     });

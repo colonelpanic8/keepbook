@@ -285,7 +285,7 @@ pub(crate) async fn sync_connections_impl(
 ) -> Result<serde_json::Value, String> {
     let response = Request::post(&format!("{API_BASE}/api/sync/connections"))
         .json(&input)
-        .map_err(|error| format!("Could not encode sync request: {error}"))?
+        .map_err(|error| format!("Could not encode balance refresh request: {error}"))?
         .send()
         .await
         .map_err(|error| format!("Could not reach keepbook-server at {API_BASE}: {error}"))?;
@@ -299,14 +299,14 @@ pub(crate) async fn sync_connections_impl(
     response
         .json::<serde_json::Value>()
         .await
-        .map_err(|error| format!("Could not decode sync result: {error}"))
+        .map_err(|error| format!("Could not decode balance refresh result: {error}"))
 }
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) async fn sync_prices_impl(input: SyncPricesInput) -> Result<serde_json::Value, String> {
     let response = Request::post(&format!("{API_BASE}/api/sync/prices"))
         .json(&input)
-        .map_err(|error| format!("Could not encode price sync request: {error}"))?
+        .map_err(|error| format!("Could not encode price refresh request: {error}"))?
         .send()
         .await
         .map_err(|error| format!("Could not reach keepbook-server at {API_BASE}: {error}"))?;
@@ -320,7 +320,7 @@ pub(crate) async fn sync_prices_impl(input: SyncPricesInput) -> Result<serde_jso
     response
         .json::<serde_json::Value>()
         .await
-        .map_err(|error| format!("Could not decode price sync result: {error}"))
+        .map_err(|error| format!("Could not decode price refresh result: {error}"))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -491,7 +491,7 @@ pub(crate) async fn sync_git_repo_impl(input: GitSyncInput) -> Result<GitSyncOut
             save_settings: input.save_settings,
         })
         .await
-        .map_err(|error| format!("Sync failed: {error:#}"))?;
+        .map_err(|error| format!("Git sync failed: {error:#}"))?;
     from_native_output(output, "Git sync result")
 }
 
@@ -506,7 +506,7 @@ pub(crate) async fn sync_connections_impl(
             full_transactions: input.full_transactions,
         })
         .await
-        .map_err(|error| format!("Sync failed: {error:#}"))
+        .map_err(|error| format!("Balance refresh failed: {error:#}"))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -519,7 +519,7 @@ pub(crate) async fn sync_prices_impl(input: SyncPricesInput) -> Result<serde_jso
             quote_staleness_seconds: input.quote_staleness_seconds,
         })
         .await
-        .map_err(|error| format!("Price sync failed: {error:#}"))
+        .map_err(|error| format!("Price refresh failed: {error:#}"))
 }
 
 #[cfg(not(target_arch = "wasm32"))]

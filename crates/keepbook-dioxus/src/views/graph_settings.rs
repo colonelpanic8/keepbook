@@ -18,7 +18,7 @@ pub(super) fn GraphsView(
                 title: "Net Worth Over Time".to_string(),
                 scope_label: currency.clone(),
                 empty_title: "No net worth history".to_string(),
-                empty_detail: "Sync balances to populate the chart.".to_string(),
+                empty_detail: "Refresh balances to populate the chart.".to_string(),
                 currency: currency.clone(),
                 defaults: defaults.clone(),
                 filter_overrides,
@@ -172,7 +172,7 @@ pub(super) fn SettingsView(
             div { class: "panel-header",
                 div { class: "panel-title",
                     h2 { "Git Sync" }
-                    span { "Server-backed" }
+                    span { "Repository only" }
                 }
                 div { class: "settings-actions inline-actions",
                     button {
@@ -219,7 +219,8 @@ pub(super) fn SettingsView(
                                 private_key_pem: private_key(),
                                 save_settings: true,
                             };
-                            let action = if repo_cloned { "Syncing" } else { "Cloning" };
+                            let action = if repo_cloned { "Git sync" } else { "Clone" };
+                            let action_progress = if repo_cloned { "Syncing" } else { "Cloning" };
                             let key_source = if input.private_key_pem.trim().is_empty() {
                                 "saved SSH key"
                             } else {
@@ -230,28 +231,28 @@ pub(super) fn SettingsView(
                             clone_dialog_title.set(format!("{action} repository"));
                             clone_dialog_message.set(format!(
                                 "{} {} at {} using {}",
-                                action,
+                                action_progress,
                                 remote_input_from_settings(&input.host, &input.repo, &input.ssh_user),
                                 input.data_dir,
                                 key_source
                             ));
-                            status.set(format!("{action} repository..."));
+                            status.set(format!("{action_progress} repository..."));
                             spawn(async move {
                                 match sync_git_repo(input).await {
                                     Ok(result) => {
                                         clone_dialog_title.set("Repository ready".to_string());
                                         clone_dialog_message.set(format!(
-                                            "Synced {} from {} {}",
+                                            "Git synced {} from {} {}",
                                             result.data_dir, result.remote_url, result.branch
                                         ));
-                                        status.set(format!("Synced {} from {} {}", result.data_dir, result.remote_url, result.branch));
+                                        status.set(format!("Git synced {} from {} {}", result.data_dir, result.remote_url, result.branch));
                                         settings.restart();
                                         onrefresh.call(());
                                     }
                                     Err(error) => {
                                         clone_dialog_title.set("Git operation failed".to_string());
                                         clone_dialog_message.set(error.clone());
-                                        status.set(format!("Sync failed: {error}"));
+                                        status.set(format!("Git sync failed: {error}"));
                                     }
                                 }
                                 busy.set(false);
@@ -501,7 +502,7 @@ fn GitLocationList(
         .map(short_commit)
         .unwrap_or_else(|| "Not cloned".to_string());
     let status_label = if state.cloned { "Cloned" } else { "Not cloned" };
-    let action_label = if state.cloned { "Sync" } else { "Clone" };
+    let action_label = if state.cloned { "Git sync" } else { "Clone" };
 
     rsx! {
         div { class: "git-locations",

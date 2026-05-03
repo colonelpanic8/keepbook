@@ -417,7 +417,7 @@ fn SpendingPieChart(
         return rsx! {
             div { class: "chart-empty spending-empty",
                 strong { "No spending in range" }
-                small { "Sync transactions or adjust the range." }
+                small { "Refresh transactions or adjust the range." }
             }
         };
     }

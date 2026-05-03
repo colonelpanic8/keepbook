@@ -82,14 +82,14 @@ pub(super) fn AccountGraphPanel(
             if selected_id.is_empty() {
                 div { class: "chart-empty",
                     strong { "No accounts" }
-                    small { "Sync or add an account to populate account charts." }
+                    small { "Refresh balances or add an account to populate account charts." }
                 }
             } else {
                 HistoryGraphPanel {
                     title: selected_name.clone(),
                     scope_label: selected_connection.clone(),
                     empty_title: "No account history".to_string(),
-                    empty_detail: "Sync balances for this account to populate the chart.".to_string(),
+                    empty_detail: "Refresh balances for this account to populate the chart.".to_string(),
                     currency,
                     defaults,
                     filter_overrides,
