@@ -12,7 +12,7 @@ keepbook_tray_cmd := env_var_or_default(
 )
 keepbook_dioxus_desktop_cmd := env_var_or_default(
   "KEEPBOOK_DIOXUS_DESKTOP_CMD",
-  "dx serve --desktop --package keepbook-dioxus --no-default-features --features desktop",
+  "dx serve --platform desktop --package keepbook-dioxus --no-default-features --features desktop",
 )
 
 # Run the development keepbook binary with arbitrary args.
@@ -31,11 +31,36 @@ run-tray *args:
 
 # Run the Dioxus desktop app with its integrated tray icon.
 run-dioxus-desktop *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ -z "${WAYLAND_DISPLAY:-}" ]]; then
+      for socket in "${XDG_RUNTIME_DIR:-}"/wayland-*; do
+        [[ -S "$socket" ]] || continue
+        export WAYLAND_DISPLAY="${socket##*/}"
+        break
+      done
+    fi
+    if [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
+      export GDK_BACKEND="${GDK_BACKEND:-wayland,x11}"
+    fi
     {{keepbook_dioxus_desktop_cmd}} "$@"
 
 # Run the Dioxus desktop app from the directory containing Dioxus.toml.
 dioxus-serve *args:
-    cd crates/keepbook-dioxus && dx serve --desktop --package keepbook-dioxus --no-default-features --features desktop "$@"
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ -z "${WAYLAND_DISPLAY:-}" ]]; then
+      for socket in "${XDG_RUNTIME_DIR:-}"/wayland-*; do
+        [[ -S "$socket" ]] || continue
+        export WAYLAND_DISPLAY="${socket##*/}"
+        break
+      done
+    fi
+    if [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
+      export GDK_BACKEND="${GDK_BACKEND:-wayland,x11}"
+    fi
+    cd crates/keepbook-dioxus
+    dx serve --platform desktop --package keepbook-dioxus --no-default-features --features desktop "$@"
 
 # Build the Dioxus Linux desktop app as a release bundle.
 dioxus-desktop-release *args:
