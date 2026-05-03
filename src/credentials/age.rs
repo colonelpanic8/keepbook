@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::io::BufReader;
 use std::path::PathBuf;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use async_trait::async_trait;
 use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
@@ -11,6 +11,13 @@ use super::field_entry::FieldEntry;
 use super::CredentialStore;
 
 const AGE_IDENTITY_PATH_ENV: &str = "KEEPBOOK_CREDENTIALS_AGE_IDENTITY_PATH";
+const DEFAULT_SSH_IDENTITY_FILES: &[&str] = &[
+    "id_ed25519",
+    "id_rsa",
+    "id_ecdsa",
+    "id_ecdsa_sk",
+    "id_ed25519_sk",
+];
 
 /// Configuration for an age-encrypted credential entry.
 ///
@@ -81,7 +88,7 @@ impl AgeCredentialStore {
         }
     }
 
-    fn identity_path(&self) -> Result<PathBuf> {
+    fn configured_identity_path(&self) -> Result<Option<PathBuf>> {
         if let Some(path) = self
             .config
             .identity_path
@@ -89,23 +96,44 @@ impl AgeCredentialStore {
             .map(str::trim)
             .filter(|path| !path.is_empty())
         {
-            return Ok(self.resolve_path(path));
+            return Ok(Some(self.resolve_path(path)));
         }
 
-        let path = std::env::var(AGE_IDENTITY_PATH_ENV).with_context(|| {
-            format!(
-                "age credential identity is not configured; set identity_path or {AGE_IDENTITY_PATH_ENV}"
-            )
-        })?;
-        Ok(self.resolve_path(path.trim()))
+        match std::env::var(AGE_IDENTITY_PATH_ENV) {
+            Ok(path) if !path.trim().is_empty() => Ok(Some(self.resolve_path(path.trim()))),
+            Ok(_) | Err(std::env::VarError::NotPresent) => Ok(None),
+            Err(err) => Err(err).with_context(|| format!("Failed to read {AGE_IDENTITY_PATH_ENV}")),
+        }
     }
 
-    fn read_entry(&self) -> Result<FieldEntry> {
-        let age_path = self.resolve_path(&self.config.path);
-        let identity_path = self.identity_path()?;
-        let ciphertext = std::fs::read(&age_path)
-            .with_context(|| format!("Failed to read age credentials {}", age_path.display()))?;
-        let identity_pem = std::fs::read_to_string(&identity_path).with_context(|| {
+    fn default_identity_paths() -> Vec<PathBuf> {
+        let Some(home_dir) = dirs::home_dir() else {
+            return Vec::new();
+        };
+        let ssh_dir = home_dir.join(".ssh");
+        DEFAULT_SSH_IDENTITY_FILES
+            .iter()
+            .map(|name| ssh_dir.join(name))
+            .filter(|path| path.exists())
+            .collect()
+    }
+
+    fn identity_paths(&self) -> Result<Vec<PathBuf>> {
+        if let Some(path) = self.configured_identity_path()? {
+            return Ok(vec![path]);
+        }
+
+        let paths = Self::default_identity_paths();
+        if paths.is_empty() {
+            bail!(
+                "age credential identity is not configured; set identity_path or {AGE_IDENTITY_PATH_ENV}, or create a default SSH identity under ~/.ssh"
+            );
+        }
+        Ok(paths)
+    }
+
+    fn decrypt_with_identity(&self, ciphertext: &[u8], identity_path: &PathBuf) -> Result<Vec<u8>> {
+        let identity_pem = std::fs::read_to_string(identity_path).with_context(|| {
             format!(
                 "Failed to read age SSH identity {}",
                 identity_path.display()
@@ -118,8 +146,33 @@ impl AgeCredentialStore {
                     format!("Failed to parse SSH identity {}", identity_path.display())
                 })?;
 
-        let plaintext = ::age::decrypt(&identity, &ciphertext)
-            .with_context(|| format!("Failed to decrypt {}", age_path.display()))?;
+        ::age::decrypt(&identity, ciphertext)
+            .with_context(|| format!("Failed to decrypt with {}", identity_path.display()))
+    }
+
+    fn read_entry(&self) -> Result<FieldEntry> {
+        let age_path = self.resolve_path(&self.config.path);
+        let identity_paths = self.identity_paths()?;
+        let ciphertext = std::fs::read(&age_path)
+            .with_context(|| format!("Failed to read age credentials {}", age_path.display()))?;
+        let mut failures = Vec::new();
+        let mut plaintext = None;
+        for identity_path in &identity_paths {
+            match self.decrypt_with_identity(&ciphertext, identity_path) {
+                Ok(decrypted) => {
+                    plaintext = Some(decrypted);
+                    break;
+                }
+                Err(err) => failures.push(format!("{}: {err:#}", identity_path.display())),
+            }
+        }
+        let plaintext = plaintext.ok_or_else(|| {
+            anyhow!(
+                "Failed to decrypt {} with configured/default SSH identities: {}",
+                age_path.display(),
+                failures.join("; ")
+            )
+        })?;
         let content = String::from_utf8(plaintext).with_context(|| {
             format!(
                 "Decrypted credentials are not UTF-8: {}",
@@ -166,5 +219,22 @@ mod tests {
             store.resolve_path("creds/foo.age"),
             Path::new("/tmp/keepbook/creds/foo.age")
         );
+    }
+
+    #[test]
+    fn configured_identity_path_wins() -> Result<()> {
+        let store = AgeCredentialStore::with_base_dir(
+            AgeConfig {
+                path: "creds/foo.age".to_string(),
+                identity_path: Some("key".to_string()),
+                fields: HashMap::new(),
+            },
+            Path::new("/tmp/keepbook"),
+        );
+        assert_eq!(
+            store.configured_identity_path()?,
+            Some(Path::new("/tmp/keepbook/key").to_path_buf())
+        );
+        Ok(())
     }
 }
