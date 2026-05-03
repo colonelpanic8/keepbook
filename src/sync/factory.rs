@@ -30,6 +30,11 @@ impl DefaultSynchronizerFactory {
     }
 }
 
+fn browser_sync_unsupported_on_this_platform(synchronizer: &str) -> bool {
+    cfg!(any(target_os = "android", target_os = "ios"))
+        && matches!(synchronizer, "chase" | "schwab")
+}
+
 #[async_trait::async_trait]
 impl SynchronizerFactory for DefaultSynchronizerFactory {
     async fn create(
@@ -37,6 +42,13 @@ impl SynchronizerFactory for DefaultSynchronizerFactory {
         connection: &Connection,
         storage: &dyn Storage,
     ) -> Result<Box<dyn Synchronizer>> {
+        if browser_sync_unsupported_on_this_platform(&connection.config.synchronizer) {
+            return Err(anyhow!(
+                "{} sync is not supported in the mobile app because it requires a desktop browser login/session.",
+                connection.config.synchronizer
+            ));
+        }
+
         match connection.config.synchronizer.as_str() {
             "chase" => {
                 // Chase uses ephemeral cache directories for browser profiles/downloads.
