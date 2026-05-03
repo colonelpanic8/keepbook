@@ -1724,6 +1724,18 @@ small,
     grid-template-columns: 1fr;
   }
 
+  .spending-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .spending-chart-area {
+    justify-content: center;
+  }
+
+  .spending-pie {
+    max-width: 320px;
+  }
+
   .graph-scope-control {
     grid-template-columns: 1fr;
     width: 100%;

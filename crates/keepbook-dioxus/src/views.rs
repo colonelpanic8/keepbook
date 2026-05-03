@@ -288,12 +288,6 @@ fn Dashboard(
                     div {
                         h1 { "{active.label()}" }
                     }
-                    button {
-                        class: "topbar-button",
-                        title: "Refresh",
-                        onclick: move |_| onrefresh.call(()),
-                        "Refresh"
-                    }
                 }
                 match active {
                     ActiveView::Spending => rsx! {
