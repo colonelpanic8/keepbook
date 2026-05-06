@@ -1,4 +1,3 @@
-use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
@@ -43,9 +42,6 @@ const OVERLAY_ERROR_32: &[u8] = include_bytes!("../../assets/overlay-error-32.pn
 const OVERLAY_ERROR_48: &[u8] = include_bytes!("../../assets/overlay-error-48.png");
 const OVERLAY_ERROR_64: &[u8] = include_bytes!("../../assets/overlay-error-64.png");
 const DATA_WATCH_DEBOUNCE: Duration = Duration::from_millis(500);
-const PORTFOLIO_GRAPH_DAYS: u32 = 90;
-const PORTFOLIO_GRAPH_SPARKLINE_WIDTH: usize = 36;
-const PORTFOLIO_GRAPH_MAX_RENDER_POINTS: usize = 180;
 
 fn png_to_argb32(png_data: &[u8]) -> ksni::Icon {
     let img = image::load_from_memory_with_format(png_data, image::ImageFormat::Png)
@@ -194,7 +190,7 @@ enum DaemonStatus {
 #[derive(Debug, Clone)]
 enum DaemonCommand {
     SyncNow,
-    OpenPortfolioGraph,
+    OpenDioxusApp,
     Quit,
 }
 
@@ -206,7 +202,6 @@ struct KeepbookTrayState {
     last_summary: String,
     history_lines: Vec<String>,
     portfolio_breakdown_lines: Vec<String>,
-    graph_lines: Vec<String>,
     spending_lines: Vec<String>,
     transaction_lines: Vec<String>,
 }
@@ -220,7 +215,6 @@ impl Default for KeepbookTrayState {
             last_summary: "No sync cycle has run yet".to_string(),
             history_lines: vec!["No portfolio history loaded".to_string()],
             portfolio_breakdown_lines: vec!["No portfolio breakdown loaded".to_string()],
-            graph_lines: vec!["No portfolio graph loaded".to_string()],
             spending_lines: vec!["Spending metrics not loaded".to_string()],
             transaction_lines: vec!["Transactions not loaded".to_string()],
         }
@@ -410,28 +404,6 @@ impl ksni::Tray for KeepbookTray {
                     .collect()
             };
 
-        let graph_items: Vec<MenuItem<Self>> = if self.state.graph_lines.is_empty() {
-            vec![StandardItem {
-                label: "No portfolio graph available".to_string(),
-                enabled: false,
-                ..Default::default()
-            }
-            .into()]
-        } else {
-            self.state
-                .graph_lines
-                .iter()
-                .map(|line| {
-                    StandardItem {
-                        label: line.clone(),
-                        enabled: false,
-                        ..Default::default()
-                    }
-                    .into()
-                })
-                .collect()
-        };
-
         let mut items = vec![
             StandardItem {
                 label: "keepbook sync daemon".to_string(),
@@ -479,26 +451,6 @@ impl ksni::Tray for KeepbookTray {
                 label: "Portfolio Breakdown".to_string(),
                 icon_name: "view-financial-account".to_string(),
                 submenu: portfolio_breakdown_menu,
-                ..Default::default()
-            }
-            .into(),
-        );
-        items.push(
-            StandardItem {
-                label: format!("Portfolio Graph (last {PORTFOLIO_GRAPH_DAYS}d)"),
-                enabled: false,
-                ..Default::default()
-            }
-            .into(),
-        );
-        items.extend(graph_items);
-        items.push(
-            StandardItem {
-                label: "Open Detailed Portfolio Graph".to_string(),
-                icon_name: "office-chart-line".to_string(),
-                activate: Box::new(|this: &mut Self| {
-                    let _ = this.cmd_tx.send(DaemonCommand::OpenPortfolioGraph);
-                }),
                 ..Default::default()
             }
             .into(),
@@ -553,6 +505,15 @@ impl ksni::Tray for KeepbookTray {
                 icon_name: "view-refresh".to_string(),
                 activate: Box::new(|this: &mut Self| {
                     let _ = this.cmd_tx.send(DaemonCommand::SyncNow);
+                }),
+                ..Default::default()
+            }
+            .into(),
+            StandardItem {
+                label: "Open Dioxus App".to_string(),
+                icon_name: "keepbook".to_string(),
+                activate: Box::new(|this: &mut Self| {
+                    let _ = this.cmd_tx.send(DaemonCommand::OpenDioxusApp);
                 }),
                 ..Default::default()
             }
@@ -719,126 +680,6 @@ fn format_history_change_for_tray(percentage_change: Option<&str>) -> String {
     }
 }
 
-#[derive(Clone, Debug)]
-struct GraphPoint {
-    date: String,
-    value_str: String,
-    value: f64,
-}
-
-fn parse_graph_value(value: &str) -> Option<f64> {
-    value.parse::<f64>().ok().filter(|value| value.is_finite())
-}
-
-fn downsample_graph_points(points: &[app::HistoryPoint], max_points: usize) -> Vec<GraphPoint> {
-    let parsed: Vec<GraphPoint> = points
-        .iter()
-        .filter_map(|point| {
-            parse_graph_value(&point.total_value).map(|value| GraphPoint {
-                date: point.date.clone(),
-                value_str: point.total_value.clone(),
-                value,
-            })
-        })
-        .collect();
-
-    if parsed.is_empty() || max_points == 0 {
-        return Vec::new();
-    }
-
-    if parsed.len() <= max_points {
-        return parsed;
-    }
-
-    if max_points == 1 {
-        return vec![parsed[parsed.len() - 1].clone()];
-    }
-
-    let step = (parsed.len() - 1) as f64 / (max_points - 1) as f64;
-    (0..max_points)
-        .map(|index| {
-            let source_index = ((index as f64) * step).round() as usize;
-            parsed[source_index.min(parsed.len() - 1)].clone()
-        })
-        .collect()
-}
-
-fn build_sparkline(values: &[f64]) -> String {
-    const BLOCKS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
-
-    if values.is_empty() {
-        return "No graph data".to_string();
-    }
-
-    let min = values.iter().copied().fold(f64::INFINITY, f64::min);
-    let max = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-
-    if !min.is_finite() || !max.is_finite() {
-        return "No graph data".to_string();
-    }
-
-    if (max - min).abs() < f64::EPSILON {
-        return std::iter::repeat_n(BLOCKS[3], values.len()).collect();
-    }
-
-    values
-        .iter()
-        .map(|value| {
-            let ratio = ((*value - min) / (max - min)).clamp(0.0, 1.0);
-            let bucket = (ratio * (BLOCKS.len() - 1) as f64).round() as usize;
-            BLOCKS[bucket.min(BLOCKS.len() - 1)]
-        })
-        .collect()
-}
-
-fn format_axis_currency(
-    value: f64,
-    currency: &str,
-    display: &keepbook::config::DisplayConfig,
-) -> String {
-    format_tray_currency(&format!("{value:.2}"), currency, display)
-}
-
-fn build_portfolio_graph_lines(
-    history: &app::HistoryOutput,
-    config: &ResolvedConfig,
-) -> Vec<String> {
-    let points = downsample_graph_points(&history.points, PORTFOLIO_GRAPH_SPARKLINE_WIDTH);
-    if points.is_empty() {
-        return vec![format!(
-            "No portfolio data for last {PORTFOLIO_GRAPH_DAYS}d"
-        )];
-    }
-
-    let values: Vec<f64> = points.iter().map(|point| point.value).collect();
-    let low = points
-        .iter()
-        .min_by(|left, right| left.value.total_cmp(&right.value))
-        .expect("points is not empty");
-    let now = points.last().expect("points is not empty");
-    let delta = format_history_change_for_tray(
-        history
-            .summary
-            .as_ref()
-            .map(|summary| summary.percentage_change.as_str()),
-    );
-
-    vec![
-        format!(
-            "{} .. {}",
-            points.first().expect("points is not empty").date,
-            now.date
-        ),
-        build_sparkline(&values),
-        format!(
-            "Low {} | Now {} | {}",
-            format_tray_currency(&low.value_str, &history.currency, &config.display),
-            format_tray_currency(&now.value_str, &history.currency, &config.display),
-            delta
-        ),
-    ]
-}
-
 fn build_portfolio_breakdown_lines(
     snapshot: &keepbook::portfolio::PortfolioSnapshot,
     config: &ResolvedConfig,
@@ -873,352 +714,39 @@ fn build_portfolio_breakdown_lines(
     lines
 }
 
-fn escape_html(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
+fn spawn_detached(program: &str, args: &[&str]) -> Result<()> {
+    Command::new(program)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .with_context(|| format!("Failed to launch {program}"))?;
+    Ok(())
 }
 
-fn render_portfolio_graph_html(
-    history: &app::HistoryOutput,
-    config: &ResolvedConfig,
-) -> Result<String> {
-    let points = downsample_graph_points(&history.points, PORTFOLIO_GRAPH_MAX_RENDER_POINTS);
-    if points.len() < 2 {
-        anyhow::bail!("Need at least two history points to render a graph");
+fn open_dioxus_app() -> Result<()> {
+    if let Ok(command) = std::env::var("KEEPBOOK_DIOXUS_APP_CMD") {
+        if !command.trim().is_empty() {
+            return spawn_detached("sh", &["-lc", &command]);
+        }
     }
 
-    let width = 1400.0;
-    let height = 900.0;
-    let left = 130.0;
-    let right = 48.0;
-    let top = 72.0;
-    let bottom = 118.0;
-    let plot_width = width - left - right;
-    let plot_height = height - top - bottom;
-    let plot_bottom = top + plot_height;
-
-    let min_value = points
-        .iter()
-        .map(|point| point.value)
-        .fold(f64::INFINITY, f64::min);
-    let max_value = points
-        .iter()
-        .map(|point| point.value)
-        .fold(f64::NEG_INFINITY, f64::max);
-    let raw_range = (max_value - min_value).abs();
-    let padding = if raw_range < 1.0 {
-        max_value.abs().max(1.0) * 0.05
-    } else {
-        raw_range * 0.08
-    };
-    let display_min = min_value - padding;
-    let display_max = max_value + padding;
-    let display_range = (display_max - display_min).max(1.0);
-
-    let coords: Vec<(f64, f64)> = points
-        .iter()
-        .enumerate()
-        .map(|(index, point)| {
-            let x_ratio = if points.len() == 1 {
-                0.0
-            } else {
-                index as f64 / (points.len() - 1) as f64
-            };
-            let x = left + x_ratio * plot_width;
-            let y = top + ((display_max - point.value) / display_range) * plot_height;
-            (x, y)
-        })
-        .collect();
-
-    let polyline_points = coords
-        .iter()
-        .map(|(x, y)| format!("{x:.2},{y:.2}"))
-        .collect::<Vec<_>>()
-        .join(" ");
-    let first_x = coords.first().expect("coords is not empty").0;
-    let last_x = coords.last().expect("coords is not empty").0;
-    let area_points =
-        format!("{first_x:.2},{plot_bottom:.2} {polyline_points} {last_x:.2},{plot_bottom:.2}");
-
-    let grid_lines = (0..=4)
-        .map(|index| {
-            let ratio = index as f64 / 4.0;
-            let y = top + ratio * plot_height;
-            let value = display_max - ratio * (display_max - display_min);
-            format!(
-                r#"<g>
-  <line x1="{left:.2}" y1="{y:.2}" x2="{x2:.2}" y2="{y:.2}" />
-  <text x="{label_x:.2}" y="{text_y:.2}">{label}</text>
-</g>"#,
-                x2 = width - right,
-                label_x = left - 14.0,
-                text_y = y + 5.0,
-                label = escape_html(&format_axis_currency(
-                    value,
-                    &history.currency,
-                    &config.display
-                ))
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    let mid_index = points.len() / 2;
-    let x_labels = [
-        (coords[0].0, points[0].date.as_str()),
-        (coords[mid_index].0, points[mid_index].date.as_str()),
-        (
-            coords[points.len() - 1].0,
-            points[points.len() - 1].date.as_str(),
-        ),
-    ]
-    .into_iter()
-    .map(|(x, label)| {
-        format!(
-            r#"<text x="{x:.2}" y="{y:.2}" text-anchor="middle">{}</text>"#,
-            escape_html(label),
-            y = height - 44.0
-        )
-    })
-    .collect::<Vec<_>>()
-    .join("\n");
-
-    let latest = points.last().expect("points is not empty");
-    let low = points
-        .iter()
-        .min_by(|left, right| left.value.total_cmp(&right.value))
-        .expect("points is not empty");
-    let high = points
-        .iter()
-        .max_by(|left, right| left.value.total_cmp(&right.value))
-        .expect("points is not empty");
-    let delta = format_history_change_for_tray(
-        history
-            .summary
-            .as_ref()
-            .map(|summary| summary.percentage_change.as_str()),
-    );
-    let title = format!("Keepbook Net Worth (last {PORTFOLIO_GRAPH_DAYS}d)");
-    let subtitle = format!(
-        "{} .. {}",
-        points.first().expect("points is not empty").date,
-        latest.date
-    );
-    let final_marker = coords.last().expect("coords is not empty");
-
-    Ok(format!(
-        r#"<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{title}</title>
-    <style>
-      :root {{
-        color-scheme: light;
-        --bg: #f5f8fb;
-        --panel: #ffffff;
-        --ink: #10243a;
-        --muted: #5f7388;
-        --grid: #d8e3ef;
-        --accent: #1f9d70;
-        --accent-fill: rgba(31, 157, 112, 0.16);
-      }}
-      * {{ box-sizing: border-box; }}
-      body {{
-        margin: 0;
-        font-family: "IBM Plex Sans", "Avenir Next", sans-serif;
-        color: var(--ink);
-        background:
-          radial-gradient(circle at top left, rgba(31, 157, 112, 0.14), transparent 36%),
-          linear-gradient(180deg, #fbfdff 0%, var(--bg) 100%);
-      }}
-      main {{
-        max-width: 1500px;
-        margin: 0 auto;
-        padding: 36px 28px 48px;
-      }}
-      .panel {{
-        background: var(--panel);
-        border: 1px solid #dce7f1;
-        border-radius: 24px;
-        box-shadow: 0 24px 80px rgba(16, 36, 58, 0.08);
-        overflow: hidden;
-      }}
-      header {{
-        padding: 28px 32px 8px;
-      }}
-      h1 {{
-        margin: 0;
-        font-size: 30px;
-        line-height: 1.1;
-      }}
-      .sub {{
-        margin-top: 8px;
-        color: var(--muted);
-        font-size: 16px;
-      }}
-      .stats {{
-        display: flex;
-        gap: 18px;
-        flex-wrap: wrap;
-        padding: 0 32px 24px;
-      }}
-      .stat {{
-        min-width: 180px;
-        padding: 14px 16px;
-        border-radius: 16px;
-        background: #f7fafc;
-        border: 1px solid #e4edf5;
-      }}
-      .stat-label {{
-        color: var(--muted);
-        font-size: 12px;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-      }}
-      .stat-value {{
-        margin-top: 6px;
-        font-size: 21px;
-        font-weight: 700;
-      }}
-      svg {{
-        display: block;
-        width: 100%;
-        height: auto;
-      }}
-      .grid line {{
-        stroke: var(--grid);
-        stroke-width: 1;
-      }}
-      .grid text, .axis text {{
-        fill: var(--muted);
-        font-size: 16px;
-      }}
-      .area {{
-        fill: var(--accent-fill);
-      }}
-      .line {{
-        fill: none;
-        stroke: var(--accent);
-        stroke-width: 4;
-        stroke-linejoin: round;
-        stroke-linecap: round;
-      }}
-      .marker {{
-        fill: var(--accent);
-      }}
-    </style>
-  </head>
-  <body>
-    <main>
-      <section class="panel">
-        <header>
-          <h1>{title}</h1>
-          <div class="sub">{subtitle}</div>
-        </header>
-        <div class="stats">
-          <div class="stat">
-            <div class="stat-label">Current</div>
-            <div class="stat-value">{current}</div>
-          </div>
-          <div class="stat">
-            <div class="stat-label">Low</div>
-            <div class="stat-value">{low}</div>
-          </div>
-          <div class="stat">
-            <div class="stat-label">High</div>
-            <div class="stat-value">{high}</div>
-          </div>
-          <div class="stat">
-            <div class="stat-label">Change</div>
-            <div class="stat-value">{delta}</div>
-          </div>
-        </div>
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width:.0} {height:.0}" role="img" aria-labelledby="title desc">
-          <title id="title">{title}</title>
-          <desc id="desc">Net worth history from {subtitle}.</desc>
-          <g class="grid">
-            {grid_lines}
-          </g>
-          <polygon class="area" points="{area_points}" />
-          <polyline class="line" points="{polyline_points}" />
-          <circle class="marker" cx="{final_x:.2}" cy="{final_y:.2}" r="7" />
-          <g class="axis">
-            {x_labels}
-          </g>
-        </svg>
-      </section>
-    </main>
-  </body>
-</html>"#,
-        title = escape_html(&title),
-        subtitle = escape_html(&subtitle),
-        current = escape_html(&format_tray_currency(
-            &latest.value_str,
-            &history.currency,
-            &config.display
-        )),
-        low = escape_html(&format_tray_currency(
-            &low.value_str,
-            &history.currency,
-            &config.display
-        )),
-        high = escape_html(&format_tray_currency(
-            &high.value_str,
-            &history.currency,
-            &config.display
-        )),
-        delta = escape_html(&delta),
-        grid_lines = grid_lines,
-        area_points = area_points,
-        polyline_points = polyline_points,
-        final_x = final_marker.0,
-        final_y = final_marker.1,
-        x_labels = x_labels
-    ))
-}
-
-fn portfolio_graph_output_path() -> Result<PathBuf> {
-    let base = dirs::cache_dir()
-        .context("Could not find a cache directory for tray graph output")?
-        .join("keepbook")
-        .join("tray");
-    std::fs::create_dir_all(&base)
-        .with_context(|| format!("Failed to create tray graph directory: {}", base.display()))?;
-    Ok(base.join(format!("portfolio-graph-last-{PORTFOLIO_GRAPH_DAYS}d.html")))
-}
-
-fn open_path_in_browser(path: &Path) -> Result<()> {
-    let candidates: [(&str, Vec<OsString>); 3] = [
-        ("xdg-open", vec![path.as_os_str().to_os_string()]),
-        (
-            "gio",
-            vec![OsString::from("open"), path.as_os_str().to_os_string()],
-        ),
-        ("open", vec![path.as_os_str().to_os_string()]),
+    let candidates: [(&str, &[&str]); 2] = [
+        ("keepbook-dioxus", &[]),
+        ("gtk-launch", &["keepbook-dioxus"]),
     ];
-
     let mut errors = Vec::new();
 
     for (program, args) in candidates {
-        match Command::new(program)
-            .args(&args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-        {
-            Ok(_) => return Ok(()),
+        match spawn_detached(program, args) {
+            Ok(()) => return Ok(()),
             Err(err) => errors.push(format!("{program}: {err}")),
         }
     }
 
     anyhow::bail!(
-        "Unable to open portfolio graph automatically ({})",
+        "Unable to open the Dioxus app automatically ({})",
         errors.join("; ")
     )
 }
@@ -1498,42 +1026,6 @@ impl Daemon {
         }
     }
 
-    async fn portfolio_graph_history(&self) -> Result<app::HistoryOutput> {
-        let (start, end) = Self::last_n_days_range(PORTFOLIO_GRAPH_DAYS);
-        app::portfolio_history(
-            self.storage.clone(),
-            &self.config,
-            None,
-            Some(start.format("%Y-%m-%d").to_string()),
-            Some(end.format("%Y-%m-%d").to_string()),
-            "daily".to_string(),
-            true,
-        )
-        .await
-    }
-
-    async fn refresh_graph_lines(&self, state: &mut KeepbookTrayState) {
-        match self.portfolio_graph_history().await {
-            Ok(history) => {
-                state.graph_lines = build_portfolio_graph_lines(&history, &self.config);
-            }
-            Err(err) => {
-                warn!(error = %err, "unable to refresh tray portfolio graph");
-                state.graph_lines = vec![format!("Graph unavailable: {err}")];
-            }
-        }
-    }
-
-    async fn open_portfolio_graph(&self) -> Result<PathBuf> {
-        let history = self.portfolio_graph_history().await?;
-        let html = render_portfolio_graph_html(&history, &self.config)?;
-        let output_path = portfolio_graph_output_path()?;
-        std::fs::write(&output_path, html)
-            .with_context(|| format!("Failed to write graph HTML: {}", output_path.display()))?;
-        open_path_in_browser(&output_path)?;
-        Ok(output_path)
-    }
-
     async fn run_cycle(
         &self,
         reason: &str,
@@ -1624,7 +1116,6 @@ impl Daemon {
     ) {
         self.refresh_history_lines(state).await;
         self.refresh_portfolio_breakdown_lines(state).await;
-        self.refresh_graph_lines(state).await;
         self.refresh_spending_lines(state).await;
         self.refresh_transaction_lines(state).await;
         apply_tray_state(tray_handle, state).await;
@@ -1637,7 +1128,6 @@ impl Daemon {
         self.refresh_history_lines(&mut tray_state).await;
         self.refresh_portfolio_breakdown_lines(&mut tray_state)
             .await;
-        self.refresh_graph_lines(&mut tray_state).await;
         self.refresh_spending_lines(&mut tray_state).await;
         self.refresh_transaction_lines(&mut tray_state).await;
 
@@ -1726,18 +1216,16 @@ impl Daemon {
                             apply_tray_state(&mut tray_handle, &tray_state).await;
                             sync_sleep.as_mut().reset(tokio::time::Instant::now() + next_delay);
                         }
-                        DaemonCommand::OpenPortfolioGraph => {
-                            match self.open_portfolio_graph().await {
-                                Ok(path) => {
-                                    tray_state.last_summary = format!(
-                                        "Opened portfolio graph: {}",
-                                        path.display()
-                                    );
+                        DaemonCommand::OpenDioxusApp => {
+                            match open_dioxus_app() {
+                                Ok(()) => {
+                                    tray_state.last_summary =
+                                        "Opened Dioxus app".to_string();
                                 }
                                 Err(err) => {
-                                    warn!(error = %err, "unable to open portfolio graph");
+                                    warn!(error = %err, "unable to open Dioxus app");
                                     tray_state.last_summary =
-                                        format!("Portfolio graph unavailable: {err}");
+                                        format!("Dioxus app unavailable: {err}");
                                 }
                             }
                             apply_tray_state(&mut tray_handle, &tray_state).await;
@@ -1920,14 +1408,6 @@ mod tests {
     }
 
     #[test]
-    fn build_sparkline_tracks_simple_growth() {
-        let sparkline = build_sparkline(&[10.0, 20.0, 30.0, 40.0]);
-        assert_eq!(sparkline.chars().count(), 4);
-        assert_eq!(sparkline.chars().next(), Some('▁'));
-        assert_eq!(sparkline.chars().last(), Some('█'));
-    }
-
-    #[test]
     fn recent_spending_is_not_rendered_as_submenu() {
         let (cmd_tx, _cmd_rx) = mpsc::unbounded_channel();
         let state = KeepbookTrayState {
@@ -1973,31 +1453,16 @@ mod tests {
     }
 
     #[test]
-    fn portfolio_graph_preview_and_open_action_are_rendered_top_level() {
+    fn dioxus_app_action_is_rendered_top_level() {
         let (cmd_tx, _cmd_rx) = mpsc::unbounded_channel();
-        let state = KeepbookTrayState {
-            graph_lines: vec![
-                "2026-01-22 .. 2026-04-20".to_string(),
-                "▁▂▃▄▅▆▇█".to_string(),
-                "Low $100 | Now $150 | +50.00%".to_string(),
-            ],
-            ..KeepbookTrayState::default()
-        };
-        let tray = KeepbookTray::new(state, cmd_tx);
+        let tray = KeepbookTray::new(KeepbookTrayState::default(), cmd_tx);
 
         let menu = tray.menu();
         assert!(menu.iter().any(|item| {
             matches!(
                 item,
                 MenuItem::Standard(StandardItem { label, .. })
-                    if label == &format!("Portfolio Graph (last {PORTFOLIO_GRAPH_DAYS}d)")
-            )
-        }));
-        assert!(menu.iter().any(|item| {
-            matches!(
-                item,
-                MenuItem::Standard(StandardItem { label, .. })
-                    if label == "Open Detailed Portfolio Graph"
+                    if label == "Open Dioxus App"
             )
         }));
     }
