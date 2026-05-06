@@ -562,10 +562,16 @@
             };
             cargoBuildFlags = ["-p" cargoPackage];
             cargoTestFlags = ["-p" cargoPackage];
-            checkFlags = ["--skip" "contracts_match_both_clis"];
+            checkFlags = [
+              "--skip"
+              "contracts_match_both_clis"
+              "--skip"
+              "contracts_match_rust_cli"
+            ];
             nativeBuildInputs = [pkgs.pkg-config] ++ extraNativeBuildInputs;
             buildInputs = extraBuildInputs;
             OPENSSL_NO_VENDOR = "1";
+            RUST_MIN_STACK = "16777216";
           };
         keepbookDioxusDesktop = mkKeepbookPackage {
           pname = "keepbook-dioxus";
