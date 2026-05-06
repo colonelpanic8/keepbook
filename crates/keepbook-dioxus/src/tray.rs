@@ -3,7 +3,7 @@ use dioxus::desktop::trayicon::{
     menu::{Menu, MenuId, MenuItem, PredefinedMenuItem, Submenu},
     Icon, TrayIconBuilder,
 };
-use dioxus::desktop::{use_tray_menu_event_handler, window};
+use dioxus::desktop::{use_tray_menu_event_handler, window, WindowCloseBehaviour};
 use dioxus::prelude::*;
 use image::ImageReader;
 use std::io::Cursor;
@@ -54,6 +54,16 @@ fn toggle_window_visibility() {
     }
 }
 
+fn quit_app(mut tray_state: Signal<Option<TrayState>>) {
+    if let Some(tray_state) = tray_state.write().take() {
+        let _ = tray_state.tray.set_visible(false);
+    }
+
+    let win = window();
+    win.set_close_behavior(WindowCloseBehaviour::WindowCloses);
+    win.close();
+}
+
 #[component]
 pub fn KeepbookTray(
     overview: Option<Overview>,
@@ -61,7 +71,7 @@ pub fn KeepbookTray(
     runtime: TrayRuntime,
     onsyncnow: EventHandler<()>,
 ) -> Element {
-    let tray_state = use_hook(create_tray_state);
+    let tray_state = use_signal(create_tray_state);
 
     use_tray_menu_event_handler(move |event| match event.id().as_ref() {
         OPEN_APP_ID => show_window(),
@@ -70,12 +80,12 @@ pub fn KeepbookTray(
             show_window();
             onsyncnow.call(());
         }
-        QUIT_ID => std::process::exit(0),
+        QUIT_ID => quit_app(tray_state),
         _ => {}
     });
 
     use_effect(use_reactive!(|overview, tray_snapshot, runtime| {
-        if let Some(tray_state) = tray_state.as_ref() {
+        if let Some(tray_state) = tray_state.read().as_ref() {
             update_tray_state(
                 tray_state,
                 overview.as_ref(),
