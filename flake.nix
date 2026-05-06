@@ -162,6 +162,50 @@
           pkgs.xdotool
           pkgs.zlib
         ];
+        dioxusDarwinBuildInputs = lib.optionals isDarwin [
+          pkgs.apple-sdk_15
+        ];
+        dioxusDesktopPackageType =
+          if isDarwin
+          then "macos"
+          else "deb";
+        dioxusDesktopPlatformArg =
+          if isDarwin
+          then "--macos"
+          else "--desktop";
+        keepbookDioxusDarwinInfoPlist = pkgs.writeText "Keepbook-Info.plist" ''
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+            "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleDevelopmentRegion</key>
+            <string>en</string>
+            <key>CFBundleDisplayName</key>
+            <string>Keepbook</string>
+            <key>CFBundleExecutable</key>
+            <string>Keepbook</string>
+            <key>CFBundleIconFile</key>
+            <string>keepbook-icon.png</string>
+            <key>CFBundleIdentifier</key>
+            <string>org.colonelpanic.keepbook.dioxus</string>
+            <key>CFBundleInfoDictionaryVersion</key>
+            <string>6.0</string>
+            <key>CFBundleName</key>
+            <string>Keepbook</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>CFBundleShortVersionString</key>
+            <string>0.2.3</string>
+            <key>CFBundleVersion</key>
+            <string>0.2.3</string>
+            <key>LSMinimumSystemVersion</key>
+            <string>13.0</string>
+            <key>NSHighResolutionCapable</key>
+            <true/>
+          </dict>
+          </plist>
+        '';
         dioxusAndroidBuildScript = release:
           pkgs.writeShellApplication {
             name = "keepbook-dioxus-android-${
@@ -366,8 +410,8 @@
             mkdir -p "$out_dir"
 
             nix develop "$repo" --command dx bundle \
-              --desktop \
-              --package-types deb \
+              ${dioxusDesktopPlatformArg} \
+              --package-types ${dioxusDesktopPackageType} \
               --out-dir "$out_dir" \
               --package keepbook-dioxus \
               --no-default-features \
@@ -389,6 +433,34 @@
           categories = ["Office" "Finance"];
           startupNotify = true;
         };
+        keepbookDioxusDesktopLinuxPostInstall = lib.optionalString isLinux ''
+          wrapProgram "$out/bin/keepbook-dioxus" \
+            --set WEBKIT_DISABLE_DMABUF_RENDERER 1 \
+            --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath dioxusLinuxLibraryPathInputs}
+
+          install -Dm644 ${cleanSrc}/assets/keepbook-icon.svg \
+            "$out/share/icons/hicolor/scalable/apps/keepbook.svg"
+          install -Dm644 ${cleanSrc}/assets/keepbook-icon-32.png \
+            "$out/share/icons/hicolor/32x32/apps/keepbook.png"
+          install -Dm644 ${cleanSrc}/assets/keepbook-icon-48.png \
+            "$out/share/icons/hicolor/48x48/apps/keepbook.png"
+          install -Dm644 ${cleanSrc}/assets/keepbook-icon-64.png \
+            "$out/share/icons/hicolor/64x64/apps/keepbook.png"
+          install -Dm644 ${keepbookDioxusDesktopItem}/share/applications/keepbook-dioxus.desktop \
+            "$out/share/applications/keepbook-dioxus.desktop"
+        '';
+        keepbookDioxusDesktopDarwinPostInstall = lib.optionalString isDarwin ''
+          app="$out/Applications/Keepbook.app"
+          contents="$app/Contents"
+          macos="$contents/MacOS"
+          resources="$contents/Resources"
+
+          mkdir -p "$macos" "$resources"
+          cp "$out/bin/keepbook-dioxus" "$macos/Keepbook"
+          chmod +x "$macos/Keepbook"
+          install -Dm644 ${cleanSrc}/assets/keepbook-icon-64.png "$resources/keepbook-icon.png"
+          install -Dm644 ${keepbookDioxusDarwinInfoPlist} "$contents/Info.plist"
+        '';
         keepbookAgeRecipientsScript = pkgs.writeShellApplication {
           name = "keepbook-age-recipients";
           runtimeInputs = [
@@ -579,23 +651,8 @@
           buildNoDefaultFeatures = true;
           buildFeatures = ["desktop"];
           extraNativeBuildInputs = [pkgs.makeWrapper];
-          extraBuildInputs = dioxusLinuxBuildInputs ++ [pkgs.openssl];
-          postInstall = ''
-            wrapProgram "$out/bin/keepbook-dioxus" \
-              --set WEBKIT_DISABLE_DMABUF_RENDERER 1 \
-              --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath dioxusLinuxLibraryPathInputs}
-
-            install -Dm644 ${cleanSrc}/assets/keepbook-icon.svg \
-              "$out/share/icons/hicolor/scalable/apps/keepbook.svg"
-            install -Dm644 ${cleanSrc}/assets/keepbook-icon-32.png \
-              "$out/share/icons/hicolor/32x32/apps/keepbook.png"
-            install -Dm644 ${cleanSrc}/assets/keepbook-icon-48.png \
-              "$out/share/icons/hicolor/48x48/apps/keepbook.png"
-            install -Dm644 ${cleanSrc}/assets/keepbook-icon-64.png \
-              "$out/share/icons/hicolor/64x64/apps/keepbook.png"
-            install -Dm644 ${keepbookDioxusDesktopItem}/share/applications/keepbook-dioxus.desktop \
-              "$out/share/applications/keepbook-dioxus.desktop"
-          '';
+          extraBuildInputs = dioxusLinuxBuildInputs ++ dioxusDarwinBuildInputs ++ [pkgs.openssl];
+          postInstall = keepbookDioxusDesktopLinuxPostInstall + keepbookDioxusDesktopDarwinPostInstall;
         };
       in {
         formatter = pkgs.alejandra;
@@ -607,16 +664,18 @@
             keepbook-age-recipients = keepbookAgeRecipientsScript;
             keepbook-age-encrypt = keepbookAgeEncryptScript;
           }
+          // lib.optionalAttrs (isLinux || isDarwin) {
+            keepbook-dioxus-desktop = keepbookDioxusDesktop;
+            keepbook-dioxus-desktop-release-runner = dioxusDesktopBuildScript;
+          }
           // lib.optionalAttrs isLinux {
             keepbook-tray = mkKeepbookPackage {
               pname = "keepbook-tray";
               buildFeatures = ["tray"];
               extraBuildInputs = [pkgs.dbus];
             };
-            keepbook-dioxus-desktop = keepbookDioxusDesktop;
             keepbook-dioxus-android-debug-runner = dioxusAndroidBuildScript false;
             keepbook-dioxus-android-release-runner = dioxusAndroidBuildScript true;
-            keepbook-dioxus-desktop-release-runner = dioxusDesktopBuildScript;
           };
 
         apps =
@@ -628,6 +687,23 @@
             keepbook-age-encrypt = {
               type = "app";
               program = "${keepbookAgeEncryptScript}/bin/keepbook-age-encrypt";
+            };
+          }
+          // lib.optionalAttrs (isLinux || isDarwin) {
+            dioxus-desktop-release = {
+              type = "app";
+              program = "${dioxusDesktopBuildScript}/bin/keepbook-dioxus-desktop-release";
+            };
+            keepbook-dioxus-desktop = {
+              type = "app";
+              program =
+                if isDarwin
+                then "${keepbookDioxusDesktop}/Applications/Keepbook.app/Contents/MacOS/Keepbook"
+                else "${keepbookDioxusDesktop}/bin/keepbook-dioxus";
+            };
+            keepbook-dioxus-desktop-release = {
+              type = "app";
+              program = "${dioxusDesktopBuildScript}/bin/keepbook-dioxus-desktop-release";
             };
           }
           // lib.optionalAttrs isLinux {
@@ -646,18 +722,6 @@
             keepbook-dioxus-android-release = {
               type = "app";
               program = "${dioxusAndroidBuildScript true}/bin/keepbook-dioxus-android-release";
-            };
-            dioxus-desktop-release = {
-              type = "app";
-              program = "${dioxusDesktopBuildScript}/bin/keepbook-dioxus-desktop-release";
-            };
-            keepbook-dioxus-desktop = {
-              type = "app";
-              program = "${keepbookDioxusDesktop}/bin/keepbook-dioxus";
-            };
-            keepbook-dioxus-desktop-release = {
-              type = "app";
-              program = "${dioxusDesktopBuildScript}/bin/keepbook-dioxus-desktop-release";
             };
           };
 

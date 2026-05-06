@@ -62,7 +62,7 @@ dioxus-serve *args:
     cd crates/keepbook-dioxus
     dx serve --platform desktop --package keepbook-dioxus --no-default-features --features desktop "$@"
 
-# Build the Dioxus Linux desktop app as a release bundle.
+# Build the Dioxus desktop app as a platform-native release bundle.
 dioxus-desktop-release *args:
     nix run .#dioxus-desktop-release -- "$@"
 
