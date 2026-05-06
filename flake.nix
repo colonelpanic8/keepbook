@@ -379,6 +379,16 @@
             find "$out_dir" -type f -print
           '';
         };
+        keepbookDioxusDesktopItem = pkgs.makeDesktopItem {
+          name = "keepbook-dioxus";
+          desktopName = "Keepbook";
+          genericName = "Personal finance toolkit";
+          comment = "Local-first personal finance toolkit";
+          exec = "keepbook-dioxus";
+          icon = "keepbook";
+          categories = ["Office" "Finance"];
+          startupNotify = true;
+        };
         keepbookAgeRecipientsScript = pkgs.writeShellApplication {
           name = "keepbook-age-recipients";
           runtimeInputs = [
@@ -538,11 +548,13 @@
           pname,
           cargoPackage ? "keepbook",
           buildFeatures ? [],
+          buildNoDefaultFeatures ? false,
           extraBuildInputs ? [],
           extraNativeBuildInputs ? [],
+          postInstall ? "",
         }:
           rustPlatform.buildRustPackage {
-            inherit pname buildFeatures;
+            inherit pname buildFeatures buildNoDefaultFeatures postInstall;
             version = "0.2.3";
             src = cleanSrc;
             cargoLock = {
@@ -553,7 +565,32 @@
             checkFlags = ["--skip" "contracts_match_both_clis"];
             nativeBuildInputs = [pkgs.pkg-config] ++ extraNativeBuildInputs;
             buildInputs = extraBuildInputs;
+            OPENSSL_NO_VENDOR = "1";
           };
+        keepbookDioxusDesktop = mkKeepbookPackage {
+          pname = "keepbook-dioxus";
+          cargoPackage = "keepbook-dioxus";
+          buildNoDefaultFeatures = true;
+          buildFeatures = ["desktop"];
+          extraNativeBuildInputs = [pkgs.makeWrapper];
+          extraBuildInputs = dioxusLinuxBuildInputs ++ [pkgs.openssl];
+          postInstall = ''
+            wrapProgram "$out/bin/keepbook-dioxus" \
+              --set WEBKIT_DISABLE_DMABUF_RENDERER 1 \
+              --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath dioxusLinuxLibraryPathInputs}
+
+            install -Dm644 ${cleanSrc}/assets/keepbook-icon.svg \
+              "$out/share/icons/hicolor/scalable/apps/keepbook.svg"
+            install -Dm644 ${cleanSrc}/assets/keepbook-icon-32.png \
+              "$out/share/icons/hicolor/32x32/apps/keepbook.png"
+            install -Dm644 ${cleanSrc}/assets/keepbook-icon-48.png \
+              "$out/share/icons/hicolor/48x48/apps/keepbook.png"
+            install -Dm644 ${cleanSrc}/assets/keepbook-icon-64.png \
+              "$out/share/icons/hicolor/64x64/apps/keepbook.png"
+            install -Dm644 ${keepbookDioxusDesktopItem}/share/applications/keepbook-dioxus.desktop \
+              "$out/share/applications/keepbook-dioxus.desktop"
+          '';
+        };
       in {
         formatter = pkgs.alejandra;
 
@@ -570,47 +607,53 @@
               buildFeatures = ["tray"];
               extraBuildInputs = [pkgs.dbus];
             };
+            keepbook-dioxus-desktop = keepbookDioxusDesktop;
             keepbook-dioxus-android-debug-runner = dioxusAndroidBuildScript false;
             keepbook-dioxus-android-release-runner = dioxusAndroidBuildScript true;
             keepbook-dioxus-desktop-release-runner = dioxusDesktopBuildScript;
           };
 
-        apps = {
-          keepbook-age-recipients = {
-            type = "app";
-            program = "${keepbookAgeRecipientsScript}/bin/keepbook-age-recipients";
+        apps =
+          {
+            keepbook-age-recipients = {
+              type = "app";
+              program = "${keepbookAgeRecipientsScript}/bin/keepbook-age-recipients";
+            };
+            keepbook-age-encrypt = {
+              type = "app";
+              program = "${keepbookAgeEncryptScript}/bin/keepbook-age-encrypt";
+            };
+          }
+          // lib.optionalAttrs isLinux {
+            dioxus-android-debug = {
+              type = "app";
+              program = "${dioxusAndroidBuildScript false}/bin/keepbook-dioxus-android-debug";
+            };
+            dioxus-android-release = {
+              type = "app";
+              program = "${dioxusAndroidBuildScript true}/bin/keepbook-dioxus-android-release";
+            };
+            keepbook-dioxus-android-debug = {
+              type = "app";
+              program = "${dioxusAndroidBuildScript false}/bin/keepbook-dioxus-android-debug";
+            };
+            keepbook-dioxus-android-release = {
+              type = "app";
+              program = "${dioxusAndroidBuildScript true}/bin/keepbook-dioxus-android-release";
+            };
+            dioxus-desktop-release = {
+              type = "app";
+              program = "${dioxusDesktopBuildScript}/bin/keepbook-dioxus-desktop-release";
+            };
+            keepbook-dioxus-desktop = {
+              type = "app";
+              program = "${keepbookDioxusDesktop}/bin/keepbook-dioxus";
+            };
+            keepbook-dioxus-desktop-release = {
+              type = "app";
+              program = "${dioxusDesktopBuildScript}/bin/keepbook-dioxus-desktop-release";
+            };
           };
-          keepbook-age-encrypt = {
-            type = "app";
-            program = "${keepbookAgeEncryptScript}/bin/keepbook-age-encrypt";
-          };
-        }
-        // lib.optionalAttrs isLinux {
-          dioxus-android-debug = {
-            type = "app";
-            program = "${dioxusAndroidBuildScript false}/bin/keepbook-dioxus-android-debug";
-          };
-          dioxus-android-release = {
-            type = "app";
-            program = "${dioxusAndroidBuildScript true}/bin/keepbook-dioxus-android-release";
-          };
-          keepbook-dioxus-android-debug = {
-            type = "app";
-            program = "${dioxusAndroidBuildScript false}/bin/keepbook-dioxus-android-debug";
-          };
-          keepbook-dioxus-android-release = {
-            type = "app";
-            program = "${dioxusAndroidBuildScript true}/bin/keepbook-dioxus-android-release";
-          };
-          dioxus-desktop-release = {
-            type = "app";
-            program = "${dioxusDesktopBuildScript}/bin/keepbook-dioxus-desktop-release";
-          };
-          keepbook-dioxus-desktop-release = {
-            type = "app";
-            program = "${dioxusDesktopBuildScript}/bin/keepbook-dioxus-desktop-release";
-          };
-        };
 
         devShells = {
           default = pkgs.mkShell {
@@ -637,19 +680,20 @@
 
           android = pkgs.mkShell (dioxusAndroidEnv
             // {
-              buildInputs = [
-                toolchain
-                pkgs.dioxus-cli
-                pkgs.wasm-bindgen-cli_0_2_118
-                pkgs.jdk17
-                pkgs.pkg-config
-                pkgs.binaryen
-                pkgs.openssl
-                pkgs.just
-                pkgs.jq
-                pkgs.gradle_9
-              ]
-              ++ dioxusLinuxBuildInputs;
+              buildInputs =
+                [
+                  toolchain
+                  pkgs.dioxus-cli
+                  pkgs.wasm-bindgen-cli_0_2_118
+                  pkgs.jdk17
+                  pkgs.pkg-config
+                  pkgs.binaryen
+                  pkgs.openssl
+                  pkgs.just
+                  pkgs.jq
+                  pkgs.gradle_9
+                ]
+                ++ dioxusLinuxBuildInputs;
 
               LD_LIBRARY_PATH = lib.optionalString isLinux (lib.makeLibraryPath dioxusLinuxLibraryPathInputs);
               WEBKIT_DISABLE_DMABUF_RENDERER = "1";
