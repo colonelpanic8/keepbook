@@ -226,12 +226,6 @@ pub struct TaxImpactPoint {
     pub equity_change_percent: String,
 }
 
-#[derive(Serialize)]
-pub struct TaxImpactGraphOutput {
-    pub html_path: String,
-    pub svg_path: String,
-}
-
 /// Output for portfolio tax-impact command.
 #[derive(Serialize)]
 pub struct TaxImpactOutput {
@@ -242,8 +236,6 @@ pub struct TaxImpactOutput {
     pub current_tax_liability: String,
     pub current_after_tax_net_worth: String,
     pub points: Vec<TaxImpactPoint>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub graph: Option<TaxImpactGraphOutput>,
 }
 
 /// Output for portfolio change-points command

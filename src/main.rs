@@ -867,30 +867,6 @@ enum PortfolioCommand {
         /// Number of curve points
         #[arg(long, default_value_t = 25)]
         points: usize,
-
-        /// Write an HTML/SVG graph in addition to JSON output
-        #[arg(long)]
-        graph: bool,
-
-        /// HTML output path for --graph
-        #[arg(long)]
-        output: Option<std::path::PathBuf>,
-
-        /// SVG output path for --graph
-        #[arg(long)]
-        svg_output: Option<std::path::PathBuf>,
-
-        /// Graph title
-        #[arg(long)]
-        title: Option<String>,
-
-        /// Graph width in pixels
-        #[arg(long, default_value_t = 1400)]
-        width: u32,
-
-        /// Graph height in pixels
-        #[arg(long, default_value_t = 900)]
-        height: u32,
     },
 
     /// Track net worth over time at every change point
@@ -1426,12 +1402,6 @@ async fn main() -> Result<()> {
                 min,
                 max,
                 points,
-                graph,
-                output,
-                svg_output,
-                title,
-                width,
-                height,
             } => {
                 let output = app::portfolio_tax_impact(
                     storage_arc.clone(),
@@ -1442,12 +1412,6 @@ async fn main() -> Result<()> {
                     min,
                     max,
                     points,
-                    graph,
-                    output,
-                    svg_output,
-                    title,
-                    width,
-                    height,
                 )
                 .await?;
                 println!("{}", serde_json::to_string_pretty(&output)?);

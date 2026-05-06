@@ -1,5 +1,4 @@
 mod config;
-mod graph;
 mod ignore_rules;
 #[cfg(feature = "sync")]
 mod import;
@@ -16,7 +15,6 @@ mod value;
 use crate::config::ResolvedConfig;
 
 pub use config::config_output;
-pub use graph::{portfolio_graph, PortfolioGraphOptions, PortfolioGraphOutput};
 #[cfg(feature = "sync")]
 pub use import::import_schwab_transactions;
 pub use list::{
@@ -51,8 +49,8 @@ pub use types::{
     HistoryOutput, HistoryPoint, HistorySummary, PriceHistoryFailure, PriceHistoryOutput,
     PriceHistoryScopeOutput, PriceHistoryStats, PriceSourceOutput, ProposedTransactionEditOutput,
     SpendingBreakdownEntryOutput, SpendingOutput, SpendingPeriodOutput, SpendingScopeOutput,
-    TaxImpactGraphOutput, TaxImpactOutput, TaxImpactPoint, TransactionAnnotationOutput,
-    TransactionAnnotationPatchOutput, TransactionOutput,
+    TaxImpactOutput, TaxImpactPoint, TransactionAnnotationOutput, TransactionAnnotationPatchOutput,
+    TransactionOutput,
 };
 
 fn maybe_auto_commit(config: &ResolvedConfig, action: &str) {
