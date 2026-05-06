@@ -555,6 +555,8 @@
             buildInputs = extraBuildInputs;
           };
       in {
+        formatter = pkgs.alejandra;
+
         packages =
           {
             default = mkKeepbookPackage {pname = "keepbook";};
