@@ -118,6 +118,12 @@ pub(crate) async fn set_transaction_category(
     set_transaction_category_impl(input).await
 }
 
+pub(crate) async fn set_transaction_categories(
+    input: SetTransactionCategoriesInput,
+) -> Result<(), String> {
+    set_transaction_categories_impl(input).await
+}
+
 pub(crate) async fn fetch_proposed_transaction_edits(
 ) -> Result<Vec<ProposedTransactionEdit>, String> {
     fetch_proposed_transaction_edits_impl().await
@@ -367,6 +373,26 @@ pub(crate) async fn set_transaction_category_impl(
 }
 
 #[cfg(target_arch = "wasm32")]
+pub(crate) async fn set_transaction_categories_impl(
+    input: SetTransactionCategoriesInput,
+) -> Result<(), String> {
+    let response = Request::post(&format!("{API_BASE}/api/transactions/category/batch"))
+        .json(&input)
+        .map_err(|error| format!("Could not encode category update: {error}"))?
+        .send()
+        .await
+        .map_err(|error| format!("Could not reach keepbook-server at {API_BASE}: {error}"))?;
+
+    if !response.ok() {
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+        return Err(format!("keepbook-server returned HTTP {status}: {text}"));
+    }
+
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
 pub(crate) async fn fetch_proposed_transaction_edits_impl(
 ) -> Result<Vec<ProposedTransactionEdit>, String> {
     let response = Request::get(&format!("{API_BASE}/api/proposed-transaction-edits"))
@@ -560,6 +586,30 @@ pub(crate) async fn set_transaction_category_impl(
         .set_transaction_category(keepbook_server::TransactionCategoryInput {
             account_id: input.account_id,
             transaction_id: input.transaction_id,
+            category: input.category,
+            clear_category: input.clear_category,
+        })
+        .await
+        .map_err(|error| format!("Category update failed: {error:#}"))?;
+    Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn set_transaction_categories_impl(
+    input: SetTransactionCategoriesInput,
+) -> Result<(), String> {
+    native_api_state()?
+        .set_transaction_categories(keepbook_server::TransactionCategoryBatchInput {
+            transactions: input
+                .transactions
+                .into_iter()
+                .map(
+                    |transaction| keepbook_server::TransactionCategoryTargetInput {
+                        account_id: transaction.account_id,
+                        transaction_id: transaction.transaction_id,
+                    },
+                )
+                .collect(),
             category: input.category,
             clear_category: input.clear_category,
         })

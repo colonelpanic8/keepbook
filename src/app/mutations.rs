@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 
 use anyhow::{Context, Result};
@@ -576,6 +576,95 @@ pub async fn set_transaction_annotation(
     maybe_auto_commit(
         config,
         &format!("set transaction annotation {account_id} {transaction_id}"),
+    );
+
+    Ok(result)
+}
+
+pub async fn set_transaction_categories(
+    storage: &dyn Storage,
+    config: &ResolvedConfig,
+    targets: Vec<(String, String)>,
+    category: Option<String>,
+    clear_category: bool,
+) -> Result<serde_json::Value> {
+    if clear_category && category.is_some() {
+        anyhow::bail!("Cannot set and clear category together");
+    }
+
+    let category = category
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    if !clear_category && category.is_none() {
+        anyhow::bail!("No category change specified");
+    }
+    if targets.is_empty() {
+        anyhow::bail!("No transactions specified");
+    }
+
+    let mut by_account: HashMap<Id, Vec<Id>> = HashMap::new();
+    let mut seen = HashSet::new();
+    for (account_id, transaction_id) in targets {
+        let account_id = Id::from_string_checked(&account_id)
+            .with_context(|| format!("Invalid account id: {account_id}"))?;
+        let transaction_id = Id::from_string_checked(&transaction_id)
+            .with_context(|| format!("Invalid transaction id: {transaction_id}"))?;
+        if seen.insert((account_id.clone(), transaction_id.clone())) {
+            by_account
+                .entry(account_id)
+                .or_default()
+                .push(transaction_id);
+        }
+    }
+
+    let timestamp = chrono::Utc::now();
+    let mut updated_count = 0usize;
+    for (account_id, transaction_ids) in by_account {
+        storage
+            .get_account(&account_id)
+            .await?
+            .context("Account not found")?;
+
+        let txns = storage.get_transactions(&account_id).await?;
+        let valid_transaction_ids = txns
+            .iter()
+            .map(|transaction| transaction.id.clone())
+            .collect::<HashSet<_>>();
+        for transaction_id in &transaction_ids {
+            if !valid_transaction_ids.contains(transaction_id) {
+                anyhow::bail!("Transaction not found for account: {transaction_id}");
+            }
+        }
+
+        let patches = transaction_ids
+            .into_iter()
+            .map(|transaction_id| TransactionAnnotationPatch {
+                transaction_id,
+                timestamp,
+                description: None,
+                note: None,
+                category: Some(category.clone()),
+                subcategory: None,
+                tags: None,
+                effective_date: None,
+            })
+            .collect::<Vec<_>>();
+        updated_count += patches.len();
+        storage
+            .append_transaction_annotation_patches(&account_id, &patches)
+            .await?;
+    }
+
+    let result = serde_json::json!({
+        "success": true,
+        "updated_count": updated_count,
+        "category": category,
+        "clear_category": clear_category,
+    });
+
+    maybe_auto_commit(
+        config,
+        &format!("set transaction categories for {updated_count} transactions"),
     );
 
     Ok(result)

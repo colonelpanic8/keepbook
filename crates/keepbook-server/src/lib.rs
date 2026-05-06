@@ -313,6 +313,26 @@ impl ApiState {
         .await
     }
 
+    pub async fn set_transaction_categories(
+        &self,
+        input: TransactionCategoryBatchInput,
+    ) -> Result<serde_json::Value> {
+        let state = self.snapshot().await;
+        let targets = input
+            .transactions
+            .into_iter()
+            .map(|transaction| (transaction.account_id, transaction.transaction_id))
+            .collect::<Vec<_>>();
+        keepbook::app::set_transaction_categories(
+            state.storage.as_ref(),
+            &state.config,
+            targets,
+            input.category,
+            input.clear_category,
+        )
+        .await
+    }
+
     pub async fn proposed_transaction_edits(
         &self,
         query: ProposedTransactionEditsQuery,
@@ -761,6 +781,22 @@ pub struct TransactionCategoryInput {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct TransactionCategoryTargetInput {
+    pub account_id: String,
+    pub transaction_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TransactionCategoryBatchInput {
+    #[serde(default)]
+    pub transactions: Vec<TransactionCategoryTargetInput>,
+    #[serde(default)]
+    pub category: Option<String>,
+    #[serde(default)]
+    pub clear_category: bool,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct SpendingQuery {
     pub currency: Option<String>,
     pub start: Option<String>,
@@ -1174,6 +1210,10 @@ pub fn router(state: ApiState) -> Router {
         .route("/api/balances", get(balances))
         .route("/api/transactions", get(transactions))
         .route("/api/transactions/category", post(set_transaction_category))
+        .route(
+            "/api/transactions/category/batch",
+            post(set_transaction_categories),
+        )
         .route("/api/spending", get(spending))
         .route("/api/tray", get(tray))
         .route(
@@ -1270,6 +1310,14 @@ async fn set_transaction_category(
     Json(input): Json<TransactionCategoryInput>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     Ok(Json(state.set_transaction_category(input).await?))
+}
+
+#[cfg(feature = "http")]
+async fn set_transaction_categories(
+    State(state): State<ApiState>,
+    Json(input): Json<TransactionCategoryBatchInput>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    Ok(Json(state.set_transaction_categories(input).await?))
 }
 
 #[cfg(feature = "http")]

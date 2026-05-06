@@ -1,5 +1,8 @@
 use super::*;
-use crate::api::{fetch_spending_dashboard, set_transaction_category, suggest_ai_rules};
+use crate::api::{
+    fetch_spending_dashboard, set_transaction_categories, set_transaction_category,
+    suggest_ai_rules,
+};
 use std::collections::HashSet;
 
 #[component]
@@ -89,6 +92,14 @@ pub(super) fn SpendingView(currency: String) -> Element {
         .iter()
         .filter(|transaction| selected_keys.contains(&transaction_key(transaction)))
         .map(ai_rule_transaction_input)
+        .collect::<Vec<_>>();
+    let selected_category_targets = filtered_transactions
+        .iter()
+        .filter(|transaction| selected_keys.contains(&transaction_key(transaction)))
+        .map(|transaction| TransactionCategoryTargetInput {
+            account_id: transaction.account_id.clone(),
+            transaction_id: transaction.id.clone(),
+        })
         .collect::<Vec<_>>();
     let filtered_transaction_keys = filtered_transactions
         .iter()
@@ -339,6 +350,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
                         ai_prompt: ai_prompt(),
                         ai_status: ai_status(),
                         ai_result: ai_result(),
+                        category_targets: selected_category_targets.clone(),
                         onpromptchange: move |value| ai_prompt.set(value),
                         onairulesubmit: move |_| {
                             let prompt = ai_prompt().trim().to_string();
@@ -385,6 +397,31 @@ pub(super) fn SpendingView(currency: String) -> Element {
                                     match set_transaction_category(input).await {
                                         Ok(()) => {
                                             category_update_status.set(Some("Category saved.".to_string()));
+                                            spending.restart();
+                                        }
+                                        Err(error) => {
+                                            category_update_status.set(Some(error));
+                                        }
+                                    }
+                                }
+                            });
+                        },
+                        oncategorybulksave: move |input: SetTransactionCategoriesInput| {
+                            let updated_count = input.transactions.len();
+                            category_update_status.set(Some(format!(
+                                "Saving category for {updated_count} transaction(s)..."
+                            )));
+                            spawn({
+                                let mut spending = spending;
+                                let mut category_update_status = category_update_status;
+                                let mut selected_transaction_keys = selected_transaction_keys;
+                                async move {
+                                    match set_transaction_categories(input).await {
+                                        Ok(()) => {
+                                            category_update_status.set(Some(format!(
+                                                "Updated {updated_count} transaction(s)."
+                                            )));
+                                            selected_transaction_keys.set(HashSet::new());
                                             spending.restart();
                                         }
                                         Err(error) => {
@@ -511,9 +548,11 @@ fn TransactionList(
     ai_prompt: String,
     ai_status: Option<String>,
     ai_result: Option<AiRuleSuggestionsOutput>,
+    category_targets: Vec<TransactionCategoryTargetInput>,
     onpromptchange: EventHandler<String>,
     onairulesubmit: EventHandler<MouseEvent>,
     oncategorysave: EventHandler<SetTransactionCategoryInput>,
+    oncategorybulksave: EventHandler<SetTransactionCategoriesInput>,
 ) -> Element {
     let has_any_selection = !selected_keys.is_empty();
     let has_transactions = !transactions.is_empty();
@@ -603,6 +642,12 @@ fn TransactionList(
                 if let Some(result) = ai_result.clone() {
                     AiRuleSuggestions { result }
                 }
+            }
+            GroupCategoryEditor {
+                selected_count,
+                category_targets: category_targets.clone(),
+                category_options: category_options.clone(),
+                oncategorybulksave,
             }
             if !has_transactions {
                 div { class: "chart-empty transaction-empty",
@@ -702,6 +747,72 @@ fn TransactionList(
                         onclick: move |event| onnext.call(event),
                         "Next"
                     }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn GroupCategoryEditor(
+    selected_count: usize,
+    category_targets: Vec<TransactionCategoryTargetInput>,
+    category_options: Vec<String>,
+    oncategorybulksave: EventHandler<SetTransactionCategoriesInput>,
+) -> Element {
+    let mut draft_category = use_signal(String::new);
+    let draft = draft_category();
+    let trimmed = draft.trim().to_string();
+    let has_selection = selected_count > 0 && !category_targets.is_empty();
+    let apply_targets = category_targets.clone();
+    let clear_targets = category_targets.clone();
+    let list_id = "group-category-options";
+
+    rsx! {
+        div { class: "group-edit-panel",
+            div { class: "group-edit-copy",
+                strong { "Group edit" }
+                small { "{selected_count} selected" }
+            }
+            div { class: "group-category-row",
+                input {
+                    class: "category-editor-input",
+                    r#type: "text",
+                    list: "{list_id}",
+                    value: "{draft}",
+                    placeholder: "Category",
+                    disabled: !has_selection,
+                    oninput: move |event| draft_category.set(event.value())
+                }
+                datalist { id: "{list_id}",
+                    for category in category_options {
+                        option { value: "{category}" }
+                    }
+                }
+                button {
+                    class: "control-button selected",
+                    disabled: !has_selection || trimmed.is_empty(),
+                    onclick: move |_| {
+                        oncategorybulksave.call(SetTransactionCategoriesInput {
+                            transactions: apply_targets.clone(),
+                            category: Some(draft_category().trim().to_string()),
+                            clear_category: false,
+                        });
+                    },
+                    "Apply Category"
+                }
+                button {
+                    class: "control-button",
+                    disabled: !has_selection,
+                    onclick: move |_| {
+                        draft_category.set(String::new());
+                        oncategorybulksave.call(SetTransactionCategoriesInput {
+                            transactions: clear_targets.clone(),
+                            category: None,
+                            clear_category: true,
+                        });
+                    },
+                    "Clear Category"
                 }
             }
         }

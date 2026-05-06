@@ -442,6 +442,20 @@ struct SetTransactionCategoryInput {
     clear_category: bool,
 }
 
+#[derive(Clone, Debug, Serialize, PartialEq)]
+struct TransactionCategoryTargetInput {
+    account_id: String,
+    transaction_id: String,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq)]
+struct SetTransactionCategoriesInput {
+    transactions: Vec<TransactionCategoryTargetInput>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    category: Option<String>,
+    clear_category: bool,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 struct NetWorthDataPoint {
     date: String,
