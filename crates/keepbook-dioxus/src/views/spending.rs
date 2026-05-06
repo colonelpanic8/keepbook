@@ -90,6 +90,14 @@ pub(super) fn SpendingView(currency: String) -> Element {
         .filter(|transaction| selected_keys.contains(&transaction_key(transaction)))
         .map(ai_rule_transaction_input)
         .collect::<Vec<_>>();
+    let filtered_transaction_keys = filtered_transactions
+        .iter()
+        .map(transaction_key)
+        .collect::<Vec<_>>();
+    let selected_filtered_count = filtered_transaction_keys
+        .iter()
+        .filter(|key| selected_keys.contains(*key))
+        .count();
     let page_size = 100usize;
     let page_count = filtered_transactions.len().max(1).div_ceil(page_size);
     let current_page = transaction_page().min(page_count.saturating_sub(1));
@@ -280,6 +288,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
                         show_ignored,
                         title_filter: title_filter.clone(),
                         selected_keys: selected_keys.clone(),
+                        selected_count: selected_filtered_count,
                         page: current_page,
                         page_count,
                         category_options: category_options.clone(),
@@ -310,6 +319,13 @@ pub(super) fn SpendingView(currency: String) -> Element {
                             let mut next = selected_transaction_keys();
                             for transaction in &page_transactions {
                                 next.insert(transaction_key(transaction));
+                            }
+                            selected_transaction_keys.set(next);
+                        },
+                        onselectfiltered: move |_| {
+                            let mut next = selected_transaction_keys();
+                            for key in &filtered_transaction_keys {
+                                next.insert(key.clone());
                             }
                             selected_transaction_keys.set(next);
                         },
@@ -478,6 +494,7 @@ fn TransactionList(
     show_ignored: bool,
     title_filter: String,
     selected_keys: HashSet<String>,
+    selected_count: usize,
     page: usize,
     page_count: usize,
     category_options: Vec<String>,
@@ -487,6 +504,7 @@ fn TransactionList(
     ontitlefilterchange: EventHandler<String>,
     ontoggleselection: EventHandler<String>,
     onselectpage: EventHandler<MouseEvent>,
+    onselectfiltered: EventHandler<MouseEvent>,
     onclearselection: EventHandler<MouseEvent>,
     onprev: EventHandler<MouseEvent>,
     onnext: EventHandler<MouseEvent>,
@@ -497,7 +515,7 @@ fn TransactionList(
     onairulesubmit: EventHandler<MouseEvent>,
     oncategorysave: EventHandler<SetTransactionCategoryInput>,
 ) -> Element {
-    let selected_count = selected_keys.len();
+    let has_any_selection = !selected_keys.is_empty();
     let has_transactions = !transactions.is_empty();
     rsx! {
         div { class: "transaction-panel",
@@ -548,8 +566,15 @@ fn TransactionList(
                 }
                 button {
                     class: "control-button",
+                    title: "Select all transactions matching the current filters",
+                    onclick: move |event| onselectfiltered.call(event),
+                    disabled: !has_transactions,
+                    "Select All"
+                }
+                button {
+                    class: "control-button",
                     onclick: move |event| onclearselection.call(event),
-                    disabled: selected_count == 0,
+                    disabled: !has_any_selection,
                     "Clear"
                 }
             }
