@@ -670,6 +670,94 @@ pub async fn set_transaction_categories(
     Ok(result)
 }
 
+pub async fn set_transaction_tags(
+    storage: &dyn Storage,
+    config: &ResolvedConfig,
+    targets: Vec<(String, String)>,
+    tags: Vec<String>,
+    clear_tags: bool,
+) -> Result<serde_json::Value> {
+    if clear_tags && !tags.is_empty() {
+        anyhow::bail!("Cannot set and clear tags together");
+    }
+
+    let tags = normalize_tags(tags);
+    if !clear_tags && tags.is_empty() {
+        anyhow::bail!("No tag change specified");
+    }
+    if targets.is_empty() {
+        anyhow::bail!("No transactions specified");
+    }
+
+    let mut by_account: HashMap<Id, Vec<Id>> = HashMap::new();
+    let mut seen = HashSet::new();
+    for (account_id, transaction_id) in targets {
+        let account_id = Id::from_string_checked(&account_id)
+            .with_context(|| format!("Invalid account id: {account_id}"))?;
+        let transaction_id = Id::from_string_checked(&transaction_id)
+            .with_context(|| format!("Invalid transaction id: {transaction_id}"))?;
+        if seen.insert((account_id.clone(), transaction_id.clone())) {
+            by_account
+                .entry(account_id)
+                .or_default()
+                .push(transaction_id);
+        }
+    }
+
+    let timestamp = chrono::Utc::now();
+    let mut updated_count = 0usize;
+    for (account_id, transaction_ids) in by_account {
+        storage
+            .get_account(&account_id)
+            .await?
+            .context("Account not found")?;
+
+        let txns = storage.get_transactions(&account_id).await?;
+        let valid_transaction_ids = txns
+            .iter()
+            .map(|transaction| transaction.id.clone())
+            .collect::<HashSet<_>>();
+        for transaction_id in &transaction_ids {
+            if !valid_transaction_ids.contains(transaction_id) {
+                anyhow::bail!("Transaction not found for account: {transaction_id}");
+            }
+        }
+
+        let tags_patch = if clear_tags { None } else { Some(tags.clone()) };
+        let patches = transaction_ids
+            .into_iter()
+            .map(|transaction_id| TransactionAnnotationPatch {
+                transaction_id,
+                timestamp,
+                description: None,
+                note: None,
+                category: None,
+                subcategory: None,
+                tags: Some(tags_patch.clone()),
+                effective_date: None,
+            })
+            .collect::<Vec<_>>();
+        updated_count += patches.len();
+        storage
+            .append_transaction_annotation_patches(&account_id, &patches)
+            .await?;
+    }
+
+    let result = serde_json::json!({
+        "success": true,
+        "updated_count": updated_count,
+        "tags": tags,
+        "clear_tags": clear_tags,
+    });
+
+    maybe_auto_commit(
+        config,
+        &format!("set transaction tags for {updated_count} transactions"),
+    );
+
+    Ok(result)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn propose_transaction_edit(
     storage: &dyn Storage,
@@ -1074,6 +1162,26 @@ fn proposal_status_string(status: ProposedTransactionEditStatus) -> &'static str
         ProposedTransactionEditStatus::Rejected => "rejected",
         ProposedTransactionEditStatus::Removed => "removed",
     }
+}
+
+fn normalize_tags(tags: Vec<String>) -> Vec<String> {
+    tags.into_iter()
+        .flat_map(|tag| {
+            tag.split(',')
+                .map(str::trim)
+                .filter(|part| !part.is_empty())
+                .map(ToOwned::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .fold(Vec::<String>::new(), |mut acc, tag| {
+            if !acc
+                .iter()
+                .any(|existing| existing.eq_ignore_ascii_case(&tag))
+            {
+                acc.push(tag);
+            }
+            acc
+        })
 }
 
 pub fn parse_asset(s: &str) -> Result<Asset> {

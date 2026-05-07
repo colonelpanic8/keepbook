@@ -265,6 +265,8 @@ struct Transaction {
     #[serde(default)]
     subcategory: Option<String>,
     #[serde(default)]
+    tags: Vec<String>,
+    #[serde(default)]
     annotation: Option<TransactionAnnotation>,
     #[serde(default)]
     ignored_from_spending: bool,
@@ -278,6 +280,8 @@ struct TransactionAnnotation {
     category: Option<String>,
     #[serde(default)]
     subcategory: Option<String>,
+    #[serde(default)]
+    tags: Option<Vec<String>>,
     #[serde(default)]
     effective_date: Option<String>,
 }
@@ -434,26 +438,16 @@ struct AiRuleToolCallOutput {
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
-struct SetTransactionCategoryInput {
-    account_id: String,
-    transaction_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    category: Option<String>,
-    clear_category: bool,
-}
-
-#[derive(Clone, Debug, Serialize, PartialEq)]
 struct TransactionCategoryTargetInput {
     account_id: String,
     transaction_id: String,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
-struct SetTransactionCategoriesInput {
+struct SetTransactionTagsInput {
     transactions: Vec<TransactionCategoryTargetInput>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    category: Option<String>,
-    clear_category: bool,
+    tags: Vec<String>,
+    clear_tags: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]

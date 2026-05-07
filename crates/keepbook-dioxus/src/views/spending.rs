@@ -1,8 +1,5 @@
 use super::*;
-use crate::api::{
-    fetch_spending_dashboard, set_transaction_categories, set_transaction_category,
-    suggest_ai_rules,
-};
+use crate::api::{fetch_spending_dashboard, set_transaction_tags, suggest_ai_rules};
 use std::collections::HashSet;
 
 #[component]
@@ -10,7 +7,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
     let mut range_preset = use_signal(|| RangePreset::NinetyDays);
     let mut start_override = use_signal(String::new);
     let mut end_override = use_signal(String::new);
-    let mut selected_category = use_signal(|| None::<String>);
+    let mut selected_tag = use_signal(|| None::<String>);
     let mut transaction_page = use_signal(|| 0usize);
     let mut transaction_sort_field = use_signal(|| TransactionSortField::Date);
     let mut transaction_sort_direction = use_signal(|| SortDirection::Desc);
@@ -20,7 +17,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
     let mut ai_prompt = use_signal(String::new);
     let mut ai_result = use_signal(|| None::<AiRuleSuggestionsOutput>);
     let mut ai_status = use_signal(|| None::<String>);
-    let mut category_update_status = use_signal(|| None::<String>);
+    let mut tag_update_status = use_signal(|| None::<String>);
     let spending = use_resource({
         let currency = currency.clone();
         move || {
@@ -44,7 +41,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
     let selected_range = range_preset();
     let start_text = start_override();
     let end_text = end_override();
-    let selected = selected_category();
+    let selected = selected_tag();
     let selected_sort_field = transaction_sort_field();
     let selected_sort_direction = transaction_sort_direction();
     let show_ignored = show_ignored_transactions();
@@ -64,16 +61,16 @@ pub(super) fn SpendingView(currency: String) -> Element {
     let categories = loaded
         .map(|data| spending_categories(&data.spending))
         .unwrap_or_default();
-    let category_options = loaded
-        .map(|data| transaction_category_options(&data.transactions, &categories))
+    let tag_options = loaded
+        .map(|data| transaction_tag_options(&data.transactions, &categories))
         .unwrap_or_default();
     let total = loaded
         .and_then(|data| parse_money_input(&data.spending.total))
         .unwrap_or_default();
-    let selected_total = selected.as_ref().and_then(|category| {
+    let selected_total = selected.as_ref().and_then(|tag| {
         categories
             .iter()
-            .find(|entry| &entry.key == category)
+            .find(|entry| &entry.key == tag)
             .and_then(|entry| parse_money_input(&entry.total))
     });
     let filtered_transactions = loaded
@@ -93,7 +90,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
         .filter(|transaction| selected_keys.contains(&transaction_key(transaction)))
         .map(ai_rule_transaction_input)
         .collect::<Vec<_>>();
-    let selected_category_targets = filtered_transactions
+    let selected_tag_targets = filtered_transactions
         .iter()
         .filter(|transaction| selected_keys.contains(&transaction_key(transaction)))
         .map(|transaction| TransactionCategoryTargetInput {
@@ -129,13 +126,13 @@ pub(super) fn SpendingView(currency: String) -> Element {
         let last = (page_start + page_transactions.len()).min(filtered_transactions.len());
         format!("{first}-{last} of {}", filtered_transactions.len())
     };
-    let selected_label = selected.as_deref().unwrap_or("All categories");
+    let selected_label = selected.as_deref().unwrap_or("All tags");
 
     rsx! {
         section { class: "panel spending-panel",
             div { class: "panel-header",
                 div { class: "panel-title",
-                    h2 { "Spending Categories" }
+                    h2 { "Spending Tags" }
                     span { "{selected_label}" }
                 }
                 span { "{currency}" }
@@ -143,7 +140,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
             if state.is_none() {
                 BackendActivity { message: "Waiting on backend spending data" }
             }
-            if let Some(message) = category_update_status() {
+            if let Some(message) = tag_update_status() {
                 div { class: "inline-notice", "{message}" }
             }
             div { class: "chart-controls",
@@ -156,7 +153,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
                             range_preset.set(RangePreset::OneMonth);
                             start_override.set(String::new());
                             end_override.set(String::new());
-                            selected_category.set(None);
+                            selected_tag.set(None);
                             transaction_page.set(0);
                         }
                     }
@@ -167,7 +164,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
                             range_preset.set(RangePreset::NinetyDays);
                             start_override.set(String::new());
                             end_override.set(String::new());
-                            selected_category.set(None);
+                            selected_tag.set(None);
                             transaction_page.set(0);
                         }
                     }
@@ -178,7 +175,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
                             range_preset.set(RangePreset::SixMonths);
                             start_override.set(String::new());
                             end_override.set(String::new());
-                            selected_category.set(None);
+                            selected_tag.set(None);
                             transaction_page.set(0);
                         }
                     }
@@ -189,7 +186,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
                             range_preset.set(RangePreset::OneYear);
                             start_override.set(String::new());
                             end_override.set(String::new());
-                            selected_category.set(None);
+                            selected_tag.set(None);
                             transaction_page.set(0);
                         }
                     }
@@ -200,7 +197,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
                             range_preset.set(RangePreset::Max);
                             start_override.set(String::new());
                             end_override.set(String::new());
-                            selected_category.set(None);
+                            selected_tag.set(None);
                             transaction_page.set(0);
                         }
                     }
@@ -208,7 +205,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
                         class: "control-button",
                         disabled: selected.is_none(),
                         onclick: move |_| {
-                            selected_category.set(None);
+                            selected_tag.set(None);
                             transaction_page.set(0);
                         },
                         "All"
@@ -223,7 +220,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
                         oninput: move |value| {
                             start_override.set(value);
                             range_preset.set(RangePreset::Custom);
-                            selected_category.set(None);
+                            selected_tag.set(None);
                             transaction_page.set(0);
                         }
                     }
@@ -235,7 +232,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
                         oninput: move |value| {
                             end_override.set(value);
                             range_preset.set(RangePreset::Custom);
-                            selected_category.set(None);
+                            selected_tag.set(None);
                             transaction_page.set(0);
                         }
                     }
@@ -245,11 +242,11 @@ pub(super) fn SpendingView(currency: String) -> Element {
                 None => rsx! {
                     GraphLoadingPanel {
                         range: range_summary_text(&resolved_start, &resolved_end),
-                        sampling: "Categories"
+                        sampling: "Tags"
                     }
                 },
                 Some(Err(error)) => rsx! {
-                    InlineStatus { title: "Spending Categories", message: error }
+                    InlineStatus { title: "Spending Tags", message: error }
                 },
                 Some(Ok(data)) => rsx! {
                     div { class: "spending-layout",
@@ -259,7 +256,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
                                 selected: selected.clone(),
                                 currency: data.spending.currency.clone(),
                                 onclick: move |category| {
-                                    selected_category.set(Some(category));
+                                    selected_tag.set(Some(category));
                                     transaction_page.set(0);
                                 }
                             }
@@ -278,12 +275,12 @@ pub(super) fn SpendingView(currency: String) -> Element {
                                 }
                             }
                             for entry in categories.iter() {
-                                CategoryRow {
+                                TagRow {
                                     entry: entry.clone(),
                                     currency: data.spending.currency.clone(),
                                     selected: selected.as_ref() == Some(&entry.key),
                                     onclick: move |category| {
-                                        selected_category.set(Some(category));
+                                        selected_tag.set(Some(category));
                                         transaction_page.set(0);
                                     }
                                 }
@@ -302,7 +299,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
                         selected_count: selected_filtered_count,
                         page: current_page,
                         page_count,
-                        category_options: category_options.clone(),
+                        tag_options: tag_options.clone(),
                         onshowignoredchange: move |checked| {
                             show_ignored_transactions.set(checked);
                             transaction_page.set(0);
@@ -350,12 +347,12 @@ pub(super) fn SpendingView(currency: String) -> Element {
                         ai_prompt: ai_prompt(),
                         ai_status: ai_status(),
                         ai_result: ai_result(),
-                        category_targets: selected_category_targets.clone(),
+                        tag_targets: selected_tag_targets.clone(),
                         onpromptchange: move |value| ai_prompt.set(value),
                         onairulesubmit: move |_| {
                             let prompt = ai_prompt().trim().to_string();
                             let transactions = selected_ai_transactions.clone();
-                            let existing_categories = category_options.clone();
+                            let existing_categories = tag_options.clone();
                             ai_result.set(None);
                             if prompt.is_empty() {
                                 ai_status.set(Some("Enter a prompt for the rule assistant.".to_string()));
@@ -388,44 +385,44 @@ pub(super) fn SpendingView(currency: String) -> Element {
                                 }
                             });
                         },
-                        oncategorysave: move |input: SetTransactionCategoryInput| {
-                            category_update_status.set(Some("Saving category...".to_string()));
+                        ontagssave: move |input: SetTransactionTagsInput| {
+                            tag_update_status.set(Some("Saving tags...".to_string()));
                             spawn({
                                 let mut spending = spending;
-                                let mut category_update_status = category_update_status;
+                                let mut tag_update_status = tag_update_status;
                                 async move {
-                                    match set_transaction_category(input).await {
+                                    match set_transaction_tags(input).await {
                                         Ok(()) => {
-                                            category_update_status.set(Some("Category saved.".to_string()));
+                                            tag_update_status.set(Some("Tags saved.".to_string()));
                                             spending.restart();
                                         }
                                         Err(error) => {
-                                            category_update_status.set(Some(error));
+                                            tag_update_status.set(Some(error));
                                         }
                                     }
                                 }
                             });
                         },
-                        oncategorybulksave: move |input: SetTransactionCategoriesInput| {
+                        ontagsbulksave: move |input: SetTransactionTagsInput| {
                             let updated_count = input.transactions.len();
-                            category_update_status.set(Some(format!(
-                                "Saving category for {updated_count} transaction(s)..."
+                            tag_update_status.set(Some(format!(
+                                "Saving tags for {updated_count} transaction(s)..."
                             )));
                             spawn({
                                 let mut spending = spending;
-                                let mut category_update_status = category_update_status;
+                                let mut tag_update_status = tag_update_status;
                                 let mut selected_transaction_keys = selected_transaction_keys;
                                 async move {
-                                    match set_transaction_categories(input).await {
+                                    match set_transaction_tags(input).await {
                                         Ok(()) => {
-                                            category_update_status.set(Some(format!(
+                                            tag_update_status.set(Some(format!(
                                                 "Updated {updated_count} transaction(s)."
                                             )));
                                             selected_transaction_keys.set(HashSet::new());
                                             spending.restart();
                                         }
                                         Err(error) => {
-                                            category_update_status.set(Some(error));
+                                            tag_update_status.set(Some(error));
                                         }
                                     }
                                 }
@@ -497,7 +494,7 @@ fn SpendingPieChart(
 }
 
 #[component]
-fn CategoryRow(
+fn TagRow(
     entry: SpendingBreakdownEntry,
     currency: String,
     selected: bool,
@@ -534,7 +531,7 @@ fn TransactionList(
     selected_count: usize,
     page: usize,
     page_count: usize,
-    category_options: Vec<String>,
+    tag_options: Vec<String>,
     onshowignoredchange: EventHandler<bool>,
     onsortfieldchange: EventHandler<TransactionSortField>,
     onsortdirectionchange: EventHandler<SortDirection>,
@@ -548,11 +545,11 @@ fn TransactionList(
     ai_prompt: String,
     ai_status: Option<String>,
     ai_result: Option<AiRuleSuggestionsOutput>,
-    category_targets: Vec<TransactionCategoryTargetInput>,
+    tag_targets: Vec<TransactionCategoryTargetInput>,
     onpromptchange: EventHandler<String>,
     onairulesubmit: EventHandler<MouseEvent>,
-    oncategorysave: EventHandler<SetTransactionCategoryInput>,
-    oncategorybulksave: EventHandler<SetTransactionCategoriesInput>,
+    ontagssave: EventHandler<SetTransactionTagsInput>,
+    ontagsbulksave: EventHandler<SetTransactionTagsInput>,
 ) -> Element {
     let has_any_selection = !selected_keys.is_empty();
     let has_transactions = !transactions.is_empty();
@@ -643,16 +640,16 @@ fn TransactionList(
                     AiRuleSuggestions { result }
                 }
             }
-            GroupCategoryEditor {
+            GroupTagsEditor {
                 selected_count,
-                category_targets: category_targets.clone(),
-                category_options: category_options.clone(),
-                oncategorybulksave,
+                tag_targets: tag_targets.clone(),
+                tag_options: tag_options.clone(),
+                ontagsbulksave,
             }
             if !has_transactions {
                 div { class: "chart-empty transaction-empty",
                     strong { "No matching transactions" }
-                    small { "Select another category or range." }
+                    small { "Select another tag or range." }
                 }
             } else {
                 div { class: "data-table transaction-table",
@@ -675,7 +672,7 @@ fn TransactionList(
                             onsortdirectionchange,
                         }
                         TransactionSortHeader {
-                            label: "Category / Subcategory",
+                            label: "Tags",
                             field: TransactionSortField::Category,
                             selected_field: sort_field,
                             direction: sort_direction,
@@ -715,13 +712,10 @@ fn TransactionList(
                             strong { "{transaction_description(&tx)}" }
                             span { class: "transaction-category-cell",
                                 div { class: "transaction-category-stack",
-                                    TransactionCategoryEditor {
+                                    TransactionTagsEditor {
                                         transaction: tx.clone(),
-                                        category_options: category_options.clone(),
-                                        oncategorysave,
-                                    }
-                                    if let Some(subcategory) = transaction_subcategory(&tx) {
-                                        small { class: "transaction-subcategory", "{subcategory}" }
+                                        tag_options: tag_options.clone(),
+                                        ontagssave,
                                     }
                                 }
                                 if tx.ignored_from_spending {
@@ -754,19 +748,20 @@ fn TransactionList(
 }
 
 #[component]
-fn GroupCategoryEditor(
+fn GroupTagsEditor(
     selected_count: usize,
-    category_targets: Vec<TransactionCategoryTargetInput>,
-    category_options: Vec<String>,
-    oncategorybulksave: EventHandler<SetTransactionCategoriesInput>,
+    tag_targets: Vec<TransactionCategoryTargetInput>,
+    tag_options: Vec<String>,
+    ontagsbulksave: EventHandler<SetTransactionTagsInput>,
 ) -> Element {
-    let mut draft_category = use_signal(String::new);
-    let draft = draft_category();
+    let mut draft_tags = use_signal(String::new);
+    let draft = draft_tags();
     let trimmed = draft.trim().to_string();
-    let has_selection = selected_count > 0 && !category_targets.is_empty();
-    let apply_targets = category_targets.clone();
-    let clear_targets = category_targets.clone();
-    let list_id = "group-category-options";
+    let has_selection = selected_count > 0 && !tag_targets.is_empty();
+    let apply_targets = tag_targets.clone();
+    let clear_targets = tag_targets.clone();
+    let parsed_tags = parse_tags_input(&trimmed);
+    let list_id = "group-tag-options";
 
     rsx! {
         div { class: "group-edit-panel",
@@ -780,39 +775,39 @@ fn GroupCategoryEditor(
                     r#type: "text",
                     list: "{list_id}",
                     value: "{draft}",
-                    placeholder: "Category",
+                    placeholder: "Tags, comma separated",
                     disabled: !has_selection,
-                    oninput: move |event| draft_category.set(event.value())
+                    oninput: move |event| draft_tags.set(event.value())
                 }
                 datalist { id: "{list_id}",
-                    for category in category_options {
-                        option { value: "{category}" }
+                    for tag in tag_options {
+                        option { value: "{tag}" }
                     }
                 }
                 button {
                     class: "control-button selected",
-                    disabled: !has_selection || trimmed.is_empty(),
+                    disabled: !has_selection || parsed_tags.is_empty(),
                     onclick: move |_| {
-                        oncategorybulksave.call(SetTransactionCategoriesInput {
+                        ontagsbulksave.call(SetTransactionTagsInput {
                             transactions: apply_targets.clone(),
-                            category: Some(draft_category().trim().to_string()),
-                            clear_category: false,
+                            tags: parse_tags_input(&draft_tags()),
+                            clear_tags: false,
                         });
                     },
-                    "Apply Category"
+                    "Apply Tags"
                 }
                 button {
                     class: "control-button",
                     disabled: !has_selection,
                     onclick: move |_| {
-                        draft_category.set(String::new());
-                        oncategorybulksave.call(SetTransactionCategoriesInput {
+                        draft_tags.set(String::new());
+                        ontagsbulksave.call(SetTransactionTagsInput {
                             transactions: clear_targets.clone(),
-                            category: None,
-                            clear_category: true,
+                            tags: Vec::new(),
+                            clear_tags: true,
                         });
                     },
-                    "Clear Category"
+                    "Clear Tags"
                 }
             }
         }
@@ -837,31 +832,18 @@ fn AiRuleSuggestions(result: AiRuleSuggestionsOutput) -> Element {
 }
 
 #[component]
-fn TransactionCategoryEditor(
+fn TransactionTagsEditor(
     transaction: Transaction,
-    category_options: Vec<String>,
-    oncategorysave: EventHandler<SetTransactionCategoryInput>,
+    tag_options: Vec<String>,
+    ontagssave: EventHandler<SetTransactionTagsInput>,
 ) -> Element {
-    let current_category = transaction_category(&transaction);
-    let mut draft_category = use_signal(|| {
-        if current_category == "Uncategorized" {
-            String::new()
-        } else {
-            current_category.clone()
-        }
-    });
-    let draft = draft_category();
-    let trimmed = draft.trim().to_string();
-    let normalized_draft = normalize_spending_category_key(&trimmed);
-    let changed = if trimmed.is_empty() {
-        current_category != "Uncategorized"
-    } else {
-        normalized_draft != current_category
-    };
-    let list_id = format!(
-        "category-options-{}-{}",
-        transaction.account_id, transaction.id
-    );
+    let current_tags = transaction_tags(&transaction);
+    let current_tags_input = current_tags.join(", ");
+    let mut draft_tags = use_signal(move || current_tags_input.clone());
+    let draft = draft_tags();
+    let parsed_tags = parse_tags_input(&draft);
+    let changed = parsed_tags != current_tags;
+    let list_id = format!("tag-options-{}-{}", transaction.account_id, transaction.id);
 
     rsx! {
         div { class: "category-editor",
@@ -870,25 +852,26 @@ fn TransactionCategoryEditor(
                 r#type: "text",
                 list: "{list_id}",
                 value: "{draft}",
-                placeholder: "Uncategorized",
-                oninput: move |event| draft_category.set(event.value())
+                placeholder: "Untagged",
+                oninput: move |event| draft_tags.set(event.value())
             }
             datalist { id: "{list_id}",
-                for category in category_options {
-                    option { value: "{category}" }
+                for tag in tag_options {
+                    option { value: "{tag}" }
                 }
             }
             button {
                 class: "category-editor-button",
-                title: "Save category",
+                title: "Save tags",
                 disabled: !changed,
                 onclick: move |_| {
-                    let category = draft_category().trim().to_string();
-                    oncategorysave.call(SetTransactionCategoryInput {
-                        account_id: transaction.account_id.clone(),
-                        transaction_id: transaction.id.clone(),
-                        clear_category: category.is_empty(),
-                        category: if category.is_empty() { None } else { Some(category) },
+                    ontagssave.call(SetTransactionTagsInput {
+                        transactions: vec![TransactionCategoryTargetInput {
+                            account_id: transaction.account_id.clone(),
+                            transaction_id: transaction.id.clone(),
+                        }],
+                        tags: parse_tags_input(&draft_tags()),
+                        clear_tags: parse_tags_input(&draft_tags()).is_empty(),
                     });
                 },
                 "Save"

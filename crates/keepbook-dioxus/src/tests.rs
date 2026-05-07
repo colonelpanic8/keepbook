@@ -159,6 +159,7 @@ fn transaction(id: &str, amount: &str, status: &str) -> Transaction {
         status: status.to_string(),
         category: None,
         subcategory: None,
+        tags: Vec::new(),
         annotation: None,
         ignored_from_spending: false,
     }
@@ -296,6 +297,7 @@ fn transaction_subcategory_prefers_annotation_value() {
         description: None,
         category: None,
         subcategory: Some("Coffee".to_string()),
+        tags: None,
         effective_date: None,
     });
 

@@ -143,7 +143,7 @@ pub(crate) fn spending_query_string(
     let (start, end) = requested_history_date_range(preset, start_override, end_override, today);
     let mut params = vec![
         "period=range".to_string(),
-        "group_by=category".to_string(),
+        "group_by=tag".to_string(),
         "direction=outflow".to_string(),
         "status=posted".to_string(),
         format!("currency={currency}"),
@@ -660,15 +660,15 @@ pub(crate) fn spending_categories(spending: &SpendingOutput) -> Vec<SpendingBrea
     totals
 }
 
-pub(crate) fn transaction_category_options(
+pub(crate) fn transaction_tag_options(
     transactions: &[Transaction],
     categories: &[SpendingBreakdownEntry],
 ) -> Vec<String> {
     let mut options = categories
         .iter()
         .map(|entry| entry.key.clone())
-        .chain(transactions.iter().map(transaction_category))
-        .filter(|category| category != "Uncategorized")
+        .chain(transactions.iter().flat_map(transaction_tags))
+        .filter(|tag| tag != "Untagged")
         .collect::<Vec<_>>();
     options.sort_by(|a, b| compare_case_insensitive(a, b));
     options.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
@@ -677,7 +677,7 @@ pub(crate) fn transaction_category_options(
 
 pub(crate) fn filtered_transactions(
     transactions: &[Transaction],
-    category: Option<&str>,
+    selected_tag: Option<&str>,
     title_filter: &str,
     sort_field: TransactionSortField,
     sort_direction: SortDirection,
@@ -697,8 +697,8 @@ pub(crate) fn filtered_transactions(
             {
                 return false;
             }
-            category
-                .map(|category| transaction_category(transaction) == category)
+            selected_tag
+                .map(|tag| transaction_has_tag(transaction, tag))
                 .unwrap_or(true)
         })
         .cloned()
@@ -720,14 +720,7 @@ pub(crate) fn compare_transactions(
             compare_case_insensitive(&transaction_description(a), &transaction_description(b))
         }
         TransactionSortField::Category => {
-            compare_case_insensitive(&transaction_category(a), &transaction_category(b)).then_with(
-                || {
-                    compare_case_insensitive(
-                        &transaction_subcategory(a).unwrap_or_default(),
-                        &transaction_subcategory(b).unwrap_or_default(),
-                    )
-                },
-            )
+            compare_case_insensitive(&transaction_tags_label(a), &transaction_tags_label(b))
         }
         TransactionSortField::Account => compare_case_insensitive(&a.account_name, &b.account_name),
         TransactionSortField::Counted => a.ignored_from_spending.cmp(&b.ignored_from_spending),
@@ -956,6 +949,69 @@ pub(crate) fn transaction_subcategory(transaction: &Transaction) -> Option<Strin
         .or_else(|| transaction.subcategory.clone())
         .map(|value| normalize_spending_category_key(&value))
         .filter(|value| !value.is_empty() && value != "Uncategorized")
+}
+
+pub(crate) fn transaction_tags(transaction: &Transaction) -> Vec<String> {
+    if !transaction.tags.is_empty() {
+        return normalize_tags(transaction.tags.clone());
+    }
+    if let Some(tags) = transaction
+        .annotation
+        .as_ref()
+        .and_then(|annotation| annotation.tags.clone())
+    {
+        return normalize_tags(tags);
+    }
+
+    let mut tags = Vec::new();
+    if let Some(category) = transaction_category_value(transaction) {
+        tags.push(category);
+    }
+    if let Some(subcategory) = transaction_subcategory(transaction) {
+        tags.push(subcategory);
+    }
+    normalize_tags(tags)
+}
+
+pub(crate) fn transaction_has_tag(transaction: &Transaction, tag: &str) -> bool {
+    transaction_tags(transaction)
+        .iter()
+        .any(|candidate| candidate.eq_ignore_ascii_case(tag))
+}
+
+pub(crate) fn transaction_tags_label(transaction: &Transaction) -> String {
+    let tags = transaction_tags(transaction);
+    if tags.is_empty() {
+        "Untagged".to_string()
+    } else {
+        tags.join(", ")
+    }
+}
+
+pub(crate) fn parse_tags_input(value: &str) -> Vec<String> {
+    normalize_tags(
+        value
+            .split(',')
+            .map(str::trim)
+            .filter(|tag| !tag.is_empty())
+            .map(ToOwned::to_owned)
+            .collect(),
+    )
+}
+
+pub(crate) fn normalize_tags(tags: Vec<String>) -> Vec<String> {
+    tags.into_iter()
+        .map(|tag| tag.trim().to_string())
+        .filter(|tag| !tag.is_empty())
+        .fold(Vec::<String>::new(), |mut acc, tag| {
+            if !acc
+                .iter()
+                .any(|existing| existing.eq_ignore_ascii_case(&tag))
+            {
+                acc.push(tag);
+            }
+            acc
+        })
 }
 
 pub(crate) fn format_transaction_amount(transaction: &Transaction, currency: &str) -> String {

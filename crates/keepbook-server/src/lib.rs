@@ -341,6 +341,26 @@ impl ApiState {
         .await
     }
 
+    pub async fn set_transaction_tags(
+        &self,
+        input: TransactionTagsBatchInput,
+    ) -> Result<serde_json::Value> {
+        let state = self.snapshot().await;
+        let targets = input
+            .transactions
+            .into_iter()
+            .map(|transaction| (transaction.account_id, transaction.transaction_id))
+            .collect::<Vec<_>>();
+        keepbook::app::set_transaction_tags(
+            state.storage.as_ref(),
+            &state.config,
+            targets,
+            input.tags,
+            input.clear_tags,
+        )
+        .await
+    }
+
     pub async fn proposed_transaction_edits(
         &self,
         query: ProposedTransactionEditsQuery,
@@ -806,6 +826,16 @@ pub struct TransactionCategoryBatchInput {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct TransactionTagsBatchInput {
+    #[serde(default)]
+    pub transactions: Vec<TransactionCategoryTargetInput>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub clear_tags: bool,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct SpendingQuery {
     pub currency: Option<String>,
     pub start: Option<String>,
@@ -1223,6 +1253,7 @@ pub fn router(state: ApiState) -> Router {
             "/api/transactions/category/batch",
             post(set_transaction_categories),
         )
+        .route("/api/transactions/tags/batch", post(set_transaction_tags))
         .route("/api/spending", get(spending))
         .route("/api/tray", get(tray))
         .route(
@@ -1327,6 +1358,14 @@ async fn set_transaction_categories(
     Json(input): Json<TransactionCategoryBatchInput>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     Ok(Json(state.set_transaction_categories(input).await?))
+}
+
+#[cfg(feature = "http")]
+async fn set_transaction_tags(
+    State(state): State<ApiState>,
+    Json(input): Json<TransactionTagsBatchInput>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    Ok(Json(state.set_transaction_tags(input).await?))
 }
 
 #[cfg(feature = "http")]

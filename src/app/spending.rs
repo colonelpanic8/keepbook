@@ -467,6 +467,49 @@ fn annotation_ignores_spending(annotation: Option<&TransactionAnnotation>) -> bo
         .unwrap_or(false)
 }
 
+fn push_non_empty_tag(tags: &mut Vec<String>, value: Option<String>) {
+    let Some(value) = value.map(|value| value.trim().to_string()) else {
+        return;
+    };
+    if value.is_empty() {
+        return;
+    }
+    if !tags.iter().any(|tag| tag.eq_ignore_ascii_case(&value)) {
+        tags.push(value);
+    }
+}
+
+fn effective_transaction_tags(
+    annotation: Option<&TransactionAnnotation>,
+    metadata_category: Option<String>,
+) -> Vec<String> {
+    if let Some(tags) = annotation.and_then(|annotation| annotation.tags.clone()) {
+        return tags
+            .into_iter()
+            .map(|tag| tag.trim().to_string())
+            .filter(|tag| !tag.is_empty())
+            .fold(Vec::<String>::new(), |mut acc, tag| {
+                if !acc
+                    .iter()
+                    .any(|existing| existing.eq_ignore_ascii_case(&tag))
+                {
+                    acc.push(tag);
+                }
+                acc
+            });
+    }
+
+    let mut tags = Vec::new();
+    if let Some(annotation) = annotation {
+        push_non_empty_tag(&mut tags, annotation.category.clone());
+        push_non_empty_tag(&mut tags, annotation.subcategory.clone());
+    }
+    if tags.is_empty() {
+        push_non_empty_tag(&mut tags, metadata_category);
+    }
+    tags
+}
+
 async fn ignored_account_ids_for_portfolio_spending(
     config: &ResolvedConfig,
     accounts: &[Account],
@@ -812,7 +855,12 @@ async fn spending_report_with_store(
                     .annotation
                     .as_ref()
                     .and_then(|a| a.tags.clone())
-                    .unwrap_or_default(),
+                    .unwrap_or_else(|| {
+                        effective_transaction_tags(
+                            row.annotation.as_ref(),
+                            row.metadata_category.clone(),
+                        )
+                    }),
             };
 
             let keys = if matches!(group_by, GroupBy::Tag) && keys.is_empty() {
