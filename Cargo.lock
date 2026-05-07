@@ -3924,10 +3924,12 @@ version = "0.2.3"
 dependencies = [
  "chrono",
  "dioxus",
+ "futures-util",
  "gloo-net",
  "image",
  "js-sys",
  "keepbook-server",
+ "ksni",
  "serde",
  "serde_json",
  "serde_urlencoded",
@@ -4011,6 +4013,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b5b29c089f14ce24c5b25d9bdcb265413b5e0c3df0871823e0d96bd83bc52a24"
 dependencies = [
  "futures-util",
+ "once_cell",
  "pastey 0.2.1",
  "serde",
  "tokio",
