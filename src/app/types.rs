@@ -75,6 +75,55 @@ pub struct TransactionOutput {
     pub standardized_metadata: Option<TransactionStandardizedMetadata>,
 }
 
+/// Options for recurring transaction detection.
+#[derive(Debug, Clone)]
+pub struct RecurringTransactionsOptions {
+    pub start: Option<String>,
+    pub end: Option<String>,
+    pub include_ignored: bool,
+    pub include_possible: bool,
+    pub min_confidence: f64,
+}
+
+/// Summary of the amount pattern for a recurring transaction candidate.
+#[derive(Serialize)]
+pub struct RecurringTransactionAmountOutput {
+    pub typical: String,
+    pub min: String,
+    pub max: String,
+    pub asset: serde_json::Value,
+}
+
+/// One transaction supporting a recurring transaction candidate.
+#[derive(Serialize)]
+pub struct RecurringTransactionOccurrenceOutput {
+    pub id: String,
+    pub account_id: String,
+    pub account_name: String,
+    pub date: String,
+    pub description: String,
+    pub amount: String,
+}
+
+/// A detected recurring transaction candidate.
+#[derive(Serialize)]
+pub struct RecurringTransactionOutput {
+    pub name: String,
+    pub normalized_name: String,
+    pub status: String,
+    pub cadence: String,
+    pub confidence: String,
+    pub cadence_score: String,
+    pub occurrence_count: usize,
+    pub first_seen: String,
+    pub last_seen: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_expected: Option<String>,
+    pub amount: RecurringTransactionAmountOutput,
+    pub reason_codes: Vec<String>,
+    pub transactions: Vec<RecurringTransactionOccurrenceOutput>,
+}
+
 /// Materialized transaction annotation state.
 #[derive(Serialize)]
 pub struct TransactionAnnotationOutput {

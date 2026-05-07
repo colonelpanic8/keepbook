@@ -6,6 +6,7 @@ mod list;
 mod mutations;
 mod portfolio;
 mod preflight;
+mod recurring;
 mod spending;
 #[cfg(feature = "sync")]
 mod sync;
@@ -37,6 +38,7 @@ pub use portfolio::{
     DEFAULT_PORTFOLIO_HISTORY_GRANULARITY, DEFAULT_PORTFOLIO_INCLUDE_PRICES,
 };
 pub use preflight::{run_preflight, PreflightOptions};
+pub use recurring::list_recurring_transactions;
 pub use spending::{spending_report, SpendingReportOptions};
 #[cfg(feature = "sync")]
 pub use sync::{
@@ -48,9 +50,10 @@ pub use types::{
     AccountOutput, AllOutput, AssetInfoOutput, BalanceOutput, ChangePointsOutput, ConnectionOutput,
     HistoryOutput, HistoryPoint, HistorySummary, PriceHistoryFailure, PriceHistoryOutput,
     PriceHistoryScopeOutput, PriceHistoryStats, PriceSourceOutput, ProposedTransactionEditOutput,
-    SpendingBreakdownEntryOutput, SpendingOutput, SpendingPeriodOutput, SpendingScopeOutput,
-    TaxImpactOutput, TaxImpactPoint, TransactionAnnotationOutput, TransactionAnnotationPatchOutput,
-    TransactionOutput,
+    RecurringTransactionAmountOutput, RecurringTransactionOccurrenceOutput,
+    RecurringTransactionOutput, RecurringTransactionsOptions, SpendingBreakdownEntryOutput,
+    SpendingOutput, SpendingPeriodOutput, SpendingScopeOutput, TaxImpactOutput, TaxImpactPoint,
+    TransactionAnnotationOutput, TransactionAnnotationPatchOutput, TransactionOutput,
 };
 
 fn maybe_auto_commit(config: &ResolvedConfig, action: &str) {
