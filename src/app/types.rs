@@ -69,6 +69,8 @@ pub struct TransactionOutput {
     pub category: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subcategory: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub annotation: Option<TransactionAnnotationOutput>,
     #[serde(skip_serializing)]

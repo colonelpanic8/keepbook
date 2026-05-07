@@ -34,6 +34,49 @@ fn annotation_ignores_spending(annotation: &TransactionAnnotation) -> bool {
         .unwrap_or(false)
 }
 
+fn push_non_empty_tag(tags: &mut Vec<String>, value: Option<String>) {
+    let Some(value) = value.map(|value| value.trim().to_string()) else {
+        return;
+    };
+    if value.is_empty() {
+        return;
+    }
+    if !tags.iter().any(|tag| tag.eq_ignore_ascii_case(&value)) {
+        tags.push(value);
+    }
+}
+
+fn effective_transaction_tags(
+    annotation: Option<&TransactionAnnotation>,
+    metadata_category: Option<String>,
+) -> Vec<String> {
+    if let Some(tags) = annotation.and_then(|annotation| annotation.tags.clone()) {
+        return tags
+            .into_iter()
+            .map(|tag| tag.trim().to_string())
+            .filter(|tag| !tag.is_empty())
+            .fold(Vec::<String>::new(), |mut acc, tag| {
+                if !acc
+                    .iter()
+                    .any(|existing| existing.eq_ignore_ascii_case(&tag))
+                {
+                    acc.push(tag);
+                }
+                acc
+            });
+    }
+
+    let mut tags = Vec::new();
+    if let Some(annotation) = annotation {
+        push_non_empty_tag(&mut tags, annotation.category.clone());
+        push_non_empty_tag(&mut tags, annotation.subcategory.clone());
+    }
+    if tags.is_empty() {
+        push_non_empty_tag(&mut tags, metadata_category);
+    }
+    tags
+}
+
 pub async fn list_connections(storage: &dyn Storage) -> Result<Vec<ConnectionOutput>> {
     let connections = storage.list_connections().await?;
     let accounts = storage.list_accounts().await?;
@@ -382,17 +425,16 @@ pub async fn list_transactions(
                     })
                 }
             });
-            let category = annotations_by_tx
-                .get(&tx.id)
+            let raw_annotation = annotations_by_tx.get(&tx.id);
+            let metadata_category = tx
+                .standardized_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.merchant_category_label.clone());
+            let category = raw_annotation
                 .and_then(|ann| ann.category.clone())
-                .or_else(|| {
-                    tx.standardized_metadata
-                        .as_ref()
-                        .and_then(|metadata| metadata.merchant_category_label.clone())
-                });
-            let subcategory = annotations_by_tx
-                .get(&tx.id)
-                .and_then(|ann| ann.subcategory.clone());
+                .or_else(|| metadata_category.clone());
+            let subcategory = raw_annotation.and_then(|ann| ann.subcategory.clone());
+            let tags = effective_transaction_tags(raw_annotation, metadata_category);
             if skip_ignored
                 && annotations_by_tx
                     .get(&tx.id)
@@ -412,6 +454,7 @@ pub async fn list_transactions(
                 status,
                 category,
                 subcategory,
+                tags,
                 annotation,
                 standardized_metadata: tx.standardized_metadata.clone(),
             });
@@ -550,6 +593,7 @@ mod tests {
             out[0].annotation.as_ref().unwrap().tags.clone().unwrap(),
             vec!["coffee".to_string()]
         );
+        assert_eq!(out[0].tags, vec!["coffee".to_string()]);
         Ok(())
     }
 

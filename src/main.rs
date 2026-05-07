@@ -154,6 +154,10 @@ enum Command {
     #[command(subcommand)]
     ProposedEdits(ProposedEditsCommand),
 
+    /// Manage transaction annotation regex rules
+    #[command(subcommand)]
+    TransactionRules(TransactionRulesCommand),
+
     /// Import data from exported files
     #[command(subcommand)]
     Import(ImportCommand),
@@ -344,6 +348,9 @@ impl Command {
             | Command::MarketData(MarketDataCommand::Fetch { .. }) => true,
             Command::ProposedEdits(ProposedEditsCommand::List { .. }) => false,
             Command::ProposedEdits(_) => true,
+            Command::TransactionRules(TransactionRulesCommand::List) => false,
+            Command::TransactionRules(TransactionRulesCommand::Apply { dry_run, .. }) => !*dry_run,
+            Command::TransactionRules(_) => true,
             Command::Portfolio(PortfolioCommand::Snapshot {
                 offline, dry_run, ..
             }) => !*offline && !*dry_run,
@@ -542,6 +549,86 @@ enum ProposeCommand {
         /// Clear reporting date override
         #[arg(long)]
         clear_effective_date: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum TransactionRulesCommand {
+    /// Append a transaction annotation regex rule
+    Add {
+        /// Category to assign when the rule matches
+        #[arg(long = "set-category")]
+        set_category: Option<String>,
+
+        /// Subcategory to assign when the rule matches
+        #[arg(long = "set-subcategory")]
+        set_subcategory: Option<String>,
+
+        /// Description override to assign when the rule matches
+        #[arg(long = "set-description")]
+        set_description: Option<String>,
+
+        /// Tag to assign when the rule matches. Repeat for multiple tags.
+        #[arg(long = "set-tag")]
+        set_tags: Vec<String>,
+
+        /// Account ID regex matcher
+        #[arg(long = "match-account-id")]
+        match_account_id: Option<String>,
+
+        /// Account name regex matcher
+        #[arg(long = "match-account-name")]
+        match_account_name: Option<String>,
+
+        /// Transaction description regex matcher
+        #[arg(long = "match-description")]
+        match_description: Option<String>,
+
+        /// Resolved category regex matcher
+        #[arg(long = "match-category")]
+        match_category: Option<String>,
+
+        /// Existing explicit subcategory regex matcher
+        #[arg(long = "match-subcategory")]
+        match_subcategory: Option<String>,
+
+        /// Transaction status regex matcher
+        #[arg(long = "match-status")]
+        match_status: Option<String>,
+
+        /// Transaction amount regex matcher
+        #[arg(long = "match-amount")]
+        match_amount: Option<String>,
+    },
+
+    /// List configured transaction annotation regex rules
+    List,
+
+    /// Apply transaction annotation regex rules to existing transactions
+    Apply {
+        /// Start date (YYYY-MM-DD, default: no lower bound)
+        #[arg(long)]
+        start: Option<String>,
+
+        /// End date (YYYY-MM-DD, default: no upper bound)
+        #[arg(long)]
+        end: Option<String>,
+
+        /// Filter to a single account by ID or name (mutually exclusive with --connection)
+        #[arg(long)]
+        account: Option<String>,
+
+        /// Filter to a single connection by ID or name (mutually exclusive with --account)
+        #[arg(long)]
+        connection: Option<String>,
+
+        /// Replace existing explicit annotation fields touched by matching rules
+        #[arg(long, default_value_t = false)]
+        overwrite: bool,
+
+        /// Show matching updates without writing annotation patches
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
     },
 }
 
@@ -1184,6 +1271,72 @@ async fn main() -> Result<()> {
                 let result =
                     app::remove_proposed_transaction_edit(storage_arc.as_ref(), &config, &id)
                         .await?;
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
+        },
+
+        Some(Command::TransactionRules(transaction_rules_cmd)) => match transaction_rules_cmd {
+            TransactionRulesCommand::Add {
+                set_category,
+                set_subcategory,
+                set_description,
+                set_tags,
+                match_account_id,
+                match_account_name,
+                match_description,
+                match_category,
+                match_subcategory,
+                match_status,
+                match_amount,
+            } => {
+                let result = app::add_transaction_rule(
+                    &config,
+                    app::TransactionRule {
+                        set_category,
+                        set_subcategory,
+                        set_description,
+                        set_tags: if set_tags.is_empty() {
+                            None
+                        } else {
+                            Some(set_tags)
+                        },
+                        match_account_id,
+                        match_account_name,
+                        match_description,
+                        match_category,
+                        match_subcategory,
+                        match_status,
+                        match_amount,
+                    },
+                )
+                .await?;
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
+            TransactionRulesCommand::List => {
+                let result = app::list_transaction_rules(&config)?;
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
+            TransactionRulesCommand::Apply {
+                start,
+                end,
+                account,
+                connection,
+                overwrite,
+                dry_run,
+            } => {
+                let result = app::apply_transaction_rules(
+                    storage_arc.as_ref(),
+                    &config,
+                    app::ApplyTransactionRulesOptions {
+                        start,
+                        end,
+                        account,
+                        connection,
+                        overwrite,
+                        dry_run,
+                    },
+                )
+                .await?;
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
         },

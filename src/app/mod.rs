@@ -10,6 +10,7 @@ mod recurring;
 mod spending;
 #[cfg(feature = "sync")]
 mod sync;
+mod transaction_rules;
 mod types;
 mod value;
 
@@ -45,6 +46,11 @@ pub use sync::{
     chase_login, schwab_login, sync_all, sync_all_if_stale, sync_backfill_metadata,
     sync_connection, sync_connection_if_stale, sync_prices, sync_recompact, sync_symlinks,
     SyncPricesScopeArg,
+};
+pub use transaction_rules::{
+    add_transaction_rule, append_transaction_rule, apply_transaction_rules, list_transaction_rules,
+    load_transaction_rules, transaction_rules_config_path, transaction_rules_path,
+    ApplyTransactionRulesOptions, TransactionRule, TransactionRuleInput, TransactionRuleMatcher,
 };
 pub use types::{
     AccountOutput, AllOutput, AssetInfoOutput, BalanceOutput, ChangePointsOutput, ConnectionOutput,

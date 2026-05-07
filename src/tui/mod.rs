@@ -32,7 +32,7 @@ use crate::storage::Storage;
 const LOAD_START_DATE: &str = "1900-01-01";
 const LOAD_END_DATE: &str = "9999-12-31";
 const POLL_INTERVAL: Duration = Duration::from_millis(200);
-const CATEGORY_RULES_FILE: &str = "transaction_category_rules.jsonl";
+const CATEGORY_RULES_FILE: &str = "transaction_rules.jsonl";
 const OPENAI_REGEX_SUGGESTION_MODEL_ENV: &str = "KEEPBOOK_REGEX_LLM_MODEL";
 const OPENAI_REGEX_SUGGESTION_MODEL_DEFAULT: &str = "gpt-4o-mini";
 const OPENAI_CHAT_COMPLETIONS_URL: &str = "https://api.openai.com/v1/chat/completions";
@@ -41,17 +41,28 @@ const SPENDING_IGNORE_TAGS: [&str; 3] = ["ignore_spending", "ignore-spending", "
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct TransactionCategoryRule {
-    category: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    account_id: Option<String>,
+    set_category: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    account_name: Option<String>,
+    set_subcategory: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    description: Option<String>,
+    set_description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    status: Option<String>,
+    set_tags: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    amount: Option<String>,
+    match_account_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    match_account_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    match_description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    match_category: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    match_subcategory: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    match_status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    match_amount: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -59,16 +70,20 @@ struct TransactionCategoryRuleInput<'a> {
     account_id: &'a str,
     account_name: &'a str,
     description: &'a str,
+    category: &'a str,
+    subcategory: &'a str,
     status: &'a str,
     amount: &'a str,
 }
 
 #[derive(Debug, Clone)]
 struct CompiledTransactionCategoryRule {
-    category: String,
+    category: Option<String>,
     account_id: Option<Regex>,
     account_name: Option<Regex>,
     description: Option<Regex>,
+    category_matcher: Option<Regex>,
+    subcategory_matcher: Option<Regex>,
     status: Option<Regex>,
     amount: Option<Regex>,
 }
@@ -93,21 +108,65 @@ impl CompiledTransactionCategoryRule {
     }
 
     fn from_rule(rule_index: usize, rule: &TransactionCategoryRule) -> Result<Self> {
-        let category = rule.category.trim();
-        if category.is_empty() {
-            anyhow::bail!("Invalid category rule [{rule_index}]: empty category");
+        let category = rule
+            .set_category
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned);
+        let description = rule
+            .set_description
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let subcategory = rule
+            .set_subcategory
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let tags = rule
+            .set_tags
+            .as_ref()
+            .map(|tags| tags.iter().any(|tag| !tag.trim().is_empty()))
+            .unwrap_or(false);
+        if category.is_none() && description.is_none() && subcategory.is_none() && !tags {
+            anyhow::bail!("Invalid category rule [{rule_index}]: at least one action is required");
         }
         let compiled = Self {
-            category: category.to_string(),
-            account_id: Self::compile_field(rule_index, "account_id", &rule.account_id)?,
-            account_name: Self::compile_field(rule_index, "account_name", &rule.account_name)?,
-            description: Self::compile_field(rule_index, "description", &rule.description)?,
-            status: Self::compile_field(rule_index, "status", &rule.status)?,
-            amount: Self::compile_field(rule_index, "amount", &rule.amount)?,
+            category,
+            account_id: Self::compile_field(
+                rule_index,
+                "match_account_id",
+                &rule.match_account_id,
+            )?,
+            account_name: Self::compile_field(
+                rule_index,
+                "match_account_name",
+                &rule.match_account_name,
+            )?,
+            description: Self::compile_field(
+                rule_index,
+                "match_description",
+                &rule.match_description,
+            )?,
+            category_matcher: Self::compile_field(
+                rule_index,
+                "match_category",
+                &rule.match_category,
+            )?,
+            subcategory_matcher: Self::compile_field(
+                rule_index,
+                "match_subcategory",
+                &rule.match_subcategory,
+            )?,
+            status: Self::compile_field(rule_index, "match_status", &rule.match_status)?,
+            amount: Self::compile_field(rule_index, "match_amount", &rule.match_amount)?,
         };
         let has_any_matcher = compiled.account_id.is_some()
             || compiled.account_name.is_some()
             || compiled.description.is_some()
+            || compiled.category_matcher.is_some()
+            || compiled.subcategory_matcher.is_some()
             || compiled.status.is_some()
             || compiled.amount.is_some();
         if !has_any_matcher {
@@ -127,6 +186,8 @@ impl CompiledTransactionCategoryRule {
         Self::match_field(&self.account_id, input.account_id)
             && Self::match_field(&self.account_name, input.account_name)
             && Self::match_field(&self.description, input.description)
+            && Self::match_field(&self.category_matcher, input.category)
+            && Self::match_field(&self.subcategory_matcher, input.subcategory)
             && Self::match_field(&self.status, input.status)
             && Self::match_field(&self.amount, input.amount)
     }
@@ -141,8 +202,8 @@ impl TransactionCategoryMatcher {
     fn match_category<'a>(&'a self, input: &TransactionCategoryRuleInput<'_>) -> Option<&'a str> {
         self.rules
             .iter()
-            .find(|rule| rule.is_match(input))
-            .map(|rule| rule.category.as_str())
+            .find(|rule| rule.category.is_some() && rule.is_match(input))
+            .and_then(|rule| rule.category.as_deref())
     }
 }
 
@@ -768,7 +829,9 @@ fn collect_category_catalog(app_state: &AppState) -> Vec<String> {
     };
 
     for rule in &app_state.category_matcher.rules {
-        add(&rule.category);
+        if let Some(category) = &rule.category {
+            add(category);
+        }
     }
     for tx in &app_state.all_transactions {
         if let Some(category) = tx
@@ -1102,12 +1165,17 @@ async fn handle_regex_modal_key(
             }
 
             let rule = TransactionCategoryRule {
-                category: modal.category.clone(),
-                account_id: None,
-                account_name: exact_ci_regex_pattern(&modal.source.account_name),
-                description: Some(regex_pattern.to_string()),
-                status: None,
-                amount: None,
+                set_category: Some(modal.category.clone()),
+                set_subcategory: None,
+                set_description: None,
+                set_tags: None,
+                match_account_id: None,
+                match_account_name: exact_ci_regex_pattern(&modal.source.account_name),
+                match_description: Some(regex_pattern.to_string()),
+                match_category: None,
+                match_subcategory: None,
+                match_status: None,
+                match_amount: None,
             };
             append_transaction_category_rule(&app_state.category_rules_path, &rule)?;
             let (matcher, warning) =
@@ -1838,11 +1906,25 @@ fn resolved_transaction_category(
         return annotation_category;
     }
 
+    let metadata_category = tx
+        .standardized_metadata
+        .as_ref()
+        .and_then(|md| md.merchant_category_label.as_deref())
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let existing_subcategory = tx
+        .annotation
+        .as_ref()
+        .and_then(|ann| ann.subcategory.as_deref())
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
     let rule_category = matcher
         .match_category(&TransactionCategoryRuleInput {
             account_id: &tx.account_id,
             account_name: &tx.account_name,
             description: &tx.description,
+            category: metadata_category.unwrap_or(""),
+            subcategory: existing_subcategory.unwrap_or(""),
             status: &tx.status,
             amount: &tx.amount,
         })
@@ -1851,12 +1933,7 @@ fn resolved_transaction_category(
         return rule_category;
     }
 
-    tx.standardized_metadata
-        .as_ref()
-        .and_then(|md| md.merchant_category_label.as_deref())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned)
+    metadata_category.map(ToOwned::to_owned)
 }
 
 fn transaction_category_string(
@@ -2178,6 +2255,7 @@ mod tests {
             status: "posted".to_string(),
             category: None,
             subcategory: None,
+            tags: Vec::new(),
             annotation: None,
             standardized_metadata: None,
         }
@@ -2221,7 +2299,7 @@ mod tests {
                 tx("b", "2026-02-01T00:00:00+00:00", "1"),
             ],
             TransactionCategoryMatcher::default(),
-            PathBuf::from("/tmp/category-rules-test.jsonl"),
+            PathBuf::from("/tmp/transaction-rules-test.jsonl"),
             false,
             TuiOptions::default(),
         );
@@ -2284,12 +2362,17 @@ mod tests {
         t.description = "Starbucks #123".to_string();
 
         let rule = TransactionCategoryRule {
-            category: "coffee".to_string(),
-            account_id: None,
-            account_name: exact_ci_regex_pattern("Checking"),
-            description: Some("(?i)^starbucks".to_string()),
-            status: None,
-            amount: None,
+            set_category: Some("coffee".to_string()),
+            set_subcategory: None,
+            set_description: None,
+            set_tags: None,
+            match_account_id: None,
+            match_account_name: exact_ci_regex_pattern("Checking"),
+            match_description: Some("(?i)^starbucks".to_string()),
+            match_category: None,
+            match_subcategory: None,
+            match_status: None,
+            match_amount: None,
         };
         let matcher = TransactionCategoryMatcher {
             rules: vec![CompiledTransactionCategoryRule::from_rule(0, &rule).expect("valid rule")],
