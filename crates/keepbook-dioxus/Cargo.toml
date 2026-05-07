@@ -21,7 +21,7 @@ futures-util = { version = "0.3", optional = true }
 [features]
 default = ["web"]
 web = ["dioxus/web", "dep:gloo-net"]
-desktop = ["dioxus/desktop", "dep:image", "dep:ksni", "dep:futures-util"]
+desktop = ["dioxus/desktop", "dep:image", "dep:ksni", "dep:futures-util", "keepbook-server/git-sync"]
 mobile = ["dioxus/mobile"]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

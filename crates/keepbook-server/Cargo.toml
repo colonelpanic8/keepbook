@@ -15,7 +15,8 @@ path = "src/main.rs"
 required-features = ["http"]
 
 [features]
-default = ["http"]
+default = ["http", "git-sync"]
+git-sync = ["dep:git2"]
 http = [
   "dep:axum",
   "dep:clap",
@@ -32,7 +33,7 @@ anyhow = "1"
 axum = { version = "0.8", optional = true }
 chrono = "0.4"
 clap = { version = "4", features = ["derive"], optional = true }
-git2 = { version = "0.20", default-features = false, features = ["vendored-libgit2", "vendored-openssl", "ssh"] }
+git2 = { version = "0.20", default-features = false, features = ["vendored-libgit2", "vendored-openssl", "ssh"], optional = true }
 keepbook = { path = "../..", default-features = false, features = [
   "app",
   "config",

@@ -32,6 +32,14 @@ use tower_http::trace::TraceLayer;
 
 mod ai_rules;
 
+const DEFAULT_SSH_IDENTITY_FILES: &[&str] = &[
+    "id_ed25519",
+    "id_rsa",
+    "id_ecdsa",
+    "id_ecdsa_sk",
+    "id_ed25519_sk",
+];
+
 pub use ai_rules::{
     AiRuleSuggestionInput, AiRuleSuggestionsOutput, AiRuleToolCallOutput, AiRuleTransactionInput,
 };
@@ -440,6 +448,7 @@ impl ApiState {
         let snapshot = self.snapshot().await;
         let git = load_git_remote_settings(&snapshot.config_path)?;
         prepare_git_ssh_environment(&snapshot.config_path)?;
+        let git = with_default_desktop_ssh_key_path(git);
         Ok(GitSettingsOutput {
             config_path: snapshot.config_path.display().to_string(),
             data_dir: snapshot.config.data_dir.display().to_string(),
@@ -461,8 +470,8 @@ impl ApiState {
         validate_git_data_dir(&data_dir)?;
         prepare_git_ssh_environment(&snapshot.config_path)?;
         let configured_git = load_git_remote_settings(&snapshot.config_path)?;
-        let private_key_pem =
-            resolve_git_private_key(&snapshot.config_path, &configured_git, &input)?;
+        let auth_git = with_default_desktop_ssh_key_path(configured_git.clone());
+        let private_key_pem = resolve_git_private_key(&snapshot.config_path, &auth_git, &input)?;
         let repo_state = read_git_repo_state(&data_dir);
         let branch = repo_state
             .branch
@@ -476,7 +485,7 @@ impl ApiState {
 
         if input.save_settings {
             let ssh_key_path = if input.private_key_pem.trim().is_empty() {
-                configured_git.ssh_key_path
+                auth_git.ssh_key_path
             } else {
                 Some(persist_git_private_key(
                     &snapshot.config_path,
@@ -1450,6 +1459,40 @@ fn load_git_remote_settings(config_path: &Path) -> Result<GitRemoteSettings> {
     })
 }
 
+fn with_default_desktop_ssh_key_path(mut settings: GitRemoteSettings) -> GitRemoteSettings {
+    if settings
+        .ssh_key_path
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|path| !path.is_empty())
+    {
+        return settings;
+    }
+
+    if let Some(path) = default_desktop_ssh_key_path() {
+        settings.ssh_key_path = Some(path.display().to_string());
+    }
+
+    settings
+}
+
+fn default_desktop_ssh_key_path() -> Option<PathBuf> {
+    if cfg!(target_os = "android") {
+        return None;
+    }
+
+    let home_dir = std::env::var_os("HOME").map(PathBuf::from)?;
+    default_ssh_key_path_in_home(&home_dir)
+}
+
+fn default_ssh_key_path_in_home(home_dir: &Path) -> Option<PathBuf> {
+    let ssh_dir = home_dir.join(".ssh");
+    DEFAULT_SSH_IDENTITY_FILES
+        .iter()
+        .map(|name| ssh_dir.join(name))
+        .find(|path| path.is_file())
+}
+
 fn table_string(table: Option<&Item>, key: &str) -> Option<String> {
     table?
         .as_table_like()?
@@ -1522,6 +1565,7 @@ fn validate_git_data_dir(data_dir: &Path) -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "git-sync")]
 fn read_git_repo_state(data_dir: &Path) -> GitRepoState {
     let Ok(repo) = git2::Repository::open(data_dir) else {
         return GitRepoState {
@@ -1551,6 +1595,16 @@ fn read_git_repo_state(data_dir: &Path) -> GitRepoState {
         remote_url,
         branch,
         commit,
+    }
+}
+
+#[cfg(not(feature = "git-sync"))]
+fn read_git_repo_state(_data_dir: &Path) -> GitRepoState {
+    GitRepoState {
+        cloned: false,
+        remote_url: None,
+        branch: None,
+        commit: None,
     }
 }
 
@@ -1694,6 +1748,7 @@ fn expand_home_path(path: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
+#[cfg(feature = "git-sync")]
 fn log_git_sync_event(message: impl AsRef<str>) {
     let message = message.as_ref();
     tracing::info!("{message}");
@@ -1733,6 +1788,7 @@ fn is_explicit_git_remote(remote: &str) -> bool {
     remote.contains("://") || (remote.contains('@') && remote.contains(':'))
 }
 
+#[cfg(feature = "git-sync")]
 fn sync_git_ssh(
     data_dir: &Path,
     remote_url: &str,
@@ -1833,6 +1889,16 @@ fn sync_git_ssh(
     Ok(())
 }
 
+#[cfg(not(feature = "git-sync"))]
+fn sync_git_ssh(
+    _data_dir: &Path,
+    _remote_url: &str,
+    _branch: &str,
+    _private_key_pem: &str,
+) -> Result<()> {
+    anyhow::bail!("Git sync is unavailable in this keepbook-server build")
+}
+
 pub fn default_listen_addr() -> SocketAddr {
     SocketAddr::from(([127, 0, 0, 1], 8799))
 }
@@ -1906,6 +1972,39 @@ mod tests {
         assert!(content.contains("[git_sync]"));
         remove_test_config(config_path);
         Ok(())
+    }
+
+    #[test]
+    fn default_ssh_key_path_prefers_ed25519_then_rsa() -> Result<()> {
+        let home = unique_test_config_path("default-ssh-key-order")
+            .parent()
+            .expect("test config should have parent")
+            .join("home");
+        let ssh_dir = home.join(".ssh");
+        std::fs::create_dir_all(&ssh_dir)?;
+        std::fs::write(ssh_dir.join("id_rsa"), "rsa")?;
+        std::fs::write(ssh_dir.join("id_ed25519"), "ed25519")?;
+
+        let expected = ssh_dir.join("id_ed25519");
+        assert_eq!(
+            default_ssh_key_path_in_home(&home).as_deref(),
+            Some(expected.as_path())
+        );
+        let _ = std::fs::remove_dir_all(home.parent().unwrap_or(&home));
+        Ok(())
+    }
+
+    #[test]
+    fn configured_ssh_key_path_wins_over_default() {
+        let settings = with_default_desktop_ssh_key_path(GitRemoteSettings {
+            ssh_key_path: Some(".ssh/keepbook_sync_key".to_string()),
+            ..GitRemoteSettings::default()
+        });
+
+        assert_eq!(
+            settings.ssh_key_path.as_deref(),
+            Some(".ssh/keepbook_sync_key")
+        );
     }
 
     fn unique_test_config_path(name: &str) -> PathBuf {
