@@ -1,5 +1,9 @@
 use super::*;
-use crate::api::{fetch_git_settings, save_git_settings, sync_git_repo};
+use crate::api::{
+    fetch_git_settings, new_git_sync_cancel_handle, save_git_settings, sync_git_repo_cancelable,
+    GitSyncCancelHandle,
+};
+use dioxus::core::Task;
 
 #[component]
 pub(super) fn GraphsView(
@@ -126,6 +130,9 @@ pub(super) fn SettingsView(
     let mut private_key_name = use_signal(String::new);
     let mut status = use_signal(String::new);
     let mut busy = use_signal(|| false);
+    let mut cancel_requested = use_signal(|| false);
+    let mut git_sync_cancel = use_signal(|| None::<GitSyncCancelHandle>);
+    let mut git_sync_task = use_signal(|| None::<Task>);
     let mut add_location_open = use_signal(|| false);
     let mut location_remote_input = use_signal(String::new);
     let mut location_path_input = use_signal(String::new);
@@ -158,6 +165,7 @@ pub(super) fn SettingsView(
 
     let current_settings = settings.cloned();
     let is_busy = busy();
+    let is_canceling = cancel_requested();
     let status_text = status();
 
     rsx! {
@@ -200,6 +208,21 @@ pub(super) fn SettingsView(
                     if !status_text.is_empty() {
                         p { class: "settings-status", "{status_text}" }
                     }
+                    if is_busy {
+                        div {
+                            class: "git-sync-working",
+                            role: "status",
+                            aria_live: "polite",
+                            span { class: "activity-spinner" }
+                            span {
+                                if is_canceling {
+                                    "Canceling Git operation..."
+                                } else {
+                                    "Git operation in progress..."
+                                }
+                            }
+                        }
+                    }
                     GitLocationList {
                         current: current.clone(),
                         staged_data_dir: git_data_dir(),
@@ -226,7 +249,10 @@ pub(super) fn SettingsView(
                             } else {
                                 "selected SSH key"
                             };
+                            let cancel_handle = new_git_sync_cancel_handle();
                             busy.set(true);
+                            cancel_requested.set(false);
+                            git_sync_cancel.set(Some(cancel_handle.clone()));
                             clone_dialog_open.set(true);
                             clone_dialog_title.set(format!("{action} repository"));
                             clone_dialog_message.set(format!(
@@ -237,8 +263,8 @@ pub(super) fn SettingsView(
                                 key_source
                             ));
                             status.set(format!("{action_progress} repository..."));
-                            spawn(async move {
-                                match sync_git_repo(input).await {
+                            let task = spawn(async move {
+                                match sync_git_repo_cancelable(input, cancel_handle).await {
                                     Ok(result) => {
                                         clone_dialog_title.set("Repository ready".to_string());
                                         clone_dialog_message.set(format!(
@@ -250,13 +276,23 @@ pub(super) fn SettingsView(
                                         onrefresh.call(());
                                     }
                                     Err(error) => {
-                                        clone_dialog_title.set("Git operation failed".to_string());
-                                        clone_dialog_message.set(error.clone());
-                                        status.set(format!("Git sync failed: {error}"));
+                                        if error.contains("cancelled") || error.contains("canceled") {
+                                            clone_dialog_title.set("Git operation canceled".to_string());
+                                            clone_dialog_message.set("Git sync was canceled before it completed.".to_string());
+                                            status.set("Git sync canceled.".to_string());
+                                        } else {
+                                            clone_dialog_title.set("Git operation failed".to_string());
+                                            clone_dialog_message.set(error.clone());
+                                            status.set(format!("Git sync failed: {error}"));
+                                        }
                                     }
                                 }
+                                git_sync_task.set(None);
+                                git_sync_cancel.set(None);
+                                cancel_requested.set(false);
                                 busy.set(false);
                             });
+                            git_sync_task.set(Some(task));
                         },
                     }
                     div { class: "control-field secret-field",
@@ -467,7 +503,36 @@ pub(super) fn SettingsView(
                         if is_busy {
                             span { class: "activity-spinner large" }
                         }
-                        p { "{clone_dialog_message()}" }
+                        div { class: "clone-progress-copy",
+                            p { "{clone_dialog_message()}" }
+                            if is_busy {
+                                div { class: "indeterminate-progress",
+                                    span {}
+                                }
+                            }
+                        }
+                    }
+                    if is_busy {
+                        div { class: "modal-actions",
+                            button {
+                                class: "control-button danger",
+                                disabled: is_canceling,
+                                onclick: move |_| {
+                                    if let Some(cancel_handle) = git_sync_cancel() {
+                                        cancel_handle.cancel();
+                                    }
+                                    cancel_requested.set(true);
+                                    clone_dialog_title.set("Canceling Git operation".to_string());
+                                    clone_dialog_message.set("Waiting for the current Git transfer step to stop.".to_string());
+                                    status.set("Canceling Git sync...".to_string());
+                                },
+                                if is_canceling {
+                                    "Canceling"
+                                } else {
+                                    "Cancel"
+                                }
+                            }
+                        }
                     }
                     if !is_busy {
                         div { class: "modal-actions",

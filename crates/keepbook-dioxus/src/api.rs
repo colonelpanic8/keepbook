@@ -8,7 +8,9 @@ use gloo_net::http::Request;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 #[cfg(not(target_arch = "wasm32"))]
-use std::sync::OnceLock;
+use std::sync::{mpsc, Arc, Mutex, OnceLock};
+#[cfg(not(target_arch = "wasm32"))]
+use std::task::Poll;
 
 pub(crate) async fn fetch_overview(overrides: FilterOverrides) -> Result<Overview, String> {
     fetch_overview_impl(overrides).await
@@ -92,8 +94,27 @@ pub(crate) async fn save_git_settings(
     save_git_settings_impl(input).await
 }
 
-pub(crate) async fn sync_git_repo(input: GitSyncInput) -> Result<GitSyncOutput, String> {
-    sync_git_repo_impl(input).await
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) type GitSyncCancelHandle = keepbook_server::GitSyncCancelToken;
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone, Default)]
+pub(crate) struct GitSyncCancelHandle;
+
+#[cfg(target_arch = "wasm32")]
+impl GitSyncCancelHandle {
+    pub(crate) fn cancel(&self) {}
+}
+
+pub(crate) fn new_git_sync_cancel_handle() -> GitSyncCancelHandle {
+    GitSyncCancelHandle::default()
+}
+
+pub(crate) async fn sync_git_repo_cancelable(
+    input: GitSyncInput,
+    cancel_handle: GitSyncCancelHandle,
+) -> Result<GitSyncOutput, String> {
+    sync_git_repo_cancelable_impl(input, cancel_handle).await
 }
 
 pub(crate) async fn sync_connections(
@@ -275,6 +296,14 @@ pub(crate) async fn sync_git_repo_impl(input: GitSyncInput) -> Result<GitSyncOut
         .json::<GitSyncOutput>()
         .await
         .map_err(|error| format!("Could not decode Git sync result: {error}"))
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn sync_git_repo_cancelable_impl(
+    input: GitSyncInput,
+    _cancel_handle: GitSyncCancelHandle,
+) -> Result<GitSyncOutput, String> {
+    sync_git_repo_impl(input).await
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -477,19 +506,50 @@ pub(crate) async fn save_git_settings_impl(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) async fn sync_git_repo_impl(input: GitSyncInput) -> Result<GitSyncOutput, String> {
-    let output = native_api_state()?
-        .sync_git_repo(keepbook_server::GitSyncInput {
-            data_dir: input.data_dir,
-            host: input.host,
-            repo: input.repo,
-            branch: input.branch,
-            ssh_user: input.ssh_user,
-            private_key_pem: input.private_key_pem,
-            save_settings: input.save_settings,
-        })
-        .await
-        .map_err(|error| format!("Git sync failed: {error:#}"))?;
+pub(crate) async fn sync_git_repo_cancelable_impl(
+    input: GitSyncInput,
+    cancel_handle: GitSyncCancelHandle,
+) -> Result<GitSyncOutput, String> {
+    let state = native_api_state()?.clone();
+    let (sender, receiver) = mpsc::sync_channel(1);
+    let waker = Arc::new(Mutex::new(None::<std::task::Waker>));
+    let worker_waker = Arc::clone(&waker);
+    std::thread::spawn(move || {
+        let output = state
+            .sync_git_repo_blocking_with_cancel(
+                keepbook_server::GitSyncInput {
+                    data_dir: input.data_dir,
+                    host: input.host,
+                    repo: input.repo,
+                    branch: input.branch,
+                    ssh_user: input.ssh_user,
+                    private_key_pem: input.private_key_pem,
+                    save_settings: input.save_settings,
+                },
+                cancel_handle,
+            )
+            .map_err(|error| format!("Git sync failed: {error:#}"));
+        let _ = sender.send(output);
+        if let Ok(mut waker) = worker_waker.lock() {
+            if let Some(waker) = waker.take() {
+                waker.wake();
+            }
+        }
+    });
+
+    let output = std::future::poll_fn(move |cx| match receiver.try_recv() {
+        Ok(result) => Poll::Ready(result),
+        Err(mpsc::TryRecvError::Empty) => {
+            if let Ok(mut waker) = waker.lock() {
+                *waker = Some(cx.waker().clone());
+            }
+            Poll::Pending
+        }
+        Err(mpsc::TryRecvError::Disconnected) => Poll::Ready(Err(
+            "Git sync worker stopped before returning a result.".to_string(),
+        )),
+    })
+    .await?;
     from_native_output(output, "Git sync result")
 }
 

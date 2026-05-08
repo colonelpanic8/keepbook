@@ -283,6 +283,21 @@ small,
   width: fit-content;
 }
 
+.git-sync-working {
+  align-items: center;
+  background: #eef7f4;
+  border: 1px solid #cfe2dc;
+  border-radius: 6px;
+  color: #24443d;
+  display: inline-flex;
+  font-size: 0.82rem;
+  font-weight: 800;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  width: fit-content;
+}
+
 .inline-notice {
   background: #eef7f4;
   border: 1px solid #cfe2dc;
@@ -420,6 +435,12 @@ small,
   background: #f8eeee;
   border-color: #e4c6c6;
   color: #8b2f2f;
+}
+
+.control-button.danger {
+  background: #fff4f4;
+  border-color: #e1b5b5;
+  color: #a33a3a;
 }
 
 .control-button:disabled {
@@ -721,6 +742,13 @@ small,
   min-height: 58px;
 }
 
+.clone-progress-copy {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 10px;
+  min-width: 0;
+}
+
 .clone-progress p {
   color: #31424e;
   font-size: 0.9rem;
@@ -728,6 +756,35 @@ small,
   margin: 0;
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.indeterminate-progress {
+  background: #dbe8e4;
+  border-radius: 999px;
+  height: 6px;
+  overflow: hidden;
+  position: relative;
+  width: 100%;
+}
+
+.indeterminate-progress span {
+  animation: indeterminate-progress 1.1s ease-in-out infinite;
+  background: #1f6f8b;
+  border-radius: inherit;
+  display: block;
+  height: 100%;
+  position: absolute;
+  width: 42%;
+}
+
+@keyframes indeterminate-progress {
+  0% {
+    left: -42%;
+  }
+
+  100% {
+    left: 100%;
+  }
 }
 
 .range-summary {
