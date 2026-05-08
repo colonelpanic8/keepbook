@@ -1248,7 +1248,7 @@ async fn tray_transaction_lines(storage: Arc<dyn Storage>, config: &ResolvedConf
             }
         }
 
-        rows.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        rows.sort_by_key(|row| std::cmp::Reverse(row.timestamp));
         rows.truncate(config.tray.transaction_count);
 
         Ok(rows
@@ -1631,9 +1631,9 @@ fn write_git_settings(config_path: &Path, input: &GitSettingsInput) -> Result<()
     }
 
     doc["data_dir"] = value(input.data_dir.trim());
-    if !doc
+    if doc
         .get("git_sync")
-        .is_some_and(|item| item.as_table_like().is_some())
+        .is_none_or(|item| item.as_table_like().is_none())
     {
         doc.insert("git_sync", Item::Table(Table::new()));
     }

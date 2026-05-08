@@ -25,12 +25,14 @@ impl Drop for TrayState {
 }
 
 enum TrayThreadMessage {
-    Update {
-        overview: Option<Overview>,
-        tray_snapshot: Option<Result<TraySnapshot, String>>,
-        runtime: TrayRuntime,
-    },
+    Update(Box<TrayUpdate>),
     Shutdown,
+}
+
+struct TrayUpdate {
+    overview: Option<Overview>,
+    tray_snapshot: Option<Result<TraySnapshot, String>>,
+    runtime: TrayRuntime,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -168,15 +170,11 @@ fn create_tray_state_inner(sender: UnboundedSender<TrayCommand>) -> Result<TrayS
 fn run_tray_thread(handle: Handle<KeepbookTrayItem>, receiver: mpsc::Receiver<TrayThreadMessage>) {
     for message in receiver {
         match message {
-            TrayThreadMessage::Update {
-                overview,
-                tray_snapshot,
-                runtime,
-            } => {
+            TrayThreadMessage::Update(update) => {
                 let _ = handle.update(move |tray| {
-                    tray.overview = overview;
-                    tray.tray_snapshot = tray_snapshot;
-                    tray.runtime = runtime;
+                    tray.overview = update.overview;
+                    tray.tray_snapshot = update.tray_snapshot;
+                    tray.runtime = update.runtime;
                 });
             }
             TrayThreadMessage::Shutdown => {
@@ -196,11 +194,13 @@ fn update_tray_state(
     let overview = overview.cloned();
     let tray_snapshot = tray_snapshot.cloned();
     let runtime = runtime.clone();
-    let _ = state.sender.send(TrayThreadMessage::Update {
-        overview,
-        tray_snapshot,
-        runtime,
-    });
+    let _ = state
+        .sender
+        .send(TrayThreadMessage::Update(Box::new(TrayUpdate {
+            overview,
+            tray_snapshot,
+            runtime,
+        })));
 }
 
 fn tray_lines(
