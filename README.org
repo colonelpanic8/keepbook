@@ -20,81 +20,17 @@ Android APKs and desktop app bundles are attached to the latest GitHub release:
 
 The main Rust binary is =keepbook=. Commands emit JSON.
 
-Top-level commands:
-
-- =config=
-- =add=
-  - =connection=
-  - =account=
-- =remove=
-  - =connection=
-- =set=
-  - =balance=
-  - =transaction= (append-only transaction annotation patches)
-- =import=
-  - =schwab transactions=
-- =list=
-  - =connections=
-  - =accounts=
-  - =balances=
-  - =transactions=
-  - =price-sources=
-  - =all=
-- =sync=
-  - =connection=
-  - =all=
-  - =prices [all|connection|account]= (interactive selector when scope is omitted)
-  - =symlinks=
-- =auth=
-  - =schwab login=
-  - =chase login=
-- =market-data fetch=
-- =portfolio snapshot|history|change-points=
-- =spending=
-
-Global options:
-
-- =--config <path>=
-- =--git-merge-master=
-- =--skip-git-merge-master=
-
-Examples:
+CLI usage is intentionally not duplicated in this README. The command tree,
+flags, arguments, defaults, conflicts, and help text are defined in the Rust
+=clap= parser and should be read from the binary:
 
 #+BEGIN_SRC bash
-# Show resolved config and data directory
-keepbook config
+keepbook --help
+keepbook <command> --help
+keepbook <command> <subcommand> --help
 
-# Create a manual connection and account
-keepbook add connection "Manual"
-keepbook add account --connection <connection-id> "Checking"
-
-# Set a balance snapshot entry
-keepbook set balance --account <account-id> --asset USD --amount 1234.56
-
-# Add/clear transaction annotation fields
-keepbook set transaction \
-  --account <account-id> \
-  --transaction <transaction-id> \
-  --category "Dining" \
-  --note "Team lunch"
-
-# Override the reporting/bucketing date without changing the synced timestamp
-keepbook set transaction \
-  --account <account-id> \
-  --transaction <transaction-id> \
-  --effective-date 2026-02-01
-
-# Sync transactions/balances from one source
-keepbook sync connection <connection-id-or-name>
-
-# Refresh latest prices for all accounts
-keepbook sync prices all
-
-# Portfolio valuation in EUR at a specific date
-keepbook portfolio snapshot --currency EUR --date 2026-02-01
-
-# Spending report
-keepbook spending --period monthly --group-by category
+# From a checkout:
+cargo run --bin keepbook -- --help
 #+END_SRC
 
 * Configuration
