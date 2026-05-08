@@ -485,14 +485,17 @@ pub struct ResolvedConfig {
 ///
 /// Resolution order:
 /// 1. `./keepbook.toml` if it exists in current directory
-/// 2. `~/.local/share/keepbook/keepbook.toml` (XDG data directory)
+/// 2. The platform data directory's `keepbook/keepbook.toml`
+///    (for example, `~/.local/share/keepbook/keepbook.toml` on Linux or
+///    `~/Library/Application Support/keepbook/keepbook.toml` on macOS)
 pub fn default_config_path() -> PathBuf {
     let local_config = PathBuf::from("keepbook.toml");
     if local_config.exists() {
         return absolute_from_current_dir(local_config);
     }
 
-    // XDG data directory fallback
+    // Platform data directory fallback. On Linux this follows XDG; on macOS it
+    // uses the standard Application Support directory.
     if let Some(data_dir) = dirs::data_dir() {
         return absolute_from_current_dir(data_dir.join("keepbook").join("keepbook.toml"));
     }

@@ -38,7 +38,9 @@ cargo run --bin keepbook -- --help
 Default config path resolution:
 
 1. =./keepbook.toml= if present.
-2. =~/.local/share/keepbook/keepbook.toml= (XDG data dir fallback).
+2. Platform data dir fallback via =dirs::data_dir()=:
+   - Linux: =$XDG_DATA_HOME/keepbook/keepbook.toml=, or =~/.local/share/keepbook/keepbook.toml= when =XDG_DATA_HOME= is unset.
+   - macOS: =~/Library/Application Support/keepbook/keepbook.toml=.
 
 When no config file exists, defaults are used and the intended config directory becomes =data_dir=.
 
