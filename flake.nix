@@ -103,11 +103,10 @@
           platformToolsVersion = androidPlatformToolsVersion;
           buildToolsVersions = ["34.0.0" androidBuildToolsVersion];
           includeEmulator = true;
-          # Dioxus 0.7.3 still generates an initial Gradle project pinned to
-          # SDK 33/Build Tools 34. The wrapper patches and rebuilds with the
-          # latest versions below, but the generated first pass still needs
-          # these packages available in the immutable SDK.
-          platformVersions = ["33" androidCompileSdkVersion];
+          # Dioxus still generates an initial Gradle project pinned to older
+          # SDKs before the wrapper patches and rebuilds with the latest
+          # versions below. Include those generated SDKs in the immutable SDK.
+          platformVersions = ["33" "34" androidCompileSdkVersion];
           includeSources = false;
           includeSystemImages = false;
           systemImageTypes = ["google_apis_playstore"];
