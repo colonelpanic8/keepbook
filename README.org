@@ -10,6 +10,12 @@ Keepbook is a local-first personal finance toolkit focused on data ownership.
 - The on-disk format is human-readable and easy to inspect/edit with normal tools.
 - The data directory is fully portable: copy it, back it up, version it, and keep it long-term without lock-in.
 
+* App Downloads
+
+Android APKs and desktop app bundles are attached to the latest GitHub release:
+
+- https://github.com/colonelpanic8/keepbook/releases/latest
+
 * CLI
 
 The main Rust binary is =keepbook=. Commands emit JSON.
