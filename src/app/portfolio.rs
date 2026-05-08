@@ -774,7 +774,7 @@ pub async fn fetch_historical_prices(
         });
     }
 
-    asset_caches.sort_by(|a, b| a.asset_id.to_string().cmp(&b.asset_id.to_string()));
+    asset_caches.sort_by_key(|cache| cache.asset_id.to_string());
 
     let mut failures = Vec::new();
     let mut failure_count = 0usize;

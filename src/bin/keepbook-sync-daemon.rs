@@ -915,7 +915,7 @@ impl Daemon {
             }
 
             // Sort newest first.
-            rows.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+            rows.sort_by_key(|row| std::cmp::Reverse(row.timestamp));
             rows.truncate(self.transaction_count);
 
             let lines: Vec<String> = rows

@@ -1292,11 +1292,9 @@ async fn run_event_loop(
                 );
                 select_next(app_state.visible_row_count(), active_table_state);
             }
-            KeyCode::Char('s') => {
-                if app_state.active_view == TuiView::Transactions {
-                    app_state.sort = app_state.sort.next();
-                    app_state.recompute_visible_transactions();
-                }
+            KeyCode::Char('s') if app_state.active_view == TuiView::Transactions => {
+                app_state.sort = app_state.sort.next();
+                app_state.recompute_visible_transactions();
             }
             KeyCode::Char('1') => {
                 app_state.span = TimeSpan::Days7;
@@ -1333,17 +1331,15 @@ async fn run_event_loop(
                 app_state.recompute_visible_transactions();
                 app_state.recompute_visible_net_worth();
             }
-            KeyCode::Char('-') => {
-                if app_state.active_view == TuiView::NetWorth {
-                    app_state.net_worth_interval = app_state.net_worth_interval.prev();
-                    refresh_net_worth(app_state, storage.clone(), config).await;
-                }
+            KeyCode::Char('-') if app_state.active_view == TuiView::NetWorth => {
+                app_state.net_worth_interval = app_state.net_worth_interval.prev();
+                refresh_net_worth(app_state, storage.clone(), config).await;
             }
-            KeyCode::Char('=') | KeyCode::Char('+') => {
-                if app_state.active_view == TuiView::NetWorth {
-                    app_state.net_worth_interval = app_state.net_worth_interval.next();
-                    refresh_net_worth(app_state, storage.clone(), config).await;
-                }
+            KeyCode::Char('=') | KeyCode::Char('+')
+                if app_state.active_view == TuiView::NetWorth =>
+            {
+                app_state.net_worth_interval = app_state.net_worth_interval.next();
+                refresh_net_worth(app_state, storage.clone(), config).await;
             }
             KeyCode::Char('r') => match app_state.active_view {
                 TuiView::Transactions => {
@@ -1355,37 +1351,31 @@ async fn run_event_loop(
                     refresh_net_worth(app_state, storage.clone(), config).await;
                 }
             },
-            KeyCode::Char('i') => {
-                if app_state.active_view == TuiView::Transactions {
-                    app_state.include_ignored = !app_state.include_ignored;
-                    refresh_transactions_and_rules(app_state, storage.as_ref(), config).await?;
-                    app_state.status_message = Some(format!(
-                        "include_ignored={}",
-                        if app_state.include_ignored {
-                            "yes"
-                        } else {
-                            "no"
-                        }
-                    ));
-                }
+            KeyCode::Char('i') if app_state.active_view == TuiView::Transactions => {
+                app_state.include_ignored = !app_state.include_ignored;
+                refresh_transactions_and_rules(app_state, storage.as_ref(), config).await?;
+                app_state.status_message = Some(format!(
+                    "include_ignored={}",
+                    if app_state.include_ignored {
+                        "yes"
+                    } else {
+                        "no"
+                    }
+                ));
             }
-            KeyCode::Char('c') => {
-                if app_state.active_view == TuiView::Transactions {
-                    open_category_modal_for_selected(
-                        app_state,
-                        tx_table_state,
-                        CategoryActionKind::OneOff,
-                    );
-                }
+            KeyCode::Char('c') if app_state.active_view == TuiView::Transactions => {
+                open_category_modal_for_selected(
+                    app_state,
+                    tx_table_state,
+                    CategoryActionKind::OneOff,
+                );
             }
-            KeyCode::Char('C') => {
-                if app_state.active_view == TuiView::Transactions {
-                    open_category_modal_for_selected(
-                        app_state,
-                        tx_table_state,
-                        CategoryActionKind::Rule,
-                    );
-                }
+            KeyCode::Char('C') if app_state.active_view == TuiView::Transactions => {
+                open_category_modal_for_selected(
+                    app_state,
+                    tx_table_state,
+                    CategoryActionKind::Rule,
+                );
             }
             _ => {}
         }
