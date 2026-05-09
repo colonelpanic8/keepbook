@@ -192,7 +192,10 @@ impl CoinbaseSynchronizer {
         struct SpotPosition {
             asset: String,
             account_uuid: String,
-            total_balance_crypto: f64,
+            #[serde(default)]
+            total_balance_crypto: Option<serde_json::Value>,
+            #[serde(default)]
+            total_balance_fiat: Option<serde_json::Value>,
             #[serde(default)]
             is_cash: bool,
         }
@@ -220,20 +223,40 @@ impl CoinbaseSynchronizer {
             let breakdown: BreakdownResponse = self.request("GET", &path).await?;
 
             for pos in breakdown.breakdown.spot_positions {
-                // Skip fiat currencies (USD, etc) - they're handled differently
-                if pos.is_cash {
-                    continue;
+                let is_fiat_cash = pos.is_cash && Self::is_fiat_currency(&pos.asset);
+                let value = if is_fiat_cash {
+                    Self::json_decimal_string(
+                        pos.total_balance_fiat
+                            .as_ref()
+                            .or(pos.total_balance_crypto.as_ref()),
+                    )
+                } else {
+                    Self::json_decimal_string(
+                        pos.total_balance_crypto
+                            .as_ref()
+                            .or(pos.total_balance_fiat.as_ref()),
+                    )
                 }
+                .unwrap_or_else(|| "0".to_string());
 
                 accounts.push(CoinbaseAccount {
                     uuid: pos.account_uuid,
-                    name: format!("{} Wallet", pos.asset),
+                    name: if is_fiat_cash {
+                        format!("{} Cash", pos.asset)
+                    } else {
+                        format!("{} Wallet", pos.asset)
+                    },
                     currency: pos.asset,
                     available_balance: CoinbaseBalance {
-                        value: pos.total_balance_crypto.to_string(),
+                        value,
                         currency: String::new(), // Not used
                     },
-                    account_type: "ACCOUNT_TYPE_CRYPTO".to_string(),
+                    account_type: if is_fiat_cash {
+                        "ACCOUNT_TYPE_FIAT".to_string()
+                    } else {
+                        "ACCOUNT_TYPE_CRYPTO".to_string()
+                    },
+                    is_cash: is_fiat_cash,
                 });
             }
         }
@@ -244,6 +267,43 @@ impl CoinbaseSynchronizer {
         );
 
         Ok(accounts)
+    }
+
+    fn json_decimal_string(value: Option<&serde_json::Value>) -> Option<String> {
+        let value = value?;
+        match value {
+            serde_json::Value::Number(number) => Some(number.to_string()),
+            serde_json::Value::String(string) => {
+                let trimmed = string.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_string())
+                }
+            }
+            serde_json::Value::Object(map) => map
+                .get("value")
+                .and_then(|value| Self::json_decimal_string(Some(value))),
+            _ => None,
+        }
+    }
+
+    fn is_fiat_currency(asset: &str) -> bool {
+        matches!(
+            asset.trim().to_uppercase().as_str(),
+            "USD"
+                | "EUR"
+                | "GBP"
+                | "CAD"
+                | "AUD"
+                | "NZD"
+                | "JPY"
+                | "CHF"
+                | "SEK"
+                | "NOK"
+                | "DKK"
+                | "MXN"
+        )
     }
 
     async fn get_fills(&self) -> Result<Vec<CoinbaseFill>> {
@@ -389,7 +449,11 @@ impl CoinbaseSynchronizer {
                         Err(_) => Id::from_external(&format!("coinbase:{}", cb_account.uuid)),
                     }
                 };
-            let asset = Asset::crypto(&cb_account.currency);
+            let asset = if cb_account.is_cash {
+                Asset::currency(&cb_account.currency)
+            } else {
+                Asset::crypto(&cb_account.currency)
+            };
             let balance_amount: f64 = cb_account.available_balance.value.parse().unwrap_or(0.0);
 
             tracing::debug!(
@@ -515,6 +579,8 @@ struct CoinbaseAccount {
     available_balance: CoinbaseBalance,
     #[serde(rename = "type")]
     account_type: String,
+    #[serde(default)]
+    is_cash: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -650,6 +716,93 @@ mod tests {
         assert_eq!(result.balances[0].1[0].asset_balance.amount, "0.5");
         assert_eq!(result.transactions.len(), 1);
         assert!(result.transactions[0].1.is_empty());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sync_preserves_coinbase_cash_positions() -> Result<()> {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/v3/brokerage/portfolios"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "portfolios": [{"uuid": "p1", "name": "Default"}]
+            })))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/v3/brokerage/portfolios/p1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "breakdown": {
+                    "spot_positions": [
+                        {
+                            "asset": "USD",
+                            "account_uuid": "22222222-2222-2222-2222-222222222222",
+                            "total_balance_fiat": 123.45,
+                            "total_balance_crypto": 123.45,
+                            "is_cash": true
+                        },
+                        {
+                            "asset": "USDC",
+                            "account_uuid": "33333333-3333-3333-3333-333333333333",
+                            "total_balance_fiat": 0.01,
+                            "total_balance_crypto": 0.013745,
+                            "is_cash": true
+                        }
+                    ]
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/v3/brokerage/orders/historical/fills"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "fills": [],
+                "has_next": false
+            })))
+            .mount(&server)
+            .await;
+
+        let secret_key = SecretKey::random(&mut OsRng);
+        let pem = secret_key
+            .to_sec1_pem(LineEnding::LF)
+            .context("Failed to encode test EC private key")?;
+
+        let synchronizer = CoinbaseSynchronizer::new(
+            "test-key".to_string(),
+            SecretString::new(pem.to_string().into()),
+        )
+        .with_base_url(server.uri());
+
+        let storage = MemoryStorage::new();
+        let mut connection = Connection::new(ConnectionConfig {
+            name: "Coinbase".to_string(),
+            synchronizer: "coinbase".to_string(),
+            credentials: None,
+            balance_staleness: None,
+        });
+
+        let result = synchronizer.sync(&mut connection, &storage).await?;
+
+        assert_eq!(result.accounts.len(), 2);
+        assert_eq!(result.accounts[0].name, "USD Cash");
+        assert_eq!(result.accounts[0].tags[1], "ACCOUNT_TYPE_FIAT");
+        assert_eq!(result.accounts[1].name, "USDC Wallet");
+        assert_eq!(result.accounts[1].tags[1], "ACCOUNT_TYPE_CRYPTO");
+        assert_eq!(result.balances.len(), 2);
+        assert!(matches!(
+            result.balances[0].1[0].asset_balance.asset,
+            Asset::Currency { .. }
+        ));
+        assert_eq!(result.balances[0].1[0].asset_balance.amount, "123.45");
+        assert!(matches!(
+            result.balances[1].1[0].asset_balance.asset,
+            Asset::Crypto { .. }
+        ));
+        assert_eq!(result.balances[1].1[0].asset_balance.amount, "0.013745");
 
         Ok(())
     }

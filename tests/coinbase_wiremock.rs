@@ -20,7 +20,7 @@ fn test_private_key_pem() -> SecretString {
 }
 
 #[tokio::test]
-async fn coinbase_sync_filters_zero_balances_and_cash_positions() -> Result<()> {
+async fn coinbase_sync_filters_zero_balances_and_preserves_cash_positions() -> Result<()> {
     let server = MockServer::start().await;
 
     let portfolios_body = r#"{
@@ -99,9 +99,12 @@ async fn coinbase_sync_filters_zero_balances_and_cash_positions() -> Result<()> 
         .sync_with_storage(&mut connection, &storage)
         .await?;
 
-    assert_eq!(result.accounts.len(), 1);
-    let account = &result.accounts[0];
-    assert_eq!(account.name, "ETH Wallet");
+    assert_eq!(result.accounts.len(), 2);
+    let account = result
+        .accounts
+        .iter()
+        .find(|account| account.name == "ETH Wallet")
+        .expect("ETH account should be synced");
     assert_eq!(
         account
             .synchronizer_data
@@ -109,10 +112,29 @@ async fn coinbase_sync_filters_zero_balances_and_cash_positions() -> Result<()> 
             .and_then(|v| v.as_str()),
         Some("ETH")
     );
+    let cash_account = result
+        .accounts
+        .iter()
+        .find(|account| account.name == "USD Cash")
+        .expect("USD cash account should be synced");
+    assert_eq!(
+        cash_account
+            .synchronizer_data
+            .get("currency")
+            .and_then(|v| v.as_str()),
+        Some("USD")
+    );
 
-    let (_, balances) = &result.balances[0];
-    assert!(balances.iter().any(|b| {
-        matches!(b.asset_balance.asset, Asset::Crypto { ref symbol, .. } if symbol == "ETH")
+    assert!(result.balances.iter().any(|(_, balances)| {
+        balances.iter().any(|b| {
+            matches!(b.asset_balance.asset, Asset::Crypto { ref symbol, .. } if symbol == "ETH")
+        })
+    }));
+    assert!(result.balances.iter().any(|(_, balances)| {
+        balances.iter().any(|b| {
+            matches!(b.asset_balance.asset, Asset::Currency { ref iso_code } if iso_code == "USD")
+                && b.asset_balance.amount == "25.0"
+        })
     }));
 
     let (_, txns) = &result.transactions[0];
