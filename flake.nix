@@ -195,9 +195,9 @@
             <key>CFBundlePackageType</key>
             <string>APPL</string>
             <key>CFBundleShortVersionString</key>
-            <string>0.3.1</string>
+            <string>0.3.3</string>
             <key>CFBundleVersion</key>
-            <string>0.3.1</string>
+            <string>0.3.3</string>
             <key>LSMinimumSystemVersion</key>
             <string>13.0</string>
             <key>NSHighResolutionCapable</key>
@@ -240,7 +240,7 @@
                 --target aarch64-linux-android
                 --package keepbook-dioxus
                 --no-default-features
-                --features mobile
+                --features android
               )
 
               if ${
@@ -626,7 +626,7 @@
         }:
           rustPlatform.buildRustPackage {
             inherit pname buildFeatures buildNoDefaultFeatures postInstall;
-            version = "0.3.1";
+            version = "0.3.3";
             src = cleanSrc;
             cargoLock = {
               lockFile = ./Cargo.lock;
