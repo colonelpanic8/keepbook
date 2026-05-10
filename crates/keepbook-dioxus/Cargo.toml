@@ -1,6 +1,6 @@
 [package]
 name = "keepbook-dioxus"
-version = "0.3.3"
+version = "0.3.4"
 edition = "2021"
 description = "Dioxus client for keepbook"
 license = "MIT OR Apache-2.0"
@@ -22,8 +22,8 @@ futures-util = { version = "0.3", optional = true }
 default = ["web"]
 web = ["dioxus/web", "dep:gloo-net"]
 desktop = ["dioxus/desktop", "dep:image", "dep:ksni", "dep:futures-util", "keepbook-server/git-sync"]
-mobile = ["dioxus/mobile"]
-android = ["mobile", "keepbook-server/git-sync"]
+mobile = ["dioxus/mobile", "keepbook-server/git-sync"]
+android = ["mobile"]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
