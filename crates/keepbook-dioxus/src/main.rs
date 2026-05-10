@@ -14,6 +14,8 @@ mod tray;
 const ANDROID_PACKAGE_DATA_DIR: &str = "/data/user/0/org.colonelpanic.keepbook.dioxus";
 
 const APP_CSS: &str = include_str!("../assets/styles.css");
+#[cfg(feature = "desktop")]
+const APP_ICON_PNG: &[u8] = include_bytes!("../../../assets/keepbook-icon-64.png");
 const SSH_KEY_FILE_PICKER_BRIDGE_JS: &str = r#"
 (function () {
   if (window.__keepbookSshKeyPickerBridgeInstalled) {
@@ -559,12 +561,24 @@ fn main() {
     #[cfg(feature = "desktop")]
     {
         dioxus::LaunchBuilder::desktop()
-            .with_cfg(dioxus::desktop::Config::new().with_disable_dma_buf_on_wayland(false))
+            .with_cfg(desktop_config())
             .launch(views::App);
     }
 
     #[cfg(not(feature = "desktop"))]
     dioxus::launch(views::App);
+}
+
+#[cfg(feature = "desktop")]
+fn desktop_config() -> dioxus::desktop::Config {
+    let config = dioxus::desktop::Config::new().with_disable_dma_buf_on_wayland(false);
+    match dioxus::desktop::icon_from_memory::<dioxus::desktop::tao::window::Icon>(APP_ICON_PNG) {
+        Ok(icon) => config.with_icon(icon),
+        Err(error) => {
+            eprintln!("Failed to load keepbook window icon: {error}");
+            config
+        }
+    }
 }
 
 #[cfg(test)]
