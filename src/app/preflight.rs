@@ -19,7 +19,7 @@ pub fn run_preflight(config: &ResolvedConfig, opts: PreflightOptions) -> Result<
     if opts.merge_origin_master {
         match try_merge_origin_master(&config.data_dir)? {
             MergeOriginMasterOutcome::SkippedNotRepo { reason } => {
-                tracing::warn!("Preflight git merge skipped: {reason}");
+                anyhow::bail!("Preflight git merge required but skipped: {reason}");
             }
             MergeOriginMasterOutcome::UpToDate => {
                 tracing::debug!("Preflight git merge: already up to date");
@@ -36,10 +36,10 @@ pub fn run_preflight(config: &ResolvedConfig, opts: PreflightOptions) -> Result<
     if opts.pull_remote {
         match try_pull_remote(&config.data_dir)? {
             PullRemoteOutcome::SkippedNotRepo { reason } => {
-                tracing::warn!("Preflight git pull skipped: {reason}");
+                anyhow::bail!("Preflight git pull required but skipped: {reason}");
             }
             PullRemoteOutcome::SkippedNoUpstream { reason } => {
-                tracing::warn!("Preflight git pull skipped: {reason}");
+                anyhow::bail!("Preflight git pull required but skipped: {reason}");
             }
             PullRemoteOutcome::UpToDate => {
                 tracing::debug!("Preflight git pull: already up to date");

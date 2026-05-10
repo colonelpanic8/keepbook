@@ -1375,7 +1375,7 @@ async fn main() -> Result<()> {
                     app::sync_connection(storage_arc.clone(), &config, &id_or_name, transactions)
                         .await?
                 };
-                app::maybe_push_after_sync(&config, push_after_sync);
+                app::maybe_push_after_sync(&config, push_after_sync)?;
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
             SyncCommand::All {
@@ -1388,7 +1388,7 @@ async fn main() -> Result<()> {
                 } else {
                     app::sync_all(storage_arc.clone(), &config, transactions).await?
                 };
-                app::maybe_push_after_sync(&config, push_after_sync);
+                app::maybe_push_after_sync(&config, push_after_sync)?;
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
             SyncCommand::Prices { opts, scope } => {
@@ -1409,22 +1409,22 @@ async fn main() -> Result<()> {
                     opts.quote_staleness,
                 )
                 .await?;
-                app::maybe_push_after_sync(&config, push_after_sync);
+                app::maybe_push_after_sync(&config, push_after_sync)?;
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
             SyncCommand::Symlinks => {
                 let result = app::sync_symlinks(&storage, &config).await?;
-                app::maybe_push_after_sync(&config, push_after_sync);
+                app::maybe_push_after_sync(&config, push_after_sync)?;
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
             SyncCommand::Recompact => {
                 let result = app::sync_recompact(&storage, &config).await?;
-                app::maybe_push_after_sync(&config, push_after_sync);
+                app::maybe_push_after_sync(&config, push_after_sync)?;
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
             SyncCommand::BackfillMetadata => {
                 let result = app::sync_backfill_metadata(&storage, &config).await?;
-                app::maybe_push_after_sync(&config, push_after_sync);
+                app::maybe_push_after_sync(&config, push_after_sync)?;
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
         },

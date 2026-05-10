@@ -16,6 +16,8 @@ mod value;
 
 use crate::config::ResolvedConfig;
 
+use anyhow::Context;
+
 pub use config::config_output;
 #[cfg(feature = "sync")]
 pub use import::import_schwab_transactions;
@@ -90,24 +92,23 @@ fn maybe_auto_commit(config: &ResolvedConfig, action: &str) {
     }
 }
 
-pub fn maybe_push_after_sync(config: &ResolvedConfig, enabled: bool) {
+pub fn maybe_push_after_sync(config: &ResolvedConfig, enabled: bool) -> anyhow::Result<()> {
     if !enabled {
-        return;
+        return Ok(());
     }
 
     #[cfg(feature = "git")]
     match crate::git::try_push_remote(&config.data_dir) {
         Ok(crate::git::PushRemoteOutcome::Pushed) => {
             tracing::info!("Git push after sync completed");
+            Ok(())
         }
         Ok(crate::git::PushRemoteOutcome::SkippedNotRepo { reason }) => {
-            tracing::warn!("Git push after sync skipped: {reason}");
+            anyhow::bail!("Git push after sync required but skipped: {reason}");
         }
-        Err(error) => {
-            tracing::warn!("Git push after sync failed: {error:#}");
-        }
+        Err(error) => Err(error).context("Git push after sync failed"),
     }
 
     #[cfg(not(feature = "git"))]
-    tracing::warn!("Git push after sync skipped: keepbook was built without git support");
+    anyhow::bail!("Git push after sync required but keepbook was built without git support");
 }

@@ -1085,7 +1085,7 @@ impl Daemon {
                 symlink_accounts,
             );
 
-            app::maybe_push_after_sync(&self.config, self.config.git.push_after_sync);
+            app::maybe_push_after_sync(&self.config, self.config.git.push_after_sync)?;
 
             Ok::<String, anyhow::Error>(summary)
         }

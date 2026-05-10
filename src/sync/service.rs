@@ -41,14 +41,16 @@ impl AuthPrompter for FixedAuthPrompter {
 }
 
 pub trait AutoCommitter: Send + Sync {
-    fn maybe_commit(&self, action: &str);
+    fn maybe_commit(&self, action: &str) -> Result<()>;
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct NoopAutoCommitter;
 
 impl AutoCommitter for NoopAutoCommitter {
-    fn maybe_commit(&self, _action: &str) {}
+    fn maybe_commit(&self, _action: &str) -> Result<()> {
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -73,24 +75,24 @@ impl GitAutoCommitter {
 }
 
 impl AutoCommitter for GitAutoCommitter {
-    fn maybe_commit(&self, action: &str) {
+    fn maybe_commit(&self, action: &str) -> Result<()> {
         if !self.auto_commit {
-            return;
+            return Ok(());
         }
 
         match try_auto_commit(&self.data_dir, action, self.auto_push) {
             Ok(AutoCommitOutcome::Committed) => {
                 tracing::info!("Auto-committed keepbook data");
+                Ok(())
             }
             Ok(AutoCommitOutcome::SkippedNoChanges) => {
                 tracing::debug!("Auto-commit skipped: no changes");
+                Ok(())
             }
             Ok(AutoCommitOutcome::SkippedNotRepo { reason }) => {
-                tracing::warn!("Auto-commit enabled but skipped: {reason}");
+                anyhow::bail!("Auto-commit required but skipped: {reason}");
             }
-            Err(err) => {
-                tracing::warn!(error = %err, "Auto-commit failed");
-            }
+            Err(err) => Err(err).context("Auto-commit failed"),
         }
     }
 }
@@ -266,7 +268,7 @@ impl SyncService {
             }
         }
 
-        self.auto_committer.maybe_commit("sync all");
+        self.auto_committer.maybe_commit("sync all")?;
 
         Ok(results)
     }
@@ -306,7 +308,7 @@ impl SyncService {
             }
         }
 
-        self.auto_committer.maybe_commit("sync all");
+        self.auto_committer.maybe_commit("sync all")?;
 
         Ok(results)
     }
@@ -324,7 +326,7 @@ impl SyncService {
         } else {
             "sync prices all"
         };
-        self.auto_committer.maybe_commit(label);
+        self.auto_committer.maybe_commit(label)?;
         Ok(result)
     }
 
@@ -348,7 +350,7 @@ impl SyncService {
         } else {
             format!("sync prices connection {id_or_name}")
         };
-        self.auto_committer.maybe_commit(&label);
+        self.auto_committer.maybe_commit(&label)?;
         Ok(result)
     }
 
@@ -372,7 +374,7 @@ impl SyncService {
         } else {
             format!("sync prices account {id_or_name}")
         };
-        self.auto_committer.maybe_commit(&label);
+        self.auto_committer.maybe_commit(&label)?;
         Ok(result)
     }
 
@@ -448,7 +450,7 @@ impl SyncService {
             .await?;
 
         self.auto_committer
-            .maybe_commit(&format!("sync connection {action_label}"));
+            .maybe_commit(&format!("sync connection {action_label}"))?;
 
         Ok(SyncOutcome::Synced { report })
     }
