@@ -1686,7 +1686,6 @@ fn validate_git_data_dir(data_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-#[cfg(feature = "git-sync")]
 fn read_git_repo_state(data_dir: &Path) -> GitRepoState {
     let Ok(repo) = git2::Repository::open(data_dir) else {
         return GitRepoState {
@@ -1716,16 +1715,6 @@ fn read_git_repo_state(data_dir: &Path) -> GitRepoState {
         remote_url,
         branch,
         commit,
-    }
-}
-
-#[cfg(not(feature = "git-sync"))]
-fn read_git_repo_state(_data_dir: &Path) -> GitRepoState {
-    GitRepoState {
-        cloned: false,
-        remote_url: None,
-        branch: None,
-        commit: None,
     }
 }
 
@@ -1869,7 +1858,6 @@ fn expand_home_path(path: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
-#[cfg(feature = "git-sync")]
 fn log_git_sync_event(message: impl AsRef<str>) {
     let message = message.as_ref();
     tracing::info!("{message}");
@@ -1939,7 +1927,6 @@ fn https_remote_to_ssh(remote_url: &str, ssh_user: &str) -> Option<String> {
     }
 }
 
-#[cfg(feature = "git-sync")]
 fn sync_git_ssh(
     data_dir: &Path,
     remote_url: &str,
@@ -2070,17 +2057,6 @@ fn sync_git_ssh(
     ));
 
     Ok(())
-}
-
-#[cfg(not(feature = "git-sync"))]
-fn sync_git_ssh(
-    _data_dir: &Path,
-    _remote_url: &str,
-    _branch: &str,
-    _private_key_pem: &str,
-    _cancel_token: &GitSyncCancelToken,
-) -> Result<()> {
-    anyhow::bail!("Git sync is unavailable in this keepbook-server build")
 }
 
 pub fn default_listen_addr() -> SocketAddr {
