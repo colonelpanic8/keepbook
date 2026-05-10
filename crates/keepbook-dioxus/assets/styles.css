@@ -1215,6 +1215,11 @@ small,
   grid-template-columns: minmax(180px, 1fr) auto auto;
 }
 
+.tag-action-row {
+  grid-template-columns: auto auto;
+  justify-content: end;
+}
+
 .ai-rule-prompt {
   background: #ffffff;
   border: 1px solid #cfdad7;
@@ -1372,13 +1377,96 @@ small,
   white-space: nowrap;
 }
 
-.category-editor {
-  align-items: center;
-  display: grid;
+.tag-editor {
+  align-items: stretch;
+  display: flex;
+  flex-direction: column;
   gap: 6px;
-  grid-template-columns: minmax(0, 1fr) auto;
   min-width: 0;
   width: 100%;
+}
+
+.transaction-tag-editor {
+  max-width: 100%;
+}
+
+.bulk-tag-editor {
+  background: #f7faf9;
+  border: 1px solid #e1e8e6;
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.tag-pill-list,
+.tag-suggestion-list,
+.tag-entry-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.tag-entry-row {
+  flex: 1 1 108px;
+  flex-wrap: nowrap;
+  max-width: 170px;
+}
+
+.tag-pill,
+.tag-suggestion-pill {
+  align-items: center;
+  border: 1px solid #cddbd7;
+  border-radius: 999px;
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 800;
+  gap: 5px;
+  line-height: 1;
+  max-width: 100%;
+  min-height: 26px;
+  padding: 0 8px;
+}
+
+.tag-pill {
+  background: #e9f3ef;
+  color: #24443d;
+}
+
+.tag-suggestion-pill {
+  background: #ffffff;
+  color: #62727f;
+}
+
+.tag-pill:hover,
+.tag-suggestion-pill:hover {
+  border-color: #9fbab3;
+}
+
+.tag-pill:disabled,
+.tag-suggestion-pill:disabled {
+  cursor: default;
+  opacity: 0.48;
+}
+
+.tag-pill span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tag-pill-remove {
+  color: #62727f;
+  font-size: 0.68rem;
+}
+
+.tag-empty {
+  color: #7b8790;
+  font-size: 0.76rem;
+  font-weight: 700;
+  line-height: 1.4;
 }
 
 .category-editor-input {
@@ -1390,6 +1478,11 @@ small,
   min-height: 32px;
   min-width: 0;
   padding: 5px 7px;
+}
+
+.tag-entry-input {
+  flex: 1 1 68px;
+  min-width: 64px;
 }
 
 .category-editor-button {
@@ -1408,6 +1501,10 @@ small,
 .category-editor-button:disabled {
   cursor: default;
   opacity: 0.45;
+}
+
+.tag-save-button {
+  align-self: flex-end;
 }
 
 .ignored-badge {
@@ -1904,7 +2001,7 @@ small,
   }
 
   .transaction-category-cell,
-  .category-editor,
+  .tag-editor,
   .proposal-transaction-cell {
     max-width: 100%;
   }

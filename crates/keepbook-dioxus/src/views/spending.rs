@@ -754,13 +754,19 @@ fn GroupTagsEditor(
     tag_options: Vec<String>,
     ontagsbulksave: EventHandler<SetTransactionTagsInput>,
 ) -> Element {
-    let mut draft_tags = use_signal(String::new);
-    let draft = draft_tags();
-    let trimmed = draft.trim().to_string();
+    let mut selected_tags = use_signal(Vec::<String>::new);
+    let mut draft_tag = use_signal(String::new);
+    let draft = draft_tag();
     let has_selection = selected_count > 0 && !tag_targets.is_empty();
     let apply_targets = tag_targets.clone();
     let clear_targets = tag_targets.clone();
-    let parsed_tags = parse_tags_input(&trimmed);
+    let tags = selected_tags();
+    let suggestions = if has_selection {
+        tag_editor_suggestions(&tag_options, &tags)
+    } else {
+        Vec::new()
+    };
+    let can_add = has_selection && !draft.trim().is_empty();
     let list_id = "group-tag-options";
 
     rsx! {
@@ -769,28 +775,69 @@ fn GroupTagsEditor(
                 strong { "Group edit" }
                 small { "{selected_count} selected" }
             }
-            div { class: "group-category-row",
-                input {
-                    class: "category-editor-input",
-                    r#type: "text",
-                    list: "{list_id}",
-                    value: "{draft}",
-                    placeholder: "Tags, comma separated",
-                    disabled: !has_selection,
-                    oninput: move |event| draft_tags.set(event.value())
-                }
-                datalist { id: "{list_id}",
-                    for tag in tag_options {
-                        option { value: "{tag}" }
+            div { class: "tag-editor bulk-tag-editor",
+                div { class: "tag-pill-list",
+                    if tags.is_empty() {
+                        span { class: "tag-empty", "No tags selected" }
+                    }
+                    for tag in tags.clone() {
+                        button {
+                            class: "tag-pill removable",
+                            title: "Remove tag",
+                            disabled: !has_selection,
+                            onclick: move |_| selected_tags.set(remove_tag_from_list(&selected_tags(), &tag)),
+                            span { "{tag}" }
+                            span { class: "tag-pill-remove", "x" }
+                        }
+                    }
+                    div { class: "tag-entry-row",
+                        input {
+                            class: "category-editor-input tag-entry-input",
+                            r#type: "text",
+                            list: "{list_id}",
+                            value: "{draft}",
+                            placeholder: "Add tag",
+                            disabled: !has_selection,
+                            oninput: move |event| draft_tag.set(event.value())
+                        }
+                        datalist { id: "{list_id}",
+                            for tag in tag_options.clone() {
+                                option { value: "{tag}" }
+                            }
+                        }
+                        button {
+                            class: "category-editor-button",
+                            title: "Add tag",
+                            disabled: !can_add,
+                            onclick: move |_| {
+                                selected_tags.set(add_tag_to_list(selected_tags(), &draft_tag()));
+                                draft_tag.set(String::new());
+                            },
+                            "+"
+                        }
                     }
                 }
+                if !suggestions.is_empty() {
+                    div { class: "tag-suggestion-list",
+                        for tag in suggestions {
+                            button {
+                                class: "tag-suggestion-pill",
+                                disabled: !has_selection,
+                                onclick: move |_| selected_tags.set(add_tag_to_list(selected_tags(), &tag)),
+                                "{tag}"
+                            }
+                        }
+                    }
+                }
+            }
+            div { class: "group-category-row tag-action-row",
                 button {
                     class: "control-button selected",
-                    disabled: !has_selection || parsed_tags.is_empty(),
+                    disabled: !has_selection || tags.is_empty(),
                     onclick: move |_| {
                         ontagsbulksave.call(SetTransactionTagsInput {
                             transactions: apply_targets.clone(),
-                            tags: parse_tags_input(&draft_tags()),
+                            tags: selected_tags(),
                             clear_tags: false,
                         });
                     },
@@ -800,7 +847,8 @@ fn GroupTagsEditor(
                     class: "control-button",
                     disabled: !has_selection,
                     onclick: move |_| {
-                        draft_tags.set(String::new());
+                        selected_tags.set(Vec::new());
+                        draft_tag.set(String::new());
                         ontagsbulksave.call(SetTransactionTagsInput {
                             transactions: clear_targets.clone(),
                             tags: Vec::new(),
@@ -838,46 +886,103 @@ fn TransactionTagsEditor(
     ontagssave: EventHandler<SetTransactionTagsInput>,
 ) -> Element {
     let current_tags = transaction_tags(&transaction);
-    let current_tags_input = current_tags.join(", ");
-    let mut draft_tags = use_signal(move || current_tags_input.clone());
-    let draft = draft_tags();
-    let parsed_tags = parse_tags_input(&draft);
-    let changed = parsed_tags != current_tags;
+    let initial_tags = current_tags.clone();
+    let mut selected_tags = use_signal(move || initial_tags.clone());
+    let mut draft_tag = use_signal(String::new);
+    let tags = selected_tags();
+    let draft = draft_tag();
+    let changed = tags != current_tags;
+    let can_add = !draft.trim().is_empty();
     let list_id = format!("tag-options-{}-{}", transaction.account_id, transaction.id);
 
     rsx! {
-        div { class: "category-editor",
-            input {
-                class: "category-editor-input",
-                r#type: "text",
-                list: "{list_id}",
-                value: "{draft}",
-                placeholder: "Untagged",
-                oninput: move |event| draft_tags.set(event.value())
-            }
-            datalist { id: "{list_id}",
-                for tag in tag_options {
-                    option { value: "{tag}" }
+        div { class: "tag-editor transaction-tag-editor",
+            div { class: "tag-pill-list",
+                if tags.is_empty() {
+                    span { class: "tag-empty", "Untagged" }
+                }
+                for tag in tags.clone() {
+                    button {
+                        class: "tag-pill removable",
+                        title: "Remove tag",
+                        onclick: move |_| selected_tags.set(remove_tag_from_list(&selected_tags(), &tag)),
+                        span { "{tag}" }
+                        span { class: "tag-pill-remove", "x" }
+                    }
+                }
+                div { class: "tag-entry-row",
+                    input {
+                        class: "category-editor-input tag-entry-input",
+                        r#type: "text",
+                        list: "{list_id}",
+                        value: "{draft}",
+                        placeholder: "Add tag",
+                        oninput: move |event| draft_tag.set(event.value())
+                    }
+                    datalist { id: "{list_id}",
+                        for tag in tag_options.clone() {
+                            option { value: "{tag}" }
+                        }
+                    }
+                    button {
+                        class: "category-editor-button",
+                        title: "Add tag",
+                        disabled: !can_add,
+                        onclick: move |_| {
+                            selected_tags.set(add_tag_to_list(selected_tags(), &draft_tag()));
+                            draft_tag.set(String::new());
+                        },
+                        "+"
+                    }
                 }
             }
             button {
-                class: "category-editor-button",
+                class: "category-editor-button tag-save-button",
                 title: "Save tags",
                 disabled: !changed,
                 onclick: move |_| {
+                    let tags = selected_tags();
                     ontagssave.call(SetTransactionTagsInput {
                         transactions: vec![TransactionCategoryTargetInput {
                             account_id: transaction.account_id.clone(),
                             transaction_id: transaction.id.clone(),
                         }],
-                        tags: parse_tags_input(&draft_tags()),
-                        clear_tags: parse_tags_input(&draft_tags()).is_empty(),
+                        clear_tags: tags.is_empty(),
+                        tags,
                     });
                 },
                 "Save"
             }
         }
     }
+}
+
+fn add_tag_to_list(tags: Vec<String>, tag: &str) -> Vec<String> {
+    let mut tags = tags;
+    tags.push(tag.to_string());
+    normalize_tags(tags)
+}
+
+fn remove_tag_from_list(tags: &[String], tag_to_remove: &str) -> Vec<String> {
+    normalize_tags(
+        tags.iter()
+            .filter(|tag| !tag.eq_ignore_ascii_case(tag_to_remove))
+            .cloned()
+            .collect(),
+    )
+}
+
+fn tag_editor_suggestions(tag_options: &[String], selected_tags: &[String]) -> Vec<String> {
+    tag_options
+        .iter()
+        .filter(|tag| {
+            !selected_tags
+                .iter()
+                .any(|selected| selected.eq_ignore_ascii_case(tag))
+        })
+        .take(8)
+        .cloned()
+        .collect()
 }
 
 #[component]

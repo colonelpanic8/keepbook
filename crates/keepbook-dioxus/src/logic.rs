@@ -995,17 +995,6 @@ pub(crate) fn transaction_tags_label(transaction: &Transaction) -> String {
     }
 }
 
-pub(crate) fn parse_tags_input(value: &str) -> Vec<String> {
-    normalize_tags(
-        value
-            .split(',')
-            .map(str::trim)
-            .filter(|tag| !tag.is_empty())
-            .map(ToOwned::to_owned)
-            .collect(),
-    )
-}
-
 pub(crate) fn normalize_tags(tags: Vec<String>) -> Vec<String> {
     tags.into_iter()
         .map(|tag| tag.trim().to_string())
