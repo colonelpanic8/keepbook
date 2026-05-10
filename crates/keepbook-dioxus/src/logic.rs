@@ -974,9 +974,16 @@ pub(crate) fn transaction_tags(transaction: &Transaction) -> Vec<String> {
 }
 
 pub(crate) fn transaction_has_tag(transaction: &Transaction, tag: &str) -> bool {
-    transaction_tags(transaction)
-        .iter()
+    let tags = transaction_tags(transaction);
+    if is_untagged_tag(tag) && tags.is_empty() {
+        return true;
+    }
+    tags.iter()
         .any(|candidate| candidate.eq_ignore_ascii_case(tag))
+}
+
+pub(crate) fn is_untagged_tag(tag: &str) -> bool {
+    tag.trim().eq_ignore_ascii_case("untagged")
 }
 
 pub(crate) fn transaction_tags_label(transaction: &Transaction) -> String {

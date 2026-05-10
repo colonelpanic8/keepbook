@@ -334,6 +334,26 @@ fn spending_transactions_can_hide_ignored_rows() {
 }
 
 #[test]
+fn spending_transactions_filter_untagged_bucket() {
+    let untagged = transaction("untagged", "-12.50", "posted");
+    let mut tagged = transaction("tagged", "-8.00", "posted");
+    tagged.tags = vec!["Dining".to_string()];
+    let rows = vec![untagged, tagged];
+
+    let filtered = filtered_transactions(
+        &rows,
+        Some("untagged"),
+        "",
+        TransactionSortField::Date,
+        SortDirection::Desc,
+        true,
+    );
+
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].id, "untagged");
+}
+
+#[test]
 fn month_offsets_clamp_to_valid_dates() {
     assert_eq!(offset_months("2026-03-31", 1), "2026-02-28");
     assert_eq!(offset_months("2024-03-31", 1), "2024-02-29");
