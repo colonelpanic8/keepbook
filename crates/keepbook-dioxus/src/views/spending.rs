@@ -559,7 +559,9 @@ fn TransactionList(
     ontagsbulksave: EventHandler<SetTransactionTagsInput>,
 ) -> Element {
     let has_any_selection = !selected_keys.is_empty();
+    let has_visible_selection = selected_count > 0 && !tag_targets.is_empty();
     let has_transactions = !transactions.is_empty();
+    let mut group_editor_open = use_signal(|| false);
     rsx! {
         div { class: "transaction-panel",
             div { class: "panel-header transaction-header",
@@ -620,6 +622,13 @@ fn TransactionList(
                     disabled: !has_any_selection,
                     "Clear"
                 }
+                if has_visible_selection {
+                    button {
+                        class: "control-button selected",
+                        onclick: move |_| group_editor_open.set(true),
+                        "Edit Tags"
+                    }
+                }
             }
             div { class: "ai-rule-panel",
                 div { class: "ai-rule-copy",
@@ -647,11 +656,27 @@ fn TransactionList(
                     AiRuleSuggestions { result }
                 }
             }
-            GroupTagsEditor {
-                selected_count,
-                tag_targets: tag_targets.clone(),
-                tag_options: tag_options.clone(),
-                ontagsbulksave,
+            if has_visible_selection && group_editor_open() {
+                div { class: "modal-backdrop",
+                    div { class: "modal-dialog group-edit-dialog",
+                        div { class: "modal-header",
+                            h3 { "Group edit" }
+                            button {
+                                class: "icon-button",
+                                title: "Close group edit",
+                                onclick: move |_| group_editor_open.set(false),
+                                "x"
+                            }
+                        }
+                        GroupTagsEditor {
+                            selected_count,
+                            tag_targets: tag_targets.clone(),
+                            tag_options: tag_options.clone(),
+                            onclose: move |_| group_editor_open.set(false),
+                            ontagsbulksave,
+                        }
+                    }
+                }
             }
             if !has_transactions {
                 div { class: "chart-empty transaction-empty",
@@ -759,6 +784,7 @@ fn GroupTagsEditor(
     selected_count: usize,
     tag_targets: Vec<TransactionCategoryTargetInput>,
     tag_options: Vec<String>,
+    onclose: EventHandler<()>,
     ontagsbulksave: EventHandler<SetTransactionTagsInput>,
 ) -> Element {
     let mut selected_tags = use_signal(Vec::<String>::new);
@@ -777,9 +803,8 @@ fn GroupTagsEditor(
     let list_id = "group-tag-options";
 
     rsx! {
-        div { class: "group-edit-panel",
+        div { class: "group-edit-body",
             div { class: "group-edit-copy",
-                strong { "Group edit" }
                 small { "{selected_count} selected" }
             }
             div { class: "tag-editor bulk-tag-editor",
@@ -847,6 +872,7 @@ fn GroupTagsEditor(
                             tags: selected_tags(),
                             clear_tags: false,
                         });
+                        onclose.call(());
                     },
                     "Apply Tags"
                 }
@@ -861,6 +887,7 @@ fn GroupTagsEditor(
                             tags: Vec::new(),
                             clear_tags: true,
                         });
+                        onclose.call(());
                     },
                     "Clear Tags"
                 }

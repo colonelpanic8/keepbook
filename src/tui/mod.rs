@@ -1762,6 +1762,7 @@ async fn load_transactions(
         storage,
         Some(LOAD_START_DATE.to_string()),
         Some(LOAD_END_DATE.to_string()),
+        None,
         false,
         !include_ignored,
         config,

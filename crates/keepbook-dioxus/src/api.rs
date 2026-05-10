@@ -67,9 +67,19 @@ pub(crate) async fn fetch_spending_dashboard(
     query: String,
 ) -> Result<SpendingDashboardData, String> {
     let spending = fetch_spending_impl(query).await?;
-    let tx_query = transaction_query_string(&spending.start_date, &spending.end_date, false);
+    let tx_query = transaction_query_string(
+        &spending.start_date,
+        &spending.end_date,
+        Some(&spending.tz),
+        false,
+    );
     let counted_transactions = fetch_transactions_impl(tx_query).await?;
-    let all_tx_query = transaction_query_string(&spending.start_date, &spending.end_date, true);
+    let all_tx_query = transaction_query_string(
+        &spending.start_date,
+        &spending.end_date,
+        Some(&spending.tz),
+        true,
+    );
     let transactions = mark_transactions_excluded_from_spending(
         fetch_transactions_impl(all_tx_query).await?,
         &counted_transactions,
@@ -706,18 +716,7 @@ pub(crate) fn native_config_path() -> PathBuf {
         );
     }
 
-    let config_path = files_dir.join("keepbook.toml");
-    if !config_path.exists() {
-        let default_config = "data_dir = \"./keepbook-data\"\n";
-        if let Err(error) = std::fs::write(&config_path, default_config) {
-            eprintln!(
-                "Could not write Android keepbook config {}: {error}",
-                config_path.display()
-            );
-        }
-    }
-
-    config_path
+    android_default_git_data_dir().join("keepbook.toml")
 }
 
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]

@@ -66,7 +66,7 @@ struct ApiSnapshot {
 impl ApiState {
     pub fn load(config_path: impl AsRef<Path>) -> Result<Self> {
         let config_path = config_path.as_ref().to_path_buf();
-        let config = ResolvedConfig::load_or_default(&config_path)
+        let config = load_api_config(&config_path)
             .with_context(|| format!("failed to load config from {}", config_path.display()))?;
         let storage = Arc::new(JsonFileStorage::new(&config.data_dir));
 
@@ -102,7 +102,7 @@ impl ApiState {
             let inner = self.inner.read().await;
             inner.config_path.clone()
         };
-        let config = ResolvedConfig::load_or_default(&config_path)
+        let config = load_api_config(&config_path)
             .with_context(|| format!("failed to reload config from {}", config_path.display()))?;
         let storage = Arc::new(JsonFileStorage::new(&config.data_dir));
         let mut inner = self.inner.write().await;
@@ -116,7 +116,7 @@ impl ApiState {
             let inner = self.inner.blocking_read();
             inner.config_path.clone()
         };
-        let config = ResolvedConfig::load_or_default(&config_path)
+        let config = load_api_config(&config_path)
             .with_context(|| format!("failed to reload config from {}", config_path.display()))?;
         let storage = Arc::new(JsonFileStorage::new(&config.data_dir));
         let mut inner = self.inner.blocking_write();
@@ -272,6 +272,7 @@ impl ApiState {
                 state.storage.as_ref(),
                 query.start,
                 query.end,
+                query.tz,
                 query.sort_by_amount,
                 !query.include_ignored,
                 &state.config,
@@ -875,6 +876,7 @@ pub struct TraySnapshotOutput {
 pub struct TransactionQuery {
     pub start: Option<String>,
     pub end: Option<String>,
+    pub tz: Option<String>,
     #[serde(default)]
     pub sort_by_amount: bool,
     #[serde(default)]
@@ -1555,6 +1557,10 @@ async fn suggest_ai_rules(
     Ok(Json(state.suggest_ai_rules(input).await?))
 }
 
+fn load_api_config(config_path: &Path) -> Result<ResolvedConfig> {
+    ResolvedConfig::load_or_default(config_path)
+}
+
 fn load_config_doc(config_path: &Path) -> Result<DocumentMut> {
     if config_path.exists() {
         let content = std::fs::read_to_string(config_path)
@@ -1719,11 +1725,11 @@ fn read_git_repo_state(data_dir: &Path) -> GitRepoState {
 }
 
 fn prepare_git_ssh_environment(config_path: &Path) -> Result<()> {
-    let Some(config_dir) = config_path.parent() else {
+    let Some(state_dir) = private_state_dir(config_path) else {
         return Ok(());
     };
 
-    let ssh_dir = config_dir.join(".ssh");
+    let ssh_dir = state_dir.join(".ssh");
     std::fs::create_dir_all(&ssh_dir)
         .with_context(|| format!("failed to create {}", ssh_dir.display()))?;
 
@@ -1734,18 +1740,35 @@ fn prepare_git_ssh_environment(config_path: &Path) -> Result<()> {
     }
 
     if cfg!(target_os = "android") || std::env::var_os("HOME").is_none() {
-        std::env::set_var("HOME", config_dir);
+        std::env::set_var("HOME", state_dir);
     }
 
     Ok(())
 }
 
 fn default_git_ssh_key_path(config_path: &Path) -> Result<PathBuf> {
-    let Some(config_dir) = config_path.parent() else {
+    let Some(state_dir) = private_state_dir(config_path) else {
         anyhow::bail!("cannot resolve SSH key path without a config directory");
     };
 
-    Ok(config_dir.join(".ssh").join("keepbook_sync_key"))
+    Ok(state_dir.join(".ssh").join("keepbook_sync_key"))
+}
+
+fn private_state_dir(config_path: &Path) -> Option<PathBuf> {
+    let config_dir = config_path.parent()?;
+    #[cfg(target_os = "android")]
+    {
+        Some(
+            config_dir
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| config_dir.to_path_buf()),
+        )
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        Some(config_dir.to_path_buf())
+    }
 }
 
 fn persist_git_private_key(config_path: &Path, private_key_pem: &str) -> Result<String> {

@@ -220,6 +220,7 @@ struct HistorySummary {
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 struct SpendingOutput {
     currency: String,
+    tz: String,
     start_date: String,
     end_date: String,
     total: String,

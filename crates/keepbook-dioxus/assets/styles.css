@@ -824,6 +824,11 @@ small,
   width: min(100%, 440px);
 }
 
+.modal-dialog.group-edit-dialog {
+  max-width: 620px;
+  width: min(100%, 620px);
+}
+
 .modal-header,
 .modal-actions {
   align-items: center;
@@ -1208,13 +1213,19 @@ small,
   padding: 12px;
 }
 
-.group-edit-panel {
+.group-edit-panel,
+.group-edit-body {
   background: #ffffff;
   border: 1px solid #e1e8e6;
   border-radius: 8px;
   display: grid;
   gap: 10px;
   padding: 12px;
+}
+
+.group-edit-body {
+  border: 0;
+  padding: 0;
 }
 
 .ai-rule-copy,

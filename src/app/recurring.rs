@@ -64,6 +64,7 @@ pub async fn list_recurring_transactions(
         storage,
         start,
         options.end.clone(),
+        None,
         false,
         !options.include_ignored,
         config,

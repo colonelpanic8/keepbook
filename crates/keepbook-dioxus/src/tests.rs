@@ -168,7 +168,15 @@ fn transaction(id: &str, amount: &str, status: &str) -> Transaction {
 #[test]
 fn inclusive_transaction_query_requests_ignored_rows() {
     assert_eq!(
-        transaction_query_string("2025-04-25", "2026-04-25", true),
+        transaction_query_string("2025-04-25", "2026-04-25", Some("local"), true),
+        "start=2025-04-25&end=2026-04-25&tz=local&include_ignored=true"
+    );
+}
+
+#[test]
+fn transaction_query_omits_empty_timezone() {
+    assert_eq!(
+        transaction_query_string("2025-04-25", "2026-04-25", None, true),
         "start=2025-04-25&end=2026-04-25&include_ignored=true"
     );
 }

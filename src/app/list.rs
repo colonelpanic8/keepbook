@@ -4,6 +4,7 @@ use std::str::FromStr;
 
 use anyhow::{Context, Result};
 use chrono::{NaiveDate, Utc};
+use chrono_tz::Tz;
 use rust_decimal::Decimal;
 
 use crate::config::{DisplayConfig, ResolvedConfig};
@@ -20,6 +21,40 @@ use super::{
 };
 
 const SPENDING_IGNORE_TAGS: [&str; 3] = ["ignore_spending", "ignore-spending", "ignore:spending"];
+
+#[derive(Debug, Clone)]
+enum TransactionDateTz {
+    Utc,
+    Local,
+    Named(Tz),
+}
+
+impl TransactionDateTz {
+    fn parse(tz: Option<String>) -> Result<Self> {
+        let Some(tz) = tz else {
+            return Ok(Self::Utc);
+        };
+        let trimmed = tz.trim();
+        if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("utc") {
+            return Ok(Self::Utc);
+        }
+        if trimmed.eq_ignore_ascii_case("local") || trimmed.eq_ignore_ascii_case("current") {
+            return Ok(Self::Local);
+        }
+        let named = trimmed.parse::<Tz>().with_context(|| {
+            format!("Invalid timezone '{trimmed}' (expected IANA name, e.g. America/New_York)")
+        })?;
+        Ok(Self::Named(named))
+    }
+
+    fn date_for(&self, timestamp: chrono::DateTime<Utc>) -> NaiveDate {
+        match self {
+            Self::Utc => timestamp.date_naive(),
+            Self::Local => timestamp.with_timezone(&chrono::Local).date_naive(),
+            Self::Named(tz) => timestamp.with_timezone(tz).date_naive(),
+        }
+    }
+}
 
 fn annotation_ignores_spending(annotation: &TransactionAnnotation) -> bool {
     annotation
@@ -293,14 +328,16 @@ pub async fn list_transactions(
     storage: &dyn Storage,
     start: Option<String>,
     end: Option<String>,
+    tz: Option<String>,
     sort_by_amount: bool,
     skip_ignored: bool,
     config: &ResolvedConfig,
 ) -> Result<Vec<TransactionOutput>> {
+    let date_tz = TransactionDateTz::parse(tz)?;
     let end_date = match &end {
         Some(s) => NaiveDate::parse_from_str(s, "%Y-%m-%d")
             .with_context(|| format!("Invalid end date: {s}"))?,
-        None => Utc::now().date_naive(),
+        None => date_tz.date_for(Utc::now()),
     };
     let start_date = match &start {
         Some(s) => NaiveDate::parse_from_str(s, "%Y-%m-%d")
@@ -380,7 +417,7 @@ pub async fn list_transactions(
             let ann = annotations_by_tx.get(&tx.id);
             let tx_date = ann
                 .and_then(|annotation| annotation.effective_date)
-                .unwrap_or_else(|| tx.timestamp.date_naive());
+                .unwrap_or_else(|| date_tz.date_for(tx.timestamp));
             if tx_date < start_date || tx_date > end_date {
                 continue;
             }
@@ -561,6 +598,7 @@ mod tests {
             &storage,
             Some("2000-01-01".to_string()),
             Some("2099-12-31".to_string()),
+            None,
             false,
             true,
             &ResolvedConfig {
@@ -638,6 +676,7 @@ mod tests {
             &storage,
             Some("2026-01-31".to_string()),
             Some("2026-01-31".to_string()),
+            None,
             false,
             true,
             &ResolvedConfig {
@@ -667,6 +706,66 @@ mod tests {
             Some("2026-01-31")
         );
         assert_eq!(out[0].timestamp, "2026-02-05T12:00:00+00:00");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn list_transactions_can_filter_by_named_timezone_date() -> Result<()> {
+        let storage = MemoryStorage::new();
+        let clock = FixedClock::new(Utc.with_ymd_and_hms(2026, 2, 1, 7, 30, 0).unwrap());
+
+        let account_id = Id::from_string("acct-1");
+        let account = Account::new_with(
+            account_id.clone(),
+            clock.now(),
+            "Checking",
+            Id::from_string("conn-1"),
+        );
+        storage.save_account(&account).await?;
+
+        let ids = FixedIdGenerator::new([Id::from_string("tx-1")]);
+        let tx =
+            Transaction::new_with_generator(&ids, &clock, "-1", Asset::currency("USD"), "Coffee");
+        storage.append_transactions(&account_id, &[tx]).await?;
+
+        let config = ResolvedConfig {
+            data_dir: std::path::PathBuf::from("/tmp"),
+            reporting_currency: "USD".to_string(),
+            display: crate::config::DisplayConfig::default(),
+            refresh: crate::config::RefreshConfig::default(),
+            history: crate::config::HistoryConfig::default(),
+            tray: crate::config::TrayConfig::default(),
+            spending: crate::config::SpendingConfig::default(),
+            portfolio: crate::config::PortfolioConfig::default(),
+            ignore: crate::config::IgnoreConfig::default(),
+            ai: crate::config::AiConfig::default(),
+            git: crate::config::GitConfig::default(),
+        };
+
+        let utc_rows = list_transactions(
+            &storage,
+            Some("2026-01-31".to_string()),
+            Some("2026-01-31".to_string()),
+            None,
+            false,
+            true,
+            &config,
+        )
+        .await?;
+        assert!(utc_rows.is_empty());
+
+        let pacific_rows = list_transactions(
+            &storage,
+            Some("2026-01-31".to_string()),
+            Some("2026-01-31".to_string()),
+            Some("America/Los_Angeles".to_string()),
+            false,
+            true,
+            &config,
+        )
+        .await?;
+        assert_eq!(pacific_rows.len(), 1);
+        assert_eq!(pacific_rows[0].id, "tx-1");
         Ok(())
     }
 
@@ -714,6 +813,7 @@ mod tests {
             &storage,
             Some("2000-01-01".to_string()),
             Some("2099-12-31".to_string()),
+            None,
             false,
             true,
             &ResolvedConfig {
@@ -737,6 +837,7 @@ mod tests {
             &storage,
             Some("2000-01-01".to_string()),
             Some("2099-12-31".to_string()),
+            None,
             false,
             false,
             &ResolvedConfig {
@@ -791,6 +892,7 @@ mod tests {
             &storage,
             Some("2000-01-01".to_string()),
             Some("2099-12-31".to_string()),
+            None,
             true,
             true,
             &ResolvedConfig {
@@ -878,6 +980,7 @@ mod tests {
             &storage,
             Some("2000-01-01".to_string()),
             Some("2099-12-31".to_string()),
+            None,
             false,
             true,
             &config,
@@ -890,6 +993,7 @@ mod tests {
             &storage,
             Some("2000-01-01".to_string()),
             Some("2099-12-31".to_string()),
+            None,
             false,
             false,
             &config,
@@ -945,6 +1049,7 @@ mod tests {
             &storage,
             Some("2000-01-01".to_string()),
             Some("2099-12-31".to_string()),
+            None,
             false,
             true,
             &config,
@@ -956,6 +1061,7 @@ mod tests {
             &storage,
             Some("2000-01-01".to_string()),
             Some("2099-12-31".to_string()),
+            None,
             false,
             false,
             &config,
@@ -1012,6 +1118,7 @@ mod tests {
             &storage,
             Some("2000-01-01".to_string()),
             Some("2099-12-31".to_string()),
+            None,
             false,
             true,
             &config,
@@ -1023,6 +1130,7 @@ mod tests {
             &storage,
             Some("2000-01-01".to_string()),
             Some("2099-12-31".to_string()),
+            None,
             false,
             false,
             &config,
@@ -1080,6 +1188,7 @@ mod tests {
             &storage,
             Some("2000-01-01".to_string()),
             Some("2099-12-31".to_string()),
+            None,
             false,
             true,
             &config,
@@ -1091,6 +1200,7 @@ mod tests {
             &storage,
             Some("2000-01-01".to_string()),
             Some("2099-12-31".to_string()),
+            None,
             false,
             false,
             &config,

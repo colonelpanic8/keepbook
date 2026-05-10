@@ -1509,6 +1509,7 @@ async fn main() -> Result<()> {
                     storage_arc.as_ref(),
                     start,
                     end,
+                    None,
                     sort_by_amount,
                     !include_ignored,
                     &config,

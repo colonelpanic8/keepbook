@@ -1197,13 +1197,21 @@ pub(crate) fn price_sync_result_summary(result: &serde_json::Value) -> String {
     }
 }
 
-pub(crate) fn transaction_query_string(start: &str, end: &str, include_ignored: bool) -> String {
+pub(crate) fn transaction_query_string(
+    start: &str,
+    end: &str,
+    tz: Option<&str>,
+    include_ignored: bool,
+) -> String {
     let mut params = Vec::new();
     if !start.trim().is_empty() {
         push_query_param(&mut params, "start", start);
     }
     if !end.trim().is_empty() {
         push_query_param(&mut params, "end", end);
+    }
+    if let Some(tz) = tz.filter(|tz| !tz.trim().is_empty()) {
+        push_query_param(&mut params, "tz", tz);
     }
     if include_ignored {
         push_query_param(&mut params, "include_ignored", "true");
