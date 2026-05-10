@@ -274,9 +274,10 @@ pub(super) fn SpendingView(currency: String) -> Element {
                                     small { "{selected_label}" }
                                 }
                             }
-                            for entry in categories.iter() {
+                            for (index, entry) in categories.iter().enumerate() {
                                 TagRow {
                                     entry: entry.clone(),
+                                    color: spending_category_color(index),
                                     currency: data.spending.currency.clone(),
                                     selected: selected.as_ref() == Some(&entry.key),
                                     onclick: move |category| {
@@ -496,6 +497,7 @@ fn SpendingPieChart(
 #[component]
 fn TagRow(
     entry: SpendingBreakdownEntry,
+    color: &'static str,
     currency: String,
     selected: bool,
     onclick: EventHandler<String>,
@@ -511,6 +513,11 @@ fn TagRow(
         button {
             class: "{class}",
             onclick: move |_| onclick.call(entry.key.clone()),
+            span {
+                class: "category-swatch",
+                style: "background: {color};",
+                aria_hidden: "true",
+            }
             span { class: "category-name", "{entry.key}" }
             strong { "{format_full_money(total, &currency)}" }
             small { "{entry.transaction_count} tx" }

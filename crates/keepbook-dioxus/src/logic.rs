@@ -844,12 +844,16 @@ pub(crate) fn normalize_spending_category_key(category: &str) -> String {
     }
 }
 
-pub(crate) fn pie_slices(categories: &[SpendingBreakdownEntry]) -> Vec<PieSlice> {
-    const COLORS: [&str; 10] = [
-        "#1f6f8b", "#238a57", "#8a5cf6", "#bf6b21", "#b83280", "#52677a", "#2f9e9e", "#9b6a28",
-        "#6f7d1f", "#bf3d3d",
-    ];
+const SPENDING_CATEGORY_COLORS: [&str; 10] = [
+    "#1f6f8b", "#238a57", "#8a5cf6", "#bf6b21", "#b83280", "#52677a", "#2f9e9e", "#9b6a28",
+    "#6f7d1f", "#bf3d3d",
+];
 
+pub(crate) fn spending_category_color(index: usize) -> &'static str {
+    SPENDING_CATEGORY_COLORS[index % SPENDING_CATEGORY_COLORS.len()]
+}
+
+pub(crate) fn pie_slices(categories: &[SpendingBreakdownEntry]) -> Vec<PieSlice> {
     let values = categories
         .iter()
         .map(|entry| parse_money_input(&entry.total).unwrap_or_default().abs())
@@ -878,7 +882,7 @@ pub(crate) fn pie_slices(categories: &[SpendingBreakdownEntry]) -> Vec<PieSlice>
                 transaction_count: entry.transaction_count,
                 percentage: (*value / total) * 100.0,
                 path: pie_slice_path(130.0, 130.0, 104.0, start, end),
-                color: COLORS[index % COLORS.len()],
+                color: spending_category_color(index),
             })
         })
         .collect()
