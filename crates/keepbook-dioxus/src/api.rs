@@ -159,11 +159,66 @@ pub(crate) async fn fetch_proposed_transaction_edits(
     fetch_proposed_transaction_edits_impl().await
 }
 
+pub(crate) async fn fetch_recurring_transactions(
+    query: String,
+) -> Result<Vec<RecurringTransaction>, String> {
+    fetch_recurring_transactions_impl(query).await
+}
+
+pub(crate) async fn review_recurring_transaction(
+    input: RecurringTransactionReviewInput,
+) -> Result<(), String> {
+    review_recurring_transaction_impl(input).await
+}
+
 pub(crate) async fn decide_proposed_transaction_edit(
     id: String,
     action: &'static str,
 ) -> Result<(), String> {
     decide_proposed_transaction_edit_impl(id, action).await
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn fetch_recurring_transactions_impl(
+    query: String,
+) -> Result<Vec<RecurringTransaction>, String> {
+    let response = Request::get(&format!("{API_BASE}/api/recurring-transactions?{query}"))
+        .send()
+        .await
+        .map_err(|error| format!("Could not reach keepbook-server at {API_BASE}: {error}"))?;
+
+    if !response.ok() {
+        return Err(format!(
+            "keepbook-server returned HTTP {} {}",
+            response.status(),
+            response.status_text()
+        ));
+    }
+
+    response
+        .json::<Vec<RecurringTransaction>>()
+        .await
+        .map_err(|error| format!("Could not decode recurring transactions: {error}"))
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn review_recurring_transaction_impl(
+    input: RecurringTransactionReviewInput,
+) -> Result<(), String> {
+    let response = Request::post(&format!("{API_BASE}/api/recurring-transactions/review"))
+        .json(&input)
+        .map_err(|error| format!("Could not encode recurring review: {error}"))?
+        .send()
+        .await
+        .map_err(|error| format!("Could not reach keepbook-server at {API_BASE}: {error}"))?;
+
+    if !response.ok() {
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+        return Err(format!("keepbook-server returned HTTP {status}: {text}"));
+    }
+
+    Ok(())
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -471,6 +526,69 @@ pub(crate) async fn decide_proposed_transaction_edit_impl(
         return Err(format!("keepbook-server returned HTTP {status}: {text}"));
     }
 
+    Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn fetch_recurring_transactions_impl(
+    query: String,
+) -> Result<Vec<RecurringTransaction>, String> {
+    let query =
+        serde_urlencoded::from_str::<keepbook_server::RecurringTransactionsQuery>(&query)
+            .map_err(|error| format!("Could not encode recurring transaction query: {error}"))?;
+    let output = native_api_state()?
+        .recurring_transactions(query)
+        .await
+        .map_err(|error| format!("Could not load recurring transactions: {error:#}"))?;
+    from_native_output(output, "recurring transactions")
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn review_recurring_transaction_impl(
+    input: RecurringTransactionReviewInput,
+) -> Result<(), String> {
+    native_api_state()?
+        .review_recurring_transaction(keepbook_server::RecurringTransactionReviewInput {
+            status: input.status,
+            candidate: keepbook_server::ReviewedRecurringTransactionOutput {
+                candidate_key: input.candidate.candidate_key,
+                review_status: input.candidate.review_status,
+                name: input.candidate.name,
+                normalized_name: input.candidate.normalized_name,
+                status: input.candidate.status,
+                cadence: input.candidate.cadence,
+                confidence: input.candidate.confidence,
+                cadence_score: input.candidate.cadence_score,
+                occurrence_count: input.candidate.occurrence_count,
+                first_seen: input.candidate.first_seen,
+                last_seen: input.candidate.last_seen,
+                next_expected: input.candidate.next_expected,
+                amount: keepbook_server::ReviewedRecurringTransactionAmountOutput {
+                    typical: input.candidate.amount.typical,
+                    min: input.candidate.amount.min,
+                    max: input.candidate.amount.max,
+                    asset: input.candidate.amount.asset,
+                },
+                reason_codes: input.candidate.reason_codes,
+                transactions: input
+                    .candidate
+                    .transactions
+                    .into_iter()
+                    .map(|occurrence| {
+                        keepbook_server::ReviewedRecurringTransactionOccurrenceOutput {
+                            id: occurrence.id,
+                            account_id: occurrence.account_id,
+                            account_name: occurrence.account_name,
+                            date: occurrence.date,
+                            description: occurrence.description,
+                            amount: occurrence.amount,
+                        }
+                    })
+                    .collect(),
+            },
+        })
+        .await
+        .map_err(|error| format!("Could not review recurring transaction: {error:#}"))?;
     Ok(())
 }
 

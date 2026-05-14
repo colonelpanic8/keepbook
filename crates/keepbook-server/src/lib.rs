@@ -281,6 +281,69 @@ impl ApiState {
         )
     }
 
+    pub async fn recurring_transactions(
+        &self,
+        query: RecurringTransactionsQuery,
+    ) -> Result<Vec<ReviewedRecurringTransactionOutput>> {
+        let state = self.snapshot().await;
+        let candidates = keepbook::app::list_recurring_transactions(
+            state.storage.as_ref(),
+            keepbook::app::RecurringTransactionsOptions {
+                start: query.start,
+                end: query.end,
+                include_ignored: query.include_ignored,
+                include_possible: query.include_possible,
+                min_confidence: query.min_confidence.unwrap_or(0.70),
+            },
+            &state.config,
+        )
+        .await?;
+        let reviews = keepbook::app::list_recurring_transaction_reviews(state.storage.as_ref())
+            .await?
+            .into_iter()
+            .map(|review| (review.candidate_key, review.status))
+            .collect::<HashMap<_, _>>();
+
+        let mut out = Vec::new();
+        for candidate in candidates {
+            let candidate_key = keepbook::app::recurring_transaction_candidate_key(&candidate);
+            let review_status = reviews
+                .get(&candidate_key)
+                .cloned()
+                .unwrap_or_else(|| "proposed".to_string());
+            if review_status == "dismissed" && !query.include_dismissed {
+                continue;
+            }
+            out.push(ReviewedRecurringTransactionOutput::from_app(
+                candidate_key,
+                review_status,
+                candidate,
+            ));
+        }
+        Ok(out)
+    }
+
+    pub async fn review_recurring_transaction(
+        &self,
+        input: RecurringTransactionReviewInput,
+    ) -> Result<serde_json::Value> {
+        let state = self.snapshot().await;
+        let status = match input.status.as_str() {
+            "verified" => keepbook::models::RecurringTransactionReviewStatus::Verified,
+            "dismissed" => keepbook::models::RecurringTransactionReviewStatus::Dismissed,
+            other => anyhow::bail!("unknown recurring transaction review status: {other}"),
+        };
+        let candidate = input.candidate.to_app();
+        keepbook::app::set_recurring_transaction_review(
+            state.storage.as_ref(),
+            &state.config,
+            input.candidate.candidate_key,
+            status,
+            &candidate,
+        )
+        .await
+    }
+
     pub async fn spending(&self, query: SpendingQuery) -> Result<serde_json::Value> {
         let state = self.snapshot().await;
         json_value(
@@ -880,6 +943,141 @@ pub struct TransactionQuery {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct RecurringTransactionsQuery {
+    pub start: Option<String>,
+    pub end: Option<String>,
+    #[serde(default)]
+    pub include_ignored: bool,
+    #[serde(default)]
+    pub include_possible: bool,
+    pub min_confidence: Option<f64>,
+    #[serde(default)]
+    pub include_dismissed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReviewedRecurringTransactionAmountOutput {
+    pub typical: String,
+    pub min: String,
+    pub max: String,
+    pub asset: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReviewedRecurringTransactionOccurrenceOutput {
+    pub id: String,
+    pub account_id: String,
+    pub account_name: String,
+    pub date: String,
+    pub description: String,
+    pub amount: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReviewedRecurringTransactionOutput {
+    pub candidate_key: String,
+    pub review_status: String,
+    pub name: String,
+    pub normalized_name: String,
+    pub status: String,
+    pub cadence: String,
+    pub confidence: String,
+    pub cadence_score: String,
+    pub occurrence_count: usize,
+    pub first_seen: String,
+    pub last_seen: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_expected: Option<String>,
+    pub amount: ReviewedRecurringTransactionAmountOutput,
+    pub reason_codes: Vec<String>,
+    pub transactions: Vec<ReviewedRecurringTransactionOccurrenceOutput>,
+}
+
+impl ReviewedRecurringTransactionOutput {
+    fn from_app(
+        candidate_key: String,
+        review_status: String,
+        candidate: keepbook::app::RecurringTransactionOutput,
+    ) -> Self {
+        Self {
+            candidate_key,
+            review_status,
+            name: candidate.name,
+            normalized_name: candidate.normalized_name,
+            status: candidate.status,
+            cadence: candidate.cadence,
+            confidence: candidate.confidence,
+            cadence_score: candidate.cadence_score,
+            occurrence_count: candidate.occurrence_count,
+            first_seen: candidate.first_seen,
+            last_seen: candidate.last_seen,
+            next_expected: candidate.next_expected,
+            amount: ReviewedRecurringTransactionAmountOutput {
+                typical: candidate.amount.typical,
+                min: candidate.amount.min,
+                max: candidate.amount.max,
+                asset: candidate.amount.asset,
+            },
+            reason_codes: candidate.reason_codes,
+            transactions: candidate
+                .transactions
+                .into_iter()
+                .map(|occurrence| ReviewedRecurringTransactionOccurrenceOutput {
+                    id: occurrence.id,
+                    account_id: occurrence.account_id,
+                    account_name: occurrence.account_name,
+                    date: occurrence.date,
+                    description: occurrence.description,
+                    amount: occurrence.amount,
+                })
+                .collect(),
+        }
+    }
+
+    fn to_app(&self) -> keepbook::app::RecurringTransactionOutput {
+        keepbook::app::RecurringTransactionOutput {
+            name: self.name.clone(),
+            normalized_name: self.normalized_name.clone(),
+            status: self.status.clone(),
+            cadence: self.cadence.clone(),
+            confidence: self.confidence.clone(),
+            cadence_score: self.cadence_score.clone(),
+            occurrence_count: self.occurrence_count,
+            first_seen: self.first_seen.clone(),
+            last_seen: self.last_seen.clone(),
+            next_expected: self.next_expected.clone(),
+            amount: keepbook::app::RecurringTransactionAmountOutput {
+                typical: self.amount.typical.clone(),
+                min: self.amount.min.clone(),
+                max: self.amount.max.clone(),
+                asset: self.amount.asset.clone(),
+            },
+            reason_codes: self.reason_codes.clone(),
+            transactions: self
+                .transactions
+                .iter()
+                .map(
+                    |occurrence| keepbook::app::RecurringTransactionOccurrenceOutput {
+                        id: occurrence.id.clone(),
+                        account_id: occurrence.account_id.clone(),
+                        account_name: occurrence.account_name.clone(),
+                        date: occurrence.date.clone(),
+                        description: occurrence.description.clone(),
+                        amount: occurrence.amount.clone(),
+                    },
+                )
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RecurringTransactionReviewInput {
+    pub status: String,
+    pub candidate: ReviewedRecurringTransactionOutput,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct TransactionTagTargetInput {
     pub account_id: String,
     pub transaction_id: String,
@@ -1319,6 +1517,11 @@ pub fn router(state: ApiState) -> Router {
         .route("/api/accounts", get(accounts))
         .route("/api/balances", get(balances))
         .route("/api/transactions", get(transactions))
+        .route("/api/recurring-transactions", get(recurring_transactions))
+        .route(
+            "/api/recurring-transactions/review",
+            post(review_recurring_transaction),
+        )
         .route("/api/transactions/tags/batch", post(set_transaction_tags))
         .route(
             "/api/transactions/subtags/batch",
@@ -1416,6 +1619,22 @@ async fn transactions(
     Query(query): Query<TransactionQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     Ok(Json(state.transactions(query).await?))
+}
+
+#[cfg(feature = "http")]
+async fn recurring_transactions(
+    State(state): State<ApiState>,
+    Query(query): Query<RecurringTransactionsQuery>,
+) -> Result<Json<Vec<ReviewedRecurringTransactionOutput>>, ApiError> {
+    Ok(Json(state.recurring_transactions(query).await?))
+}
+
+#[cfg(feature = "http")]
+async fn review_recurring_transaction(
+    State(state): State<ApiState>,
+    Json(input): Json<RecurringTransactionReviewInput>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    Ok(Json(state.review_recurring_transaction(input).await?))
 }
 
 #[cfg(feature = "http")]

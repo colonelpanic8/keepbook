@@ -124,6 +124,26 @@ pub struct RecurringTransactionOutput {
     pub transactions: Vec<RecurringTransactionOccurrenceOutput>,
 }
 
+/// A persisted user decision for a recurring transaction candidate.
+#[derive(Serialize)]
+pub struct RecurringTransactionReviewOutput {
+    pub candidate_key: String,
+    pub updated_at: String,
+    pub status: String,
+    pub name: String,
+    pub normalized_name: String,
+    pub cadence: String,
+    pub amount_typical: String,
+    pub asset: serde_json::Value,
+    pub transactions: Vec<RecurringTransactionReviewOccurrenceOutput>,
+}
+
+#[derive(Serialize)]
+pub struct RecurringTransactionReviewOccurrenceOutput {
+    pub account_id: String,
+    pub transaction_id: String,
+}
+
 /// Materialized transaction annotation state.
 #[derive(Serialize)]
 pub struct TransactionAnnotationOutput {

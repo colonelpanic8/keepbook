@@ -8,6 +8,7 @@ mod charts;
 mod connections;
 mod graph_settings;
 mod proposed_edits;
+mod recurring;
 mod shared;
 mod spending;
 
@@ -16,6 +17,7 @@ use charts::{HistoryGraphPanel, StackedHistoryGraphPanel};
 use connections::ConnectionsView;
 use graph_settings::{GraphsView, SettingsView};
 use proposed_edits::ProposedEditsView;
+use recurring::RecurringView;
 use shared::*;
 use spending::SpendingView;
 
@@ -25,14 +27,16 @@ enum ActiveView {
     Graphs,
     Accounts,
     Connections,
+    Recurring,
     ProposedEdits,
     Settings,
 }
 
 impl ActiveView {
-    const ALL: [Self; 6] = [
+    const ALL: [Self; 7] = [
         Self::Accounts,
         Self::Spending,
+        Self::Recurring,
         Self::Graphs,
         Self::Connections,
         Self::ProposedEdits,
@@ -45,6 +49,7 @@ impl ActiveView {
             Self::Graphs => "Net Worth",
             Self::Accounts => "Accounts",
             Self::Connections => "Connections",
+            Self::Recurring => "Recurring",
             Self::ProposedEdits => "Proposed Edits",
             Self::Settings => "Settings",
         }
@@ -322,6 +327,9 @@ fn Dashboard(
                             connections: overview.connections.clone(),
                             onrefresh: move |_| onrefresh.call(())
                         }
+                    },
+                    ActiveView::Recurring => rsx! {
+                        RecurringView {}
                     },
                     ActiveView::ProposedEdits => rsx! {
                         ProposedEditsView {

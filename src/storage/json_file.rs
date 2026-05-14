@@ -12,7 +12,8 @@ use super::{dedupe_transactions_last_write_wins, Storage};
 use crate::credentials::CredentialStore;
 use crate::models::{
     Account, AccountConfig, BalanceSnapshot, Connection, ConnectionConfig, ConnectionState, Id,
-    ProposedTransactionEdit, Transaction, TransactionAnnotation, TransactionAnnotationPatch,
+    ProposedTransactionEdit, RecurringTransactionReview, Transaction, TransactionAnnotation,
+    TransactionAnnotationPatch,
 };
 use crate::storage::{JsonlCompactionStats, TransactionMetadataBackfillStats};
 
@@ -61,6 +62,7 @@ struct JsonFileStorageCache {
     transactions: HashMap<Id, CachedRead<Vec<Transaction>>>,
     transaction_annotations: HashMap<Id, CachedRead<Vec<TransactionAnnotationPatch>>>,
     proposed_transaction_edits: Option<CachedRead<Vec<ProposedTransactionEdit>>>,
+    recurring_transaction_reviews: Option<CachedRead<Vec<RecurringTransactionReview>>>,
 }
 
 impl JsonFileStorage {
@@ -85,6 +87,10 @@ impl JsonFileStorage {
 
     fn proposed_transaction_edits_file(&self) -> PathBuf {
         self.base_path.join("proposed_transaction_edits.jsonl")
+    }
+
+    fn recurring_transaction_reviews_file(&self) -> PathBuf {
+        self.base_path.join("recurring_transaction_reviews.jsonl")
     }
 
     fn ensure_id_path_safe(&self, id: &Id) -> Result<()> {
@@ -1250,6 +1256,57 @@ impl Storage for JsonFileStorage {
     ) -> Result<()> {
         let path = self.proposed_transaction_edits_file();
         self.append_jsonl(&path, edits).await?;
+        self.clear_cache();
+        Ok(())
+    }
+
+    async fn get_recurring_transaction_reviews(&self) -> Result<Vec<RecurringTransactionReview>> {
+        let path = self.recurring_transaction_reviews_file();
+        let key = Self::fs_cache_key(&path).await?;
+        {
+            let cache = self.cache.lock().expect("storage cache poisoned");
+            if let Some(cached) = &cache.recurring_transaction_reviews {
+                if cached.key == key {
+                    return Ok(cached.value.clone());
+                }
+            }
+        }
+
+        let events: Vec<RecurringTransactionReview> = self.read_jsonl(&path).await?;
+        let mut by_key: HashMap<String, RecurringTransactionReview> = HashMap::new();
+        for review in events {
+            by_key
+                .entry(review.candidate_key.clone())
+                .and_modify(|existing| {
+                    if review.updated_at >= existing.updated_at {
+                        *existing = review.clone();
+                    }
+                })
+                .or_insert(review);
+        }
+        let mut reviews: Vec<RecurringTransactionReview> = by_key.into_values().collect();
+        reviews.sort_by(|a, b| {
+            a.updated_at
+                .cmp(&b.updated_at)
+                .then_with(|| a.candidate_key.cmp(&b.candidate_key))
+        });
+
+        self.cache
+            .lock()
+            .expect("storage cache poisoned")
+            .recurring_transaction_reviews = Some(CachedRead {
+            key,
+            value: reviews.clone(),
+        });
+        Ok(reviews)
+    }
+
+    async fn append_recurring_transaction_reviews(
+        &self,
+        reviews: &[RecurringTransactionReview],
+    ) -> Result<()> {
+        let path = self.recurring_transaction_reviews_file();
+        self.append_jsonl(&path, reviews).await?;
         self.clear_cache();
         Ok(())
     }

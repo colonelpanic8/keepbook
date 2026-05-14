@@ -9,7 +9,7 @@ pub use memory::MemoryStorage;
 use crate::credentials::CredentialStore;
 use crate::models::{
     Account, AccountConfig, BalanceSnapshot, Connection, ConnectionConfig, Id,
-    ProposedTransactionEdit, Transaction, TransactionAnnotationPatch,
+    ProposedTransactionEdit, RecurringTransactionReview, Transaction, TransactionAnnotationPatch,
 };
 use anyhow::Result;
 use serde::Serialize;
@@ -83,6 +83,13 @@ pub trait Storage: Send + Sync {
     async fn append_proposed_transaction_edits(
         &self,
         edits: &[ProposedTransactionEdit],
+    ) -> Result<()>;
+
+    // Recurring transaction reviews (append-only candidate decisions)
+    async fn get_recurring_transaction_reviews(&self) -> Result<Vec<RecurringTransactionReview>>;
+    async fn append_recurring_transaction_reviews(
+        &self,
+        reviews: &[RecurringTransactionReview],
     ) -> Result<()>;
 }
 

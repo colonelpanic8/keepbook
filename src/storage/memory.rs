@@ -10,7 +10,7 @@ use tokio::sync::Mutex;
 use crate::credentials::CredentialStore;
 use crate::models::{
     Account, AccountConfig, BalanceSnapshot, Connection, ConnectionConfig, ConnectionState, Id,
-    ProposedTransactionEdit, Transaction, TransactionAnnotationPatch,
+    ProposedTransactionEdit, RecurringTransactionReview, Transaction, TransactionAnnotationPatch,
 };
 
 use super::{dedupe_transactions_last_write_wins, Storage};
@@ -24,6 +24,7 @@ pub struct MemoryStorage {
     transactions: Mutex<HashMap<Id, Vec<Transaction>>>,
     transaction_annotation_patches: Mutex<HashMap<Id, Vec<TransactionAnnotationPatch>>>,
     proposed_transaction_edits: Mutex<Vec<ProposedTransactionEdit>>,
+    recurring_transaction_reviews: Mutex<Vec<RecurringTransactionReview>>,
 }
 
 impl MemoryStorage {
@@ -36,6 +37,7 @@ impl MemoryStorage {
             transactions: Mutex::new(HashMap::new()),
             transaction_annotation_patches: Mutex::new(HashMap::new()),
             proposed_transaction_edits: Mutex::new(Vec::new()),
+            recurring_transaction_reviews: Mutex::new(Vec::new()),
         }
     }
 
@@ -290,6 +292,42 @@ impl Storage for MemoryStorage {
             .lock()
             .await
             .extend(edits.iter().cloned());
+        Ok(())
+    }
+
+    async fn get_recurring_transaction_reviews(&self) -> Result<Vec<RecurringTransactionReview>> {
+        let events = self.recurring_transaction_reviews.lock().await;
+        let mut by_key: HashMap<String, RecurringTransactionReview> = HashMap::new();
+        for review in events.iter().cloned() {
+            by_key
+                .entry(review.candidate_key.clone())
+                .and_modify(|existing| {
+                    if review.updated_at >= existing.updated_at {
+                        *existing = review.clone();
+                    }
+                })
+                .or_insert(review);
+        }
+        let mut reviews: Vec<RecurringTransactionReview> = by_key.into_values().collect();
+        reviews.sort_by(|a, b| {
+            a.updated_at
+                .cmp(&b.updated_at)
+                .then_with(|| a.candidate_key.cmp(&b.candidate_key))
+        });
+        Ok(reviews)
+    }
+
+    async fn append_recurring_transaction_reviews(
+        &self,
+        reviews: &[RecurringTransactionReview],
+    ) -> Result<()> {
+        if reviews.is_empty() {
+            return Ok(());
+        }
+        self.recurring_transaction_reviews
+            .lock()
+            .await
+            .extend(reviews.iter().cloned());
         Ok(())
     }
 }

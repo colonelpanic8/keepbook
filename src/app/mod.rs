@@ -42,7 +42,10 @@ pub use portfolio::{
     DEFAULT_PORTFOLIO_HISTORY_GRANULARITY, DEFAULT_PORTFOLIO_INCLUDE_PRICES,
 };
 pub use preflight::{run_preflight, PreflightOptions};
-pub use recurring::list_recurring_transactions;
+pub use recurring::{
+    list_recurring_transaction_reviews, list_recurring_transactions,
+    recurring_transaction_candidate_key, set_recurring_transaction_review,
+};
 pub use spending::{spending_report, SpendingReportOptions};
 #[cfg(feature = "sync")]
 pub use sync::{
@@ -60,10 +63,12 @@ pub use types::{
     HistoryOutput, HistoryPoint, HistorySummary, PriceHistoryFailure, PriceHistoryOutput,
     PriceHistoryScopeOutput, PriceHistoryStats, PriceSourceOutput, ProposedTransactionEditOutput,
     RecurringTransactionAmountOutput, RecurringTransactionOccurrenceOutput,
-    RecurringTransactionOutput, RecurringTransactionsOptions, SpendingBreakdownEntryOutput,
+    RecurringTransactionOutput, RecurringTransactionReviewOccurrenceOutput,
+    RecurringTransactionReviewOutput, RecurringTransactionsOptions, SpendingBreakdownEntryOutput,
     SpendingOutput, SpendingPeriodOutput, SpendingScopeOutput, StackedHistoryComponent,
     StackedHistoryOutput, StackedHistoryPoint, StackedHistorySeries, TaxImpactOutput,
-    TaxImpactPoint, TransactionAnnotationOutput, TransactionAnnotationPatchOutput, TransactionOutput,
+    TaxImpactPoint, TransactionAnnotationOutput, TransactionAnnotationPatchOutput,
+    TransactionOutput,
 };
 
 fn maybe_auto_commit(config: &ResolvedConfig, action: &str) {

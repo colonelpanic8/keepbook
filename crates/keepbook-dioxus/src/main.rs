@@ -195,6 +195,50 @@ struct ProposedTransactionEditPatch {
     effective_date: Option<Option<String>>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+struct RecurringTransaction {
+    candidate_key: String,
+    review_status: String,
+    name: String,
+    normalized_name: String,
+    status: String,
+    cadence: String,
+    confidence: String,
+    cadence_score: String,
+    occurrence_count: usize,
+    first_seen: String,
+    last_seen: String,
+    #[serde(default)]
+    next_expected: Option<String>,
+    amount: RecurringTransactionAmount,
+    reason_codes: Vec<String>,
+    transactions: Vec<RecurringTransactionOccurrence>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+struct RecurringTransactionAmount {
+    typical: String,
+    min: String,
+    max: String,
+    asset: serde_json::Value,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+struct RecurringTransactionOccurrence {
+    id: String,
+    account_id: String,
+    account_name: String,
+    date: String,
+    description: String,
+    amount: String,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq)]
+struct RecurringTransactionReviewInput {
+    status: String,
+    candidate: RecurringTransaction,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 struct History {
     currency: String,

@@ -7,12 +7,17 @@ use chrono::{Datelike, Months, NaiveDate};
 use rust_decimal::Decimal;
 
 use crate::config::ResolvedConfig;
+use crate::models::{
+    Id, RecurringTransactionReview, RecurringTransactionReviewOccurrence,
+    RecurringTransactionReviewStatus,
+};
 use crate::storage::Storage;
 
 use super::list::list_transactions;
 use super::{
     RecurringTransactionAmountOutput, RecurringTransactionOccurrenceOutput,
-    RecurringTransactionOutput, RecurringTransactionsOptions, TransactionOutput,
+    RecurringTransactionOutput, RecurringTransactionReviewOccurrenceOutput,
+    RecurringTransactionReviewOutput, RecurringTransactionsOptions, TransactionOutput,
 };
 
 const DEFAULT_RECURRING_START: &str = "1900-01-01";
@@ -109,6 +114,69 @@ pub async fn list_recurring_transactions(
         .into_iter()
         .map(|candidate| candidate.output)
         .collect())
+}
+
+pub async fn list_recurring_transaction_reviews(
+    storage: &dyn Storage,
+) -> Result<Vec<RecurringTransactionReviewOutput>> {
+    let reviews = storage.get_recurring_transaction_reviews().await?;
+    Ok(reviews.into_iter().map(recurring_review_output).collect())
+}
+
+pub async fn set_recurring_transaction_review(
+    storage: &dyn Storage,
+    config: &ResolvedConfig,
+    candidate_key: String,
+    status: RecurringTransactionReviewStatus,
+    candidate: &RecurringTransactionOutput,
+) -> Result<serde_json::Value> {
+    let expected_key = recurring_transaction_candidate_key(candidate);
+    if candidate_key != expected_key {
+        anyhow::bail!("Recurring transaction candidate key does not match candidate details");
+    }
+
+    let occurrences = candidate
+        .transactions
+        .iter()
+        .map(|occurrence| {
+            let account_id = Id::from_string_checked(&occurrence.account_id)
+                .with_context(|| format!("Invalid account id: {}", occurrence.account_id))?;
+            let transaction_id = Id::from_string_checked(&occurrence.id)
+                .with_context(|| format!("Invalid transaction id: {}", occurrence.id))?;
+            Ok(RecurringTransactionReviewOccurrence {
+                account_id,
+                transaction_id,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let review = RecurringTransactionReview {
+        candidate_key: candidate_key.clone(),
+        updated_at: chrono::Utc::now(),
+        status,
+        name: candidate.name.clone(),
+        normalized_name: candidate.normalized_name.clone(),
+        cadence: candidate.cadence.clone(),
+        amount_typical: candidate.amount.typical.clone(),
+        asset: candidate.amount.asset.clone(),
+        occurrences,
+    };
+    storage
+        .append_recurring_transaction_reviews(std::slice::from_ref(&review))
+        .await?;
+    super::maybe_auto_commit(
+        config,
+        &format!("review recurring transaction {}", review.normalized_name),
+    );
+
+    serde_json::to_value(recurring_review_output(review)).context("serialize recurring review")
+}
+
+pub fn recurring_transaction_candidate_key(candidate: &RecurringTransactionOutput) -> String {
+    let asset = serde_json::to_string(&candidate.amount.asset).unwrap_or_else(|_| "null".into());
+    format!(
+        "v1|{}|{}|{}|{}",
+        candidate.normalized_name, candidate.cadence, candidate.amount.typical, asset
+    )
 }
 
 fn transaction_candidates(
@@ -747,6 +815,34 @@ fn score_string(value: f64) -> String {
     format!("{value:.2}")
 }
 
+fn recurring_review_output(review: RecurringTransactionReview) -> RecurringTransactionReviewOutput {
+    RecurringTransactionReviewOutput {
+        candidate_key: review.candidate_key,
+        updated_at: review.updated_at.to_rfc3339(),
+        status: recurring_review_status_string(review.status).to_string(),
+        name: review.name,
+        normalized_name: review.normalized_name,
+        cadence: review.cadence,
+        amount_typical: review.amount_typical,
+        asset: review.asset,
+        transactions: review
+            .occurrences
+            .into_iter()
+            .map(|occurrence| RecurringTransactionReviewOccurrenceOutput {
+                account_id: occurrence.account_id.to_string(),
+                transaction_id: occurrence.transaction_id.to_string(),
+            })
+            .collect(),
+    }
+}
+
+fn recurring_review_status_string(status: RecurringTransactionReviewStatus) -> &'static str {
+    match status {
+        RecurringTransactionReviewStatus::Verified => "verified",
+        RecurringTransactionReviewStatus::Dismissed => "dismissed",
+    }
+}
+
 struct UnionFind {
     parent: Vec<usize>,
 }
@@ -951,6 +1047,47 @@ mod tests {
         .await?;
         assert_eq!(possible.len(), 1);
         assert_eq!(possible[0].status, "possible");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn stores_recurring_transaction_reviews_by_candidate_key() -> Result<()> {
+        let storage = storage_with_transactions(&[
+            tx("tx-1", (2026, 1, 14), "-11.99", "SPOTIFY USA 1234"),
+            tx("tx-2", (2026, 2, 14), "-11.99", "Spotify.com"),
+            tx("tx-3", (2026, 3, 15), "-11.99", "SPOTIFY USA 5678"),
+        ])
+        .await?;
+        let config = test_config();
+        let candidates = list_recurring_transactions(
+            &storage,
+            RecurringTransactionsOptions {
+                start: Some("2026-01-01".to_string()),
+                end: Some("2026-04-01".to_string()),
+                include_ignored: false,
+                include_possible: false,
+                min_confidence: 0.70,
+            },
+            &config,
+        )
+        .await?;
+        let candidate = candidates.first().context("expected recurring candidate")?;
+        let key = recurring_transaction_candidate_key(candidate);
+
+        set_recurring_transaction_review(
+            &storage,
+            &config,
+            key.clone(),
+            RecurringTransactionReviewStatus::Verified,
+            candidate,
+        )
+        .await?;
+
+        let reviews = list_recurring_transaction_reviews(&storage).await?;
+        assert_eq!(reviews.len(), 1);
+        assert_eq!(reviews[0].candidate_key, key);
+        assert_eq!(reviews[0].status, "verified");
+        assert_eq!(reviews[0].transactions.len(), 3);
         Ok(())
     }
 }
