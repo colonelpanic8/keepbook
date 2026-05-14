@@ -35,6 +35,7 @@ async fn portfolio_snapshot_offline_uses_cached_quote() -> Result<()> {
         history: keepbook::config::HistoryConfig::default(),
         tray: TrayConfig::default(),
         spending: SpendingConfig::default(),
+        tags: Default::default(),
         portfolio: keepbook::config::PortfolioConfig::default(),
         ignore: IgnoreConfig::default(),
         ai: keepbook::config::AiConfig::default(),

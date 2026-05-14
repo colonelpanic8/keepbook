@@ -929,6 +929,7 @@ mod tests {
             history: HistoryConfig::default(),
             tray: TrayConfig::default(),
             spending: SpendingConfig::default(),
+            tags: Default::default(),
             portfolio: PortfolioConfig::default(),
             ignore: IgnoreConfig::default(),
             ai: AiConfig::default(),

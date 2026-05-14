@@ -12,7 +12,9 @@ use crate::config::ResolvedConfig;
 use crate::models::{Id, TransactionAnnotation, TransactionAnnotationPatch};
 use crate::storage::{find_account, find_connection, Storage};
 
-use super::classification::provider_virtual_tag_hierarchy;
+use super::classification::{
+    effective_transaction_subtags, effective_transaction_tags, provider_virtual_tag_hierarchy,
+};
 use super::maybe_auto_commit;
 
 const TRANSACTION_RULES_FILE: &str = "transaction_rules.jsonl";
@@ -383,28 +385,20 @@ pub async fn apply_transaction_rules(
             {
                 continue;
             }
-            let existing_tag = existing_annotation
-                .and_then(|annotation| annotation.tags.as_ref())
-                .and_then(|tags| tags.iter().find(|tag| !tag.trim().is_empty()))
-                .map(String::as_str)
-                .map(str::trim)
-                .filter(|value| !value.is_empty());
-            let existing_subtag = existing_annotation
-                .and_then(|annotation| annotation.subtags.as_ref())
-                .and_then(|subtags| subtags.iter().find(|subtag| !subtag.trim().is_empty()))
-                .map(String::as_str)
-                .map(str::trim)
-                .filter(|value| !value.is_empty());
             let provider_hierarchy = provider_virtual_tag_hierarchy(
                 tx.standardized_metadata.as_ref(),
                 &tx.synchronizer_data,
+                &config.tags,
             );
-            let match_tag = existing_tag
-                .or_else(|| provider_hierarchy.tags.first().map(String::as_str))
-                .unwrap_or("");
-            let match_subtag = existing_subtag
-                .or_else(|| provider_hierarchy.subtags.first().map(String::as_str))
-                .unwrap_or("");
+            let match_tags =
+                effective_transaction_tags(existing_annotation, &provider_hierarchy, &config.tags);
+            let match_subtags = effective_transaction_subtags(
+                existing_annotation,
+                &provider_hierarchy,
+                &config.tags,
+            );
+            let match_tag = match_tags.first().map(String::as_str).unwrap_or("");
+            let match_subtag = match_subtags.first().map(String::as_str).unwrap_or("");
             let existing_description = existing_annotation
                 .and_then(|annotation| annotation.description.as_deref())
                 .map(str::trim)
@@ -464,8 +458,8 @@ pub async fn apply_transaction_rules(
                 "set_description": description_update,
                 "set_tags": tags_update,
                 "set_subtags": subtags_update,
-                "previous_tag": existing_tag,
-                "previous_subtag": existing_subtag,
+                "previous_tag": match_tag,
+                "previous_subtag": match_subtag,
                 "previous_description": existing_description,
                 "previous_tags": existing_tags,
                 "previous_subtags": existing_subtags,

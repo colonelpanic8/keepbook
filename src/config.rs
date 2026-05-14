@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -86,6 +87,206 @@ pub struct SpendingConfig {
     ///
     /// Used by default portfolio spending scope and by list/TUI ignored-transaction filtering.
     pub ignore_tags: Vec<String>,
+}
+
+/// User-owned tag hierarchy configuration.
+///
+/// `parents` is a recursive child -> parents graph. For example:
+///
+/// ```toml
+/// [tags.parents]
+/// "Groceries" = ["Food"]
+/// "Supermarket" = ["Groceries"]
+/// ```
+///
+/// A transaction tagged `Supermarket` is therefore also under the top-level
+/// `Food` tag for default spending breakdowns.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct TagsConfig {
+    /// Provider/user label aliases mapped to canonical keepbook tag names.
+    pub aliases: HashMap<String, String>,
+
+    /// Child tag -> parent tag list.
+    pub parents: HashMap<String, Vec<String>>,
+}
+
+impl TagsConfig {
+    pub fn canonical_label(&self, raw: &str) -> Option<String> {
+        self.configured_canonical_label(raw, &mut HashSet::new())
+            .or_else(|| normalized_user_label(raw))
+    }
+
+    pub fn canonical_provider_label(&self, raw: &str) -> Option<String> {
+        self.configured_canonical_label(raw, &mut HashSet::new())
+            .or_else(|| normalized_display_label(raw))
+    }
+
+    pub fn root_tags_for(&self, raw: &str) -> Vec<String> {
+        let Some(label) = self.canonical_label(raw) else {
+            return Vec::new();
+        };
+        let roots = self.root_tags_for_canonical(&label, &mut HashSet::new());
+        if roots.is_empty() {
+            vec![label]
+        } else {
+            roots
+        }
+    }
+
+    pub fn parent_root_tags_for(&self, raw: &str) -> Vec<String> {
+        let Some(label) = self.canonical_label(raw) else {
+            return Vec::new();
+        };
+        if self.direct_parents_for_canonical(&label).is_empty() {
+            return Vec::new();
+        }
+        self.root_tags_for_canonical(&label, &mut HashSet::new())
+    }
+
+    pub fn canonicalize_labels(&self, labels: Vec<String>) -> Vec<String> {
+        labels.into_iter().fold(Vec::new(), |mut acc, label| {
+            if let Some(canonical) = self.canonical_label(&label) {
+                push_unique_label(&mut acc, canonical);
+            }
+            acc
+        })
+    }
+
+    fn configured_canonical_label(
+        &self,
+        raw: &str,
+        seen_aliases: &mut HashSet<String>,
+    ) -> Option<String> {
+        let lookup = label_lookup_key(raw)?;
+        for (alias, target) in &self.aliases {
+            if label_lookup_key(alias).as_deref() == Some(lookup.as_str()) {
+                if !seen_aliases.insert(lookup) {
+                    return normalized_user_label(raw);
+                }
+                return self
+                    .configured_canonical_label(target, seen_aliases)
+                    .or_else(|| normalized_user_label(target));
+            }
+        }
+
+        for (child, parents) in &self.parents {
+            if label_lookup_key(child).as_deref() == Some(lookup.as_str()) {
+                return normalized_user_label(child);
+            }
+            for parent in parents {
+                if label_lookup_key(parent).as_deref() == Some(lookup.as_str()) {
+                    return normalized_user_label(parent);
+                }
+            }
+        }
+
+        None
+    }
+
+    fn direct_parents_for_canonical(&self, canonical: &str) -> Vec<String> {
+        let Some(lookup) = label_lookup_key(canonical) else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for (child, parents) in &self.parents {
+            if label_lookup_key(child).as_deref() != Some(lookup.as_str()) {
+                continue;
+            }
+            for parent in parents {
+                if let Some(parent) = self.canonical_label(parent) {
+                    push_unique_label(&mut out, parent);
+                }
+            }
+        }
+        out
+    }
+
+    fn root_tags_for_canonical(&self, canonical: &str, seen: &mut HashSet<String>) -> Vec<String> {
+        let Some(lookup) = label_lookup_key(canonical) else {
+            return Vec::new();
+        };
+        if !seen.insert(lookup) {
+            return Vec::new();
+        }
+
+        let parents = self.direct_parents_for_canonical(canonical);
+        if parents.is_empty() {
+            return vec![canonical.to_string()];
+        }
+
+        let mut roots = Vec::new();
+        for parent in parents {
+            let mut branch_seen = seen.clone();
+            let parent_roots = self.root_tags_for_canonical(&parent, &mut branch_seen);
+            if parent_roots.is_empty() {
+                push_unique_label(&mut roots, parent);
+            } else {
+                for root in parent_roots {
+                    push_unique_label(&mut roots, root);
+                }
+            }
+        }
+        roots
+    }
+}
+
+fn push_unique_label(values: &mut Vec<String>, value: String) {
+    if !values
+        .iter()
+        .any(|existing| label_lookup_key(existing) == label_lookup_key(&value))
+    {
+        values.push(value);
+    }
+}
+
+fn label_lookup_key(raw: &str) -> Option<String> {
+    let normalized = raw.trim().replace(['_', '-'], " ").replace('&', " and ");
+    let words = normalized
+        .split_whitespace()
+        .flat_map(|word| word.chars())
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .flat_map(|ch| ch.to_lowercase())
+        .collect::<String>();
+    if words.is_empty() {
+        None
+    } else {
+        Some(words)
+    }
+}
+
+fn normalized_display_label(raw: &str) -> Option<String> {
+    let normalized = raw.trim().replace(['_', '-'], " ");
+    if normalized.is_empty() {
+        return None;
+    }
+
+    let words = normalized
+        .split_whitespace()
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                Some(first) => format!("{}{}", first.to_uppercase(), chars.as_str().to_lowercase()),
+                None => String::new(),
+            }
+        })
+        .filter(|word| !word.is_empty())
+        .collect::<Vec<_>>();
+
+    if words.is_empty() {
+        None
+    } else {
+        Some(words.join(" "))
+    }
+}
+
+fn normalized_user_label(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
 }
 
 /// Portfolio reporting configuration.
@@ -375,6 +576,10 @@ pub struct Config {
     #[serde(default)]
     pub spending: SpendingConfig,
 
+    /// Tag hierarchy and aliases.
+    #[serde(default)]
+    pub tags: TagsConfig,
+
     /// Portfolio reporting settings.
     #[serde(default)]
     pub portfolio: PortfolioConfig,
@@ -402,6 +607,7 @@ impl Default for Config {
             history: HistoryConfig::default(),
             tray: TrayConfig::default(),
             spending: SpendingConfig::default(),
+            tags: TagsConfig::default(),
             portfolio: PortfolioConfig::default(),
             ignore: IgnoreConfig::default(),
             ai: AiConfig::default(),
@@ -467,6 +673,9 @@ pub struct ResolvedConfig {
 
     /// Spending report settings.
     pub spending: SpendingConfig,
+
+    /// Tag hierarchy and aliases.
+    pub tags: TagsConfig,
 
     /// Portfolio reporting settings.
     pub portfolio: PortfolioConfig,
@@ -575,6 +784,7 @@ impl ResolvedConfig {
             history: config.history,
             tray: config.tray,
             spending: config.spending,
+            tags: config.tags,
             portfolio: config.portfolio,
             ignore: config.ignore,
             ai: config.ai,
@@ -614,6 +824,7 @@ impl ResolvedConfig {
                 history: HistoryConfig::default(),
                 tray: TrayConfig::default(),
                 spending: SpendingConfig::default(),
+                tags: TagsConfig::default(),
                 portfolio: PortfolioConfig::default(),
                 ignore: IgnoreConfig::default(),
                 ai: AiConfig::default(),
@@ -937,6 +1148,8 @@ mod tests {
         assert!(config.spending.ignore_accounts.is_empty());
         assert!(config.spending.ignore_connections.is_empty());
         assert!(config.spending.ignore_tags.is_empty());
+        assert!(config.tags.aliases.is_empty());
+        assert!(config.tags.parents.is_empty());
     }
 
     #[test]
@@ -985,6 +1198,53 @@ mod tests {
         assert_eq!(config.spending.ignore_tags, vec!["brokerage"]);
 
         Ok(())
+    }
+
+    #[test]
+    fn test_load_tag_hierarchy_config() -> Result<()> {
+        let dir = TempDir::new()?;
+        let config_path = dir.path().join("keepbook.toml");
+
+        let mut file = std::fs::File::create(&config_path)?;
+        writeln!(file, "[tags.aliases]")?;
+        writeln!(file, "\"Food And Drink\" = \"Food\"")?;
+        writeln!(file, "[tags.parents]")?;
+        writeln!(file, "\"Groceries\" = [\"Food\"]")?;
+        writeln!(file, "\"Supermarket\" = [\"Groceries\"]")?;
+
+        let config = Config::load(&config_path)?;
+        assert_eq!(
+            config
+                .tags
+                .aliases
+                .get("Food And Drink")
+                .map(String::as_str),
+            Some("Food")
+        );
+        assert_eq!(
+            config.tags.root_tags_for("Supermarket"),
+            vec!["Food".to_string()]
+        );
+        assert_eq!(
+            config.tags.canonical_provider_label("FOOD_AND_DRINK"),
+            Some("Food".to_string())
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_tag_alias_can_point_to_root_without_parent_entry() {
+        let config = TagsConfig {
+            aliases: HashMap::from([("FOOD_AND_DRINK".to_string(), "Food".to_string())]),
+            parents: HashMap::new(),
+        };
+
+        assert_eq!(
+            config.canonical_provider_label("food and drink"),
+            Some("Food".to_string())
+        );
+        assert_eq!(config.root_tags_for("Food"), vec!["Food".to_string()]);
     }
 
     #[test]

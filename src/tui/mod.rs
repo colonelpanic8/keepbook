@@ -2218,6 +2218,7 @@ mod tests {
             history: crate::config::HistoryConfig::default(),
             tray: TrayConfig::default(),
             spending: SpendingConfig::default(),
+            tags: Default::default(),
             portfolio: crate::config::PortfolioConfig::default(),
             ignore: IgnoreConfig::default(),
             ai: crate::config::AiConfig::default(),

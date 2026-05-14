@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::Result;
@@ -8,7 +9,7 @@ use keepbook::app::{
 };
 use keepbook::config::{
     AiConfig, DisplayConfig, GitConfig, HistoryConfig, IgnoreConfig, PortfolioConfig,
-    RefreshConfig, ResolvedConfig, SpendingConfig, TrayConfig,
+    RefreshConfig, ResolvedConfig, SpendingConfig, TagsConfig, TrayConfig,
 };
 use keepbook::models::{Account, Asset, Id, Transaction, TransactionStandardizedMetadata};
 use keepbook::storage::{JsonFileStorage, Storage};
@@ -22,6 +23,10 @@ fn resolved_config(data_dir: &Path) -> ResolvedConfig {
         history: HistoryConfig::default(),
         tray: TrayConfig::default(),
         spending: SpendingConfig::default(),
+        tags: TagsConfig {
+            aliases: HashMap::from([("Food And Drink".to_string(), "Food".to_string())]),
+            parents: HashMap::from([("Groceries".to_string(), vec!["Food".to_string()])]),
+        },
         portfolio: PortfolioConfig::default(),
         ignore: IgnoreConfig::default(),
         ai: AiConfig::default(),
@@ -307,7 +312,7 @@ async fn transaction_rules_can_remap_provider_tag_and_set_subtag() -> Result<()>
             match_account_name: None,
             match_description: None,
             match_tag: Some("(?i)^food$".to_string()),
-            match_subtag: Some("(?i)^food & drink$".to_string()),
+            match_subtag: None,
             match_status: None,
             match_amount: None,
         },

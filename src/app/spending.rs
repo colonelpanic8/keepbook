@@ -698,6 +698,7 @@ async fn spending_report_with_store(
                 provider_hierarchy: provider_virtual_tag_hierarchy(
                     tx.standardized_metadata.as_ref(),
                     &tx.synchronizer_data,
+                    &config.tags,
                 ),
                 annotation,
             });
@@ -791,18 +792,22 @@ async fn spending_report_with_store(
         if group_by != GroupBy::None {
             let keys: Vec<String> = match group_by {
                 GroupBy::None => vec![],
-                GroupBy::Subtag => {
-                    effective_transaction_subtags(row.annotation.as_ref(), &row.provider_hierarchy)
-                }
+                GroupBy::Subtag => effective_transaction_subtags(
+                    row.annotation.as_ref(),
+                    &row.provider_hierarchy,
+                    &config.tags,
+                ),
                 GroupBy::Merchant => vec![row
                     .annotation
                     .as_ref()
                     .and_then(|a| a.description.clone())
                     .unwrap_or_else(|| row.raw_description.clone())],
                 GroupBy::Account => vec![row.account_id.to_string()],
-                GroupBy::Tag => {
-                    effective_transaction_tags(row.annotation.as_ref(), &row.provider_hierarchy)
-                }
+                GroupBy::Tag => effective_transaction_tags(
+                    row.annotation.as_ref(),
+                    &row.provider_hierarchy,
+                    &config.tags,
+                ),
             };
 
             let keys = if matches!(group_by, GroupBy::Tag) && keys.is_empty() {
@@ -985,6 +990,7 @@ mod tests {
             history: crate::config::HistoryConfig::default(),
             tray: crate::config::TrayConfig::default(),
             spending: crate::config::SpendingConfig::default(),
+            tags: Default::default(),
             portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
             ai: crate::config::AiConfig::default(),
@@ -1073,6 +1079,7 @@ mod tests {
             history: crate::config::HistoryConfig::default(),
             tray: crate::config::TrayConfig::default(),
             spending: crate::config::SpendingConfig::default(),
+            tags: Default::default(),
             portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
             ai: crate::config::AiConfig::default(),
@@ -1178,6 +1185,7 @@ mod tests {
             history: crate::config::HistoryConfig::default(),
             tray: crate::config::TrayConfig::default(),
             spending: crate::config::SpendingConfig::default(),
+            tags: Default::default(),
             portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
             ai: crate::config::AiConfig::default(),
@@ -1277,6 +1285,10 @@ mod tests {
             history: crate::config::HistoryConfig::default(),
             tray: crate::config::TrayConfig::default(),
             spending: crate::config::SpendingConfig::default(),
+            tags: crate::config::TagsConfig {
+                aliases: HashMap::new(),
+                parents: HashMap::from([("Groceries".to_string(), vec!["Food".to_string()])]),
+            },
             portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
             ai: crate::config::AiConfig::default(),
@@ -1407,6 +1419,7 @@ mod tests {
                 ignore_connections: vec![],
                 ignore_tags: vec!["brokerage".to_string()],
             },
+            tags: Default::default(),
             portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
             ai: crate::config::AiConfig::default(),
@@ -1495,6 +1508,7 @@ mod tests {
             history: crate::config::HistoryConfig::default(),
             tray: crate::config::TrayConfig::default(),
             spending: crate::config::SpendingConfig::default(),
+            tags: Default::default(),
             portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig {
                 transaction_rules: vec![crate::config::TransactionIgnoreRule {
@@ -1588,6 +1602,7 @@ mod tests {
             history: crate::config::HistoryConfig::default(),
             tray: crate::config::TrayConfig::default(),
             spending: crate::config::SpendingConfig::default(),
+            tags: Default::default(),
             portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
             ai: crate::config::AiConfig::default(),
@@ -1673,6 +1688,7 @@ mod tests {
             history: crate::config::HistoryConfig::default(),
             tray: crate::config::TrayConfig::default(),
             spending: crate::config::SpendingConfig::default(),
+            tags: Default::default(),
             portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
             ai: crate::config::AiConfig::default(),

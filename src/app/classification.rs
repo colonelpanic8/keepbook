@@ -1,5 +1,6 @@
 use serde_json::Value;
 
+use crate::config::TagsConfig;
 use crate::models::{TransactionAnnotation, TransactionStandardizedMetadata};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -11,9 +12,10 @@ pub(crate) struct VirtualTagHierarchy {
 pub(crate) fn effective_transaction_tags(
     annotation: Option<&TransactionAnnotation>,
     provider_hierarchy: &VirtualTagHierarchy,
+    tags_config: &TagsConfig,
 ) -> Vec<String> {
-    if let Some(tags) = annotation.and_then(|annotation| annotation.tags.clone()) {
-        return normalize_user_labels(tags);
+    if let Some(hierarchy) = explicit_annotation_hierarchy(annotation, tags_config) {
+        return hierarchy.tags;
     }
 
     provider_hierarchy.tags.clone()
@@ -22,16 +24,10 @@ pub(crate) fn effective_transaction_tags(
 pub(crate) fn effective_transaction_subtags(
     annotation: Option<&TransactionAnnotation>,
     provider_hierarchy: &VirtualTagHierarchy,
+    tags_config: &TagsConfig,
 ) -> Vec<String> {
-    if let Some(subtags) = annotation.and_then(|annotation| annotation.subtags.clone()) {
-        return normalize_user_labels(subtags);
-    }
-
-    if annotation
-        .and_then(|annotation| annotation.tags.as_ref())
-        .is_some()
-    {
-        return Vec::new();
+    if let Some(hierarchy) = explicit_annotation_hierarchy(annotation, tags_config) {
+        return hierarchy.subtags;
     }
 
     provider_hierarchy.subtags.clone()
@@ -40,6 +36,7 @@ pub(crate) fn effective_transaction_subtags(
 pub(crate) fn provider_virtual_tag_hierarchy(
     metadata: Option<&TransactionStandardizedMetadata>,
     synchronizer_data: &Value,
+    tags_config: &TagsConfig,
 ) -> VirtualTagHierarchy {
     let mut labels = Vec::new();
 
@@ -48,7 +45,10 @@ pub(crate) fn provider_virtual_tag_hierarchy(
         .and_then(|value| value.as_array())
     {
         for value in category_path {
-            if let Some(label) = value.as_str().and_then(normalize_provider_label) {
+            if let Some(label) = value
+                .as_str()
+                .and_then(|value| tags_config.canonical_provider_label(value))
+            {
                 push_unique(&mut labels, label);
             }
         }
@@ -57,50 +57,89 @@ pub(crate) fn provider_virtual_tag_hierarchy(
     if let Some(label) = synchronizer_data
         .get("etu_standard_expense_category_code")
         .and_then(|value| value.as_str())
-        .and_then(normalize_provider_label)
+        .and_then(|value| tags_config.canonical_provider_label(value))
     {
         push_unique(&mut labels, label);
     }
 
     if let Some(label) = metadata
         .and_then(|metadata| metadata.merchant_category_label.as_deref())
-        .and_then(normalize_provider_label)
+        .and_then(|value| tags_config.canonical_provider_label(value))
     {
         push_unique(&mut labels, label);
     }
 
-    if labels.is_empty() {
-        return VirtualTagHierarchy::default();
+    hierarchy_for_labels(labels, tags_config)
+}
+
+fn explicit_annotation_hierarchy(
+    annotation: Option<&TransactionAnnotation>,
+    tags_config: &TagsConfig,
+) -> Option<VirtualTagHierarchy> {
+    let annotation = annotation?;
+    if annotation.tags.is_none() && annotation.subtags.is_none() {
+        return None;
     }
 
-    let top_tag = labels
-        .iter()
-        .find_map(|label| known_top_level_tag(label))
-        .unwrap_or_else(|| labels[0].clone());
+    let mut hierarchy = VirtualTagHierarchy::default();
+    if let Some(tags) = &annotation.tags {
+        for tag in tags {
+            let Some(label) = tags_config.canonical_label(tag) else {
+                continue;
+            };
+            let roots = tags_config.root_tags_for(&label);
+            for root in &roots {
+                push_unique(&mut hierarchy.tags, root.clone());
+            }
+            if !roots.iter().any(|root| root.eq_ignore_ascii_case(&label)) {
+                push_unique(&mut hierarchy.subtags, label);
+            }
+        }
+    }
 
-    let mut hierarchy = VirtualTagHierarchy {
-        tags: vec![top_tag.clone()],
-        subtags: Vec::new(),
-    };
+    if let Some(subtags) = &annotation.subtags {
+        for subtag in subtags {
+            let Some(label) = tags_config.canonical_label(subtag) else {
+                continue;
+            };
+            for root in tags_config.parent_root_tags_for(&label) {
+                push_unique(&mut hierarchy.tags, root);
+            }
+            if !hierarchy
+                .tags
+                .iter()
+                .any(|tag| tag.eq_ignore_ascii_case(&label))
+            {
+                push_unique(&mut hierarchy.subtags, label);
+            }
+        }
+    }
+
+    Some(hierarchy)
+}
+
+fn hierarchy_for_labels(labels: Vec<String>, tags_config: &TagsConfig) -> VirtualTagHierarchy {
+    let labels = tags_config.canonicalize_labels(labels);
+    let mut hierarchy = VirtualTagHierarchy::default();
+
+    for label in &labels {
+        let roots = tags_config.root_tags_for(label);
+        for root in roots {
+            push_unique(&mut hierarchy.tags, root);
+        }
+    }
 
     for label in labels {
-        if !label.eq_ignore_ascii_case(&top_tag) {
+        if !hierarchy
+            .tags
+            .iter()
+            .any(|tag| tag.eq_ignore_ascii_case(&label))
+        {
             push_unique(&mut hierarchy.subtags, label);
         }
     }
 
     hierarchy
-}
-
-fn normalize_user_labels(values: Vec<String>) -> Vec<String> {
-    values
-        .into_iter()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .fold(Vec::new(), |mut acc, value| {
-            push_unique(&mut acc, value);
-            acc
-        })
 }
 
 fn push_unique(values: &mut Vec<String>, value: String) {
@@ -115,74 +154,55 @@ fn push_unique(values: &mut Vec<String>, value: String) {
     }
 }
 
-fn normalize_provider_label(raw: &str) -> Option<String> {
-    let normalized = raw.trim().replace(['_', '-'], " ");
-    if normalized.is_empty() {
-        return None;
-    }
-
-    let lower = normalized.to_lowercase();
-    if matches!(
-        lower.as_str(),
-        "food and drink" | "food & drink" | "food drink"
-    ) {
-        return Some("Food & Drink".to_string());
-    }
-
-    let words = normalized
-        .split_whitespace()
-        .map(|word| {
-            let mut chars = word.chars();
-            match chars.next() {
-                Some(first) => format!("{}{}", first.to_uppercase(), chars.as_str().to_lowercase()),
-                None => String::new(),
-            }
-        })
-        .filter(|word| !word.is_empty())
-        .collect::<Vec<_>>();
-
-    if words.is_empty() {
-        None
-    } else {
-        Some(words.join(" "))
-    }
-}
-
-fn known_top_level_tag(label: &str) -> Option<String> {
-    let normalized = label.trim().to_lowercase().replace('&', "and");
-    let top = match normalized.as_str() {
-        "food" | "food and drink" | "groceries" | "grocery" | "restaurants" | "restaurant"
-        | "dining" | "fast food" | "coffee" | "cafes" | "cafe" | "bakeries" | "bakery"
-        | "liquor" | "alcohol" => "Food",
-        "home" | "housing" | "rent" | "mortgage" | "home improvement" => "Home",
-        _ => return None,
-    };
-    Some(top.to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::models::TransactionStandardizedMetadata;
+    use std::collections::HashMap;
+
+    fn tags_config() -> TagsConfig {
+        TagsConfig {
+            aliases: HashMap::from([("Food And Drink".to_string(), "Food".to_string())]),
+            parents: HashMap::from([
+                ("Groceries".to_string(), vec!["Food".to_string()]),
+                ("Fast Food".to_string(), vec!["Food".to_string()]),
+                ("Rent".to_string(), vec!["Housing".to_string()]),
+                ("Housing".to_string(), vec!["Home".to_string()]),
+            ]),
+        }
+    }
 
     #[test]
-    fn plaid_food_hierarchy_becomes_food_tag_and_grocery_subtags() {
+    fn configured_hierarchy_maps_provider_label_to_top_level_tag() {
+        let config = tags_config();
         let hierarchy = provider_virtual_tag_hierarchy(
             None,
             &serde_json::json!({
                 "category": ["Food and Drink", "Groceries"]
             }),
+            &config,
         );
 
         assert_eq!(hierarchy.tags, vec!["Food".to_string()]);
-        assert_eq!(
-            hierarchy.subtags,
-            vec!["Food & Drink".to_string(), "Groceries".to_string()]
-        );
+        assert_eq!(hierarchy.subtags, vec!["Groceries".to_string()]);
     }
 
     #[test]
-    fn chase_food_category_uses_broad_code_and_merchant_category_as_subtags() {
+    fn provider_label_without_config_becomes_simple_tag() {
+        let hierarchy = provider_virtual_tag_hierarchy(
+            None,
+            &serde_json::json!({
+                "category": ["Groceries"]
+            }),
+            &TagsConfig::default(),
+        );
+
+        assert_eq!(hierarchy.tags, vec!["Groceries".to_string()]);
+        assert!(hierarchy.subtags.is_empty());
+    }
+
+    #[test]
+    fn chase_provider_fields_use_configured_aliases_and_parents() {
         let metadata = TransactionStandardizedMetadata {
             merchant_name: None,
             merchant_category_code: Some("5814".to_string()),
@@ -196,28 +216,50 @@ mod tests {
                 "etu_standard_expense_category_code": "FOOD_AND_DRINK",
                 "merchant_category_name": "Fast Food"
             }),
+            &tags_config(),
         );
 
         assert_eq!(hierarchy.tags, vec!["Food".to_string()]);
-        assert_eq!(
-            hierarchy.subtags,
-            vec!["Food & Drink".to_string(), "Fast Food".to_string()]
-        );
+        assert_eq!(hierarchy.subtags, vec!["Fast Food".to_string()]);
     }
 
     #[test]
-    fn housing_provider_labels_roll_up_to_home() {
+    fn recursive_hierarchy_finds_top_level_parent() {
         let hierarchy = provider_virtual_tag_hierarchy(
             None,
             &serde_json::json!({
                 "category": ["Housing", "Rent"]
             }),
+            &tags_config(),
         );
 
         assert_eq!(hierarchy.tags, vec!["Home".to_string()]);
         assert_eq!(
             hierarchy.subtags,
             vec!["Housing".to_string(), "Rent".to_string()]
+        );
+    }
+
+    #[test]
+    fn explicit_child_tag_implies_configured_parent_tag() {
+        let annotation = TransactionAnnotation {
+            transaction_id: crate::models::Id::from_string("tx-1"),
+            description: None,
+            note: None,
+            tags: Some(vec!["Groceries".to_string()]),
+            subtags: None,
+            effective_date: None,
+        };
+        let provider = VirtualTagHierarchy::default();
+        let config = tags_config();
+
+        assert_eq!(
+            effective_transaction_tags(Some(&annotation), &provider, &config),
+            vec!["Food".to_string()]
+        );
+        assert_eq!(
+            effective_transaction_subtags(Some(&annotation), &provider, &config),
+            vec!["Groceries".to_string()]
         );
     }
 
@@ -237,9 +279,14 @@ mod tests {
         };
 
         assert_eq!(
-            effective_transaction_tags(Some(&annotation), &provider),
+            effective_transaction_tags(Some(&annotation), &provider, &TagsConfig::default()),
             vec!["Personal".to_string()]
         );
-        assert!(effective_transaction_subtags(Some(&annotation), &provider).is_empty());
+        assert!(effective_transaction_subtags(
+            Some(&annotation),
+            &provider,
+            &TagsConfig::default()
+        )
+        .is_empty());
     }
 }

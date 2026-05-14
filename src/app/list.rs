@@ -439,9 +439,12 @@ pub async fn list_transactions(
             let provider_hierarchy = provider_virtual_tag_hierarchy(
                 tx.standardized_metadata.as_ref(),
                 &tx.synchronizer_data,
+                &config.tags,
             );
-            let tags = effective_transaction_tags(raw_annotation, &provider_hierarchy);
-            let subtags = effective_transaction_subtags(raw_annotation, &provider_hierarchy);
+            let tags =
+                effective_transaction_tags(raw_annotation, &provider_hierarchy, &config.tags);
+            let subtags =
+                effective_transaction_subtags(raw_annotation, &provider_hierarchy, &config.tags);
             if skip_ignored
                 && annotations_by_tx
                     .get(&tx.id)
@@ -577,6 +580,7 @@ mod tests {
                 history: crate::config::HistoryConfig::default(),
                 tray: crate::config::TrayConfig::default(),
                 spending: crate::config::SpendingConfig::default(),
+                tags: Default::default(),
                 portfolio: crate::config::PortfolioConfig::default(),
                 ignore: crate::config::IgnoreConfig::default(),
                 ai: crate::config::AiConfig::default(),
@@ -600,7 +604,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_transactions_rolls_provider_category_hierarchy_into_virtual_tags() -> Result<()> {
+    async fn list_transactions_uses_configured_tag_hierarchy_for_provider_labels() -> Result<()> {
         let storage = MemoryStorage::new();
         let clock = FixedClock::new(Utc.with_ymd_and_hms(2026, 2, 5, 12, 0, 0).unwrap());
 
@@ -642,6 +646,10 @@ mod tests {
                 history: crate::config::HistoryConfig::default(),
                 tray: crate::config::TrayConfig::default(),
                 spending: crate::config::SpendingConfig::default(),
+                tags: crate::config::TagsConfig {
+                    aliases: HashMap::from([("Food And Drink".to_string(), "Food".to_string())]),
+                    parents: HashMap::from([("Groceries".to_string(), vec!["Food".to_string()])]),
+                },
                 portfolio: crate::config::PortfolioConfig::default(),
                 ignore: crate::config::IgnoreConfig::default(),
                 ai: crate::config::AiConfig::default(),
@@ -652,10 +660,7 @@ mod tests {
 
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].tags, vec!["Food".to_string()]);
-        assert_eq!(
-            out[0].subtags,
-            vec!["Food & Drink".to_string(), "Groceries".to_string()]
-        );
+        assert_eq!(out[0].subtags, vec!["Groceries".to_string()]);
         Ok(())
     }
 
@@ -710,6 +715,7 @@ mod tests {
                 history: crate::config::HistoryConfig::default(),
                 tray: crate::config::TrayConfig::default(),
                 spending: crate::config::SpendingConfig::default(),
+                tags: Default::default(),
                 portfolio: crate::config::PortfolioConfig::default(),
                 ignore: crate::config::IgnoreConfig::default(),
                 ai: crate::config::AiConfig::default(),
@@ -759,6 +765,7 @@ mod tests {
             history: crate::config::HistoryConfig::default(),
             tray: crate::config::TrayConfig::default(),
             spending: crate::config::SpendingConfig::default(),
+            tags: Default::default(),
             portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
             ai: crate::config::AiConfig::default(),
@@ -846,6 +853,7 @@ mod tests {
                 history: crate::config::HistoryConfig::default(),
                 tray: crate::config::TrayConfig::default(),
                 spending: crate::config::SpendingConfig::default(),
+                tags: Default::default(),
                 portfolio: crate::config::PortfolioConfig::default(),
                 ignore: crate::config::IgnoreConfig::default(),
                 ai: crate::config::AiConfig::default(),
@@ -870,6 +878,7 @@ mod tests {
                 history: crate::config::HistoryConfig::default(),
                 tray: crate::config::TrayConfig::default(),
                 spending: crate::config::SpendingConfig::default(),
+                tags: Default::default(),
                 portfolio: crate::config::PortfolioConfig::default(),
                 ignore: crate::config::IgnoreConfig::default(),
                 ai: crate::config::AiConfig::default(),
@@ -925,6 +934,7 @@ mod tests {
                 history: crate::config::HistoryConfig::default(),
                 tray: crate::config::TrayConfig::default(),
                 spending: crate::config::SpendingConfig::default(),
+                tags: Default::default(),
                 portfolio: crate::config::PortfolioConfig::default(),
                 ignore: crate::config::IgnoreConfig::default(),
                 ai: crate::config::AiConfig::default(),
@@ -981,6 +991,7 @@ mod tests {
             history: crate::config::HistoryConfig::default(),
             tray: crate::config::TrayConfig::default(),
             spending: crate::config::SpendingConfig::default(),
+            tags: Default::default(),
             portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig {
                 transaction_rules: vec![crate::config::TransactionIgnoreRule {
@@ -1061,6 +1072,7 @@ mod tests {
                 ignore_connections: vec![],
                 ignore_tags: vec![],
             },
+            tags: Default::default(),
             portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
             ai: crate::config::AiConfig::default(),
@@ -1130,6 +1142,7 @@ mod tests {
                 ignore_connections: vec![],
                 ignore_tags: vec!["brokerage".to_string()],
             },
+            tags: Default::default(),
             portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
             ai: crate::config::AiConfig::default(),
@@ -1200,6 +1213,7 @@ mod tests {
             history: crate::config::HistoryConfig::default(),
             tray: crate::config::TrayConfig::default(),
             spending: crate::config::SpendingConfig::default(),
+            tags: Default::default(),
             portfolio: crate::config::PortfolioConfig::default(),
             ignore: crate::config::IgnoreConfig::default(),
             ai: crate::config::AiConfig::default(),
