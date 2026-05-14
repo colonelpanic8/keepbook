@@ -139,6 +139,78 @@ fn account_graph_query_scopes_history() {
 }
 
 #[test]
+fn spending_over_time_query_requests_bucketed_tag_breakdowns() {
+    assert_eq!(
+        spending_over_time_query_string(
+            RangePreset::NinetyDays,
+            "",
+            "",
+            "2026-04-25",
+            "USD",
+            SpendingBucket::Weekly,
+        ),
+        "period=weekly&period_alignment=calendar&group_by=tag&direction=outflow&status=posted&include_empty=true&currency=USD&start=2026-01-25&end=2026-04-25"
+    );
+}
+
+#[test]
+fn spending_over_time_points_preserve_bucket_breakdowns() {
+    let spending = SpendingOutput {
+        currency: "USD".to_string(),
+        tz: "local".to_string(),
+        start_date: "2026-01-01".to_string(),
+        end_date: "2026-02-28".to_string(),
+        period: "monthly".to_string(),
+        total: "60".to_string(),
+        transaction_count: 3,
+        periods: vec![
+            SpendingPeriod {
+                start_date: "2026-01-01".to_string(),
+                end_date: "2026-01-31".to_string(),
+                total: "40".to_string(),
+                transaction_count: 2,
+                breakdown: vec![
+                    SpendingBreakdownEntry {
+                        key: "food".to_string(),
+                        total: "25".to_string(),
+                        transaction_count: 1,
+                    },
+                    SpendingBreakdownEntry {
+                        key: "uncategorized".to_string(),
+                        total: "15".to_string(),
+                        transaction_count: 1,
+                    },
+                ],
+            },
+            SpendingPeriod {
+                start_date: "2026-02-01".to_string(),
+                end_date: "2026-02-28".to_string(),
+                total: "20".to_string(),
+                transaction_count: 1,
+                breakdown: vec![SpendingBreakdownEntry {
+                    key: "food".to_string(),
+                    total: "20".to_string(),
+                    transaction_count: 1,
+                }],
+            },
+        ],
+        skipped_transaction_count: 0,
+        missing_price_transaction_count: 0,
+        missing_fx_transaction_count: 0,
+    };
+
+    let points = spending_over_time_points(&spending);
+    let series = spending_over_time_series(&points);
+
+    assert_eq!(points[0].label, "2026-01");
+    assert_eq!(points[0].total, 40.0);
+    assert_eq!(points[0].segments[0].key, "food");
+    assert_eq!(points[0].segments[1].key, "Uncategorized");
+    assert_eq!(series[0].key, "food");
+    assert_eq!(series[0].total, "45");
+}
+
+#[test]
 fn filter_override_query_includes_latent_tax_override() {
     assert_eq!(
         filter_override_query_string(FilterOverrides {

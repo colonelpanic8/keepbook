@@ -65,8 +65,10 @@ pub(crate) async fn fetch_history(query: String) -> Result<History, String> {
 
 pub(crate) async fn fetch_spending_dashboard(
     query: String,
+    over_time_query: String,
 ) -> Result<SpendingDashboardData, String> {
     let spending = fetch_spending_impl(query).await?;
+    let spending_over_time = fetch_spending_impl(over_time_query).await?;
     let tx_query = transaction_query_string(
         &spending.start_date,
         &spending.end_date,
@@ -86,6 +88,7 @@ pub(crate) async fn fetch_spending_dashboard(
     );
     Ok(SpendingDashboardData {
         spending,
+        spending_over_time,
         transactions,
     })
 }

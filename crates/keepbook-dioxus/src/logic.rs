@@ -1,5 +1,5 @@
 use super::*;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 pub(crate) fn range_preset_from_config(value: &str) -> RangePreset {
     match normalize_config_key(value).as_str() {
@@ -146,13 +146,40 @@ pub(crate) fn spending_query_string(
         "group_by=tag".to_string(),
         "direction=outflow".to_string(),
         "status=posted".to_string(),
-        format!("currency={currency}"),
     ];
+    push_query_param(&mut params, "currency", currency);
     if let Some(start) = start {
-        params.push(format!("start={start}"));
+        push_query_param(&mut params, "start", &start);
     }
     if let Some(end) = end {
-        params.push(format!("end={end}"));
+        push_query_param(&mut params, "end", &end);
+    }
+    params.join("&")
+}
+
+pub(crate) fn spending_over_time_query_string(
+    preset: RangePreset,
+    start_override: &str,
+    end_override: &str,
+    today: &str,
+    currency: &str,
+    bucket: SpendingBucket,
+) -> String {
+    let (start, end) = requested_history_date_range(preset, start_override, end_override, today);
+    let mut params = vec![
+        format!("period={}", bucket.query_value()),
+        "period_alignment=calendar".to_string(),
+        "group_by=tag".to_string(),
+        "direction=outflow".to_string(),
+        "status=posted".to_string(),
+        "include_empty=true".to_string(),
+    ];
+    push_query_param(&mut params, "currency", currency);
+    if let Some(start) = start {
+        push_query_param(&mut params, "start", &start);
+    }
+    if let Some(end) = end {
+        push_query_param(&mut params, "end", &end);
     }
     params.join("&")
 }
@@ -660,6 +687,88 @@ pub(crate) fn spending_categories(spending: &SpendingOutput) -> Vec<SpendingBrea
     totals
 }
 
+pub(crate) fn spending_over_time_points(spending: &SpendingOutput) -> Vec<SpendingBarChartPoint> {
+    spending
+        .periods
+        .iter()
+        .map(|period| {
+            let mut segments = period
+                .breakdown
+                .iter()
+                .filter_map(|entry| {
+                    let value = parse_money_input(&entry.total)?.abs();
+                    if value <= 0.0 {
+                        return None;
+                    }
+                    Some(SpendingBarSegment {
+                        key: normalize_spending_category_key(&entry.key),
+                        value,
+                        transaction_count: entry.transaction_count,
+                    })
+                })
+                .collect::<Vec<_>>();
+            segments.sort_by(|a, b| {
+                b.value
+                    .partial_cmp(&a.value)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| a.key.cmp(&b.key))
+            });
+            let total = parse_money_input(&period.total).unwrap_or_default().abs();
+            SpendingBarChartPoint {
+                label: spending_period_label(&period.start_date, &period.end_date),
+                start_date: period.start_date.clone(),
+                end_date: period.end_date.clone(),
+                total,
+                transaction_count: period.transaction_count,
+                segments,
+            }
+        })
+        .collect()
+}
+
+pub(crate) fn spending_over_time_series(
+    points: &[SpendingBarChartPoint],
+) -> Vec<SpendingBreakdownEntry> {
+    let mut series = Vec::<SpendingBreakdownEntry>::new();
+    for point in points {
+        for segment in &point.segments {
+            if let Some(existing) = series.iter_mut().find(|entry| entry.key == segment.key) {
+                let current = parse_money_input(&existing.total).unwrap_or_default();
+                existing.total = format_number(current + segment.value, 2);
+                existing.transaction_count += segment.transaction_count;
+            } else {
+                series.push(SpendingBreakdownEntry {
+                    key: segment.key.clone(),
+                    total: format_number(segment.value, 2),
+                    transaction_count: segment.transaction_count,
+                });
+            }
+        }
+    }
+    series.sort_by(|a, b| {
+        let left = parse_money_input(&a.total).unwrap_or_default();
+        let right = parse_money_input(&b.total).unwrap_or_default();
+        right
+            .partial_cmp(&left)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.key.cmp(&b.key))
+    });
+    series
+}
+
+fn spending_period_label(start: &str, end: &str) -> String {
+    if start == end {
+        return start.to_string();
+    }
+    if start.get(..4) == end.get(..4) && start.ends_with("-01-01") && end.ends_with("-12-31") {
+        return start.get(..4).unwrap_or(start).to_string();
+    }
+    if start.get(..7) == end.get(..7) {
+        return start.get(..7).unwrap_or(start).to_string();
+    }
+    format!("{start} to {end}")
+}
+
 pub(crate) fn transaction_tag_options(
     transactions: &[Transaction],
     categories: &[SpendingBreakdownEntry],
@@ -853,7 +962,31 @@ pub(crate) fn spending_category_color(index: usize) -> &'static str {
     SPENDING_CATEGORY_COLORS[index % SPENDING_CATEGORY_COLORS.len()]
 }
 
-pub(crate) fn pie_slices(categories: &[SpendingBreakdownEntry]) -> Vec<PieSlice> {
+pub(crate) fn spending_category_color_map(
+    categories: &[SpendingBreakdownEntry],
+) -> HashMap<String, &'static str> {
+    categories
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| (entry.key.clone(), spending_category_color(index)))
+        .collect()
+}
+
+pub(crate) fn spending_category_color_for(
+    colors: &HashMap<String, &'static str>,
+    key: &str,
+    fallback_index: usize,
+) -> &'static str {
+    colors
+        .get(key)
+        .copied()
+        .unwrap_or_else(|| spending_category_color(fallback_index))
+}
+
+pub(crate) fn pie_slices(
+    categories: &[SpendingBreakdownEntry],
+    colors: &HashMap<String, &'static str>,
+) -> Vec<PieSlice> {
     let values = categories
         .iter()
         .map(|entry| parse_money_input(&entry.total).unwrap_or_default().abs())
@@ -882,7 +1015,7 @@ pub(crate) fn pie_slices(categories: &[SpendingBreakdownEntry]) -> Vec<PieSlice>
                 transaction_count: entry.transaction_count,
                 percentage: (*value / total) * 100.0,
                 path: pie_slice_path(130.0, 130.0, 104.0, start, end),
-                color: spending_category_color(index),
+                color: spending_category_color_for(colors, &entry.key, index),
             })
         })
         .collect()

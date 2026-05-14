@@ -923,6 +923,78 @@ small,
   stroke-width: 2;
 }
 
+.spending-over-time-card {
+  margin-bottom: 18px;
+}
+
+.spending-bar-chart {
+  aspect-ratio: 720 / 300;
+}
+
+.spending-bar-segment {
+  cursor: pointer;
+  stroke: #ffffff;
+  stroke-width: 1;
+  transition:
+    opacity 120ms ease,
+    filter 120ms ease;
+}
+
+.spending-bar-segment:hover,
+.spending-bar-segment.selected {
+  filter: brightness(1.06);
+  opacity: 0.92;
+}
+
+.spending-bar-segment.dimmed {
+  opacity: 0.32;
+}
+
+.stacked-legend {
+  border-top: 1px solid #eef2f1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: 10px;
+  padding-top: 10px;
+}
+
+.stacked-legend-item {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: #31424e;
+  display: inline-flex;
+  font-size: 0.78rem;
+  font-weight: 700;
+  gap: 6px;
+  max-width: 220px;
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+}
+
+button.stacked-legend-item {
+  cursor: pointer;
+}
+
+.stacked-legend-item.selected {
+  color: #17202a;
+}
+
+.stacked-legend-swatch {
+  border-radius: 3px;
+  display: block;
+  flex: 0 0 auto;
+  height: 10px;
+  width: 10px;
+}
+
+.spending-bar-legend {
+  max-height: 92px;
+  overflow: auto;
+}
+
 .chart-hover-point {
   fill: #1f6f8b;
   pointer-events: none;

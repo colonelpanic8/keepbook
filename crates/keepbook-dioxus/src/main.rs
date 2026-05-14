@@ -223,6 +223,8 @@ struct SpendingOutput {
     tz: String,
     start_date: String,
     end_date: String,
+    #[serde(default)]
+    period: String,
     total: String,
     transaction_count: usize,
     periods: Vec<SpendingPeriod>,
@@ -251,6 +253,7 @@ struct SpendingBreakdownEntry {
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 struct SpendingDashboardData {
     spending: SpendingOutput,
+    spending_over_time: SpendingOutput,
     transactions: Vec<Transaction>,
 }
 
@@ -460,6 +463,23 @@ struct NetWorthDataPoint {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+struct SpendingBarChartPoint {
+    label: String,
+    start_date: String,
+    end_date: String,
+    total: f64,
+    transaction_count: usize,
+    segments: Vec<SpendingBarSegment>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct SpendingBarSegment {
+    key: String,
+    value: f64,
+    transaction_count: usize,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 struct ChartPoint {
     date: String,
     value: f64,
@@ -492,6 +512,15 @@ enum SamplingGranularity {
     Daily,
     Weekly,
     Monthly,
+    Yearly,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SpendingBucket {
+    Daily,
+    Weekly,
+    Monthly,
+    Quarterly,
     Yearly,
 }
 
@@ -553,6 +582,36 @@ impl SamplingGranularity {
             Self::Daily => "daily",
             Self::Weekly => "weekly",
             Self::Monthly => "monthly",
+            Self::Yearly => "yearly",
+        }
+    }
+}
+
+impl SpendingBucket {
+    const OPTIONS: [Self; 5] = [
+        Self::Daily,
+        Self::Weekly,
+        Self::Monthly,
+        Self::Quarterly,
+        Self::Yearly,
+    ];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Daily => "Daily",
+            Self::Weekly => "Weekly",
+            Self::Monthly => "Monthly",
+            Self::Quarterly => "Quarterly",
+            Self::Yearly => "Yearly",
+        }
+    }
+
+    fn query_value(self) -> &'static str {
+        match self {
+            Self::Daily => "daily",
+            Self::Weekly => "weekly",
+            Self::Monthly => "monthly",
+            Self::Quarterly => "quarterly",
             Self::Yearly => "yearly",
         }
     }

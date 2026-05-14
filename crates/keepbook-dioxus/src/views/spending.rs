@@ -1,12 +1,13 @@
 use super::*;
 use crate::api::{fetch_spending_dashboard, set_transaction_tags, suggest_ai_rules};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 #[component]
 pub(super) fn SpendingView(currency: String) -> Element {
     let mut range_preset = use_signal(|| RangePreset::NinetyDays);
     let mut start_override = use_signal(String::new);
     let mut end_override = use_signal(String::new);
+    let mut spending_bucket = use_signal(|| SpendingBucket::Weekly);
     let mut selected_tag = use_signal(|| None::<String>);
     let mut transaction_page = use_signal(|| 0usize);
     let mut transaction_sort_field = use_signal(|| TransactionSortField::Date);
@@ -24,21 +25,28 @@ pub(super) fn SpendingView(currency: String) -> Element {
             let selected_range = range_preset();
             let start_text = start_override();
             let end_text = end_override();
+            let selected_bucket = spending_bucket();
             let currency = currency.clone();
             async move {
-                fetch_spending_dashboard(spending_query_string(
-                    selected_range,
-                    &start_text,
-                    &end_text,
-                    &current_date_string(),
-                    &currency,
-                ))
+                let today = current_date_string();
+                fetch_spending_dashboard(
+                    spending_query_string(selected_range, &start_text, &end_text, &today, &currency),
+                    spending_over_time_query_string(
+                        selected_range,
+                        &start_text,
+                        &end_text,
+                        &today,
+                        &currency,
+                        selected_bucket,
+                    ),
+                )
                 .await
             }
         }
     });
 
     let selected_range = range_preset();
+    let selected_bucket = spending_bucket();
     let start_text = start_override();
     let end_text = end_override();
     let selected = selected_tag();
@@ -61,6 +69,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
     let categories = loaded
         .map(|data| spending_categories(&data.spending))
         .unwrap_or_default();
+    let category_colors = spending_category_color_map(&categories);
     let tag_options = loaded
         .map(|data| transaction_tag_options(&data.transactions, &categories))
         .unwrap_or_default();
@@ -237,6 +246,16 @@ pub(super) fn SpendingView(currency: String) -> Element {
                         }
                     }
                 }
+                div { class: "sampling-row",
+                    span { class: "control-label", "Bucket" }
+                    for option in SpendingBucket::OPTIONS {
+                        GraphPresetButton {
+                            label: option.label(),
+                            selected: selected_bucket == option,
+                            onclick: move |_| spending_bucket.set(option)
+                        }
+                    }
+                }
             }
             match state {
                 None => rsx! {
@@ -249,12 +268,23 @@ pub(super) fn SpendingView(currency: String) -> Element {
                     InlineStatus { title: "Spending Tags", message: error }
                 },
                 Some(Ok(data)) => rsx! {
+                    SpendingOverTimeChart {
+                        spending: data.spending_over_time.clone(),
+                        selected: selected.clone(),
+                        bucket_label: selected_bucket.label().to_string(),
+                        colors: category_colors.clone(),
+                        onclick: move |category| {
+                            selected_tag.set(Some(category));
+                            transaction_page.set(0);
+                        }
+                    }
                     div { class: "spending-layout",
                         div { class: "spending-chart-area",
                             SpendingPieChart {
                                 categories: categories.clone(),
                                 selected: selected.clone(),
                                 currency: data.spending.currency.clone(),
+                                colors: category_colors.clone(),
                                 onclick: move |category| {
                                     selected_tag.set(Some(category));
                                     transaction_page.set(0);
@@ -277,7 +307,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
                             for (index, entry) in categories.iter().enumerate() {
                                 TagRow {
                                     entry: entry.clone(),
-                                    color: spending_category_color(index),
+                                    color: spending_category_color_for(&category_colors, &entry.key, index),
                                     currency: data.spending.currency.clone(),
                                     selected: selected.as_ref() == Some(&entry.key),
                                     onclick: move |category| {
@@ -456,14 +486,250 @@ fn SpendingPresetButton(
     }
 }
 
+#[derive(Clone, Debug)]
+struct SpendingBarRect {
+    key: String,
+    label: String,
+    value: f64,
+    transaction_count: usize,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    color: &'static str,
+}
+
+#[component]
+fn SpendingOverTimeChart(
+    spending: SpendingOutput,
+    selected: Option<String>,
+    bucket_label: String,
+    colors: HashMap<String, &'static str>,
+    onclick: EventHandler<String>,
+) -> Element {
+    let points = spending_over_time_points(&spending);
+    let series = spending_over_time_series(&points);
+    let visible_points = points
+        .iter()
+        .filter(|point| point.total > 0.0)
+        .cloned()
+        .collect::<Vec<_>>();
+
+    if visible_points.is_empty() || series.is_empty() {
+        return rsx! {
+            div { class: "chart-empty spending-over-time-empty",
+                strong { "No spending over time" }
+                small { "Refresh transactions or adjust the range." }
+            }
+        };
+    }
+
+    let width = 720.0;
+    let height = 300.0;
+    let padding_left = 68.0;
+    let padding_right = 20.0;
+    let padding_top = 18.0;
+    let padding_bottom = 44.0;
+    let plot_width = width - padding_left - padding_right;
+    let plot_height = height - padding_top - padding_bottom;
+    let max_total = visible_points
+        .iter()
+        .map(|point| point.total)
+        .fold(0.0_f64, f64::max)
+        .max(1.0);
+    let y_max = max_total * 1.08;
+    let count = visible_points.len();
+    let slot_width = plot_width / count as f64;
+    let gap = (slot_width * 0.18).clamp(3.0, 14.0);
+    let bar_width = (slot_width - gap).max(2.0);
+    let series_keys = series
+        .iter()
+        .map(|entry| entry.key.clone())
+        .collect::<Vec<_>>();
+    let range_total = parse_money_input(&spending.total).unwrap_or_default().abs();
+    let first_label = visible_points
+        .first()
+        .map(|point| point.label.clone())
+        .unwrap_or_default();
+    let last_label = visible_points
+        .last()
+        .map(|point| point.label.clone())
+        .unwrap_or_default();
+    let mid_label = format_compact_money(y_max / 2.0, &spending.currency);
+    let max_label = format_compact_money(y_max, &spending.currency);
+    let total_label = format_full_money(range_total, &spending.currency);
+    let mut bar_rects = Vec::new();
+    for (point_index, point) in visible_points.iter().enumerate() {
+        let x = padding_left + point_index as f64 * slot_width + gap / 2.0;
+        let values = point
+            .segments
+            .iter()
+            .map(|segment| (segment.key.as_str(), segment))
+            .collect::<std::collections::HashMap<_, _>>();
+        let mut cumulative = 0.0_f64;
+        for (series_index, key) in series_keys.iter().enumerate() {
+            if let Some(segment) = values.get(key.as_str()) {
+                let y1_value = cumulative + segment.value;
+                let y0 = padding_top + ((y_max - cumulative) / y_max) * plot_height;
+                let y1 = padding_top + ((y_max - y1_value) / y_max) * plot_height;
+                cumulative = y1_value;
+                bar_rects.push(SpendingBarRect {
+                    key: key.clone(),
+                    label: point.label.clone(),
+                    value: segment.value,
+                    transaction_count: segment.transaction_count,
+                    x,
+                    y: y1,
+                    width: bar_width,
+                    height: (y0 - y1).max(0.6),
+                    color: spending_category_color_for(&colors, key, series_index),
+                });
+            }
+        }
+    }
+
+    rsx! {
+        div { class: "chart-card spending-over-time-card",
+            div { class: "chart-meta",
+                div {
+                    span { class: "metric-label", "Over Time" }
+                    strong { "{total_label}" }
+                }
+                div {
+                    span { class: "metric-label", "Bucket" }
+                    strong { "{bucket_label}" }
+                }
+            }
+            svg {
+                class: "net-worth-chart spending-bar-chart",
+                view_box: "0 0 720 300",
+                role: "img",
+                line {
+                    class: "chart-grid",
+                    x1: "{padding_left}",
+                    x2: "{width - padding_right}",
+                    y1: "{padding_top}",
+                    y2: "{padding_top}"
+                }
+                line {
+                    class: "chart-grid",
+                    x1: "{padding_left}",
+                    x2: "{width - padding_right}",
+                    y1: "{padding_top + plot_height / 2.0}",
+                    y2: "{padding_top + plot_height / 2.0}"
+                }
+                line {
+                    class: "chart-grid axis",
+                    x1: "{padding_left}",
+                    x2: "{width - padding_right}",
+                    y1: "{padding_top + plot_height}",
+                    y2: "{padding_top + plot_height}"
+                }
+                text {
+                    class: "chart-axis-label",
+                    x: "8",
+                    y: "{padding_top + 4.0}",
+                    "{max_label}"
+                }
+                text {
+                    class: "chart-axis-label",
+                    x: "8",
+                    y: "{padding_top + plot_height / 2.0 + 4.0}",
+                    "{mid_label}"
+                }
+                text {
+                    class: "chart-axis-label",
+                    x: "8",
+                    y: "{padding_top + plot_height + 4.0}",
+                    "$0"
+                }
+                text {
+                    class: "chart-axis-label date-label",
+                    x: "{padding_left}",
+                    y: "{height - 10.0}",
+                    "{first_label}"
+                }
+                text {
+                    class: "chart-axis-label date-label end",
+                    x: "{width - padding_right}",
+                    y: "{height - 10.0}",
+                    "{last_label}"
+                }
+                for rect in bar_rects {
+                    {
+                        let key = rect.key.clone();
+                        let label = rect.label.clone();
+                        let value = rect.value;
+                        let transaction_count = rect.transaction_count;
+                        let x = rect.x;
+                        let y = rect.y;
+                        let width = rect.width;
+                        let height = rect.height;
+                        let color = rect.color;
+                        let key_for_click = key.clone();
+                        let selected_class = if selected.as_ref() == Some(&key) {
+                            " selected"
+                        } else if selected.is_some() {
+                            " dimmed"
+                        } else {
+                            ""
+                        };
+                        let class = format!("spending-bar-segment{selected_class}");
+                        rsx! {
+                            rect {
+                                class: "{class}",
+                                x: "{x}",
+                                y: "{y}",
+                                width: "{width}",
+                                height: "{height}",
+                                style: "fill: {color};",
+                                onclick: move |_| onclick.call(key_for_click.clone()),
+                                title {
+                                    "{label} / {key}: {format_full_money(value, &spending.currency)} ({transaction_count} tx)"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            div { class: "stacked-legend spending-bar-legend",
+                for (index, item) in series.iter().enumerate() {
+                    {
+                        let color = spending_category_color_for(&colors, &item.key, index);
+                        let key = item.key.clone();
+                        let key_for_click = key.clone();
+                        let class = if selected.as_ref() == Some(&key) {
+                            "stacked-legend-item selected"
+                        } else {
+                            "stacked-legend-item"
+                        };
+                        rsx! {
+                            button {
+                                class: "{class}",
+                                onclick: move |_| onclick.call(key_for_click.clone()),
+                                span {
+                                    class: "stacked-legend-swatch",
+                                    style: "background: {color};"
+                                }
+                                span { "{key}" }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[component]
 fn SpendingPieChart(
     categories: Vec<SpendingBreakdownEntry>,
     selected: Option<String>,
     currency: String,
+    colors: HashMap<String, &'static str>,
     onclick: EventHandler<String>,
 ) -> Element {
-    let slices = pie_slices(&categories);
+    let slices = pie_slices(&categories, &colors);
     if slices.is_empty() {
         return rsx! {
             div { class: "chart-empty spending-empty",
