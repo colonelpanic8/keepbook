@@ -304,7 +304,7 @@ impl ApiState {
                     connection: query.connection,
                     status: query.status.unwrap_or_else(|| "posted".to_string()),
                     direction: query.direction.unwrap_or_else(|| "outflow".to_string()),
-                    group_by: query.group_by.unwrap_or_else(|| "category".to_string()),
+                    group_by: query.group_by.unwrap_or_else(|| "tag".to_string()),
                     top: query.top,
                     lookback_days: query.lookback_days.unwrap_or(7),
                     include_noncurrency: query.include_noncurrency,

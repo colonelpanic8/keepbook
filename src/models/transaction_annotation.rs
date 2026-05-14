@@ -5,6 +5,7 @@ use super::Id;
 
 /// Current (materialized) annotation state for a transaction.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "TransactionAnnotationSerde")]
 pub struct TransactionAnnotation {
     pub transaction_id: Id,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -12,13 +13,43 @@ pub struct TransactionAnnotation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub category: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub subcategory: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subtags: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effective_date: Option<NaiveDate>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TransactionAnnotationSerde {
+    transaction_id: Id,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    note: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_string_or_vec")]
+    category: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "deserialize_optional_string_or_vec")]
+    subcategory: Option<Vec<String>>,
+    #[serde(default)]
+    tags: Option<Vec<String>>,
+    #[serde(default)]
+    subtags: Option<Vec<String>>,
+    #[serde(default)]
+    effective_date: Option<NaiveDate>,
+}
+
+impl From<TransactionAnnotationSerde> for TransactionAnnotation {
+    fn from(value: TransactionAnnotationSerde) -> Self {
+        Self {
+            transaction_id: value.transaction_id,
+            description: value.description,
+            note: value.note,
+            tags: value.tags.or(value.category),
+            subtags: value.subtags.or(value.subcategory),
+            effective_date: value.effective_date,
+        }
+    }
 }
 
 impl TransactionAnnotation {
@@ -27,9 +58,8 @@ impl TransactionAnnotation {
             transaction_id,
             description: None,
             note: None,
-            category: None,
-            subcategory: None,
             tags: None,
+            subtags: None,
             effective_date: None,
         }
     }
@@ -37,9 +67,8 @@ impl TransactionAnnotation {
     pub fn is_empty(&self) -> bool {
         self.description.is_none()
             && self.note.is_none()
-            && self.category.is_none()
-            && self.subcategory.is_none()
             && self.tags.is_none()
+            && self.subtags.is_none()
             && self.effective_date.is_none()
     }
 }
@@ -51,6 +80,7 @@ impl TransactionAnnotation {
 /// - `Some(None)`: field explicitly cleared (JSON null)
 /// - `Some(Some(v))`: field set/overwritten
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "TransactionAnnotationPatchSerde")]
 pub struct TransactionAnnotationPatch {
     pub transaction_id: Id,
     pub timestamp: DateTime<Utc>,
@@ -72,25 +102,74 @@ pub struct TransactionAnnotationPatch {
         skip_serializing_if = "Option::is_none",
         deserialize_with = "deserialize_patch_field"
     )]
-    pub category: Option<Option<String>>,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_patch_field"
-    )]
-    pub subcategory: Option<Option<String>>,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_patch_field"
-    )]
     pub tags: Option<Option<Vec<String>>>,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
         deserialize_with = "deserialize_patch_field"
     )]
+    pub subtags: Option<Option<Vec<String>>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_patch_field"
+    )]
     pub effective_date: Option<Option<NaiveDate>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TransactionAnnotationPatchSerde {
+    transaction_id: Id,
+    timestamp: DateTime<Utc>,
+
+    #[serde(default, deserialize_with = "deserialize_patch_field")]
+    description: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_patch_field")]
+    note: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_patch_string_or_vec_field")]
+    category: Option<Option<Vec<String>>>,
+    #[serde(default, deserialize_with = "deserialize_patch_string_or_vec_field")]
+    subcategory: Option<Option<Vec<String>>>,
+    #[serde(default, deserialize_with = "deserialize_patch_field")]
+    tags: Option<Option<Vec<String>>>,
+    #[serde(default, deserialize_with = "deserialize_patch_field")]
+    subtags: Option<Option<Vec<String>>>,
+    #[serde(default, deserialize_with = "deserialize_patch_field")]
+    effective_date: Option<Option<NaiveDate>>,
+}
+
+impl From<TransactionAnnotationPatchSerde> for TransactionAnnotationPatch {
+    fn from(value: TransactionAnnotationPatchSerde) -> Self {
+        Self {
+            transaction_id: value.transaction_id,
+            timestamp: value.timestamp,
+            description: value.description,
+            note: value.note,
+            tags: value.tags.or(value.category),
+            subtags: value.subtags.or(value.subcategory),
+            effective_date: value.effective_date,
+        }
+    }
+}
+
+fn deserialize_optional_string_or_vec<'de, D>(
+    deserializer: D,
+) -> Result<Option<Vec<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum StringOrVec {
+        String(String),
+        Vec(Vec<String>),
+    }
+
+    Ok(match Option::<StringOrVec>::deserialize(deserializer)? {
+        None => None,
+        Some(StringOrVec::String(value)) => Some(vec![value]),
+        Some(StringOrVec::Vec(values)) => Some(values),
+    })
 }
 
 fn deserialize_patch_field<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
@@ -101,6 +180,28 @@ where
     Ok(Some(Option::<T>::deserialize(deserializer)?))
 }
 
+fn deserialize_patch_string_or_vec_field<'de, D>(
+    deserializer: D,
+) -> Result<Option<Option<Vec<String>>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum StringOrVec {
+        String(String),
+        Vec(Vec<String>),
+    }
+
+    Ok(Some(
+        match Option::<StringOrVec>::deserialize(deserializer)? {
+            None => None,
+            Some(StringOrVec::String(value)) => Some(vec![value]),
+            Some(StringOrVec::Vec(values)) => Some(values),
+        },
+    ))
+}
+
 impl TransactionAnnotationPatch {
     pub fn apply_to(&self, ann: &mut TransactionAnnotation) {
         if let Some(v) = &self.description {
@@ -109,14 +210,11 @@ impl TransactionAnnotationPatch {
         if let Some(v) = &self.note {
             ann.note = v.clone();
         }
-        if let Some(v) = &self.category {
-            ann.category = v.clone();
-        }
-        if let Some(v) = &self.subcategory {
-            ann.subcategory = v.clone();
-        }
         if let Some(v) = &self.tags {
             ann.tags = v.clone();
+        }
+        if let Some(v) = &self.subtags {
+            ann.subtags = v.clone();
         }
         if let Some(v) = &self.effective_date {
             ann.effective_date = *v;
@@ -140,9 +238,8 @@ mod tests {
             timestamp: Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap(),
             description: None,
             note: Some(Some("hello".to_string())),
-            category: None,
-            subcategory: None,
             tags: None,
+            subtags: None,
             effective_date: None,
         };
         set_note.apply_to(&mut ann);
@@ -153,9 +250,8 @@ mod tests {
             timestamp: Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 1).unwrap(),
             description: None,
             note: Some(None),
-            category: None,
-            subcategory: None,
             tags: None,
+            subtags: None,
             effective_date: None,
         };
         clear_note.apply_to(&mut ann);
@@ -170,5 +266,15 @@ mod tests {
         .unwrap();
         assert_eq!(patch.description, Some(None));
         assert_eq!(patch.note, None);
+    }
+
+    #[test]
+    fn legacy_category_fields_deserialize_as_tags_and_subtags() {
+        let patch: TransactionAnnotationPatch = serde_json::from_str(
+            r#"{"transaction_id":"tx-1","timestamp":"2024-02-01T00:00:00Z","category":"food","subcategory":"coffee"}"#,
+        )
+        .unwrap();
+        assert_eq!(patch.tags, Some(Some(vec!["food".to_string()])));
+        assert_eq!(patch.subtags, Some(Some(vec!["coffee".to_string()])));
     }
 }

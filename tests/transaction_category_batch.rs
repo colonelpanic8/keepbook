@@ -62,8 +62,8 @@ async fn set_transaction_categories_appends_category_patches_for_selected_transa
         .await?;
     assert_eq!(patches.len(), 2);
     assert!(patches.iter().all(|patch| matches!(
-        patch.category.as_ref(),
-        Some(Some(category)) if category == "Dining"
+        patch.tags.as_ref(),
+        Some(Some(tags)) if tags == &vec!["Dining".to_string()]
     )));
 
     Ok(())

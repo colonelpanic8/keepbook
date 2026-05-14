@@ -855,8 +855,8 @@ pub(crate) fn ai_rule_transaction_input(transaction: &Transaction) -> AiRuleTran
         description: transaction_description(transaction),
         amount: transaction.amount.clone(),
         status: transaction.status.clone(),
-        category: transaction_category_value(transaction),
-        subcategory: transaction_subcategory(transaction),
+        category: transaction_tags(transaction).first().cloned(),
+        subcategory: transaction_subtags(transaction).first().cloned(),
         ignored_from_spending: transaction.ignored_from_spending,
     }
 }
@@ -1059,33 +1059,32 @@ pub(crate) fn transaction_description(transaction: &Transaction) -> String {
         .unwrap_or_else(|| transaction.description.clone())
 }
 
-pub(crate) fn transaction_category(transaction: &Transaction) -> String {
-    let category = transaction
-        .annotation
-        .as_ref()
-        .and_then(|annotation| annotation.category.clone())
-        .or_else(|| transaction.category.clone())
-        .unwrap_or_default();
-    normalize_spending_category_key(&category)
-}
-
-pub(crate) fn transaction_category_value(transaction: &Transaction) -> Option<String> {
-    let category = transaction_category(transaction);
-    if category == "Uncategorized" {
-        None
-    } else {
-        Some(category)
-    }
-}
-
-pub(crate) fn transaction_subcategory(transaction: &Transaction) -> Option<String> {
+pub(crate) fn transaction_subtags(transaction: &Transaction) -> Vec<String> {
     transaction
         .annotation
         .as_ref()
-        .and_then(|annotation| annotation.subcategory.clone())
-        .or_else(|| transaction.subcategory.clone())
+        .and_then(|annotation| annotation.subtags.clone())
+        .unwrap_or_else(|| transaction.subtags.clone())
+        .into_iter()
         .map(|value| normalize_spending_category_key(&value))
         .filter(|value| !value.is_empty() && value != "Uncategorized")
+        .fold(Vec::<String>::new(), |mut acc, subtag| {
+            if !acc
+                .iter()
+                .any(|existing| existing.eq_ignore_ascii_case(&subtag))
+            {
+                acc.push(subtag);
+            }
+            acc
+        })
+}
+
+pub(crate) fn transaction_subtag(transaction: &Transaction) -> Option<String> {
+    transaction_subtags(transaction).into_iter().next()
+}
+
+pub(crate) fn transaction_subcategory(transaction: &Transaction) -> Option<String> {
+    transaction_subtag(transaction)
 }
 
 pub(crate) fn transaction_tags(transaction: &Transaction) -> Vec<String> {
@@ -1100,14 +1099,7 @@ pub(crate) fn transaction_tags(transaction: &Transaction) -> Vec<String> {
         return normalize_tags(tags);
     }
 
-    let mut tags = Vec::new();
-    if let Some(category) = transaction_category_value(transaction) {
-        tags.push(category);
-    }
-    if let Some(subcategory) = transaction_subcategory(transaction) {
-        tags.push(subcategory);
-    }
-    normalize_tags(tags)
+    Vec::new()
 }
 
 pub(crate) fn transaction_has_tag(transaction: &Transaction, tag: &str) -> bool {
@@ -1356,11 +1348,16 @@ pub(crate) fn proposed_patch_summary(patch: &ProposedTransactionEditPatch) -> St
     let mut parts = Vec::new();
     push_patch_part(&mut parts, "description", &patch.description);
     push_patch_part(&mut parts, "note", &patch.note);
-    push_patch_part(&mut parts, "category", &patch.category);
     if let Some(value) = &patch.tags {
         match value {
             Some(tags) => parts.push(format!("tags={}", tags.join(", "))),
             None => parts.push("tags=clear".to_string()),
+        }
+    }
+    if let Some(value) = &patch.subtags {
+        match value {
+            Some(subtags) => parts.push(format!("subtags={}", subtags.join(", "))),
+            None => parts.push("subtags=clear".to_string()),
         }
     }
     push_patch_part(&mut parts, "effective_date", &patch.effective_date);

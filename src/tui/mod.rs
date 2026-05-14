@@ -837,7 +837,9 @@ fn collect_category_catalog(app_state: &AppState) -> Vec<String> {
         if let Some(category) = tx
             .annotation
             .as_ref()
-            .and_then(|ann| ann.category.as_deref())
+            .and_then(|ann| ann.tags.as_ref())
+            .and_then(|tags| tags.first())
+            .map(String::as_str)
         {
             add(category);
         }
@@ -1889,7 +1891,9 @@ fn resolved_transaction_category(
     let annotation_category = tx
         .annotation
         .as_ref()
-        .and_then(|ann| ann.category.as_deref())
+        .and_then(|ann| ann.tags.as_ref())
+        .and_then(|tags| tags.first())
+        .map(String::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned);
@@ -1906,7 +1910,9 @@ fn resolved_transaction_category(
     let existing_subcategory = tx
         .annotation
         .as_ref()
-        .and_then(|ann| ann.subcategory.as_deref())
+        .and_then(|ann| ann.subtags.as_ref())
+        .and_then(|subtags| subtags.first())
+        .map(String::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty());
     let rule_category = matcher
@@ -2244,9 +2250,8 @@ mod tests {
             amount: amount.to_string(),
             asset: json!({"type":"currency","iso_code":"USD"}),
             status: "posted".to_string(),
-            category: None,
-            subcategory: None,
             tags: Vec::new(),
+            subtags: Vec::new(),
             annotation: None,
             standardized_metadata: None,
         }
@@ -2308,9 +2313,8 @@ mod tests {
         t.annotation = Some(TransactionAnnotationOutput {
             description: Some("override".to_string()),
             note: None,
-            category: None,
-            subcategory: None,
             tags: None,
+            subtags: None,
             effective_date: None,
         });
         let description = t
@@ -2339,9 +2343,8 @@ mod tests {
         t.annotation = Some(TransactionAnnotationOutput {
             description: None,
             note: None,
-            category: Some("food".to_string()),
-            subcategory: None,
-            tags: None,
+            tags: Some(vec!["food".to_string()]),
+            subtags: None,
             effective_date: None,
         });
         assert_eq!(transaction_category_string(&t, &matcher), "food");
@@ -2519,9 +2522,8 @@ mod tests {
         ignored_tx.annotation = Some(TransactionAnnotationOutput {
             description: None,
             note: None,
-            category: None,
-            subcategory: None,
             tags: Some(vec!["ignore_spending".to_string()]),
+            subtags: None,
             effective_date: None,
         });
 

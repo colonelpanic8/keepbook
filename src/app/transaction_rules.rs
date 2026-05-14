@@ -408,7 +408,9 @@ pub async fn apply_transaction_rules(
                 continue;
             }
             let existing_category = existing_annotation
-                .and_then(|annotation| annotation.category.as_deref())
+                .and_then(|annotation| annotation.tags.as_ref())
+                .and_then(|tags| tags.iter().find(|tag| !tag.trim().is_empty()))
+                .map(String::as_str)
                 .map(str::trim)
                 .filter(|value| !value.is_empty());
             let metadata_category = tx
@@ -419,7 +421,9 @@ pub async fn apply_transaction_rules(
                 .filter(|value| !value.is_empty());
             let match_category = existing_category.or(metadata_category).unwrap_or("");
             let existing_subcategory = existing_annotation
-                .and_then(|annotation| annotation.subcategory.as_deref())
+                .and_then(|annotation| annotation.subtags.as_ref())
+                .and_then(|subtags| subtags.iter().find(|subtag| !subtag.trim().is_empty()))
+                .map(String::as_str)
                 .map(str::trim)
                 .filter(|value| !value.is_empty());
             let existing_description = existing_annotation
@@ -469,8 +473,9 @@ pub async fn apply_transaction_rules(
                 if action.set_tags.is_some() && (opts.overwrite || existing_tags.is_none()) {
                     action.set_tags.clone()
                 } else {
-                    None
+                    category_update.clone().map(|tag| vec![tag])
                 };
+            let subtags_update = subcategory_update.clone().map(|subtag| vec![subtag]);
 
             if category_update.is_none()
                 && subcategory_update.is_none()
@@ -491,6 +496,7 @@ pub async fn apply_transaction_rules(
                 "set_subcategory": subcategory_update,
                 "set_description": description_update,
                 "set_tags": tags_update,
+                "set_subtags": subtags_update,
                 "previous_category": existing_category,
                 "previous_subcategory": existing_subcategory,
                 "previous_description": existing_description,
@@ -501,9 +507,8 @@ pub async fn apply_transaction_rules(
                 timestamp,
                 description: description_update.map(Some),
                 note: None,
-                category: category_update.map(Some),
-                subcategory: subcategory_update.map(Some),
                 tags: tags_update.map(Some),
+                subtags: subtags_update.map(Some),
                 effective_date: None,
             });
         }

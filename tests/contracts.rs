@@ -98,6 +98,8 @@ struct SeedTransactionAnnotationPatch {
     subcategory: Option<String>,
     #[serde(default)]
     tags: Option<Vec<String>>,
+    #[serde(default)]
+    subtags: Option<Vec<String>>,
 }
 
 fn default_true() -> bool {
@@ -239,9 +241,16 @@ async fn seed_storage(storage: &dyn Storage, seed: &Seed) -> Result<()> {
             timestamp,
             description: p.description.clone().map(Some),
             note: p.note.clone().map(Some),
-            category: p.category.clone().map(Some),
-            subcategory: p.subcategory.clone().map(Some),
-            tags: p.tags.clone().map(Some),
+            tags: p
+                .tags
+                .clone()
+                .or_else(|| p.category.clone().map(|tag| vec![tag]))
+                .map(Some),
+            subtags: p
+                .subtags
+                .clone()
+                .or_else(|| p.subcategory.clone().map(|subtag| vec![subtag]))
+                .map(Some),
             effective_date: None,
         };
         storage

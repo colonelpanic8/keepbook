@@ -190,8 +190,8 @@ struct ProposedTransactionEdit {
 struct ProposedTransactionEditPatch {
     description: Option<Option<String>>,
     note: Option<Option<String>>,
-    category: Option<Option<String>>,
     tags: Option<Option<Vec<String>>>,
+    subtags: Option<Option<Vec<String>>>,
     effective_date: Option<Option<String>>,
 }
 
@@ -267,11 +267,9 @@ struct Transaction {
     amount: String,
     status: String,
     #[serde(default)]
-    category: Option<String>,
-    #[serde(default)]
-    subcategory: Option<String>,
-    #[serde(default)]
     tags: Vec<String>,
+    #[serde(default)]
+    subtags: Vec<String>,
     #[serde(default)]
     annotation: Option<TransactionAnnotation>,
     #[serde(default)]
@@ -283,11 +281,9 @@ struct TransactionAnnotation {
     #[serde(default)]
     description: Option<String>,
     #[serde(default)]
-    category: Option<String>,
-    #[serde(default)]
-    subcategory: Option<String>,
-    #[serde(default)]
     tags: Option<Vec<String>>,
+    #[serde(default)]
+    subtags: Option<Vec<String>>,
     #[serde(default)]
     effective_date: Option<String>,
 }

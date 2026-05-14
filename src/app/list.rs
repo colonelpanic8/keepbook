@@ -102,14 +102,28 @@ fn effective_transaction_tags(
     }
 
     let mut tags = Vec::new();
-    if let Some(annotation) = annotation {
-        push_non_empty_tag(&mut tags, annotation.category.clone());
-        push_non_empty_tag(&mut tags, annotation.subcategory.clone());
-    }
     if tags.is_empty() {
         push_non_empty_tag(&mut tags, metadata_category);
     }
     tags
+}
+
+fn effective_transaction_subtags(annotation: Option<&TransactionAnnotation>) -> Vec<String> {
+    annotation
+        .and_then(|annotation| annotation.subtags.clone())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|subtag| subtag.trim().to_string())
+        .filter(|subtag| !subtag.is_empty())
+        .fold(Vec::<String>::new(), |mut acc, subtag| {
+            if !acc
+                .iter()
+                .any(|existing| existing.eq_ignore_ascii_case(&subtag))
+            {
+                acc.push(subtag);
+            }
+            acc
+        })
 }
 
 pub async fn list_connections(storage: &dyn Storage) -> Result<Vec<ConnectionOutput>> {
@@ -455,9 +469,8 @@ pub async fn list_transactions(
                     Some(TransactionAnnotationOutput {
                         description: ann.description.clone(),
                         note: ann.note.clone(),
-                        category: ann.category.clone(),
-                        subcategory: ann.subcategory.clone(),
                         tags: ann.tags.clone(),
+                        subtags: ann.subtags.clone(),
                         effective_date: ann.effective_date.map(|d| d.to_string()),
                     })
                 }
@@ -467,11 +480,8 @@ pub async fn list_transactions(
                 .standardized_metadata
                 .as_ref()
                 .and_then(|metadata| metadata.merchant_category_label.clone());
-            let category = raw_annotation
-                .and_then(|ann| ann.category.clone())
-                .or_else(|| metadata_category.clone());
-            let subcategory = raw_annotation.and_then(|ann| ann.subcategory.clone());
             let tags = effective_transaction_tags(raw_annotation, metadata_category);
+            let subtags = effective_transaction_subtags(raw_annotation);
             if skip_ignored
                 && annotations_by_tx
                     .get(&tx.id)
@@ -489,9 +499,8 @@ pub async fn list_transactions(
                 amount: tx.amount.clone(),
                 asset: serde_json::to_value(&tx.asset).unwrap_or_default(),
                 status,
-                category,
-                subcategory,
                 tags,
+                subtags,
                 annotation,
                 standardized_metadata: tx.standardized_metadata.clone(),
             });
@@ -585,9 +594,8 @@ mod tests {
             timestamp: clock.now(),
             description: None,
             note: None,
-            category: Some(Some("food".to_string())),
-            subcategory: Some(Some("coffee".to_string())),
-            tags: Some(Some(vec!["coffee".to_string()])),
+            tags: Some(Some(vec!["food".to_string()])),
+            subtags: Some(Some(vec!["coffee".to_string()])),
             effective_date: None,
         };
         storage
@@ -619,19 +627,15 @@ mod tests {
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].id, "tx-1");
         assert_eq!(
-            out[0].annotation.as_ref().unwrap().category.as_deref(),
-            Some("food")
-        );
-        assert_eq!(out[0].subcategory.as_deref(), Some("coffee"));
-        assert_eq!(
-            out[0].annotation.as_ref().unwrap().subcategory.as_deref(),
-            Some("coffee")
+            out[0].annotation.as_ref().unwrap().subtags.clone().unwrap(),
+            vec!["coffee".to_string()]
         );
         assert_eq!(
             out[0].annotation.as_ref().unwrap().tags.clone().unwrap(),
-            vec!["coffee".to_string()]
+            vec!["food".to_string()]
         );
-        assert_eq!(out[0].tags, vec!["coffee".to_string()]);
+        assert_eq!(out[0].tags, vec!["food".to_string()]);
+        assert_eq!(out[0].subtags, vec!["coffee".to_string()]);
         Ok(())
     }
 
@@ -662,9 +666,8 @@ mod tests {
                     timestamp: clock.now(),
                     description: None,
                     note: None,
-                    category: None,
-                    subcategory: None,
                     tags: None,
+                    subtags: None,
                     effective_date: Some(Some(
                         chrono::NaiveDate::from_ymd_opt(2026, 1, 31).unwrap(),
                     )),
@@ -801,9 +804,8 @@ mod tests {
                     timestamp: clock.now(),
                     description: None,
                     note: Some(Some("Transfer; ignored from spending".to_string())),
-                    category: None,
-                    subcategory: None,
                     tags: Some(Some(vec!["ignore_spending".to_string()])),
+                    subtags: None,
                     effective_date: None,
                 }],
             )

@@ -125,7 +125,7 @@ async fn transaction_rules_append_and_apply_to_existing_transactions() -> Result
         .iter()
         .find(|tx| tx.id == coffee.id.to_string())
         .expect("coffee transaction should be listed");
-    assert_eq!(categorized.category.as_deref(), Some("Coffee"));
+    assert_eq!(categorized.tags, vec!["Coffee".to_string()]);
     assert_eq!(
         categorized
             .annotation
@@ -212,7 +212,7 @@ async fn transaction_rules_do_not_overwrite_existing_annotations_by_default() ->
         .iter()
         .find(|tx| tx.id == lunch.id.to_string())
         .expect("lunch transaction should be listed");
-    assert_eq!(categorized.category.as_deref(), Some("Manual"));
+    assert_eq!(categorized.tags, vec!["Manual".to_string()]);
     assert_eq!(
         categorized
             .annotation
@@ -250,7 +250,7 @@ async fn transaction_rules_do_not_overwrite_existing_annotations_by_default() ->
         .iter()
         .find(|tx| tx.id == lunch.id.to_string())
         .expect("lunch transaction should be listed");
-    assert_eq!(overwritten_tx.category.as_deref(), Some("Dining"));
+    assert_eq!(overwritten_tx.tags, vec!["Dining".to_string()]);
 
     Ok(())
 }
@@ -289,7 +289,7 @@ async fn transaction_rules_can_remap_metadata_category_and_set_subcategory() -> 
             set_category: Some("Food".to_string()),
             set_subcategory: Some("Groceries".to_string()),
             set_description: None,
-            set_tags: Some(vec!["Food".to_string(), "Groceries".to_string()]),
+            set_tags: Some(vec!["Food".to_string()]),
             match_account_id: None,
             match_account_name: None,
             match_description: None,
@@ -348,20 +348,15 @@ async fn transaction_rules_can_remap_metadata_category_and_set_subcategory() -> 
         .iter()
         .find(|tx| tx.id == grocery.id.to_string())
         .expect("grocery transaction should be listed");
-    assert_eq!(grocery_out.category.as_deref(), Some("Food"));
-    assert_eq!(grocery_out.subcategory.as_deref(), Some("Groceries"));
-    assert_eq!(
-        grocery_out.tags,
-        vec!["Food".to_string(), "Groceries".to_string()]
-    );
+    assert_eq!(grocery_out.tags, vec!["Food".to_string()]);
+    assert_eq!(grocery_out.subtags, vec!["Groceries".to_string()]);
 
     let restaurant_out = transactions
         .iter()
         .find(|tx| tx.id == restaurant.id.to_string())
         .expect("restaurant transaction should be listed");
-    assert_eq!(restaurant_out.category.as_deref(), Some("Food"));
-    assert_eq!(restaurant_out.subcategory.as_deref(), None);
     assert_eq!(restaurant_out.tags, vec!["Food".to_string()]);
+    assert!(restaurant_out.subtags.is_empty());
 
     Ok(())
 }

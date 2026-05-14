@@ -75,8 +75,7 @@ enum StatusFilter {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum GroupBy {
     None,
-    Category,
-    Subcategory,
+    Subtag,
     Merchant,
     Account,
     Tag,
@@ -206,14 +205,11 @@ fn parse_status_filter(s: &str) -> Result<(StatusFilter, String)> {
 fn parse_group_by(s: &str) -> Result<(GroupBy, String)> {
     match s.trim().to_lowercase().as_str() {
         "none" => Ok((GroupBy::None, "none".to_string())),
-        "category" => Ok((GroupBy::Category, "category".to_string())),
-        "subcategory" => Ok((GroupBy::Subcategory, "subcategory".to_string())),
+        "category" | "tag" => Ok((GroupBy::Tag, "tag".to_string())),
+        "subcategory" | "subtag" => Ok((GroupBy::Subtag, "subtag".to_string())),
         "merchant" => Ok((GroupBy::Merchant, "merchant".to_string())),
         "account" => Ok((GroupBy::Account, "account".to_string())),
-        "tag" => Ok((GroupBy::Tag, "tag".to_string())),
-        _ => anyhow::bail!(
-            "Invalid group_by: {s}. Use: none, category, subcategory, merchant, account, tag"
-        ),
+        _ => anyhow::bail!("Invalid group_by: {s}. Use: none, tag, subtag, merchant, account"),
     }
 }
 
@@ -500,14 +496,28 @@ fn effective_transaction_tags(
     }
 
     let mut tags = Vec::new();
-    if let Some(annotation) = annotation {
-        push_non_empty_tag(&mut tags, annotation.category.clone());
-        push_non_empty_tag(&mut tags, annotation.subcategory.clone());
-    }
     if tags.is_empty() {
         push_non_empty_tag(&mut tags, metadata_category);
     }
     tags
+}
+
+fn effective_transaction_subtags(annotation: Option<&TransactionAnnotation>) -> Vec<String> {
+    annotation
+        .and_then(|annotation| annotation.subtags.clone())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|subtag| subtag.trim().to_string())
+        .filter(|subtag| !subtag.is_empty())
+        .fold(Vec::<String>::new(), |mut acc, subtag| {
+            if !acc
+                .iter()
+                .any(|existing| existing.eq_ignore_ascii_case(&subtag))
+            {
+                acc.push(subtag);
+            }
+            acc
+        })
 }
 
 async fn ignored_account_ids_for_portfolio_spending(
@@ -834,17 +844,7 @@ async fn spending_report_with_store(
         if group_by != GroupBy::None {
             let keys: Vec<String> = match group_by {
                 GroupBy::None => vec![],
-                GroupBy::Category => vec![row
-                    .annotation
-                    .as_ref()
-                    .and_then(|a| a.category.clone())
-                    .or_else(|| row.metadata_category.clone())
-                    .unwrap_or_else(|| "uncategorized".to_string())],
-                GroupBy::Subcategory => vec![row
-                    .annotation
-                    .as_ref()
-                    .and_then(|a| a.subcategory.clone())
-                    .unwrap_or_else(|| "uncategorized".to_string())],
+                GroupBy::Subtag => effective_transaction_subtags(row.annotation.as_ref()),
                 GroupBy::Merchant => vec![row
                     .annotation
                     .as_ref()
@@ -865,6 +865,8 @@ async fn spending_report_with_store(
 
             let keys = if matches!(group_by, GroupBy::Tag) && keys.is_empty() {
                 vec!["untagged".to_string()]
+            } else if matches!(group_by, GroupBy::Subtag) && keys.is_empty() {
+                vec!["unsubtagged".to_string()]
             } else {
                 keys
             };
@@ -1272,8 +1274,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn spending_report_category_uses_annotation_then_metadata_then_uncategorized(
-    ) -> Result<()> {
+    async fn spending_report_tag_uses_annotation_then_metadata_then_untagged() -> Result<()> {
         let storage = MemoryStorage::new();
         let conn_id = Id::from_string("conn-1");
         let acct_id = Id::from_string("acct-1");
@@ -1319,9 +1320,8 @@ mod tests {
                     timestamp: clock.now(),
                     description: None,
                     note: None,
-                    category: Some(Some("Dining".to_string())),
-                    subcategory: Some(Some("Restaurants".to_string())),
-                    tags: None,
+                    tags: Some(Some(vec!["Dining".to_string()])),
+                    subtags: Some(Some(vec!["Restaurants".to_string()])),
                     effective_date: None,
                 }],
             )
@@ -1357,7 +1357,7 @@ mod tests {
                 connection: None,
                 status: "posted".to_string(),
                 direction: "outflow".to_string(),
-                group_by: "category".to_string(),
+                group_by: "tag".to_string(),
                 top: None,
                 lookback_days: 7,
                 include_noncurrency: false,
@@ -1376,7 +1376,7 @@ mod tests {
         assert_eq!(out.periods[0].breakdown[1].key, "Groceries");
         assert_eq!(out.periods[0].breakdown[1].total, "10");
 
-        let subcategory_out = spending_report_with_store(
+        let subtag_out = spending_report_with_store(
             &storage,
             &cfg,
             SpendingReportOptions {
@@ -1392,7 +1392,7 @@ mod tests {
                 connection: None,
                 status: "posted".to_string(),
                 direction: "outflow".to_string(),
-                group_by: "subcategory".to_string(),
+                group_by: "subtag".to_string(),
                 top: None,
                 lookback_days: 7,
                 include_noncurrency: false,
@@ -1401,10 +1401,10 @@ mod tests {
             Arc::new(MemoryMarketDataStore::default()),
         )
         .await?;
-        assert_eq!(subcategory_out.periods[0].breakdown[0].key, "Restaurants");
-        assert_eq!(subcategory_out.periods[0].breakdown[0].total, "20");
-        assert_eq!(subcategory_out.periods[0].breakdown[1].key, "uncategorized");
-        assert_eq!(subcategory_out.periods[0].breakdown[1].total, "10");
+        assert_eq!(subtag_out.periods[0].breakdown[0].key, "Restaurants");
+        assert_eq!(subtag_out.periods[0].breakdown[0].total, "20");
+        assert_eq!(subtag_out.periods[0].breakdown[1].key, "unsubtagged");
+        assert_eq!(subtag_out.periods[0].breakdown[1].total, "10");
         Ok(())
     }
 
@@ -1716,9 +1716,8 @@ mod tests {
                     timestamp: clock.now(),
                     description: None,
                     note: None,
-                    category: None,
-                    subcategory: None,
                     tags: Some(Some(vec!["ignore_spending".to_string()])),
+                    subtags: None,
                     effective_date: None,
                 }],
             )

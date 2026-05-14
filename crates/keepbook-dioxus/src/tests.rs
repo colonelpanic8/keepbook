@@ -229,9 +229,8 @@ fn transaction(id: &str, amount: &str, status: &str) -> Transaction {
         description: "Test transaction".to_string(),
         amount: amount.to_string(),
         status: status.to_string(),
-        category: None,
-        subcategory: None,
         tags: Vec::new(),
+        subtags: Vec::new(),
         annotation: None,
         ignored_from_spending: false,
     }
@@ -306,15 +305,15 @@ fn spending_transactions_sort_by_amount_in_both_directions() {
 fn spending_transactions_sort_by_each_visible_text_field() {
     let mut card = transaction("card", "-12.50", "posted");
     card.account_name = "Card".to_string();
-    card.category = Some("Dining".to_string());
-    card.subcategory = Some("Restaurants".to_string());
+    card.tags = vec!["Dining".to_string()];
+    card.subtags = vec!["Restaurants".to_string()];
     card.description = "Zulu".to_string();
     card.ignored_from_spending = true;
 
     let mut bank = transaction("bank", "-8.00", "posted");
     bank.account_name = "Bank".to_string();
-    bank.category = Some("Bills".to_string());
-    bank.subcategory = Some("Utilities".to_string());
+    bank.tags = vec!["Bills".to_string()];
+    bank.subtags = vec!["Utilities".to_string()];
     bank.description = "Alpha".to_string();
 
     let rows = vec![card, bank];
@@ -372,12 +371,11 @@ fn spending_transactions_sort_by_each_visible_text_field() {
 #[test]
 fn transaction_subcategory_prefers_annotation_value() {
     let mut row = transaction("annotated", "-12.50", "posted");
-    row.subcategory = Some("Fallback".to_string());
+    row.subtags = vec!["Fallback".to_string()];
     row.annotation = Some(TransactionAnnotation {
         description: None,
-        category: None,
-        subcategory: Some("Coffee".to_string()),
         tags: None,
+        subtags: Some(vec!["Coffee".to_string()]),
         effective_date: None,
     });
 

@@ -427,9 +427,8 @@ pub async fn set_transaction_annotation(
         timestamp: chrono::Utc::now(),
         description: None,
         note: None,
-        category: None,
-        subcategory: None,
         tags: None,
+        subtags: None,
         effective_date: None,
     };
 
@@ -444,14 +443,14 @@ pub async fn set_transaction_annotation(
         patch.note = Some(Some(v));
     }
     if clear_category {
-        patch.category = Some(None);
+        patch.tags = Some(None);
     } else if let Some(v) = category {
-        patch.category = Some(Some(v));
+        patch.tags = Some(Some(normalize_tags(vec![v])));
     }
     if clear_subcategory {
-        patch.subcategory = Some(None);
+        patch.subtags = Some(None);
     } else if let Some(v) = subcategory {
-        patch.subcategory = Some(Some(v));
+        patch.subtags = Some(Some(normalize_tags(vec![v])));
     }
     if clear_tags {
         patch.tags = Some(None);
@@ -500,20 +499,20 @@ pub async fn set_transaction_annotation(
             },
         );
     }
-    if let Some(v) = patch.category {
+    if let Some(v) = patch.tags.clone() {
         patch_json.insert(
-            "category".to_string(),
+            "tags".to_string(),
             match v {
-                Some(s) => serde_json::json!(s),
+                Some(tags) => serde_json::json!(tags),
                 None => serde_json::Value::Null,
             },
         );
     }
-    if let Some(v) = patch.subcategory {
+    if let Some(v) = patch.subtags.clone() {
         patch_json.insert(
-            "subcategory".to_string(),
+            "subtags".to_string(),
             match v {
-                Some(s) => serde_json::json!(s),
+                Some(subtags) => serde_json::json!(subtags),
                 None => serde_json::Value::Null,
             },
         );
@@ -547,14 +546,11 @@ pub async fn set_transaction_annotation(
         if let Some(v) = ann.note {
             m.insert("note".to_string(), serde_json::json!(v));
         }
-        if let Some(v) = ann.category {
-            m.insert("category".to_string(), serde_json::json!(v));
-        }
-        if let Some(v) = ann.subcategory {
-            m.insert("subcategory".to_string(), serde_json::json!(v));
-        }
         if let Some(v) = ann.tags {
             m.insert("tags".to_string(), serde_json::json!(v));
+        }
+        if let Some(v) = ann.subtags {
+            m.insert("subtags".to_string(), serde_json::json!(v));
         }
         if let Some(v) = ann.effective_date {
             m.insert(
@@ -643,9 +639,8 @@ pub async fn set_transaction_categories(
                 timestamp,
                 description: None,
                 note: None,
-                category: Some(category.clone()),
-                subcategory: None,
-                tags: None,
+                tags: Some(category.clone().map(|tag| normalize_tags(vec![tag]))),
+                subtags: None,
                 effective_date: None,
             })
             .collect::<Vec<_>>();
@@ -731,9 +726,8 @@ pub async fn set_transaction_tags(
                 timestamp,
                 description: None,
                 note: None,
-                category: None,
-                subcategory: None,
                 tags: Some(tags_patch.clone()),
+                subtags: None,
                 effective_date: None,
             })
             .collect::<Vec<_>>();
@@ -864,9 +858,8 @@ pub async fn propose_transaction_edit_with(
         status: ProposedTransactionEditStatus::Pending,
         description: patch.description,
         note: patch.note,
-        category: patch.category,
-        subcategory: patch.subcategory,
         tags: patch.tags,
+        subtags: patch.subtags,
         effective_date: patch.effective_date,
     };
     storage
@@ -1057,9 +1050,8 @@ fn build_transaction_annotation_patch(
         timestamp: chrono::Utc::now(),
         description: None,
         note: None,
-        category: None,
-        subcategory: None,
         tags: None,
+        subtags: None,
         effective_date: None,
     };
     if clear_description {
@@ -1073,14 +1065,14 @@ fn build_transaction_annotation_patch(
         patch.note = Some(Some(v));
     }
     if clear_category {
-        patch.category = Some(None);
+        patch.tags = Some(None);
     } else if let Some(v) = category {
-        patch.category = Some(Some(v));
+        patch.tags = Some(Some(normalize_tags(vec![v])));
     }
     if clear_subcategory {
-        patch.subcategory = Some(None);
+        patch.subtags = Some(None);
     } else if let Some(v) = subcategory {
-        patch.subcategory = Some(Some(v));
+        patch.subtags = Some(Some(normalize_tags(vec![v])));
     }
     if clear_tags {
         patch.tags = Some(None);
@@ -1146,9 +1138,8 @@ fn proposal_patch_output(edit: &ProposedTransactionEdit) -> TransactionAnnotatio
     TransactionAnnotationPatchOutput {
         description: edit.description.clone(),
         note: edit.note.clone(),
-        category: edit.category.clone(),
-        subcategory: edit.subcategory.clone(),
         tags: edit.tags.clone(),
+        subtags: edit.subtags.clone(),
         effective_date: edit
             .effective_date
             .map(|value| value.map(|date| date.to_string())),
