@@ -477,6 +477,33 @@ impl ApiState {
         json_value(output)
     }
 
+    pub async fn portfolio_stacked_history(
+        &self,
+        query: HistoryQuery,
+    ) -> Result<serde_json::Value> {
+        let state = self.snapshot().await;
+        let effective_config =
+            config_with_filter_overrides(&state.config, query.include_latent_capital_gains_tax);
+        let granularity = query
+            .granularity
+            .unwrap_or_else(|| effective_config.history.portfolio_granularity.clone());
+        let include_prices = query
+            .include_prices
+            .unwrap_or(effective_config.history.include_prices);
+        json_value(
+            keepbook::app::portfolio_stacked_history(
+                state.storage.clone(),
+                &effective_config,
+                query.currency,
+                query.start,
+                query.end,
+                granularity,
+                include_prices,
+            )
+            .await?,
+        )
+    }
+
     pub async fn merge_origin_master(&self) -> Result<serde_json::Value> {
         let state = self.snapshot().await;
         keepbook::app::run_preflight(
@@ -1259,6 +1286,7 @@ async fn tray_transaction_lines(storage: Arc<dyn Storage>, config: &ResolvedConf
                 let date = row.timestamp.with_timezone(&Local).format("%m-%d");
                 let currency = match &row.asset {
                     Asset::Currency { iso_code } => iso_code.as_str(),
+                    Asset::ManualValue { currency, .. } => currency.as_str(),
                     Asset::Equity { ticker, .. } => ticker.as_str(),
                     Asset::Crypto { symbol, .. } => symbol.as_str(),
                 };
@@ -1357,6 +1385,10 @@ pub fn router(state: ApiState) -> Router {
             post(remove_proposed_transaction_edit),
         )
         .route("/api/portfolio/history", get(portfolio_history))
+        .route(
+            "/api/portfolio/stacked-history",
+            get(portfolio_stacked_history),
+        )
         .route("/api/git/merge-master", post(merge_origin_master))
         .route(
             "/api/git/settings",
@@ -1503,6 +1535,14 @@ async fn portfolio_history(
     Query(query): Query<HistoryQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     Ok(Json(state.portfolio_history(query).await?))
+}
+
+#[cfg(feature = "http")]
+async fn portfolio_stacked_history(
+    State(state): State<ApiState>,
+    Query(query): Query<HistoryQuery>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    Ok(Json(state.portfolio_stacked_history(query).await?))
 }
 
 #[cfg(feature = "http")]

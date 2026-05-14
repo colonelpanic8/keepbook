@@ -68,6 +68,34 @@ async fn value_in_reporting_currency_detailed_with_options(
                 missing: None,
             })
         }
+        Asset::ManualValue { currency, .. } => {
+            if currency.eq_ignore_ascii_case(&reporting_currency) {
+                return Ok(ValueInReportingCurrency {
+                    value: Some(format_base_currency_value(amount, currency_decimals)),
+                    missing: None,
+                });
+            }
+
+            let Some(rate) = market_data
+                .fx_from_store(currency, &reporting_currency, as_of_date)
+                .await?
+            else {
+                return Ok(ValueInReportingCurrency {
+                    value: None,
+                    missing: Some(MissingMarketData::Fx),
+                });
+            };
+
+            let fx_rate = Decimal::from_str(&rate.rate)
+                .with_context(|| format!("Invalid FX rate value: {}", rate.rate))?;
+            Ok(ValueInReportingCurrency {
+                value: Some(format_base_currency_value(
+                    amount * fx_rate,
+                    currency_decimals,
+                )),
+                missing: None,
+            })
+        }
         Asset::Equity { .. } | Asset::Crypto { .. } => {
             let Some(price) = market_data
                 .valuation_price_from_store(&asset, as_of_date)

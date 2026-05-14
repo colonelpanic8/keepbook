@@ -218,6 +218,38 @@ struct HistorySummary {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
+struct StackedHistory {
+    currency: String,
+    points: Vec<StackedHistoryPoint>,
+    series: Vec<StackedHistorySeries>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+struct StackedHistoryPoint {
+    date: String,
+    total_value: String,
+    components: Vec<StackedHistoryComponent>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+struct StackedHistoryComponent {
+    series_key: String,
+    value: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+struct StackedHistorySeries {
+    key: String,
+    label: String,
+    series_type: String,
+    account_id: Option<String>,
+    account_name: Option<String>,
+    connection_name: Option<String>,
+    parent_key: Option<String>,
+    asset: Option<serde_json::Value>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 struct SpendingOutput {
     currency: String,
     tz: String,
@@ -456,6 +488,39 @@ struct SetTransactionTagsInput {
 struct NetWorthDataPoint {
     date: String,
     value: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct StackedHistoryDataPoint {
+    date: String,
+    total: f64,
+    components: Vec<StackedValue>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct StackedValue {
+    series_key: String,
+    value: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct ActiveStackedSeries {
+    key: String,
+    label: String,
+    account_id: Option<String>,
+    series_type: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct StackedLayerDetail {
+    index: usize,
+    series: ActiveStackedSeries,
+    path: String,
+    color: &'static str,
+    x: f64,
+    y: f64,
+    value: f64,
+    share: Option<f64>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

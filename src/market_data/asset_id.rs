@@ -16,6 +16,13 @@ impl AssetId {
             Asset::Currency { iso_code } => {
                 format!("currency/{}", normalize_upper_segment(iso_code))
             }
+            Asset::ManualValue { name, currency } => {
+                format!(
+                    "manual_value/{}/{}",
+                    normalize_upper_segment(currency),
+                    normalize_lower_segment(name)
+                )
+            }
             Asset::Equity {
                 ticker,
                 exchange: None,
@@ -156,6 +163,13 @@ mod tests {
         let asset = Asset::equity("AAPL");
         let id = AssetId::from_asset(&asset);
         assert_eq!(id.as_str(), "equity/AAPL");
+    }
+
+    #[test]
+    fn asset_id_is_human_readable_manual_value() {
+        let asset = Asset::manual_value("Expected Housing Value", "USD");
+        let id = AssetId::from_asset(&asset);
+        assert_eq!(id.as_str(), "manual_value/USD/expected housing value");
     }
 
     #[test]

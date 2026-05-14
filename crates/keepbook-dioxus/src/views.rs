@@ -12,7 +12,7 @@ mod shared;
 mod spending;
 
 use accounts::AccountsView;
-use charts::HistoryGraphPanel;
+use charts::{HistoryGraphPanel, StackedHistoryGraphPanel};
 use connections::ConnectionsView;
 use graph_settings::{GraphsView, SettingsView};
 use proposed_edits::ProposedEditsView;

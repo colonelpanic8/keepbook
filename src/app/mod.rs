@@ -36,8 +36,8 @@ pub use portfolio::{
     default_portfolio_include_prices, fetch_historical_prices, fill_prices_at_date,
     latent_capital_gains_tax_history, portfolio_change_points, portfolio_history,
     portfolio_history_for_accounts, portfolio_recent_history, portfolio_snapshot,
-    portfolio_tax_impact, resolve_portfolio_history_selection, PortfolioHistorySelection,
-    PriceHistoryRequest, DEFAULT_PORTFOLIO_CHANGE_POINTS_GRANULARITY,
+    portfolio_stacked_history, portfolio_tax_impact, resolve_portfolio_history_selection,
+    PortfolioHistorySelection, PriceHistoryRequest, DEFAULT_PORTFOLIO_CHANGE_POINTS_GRANULARITY,
     DEFAULT_PORTFOLIO_HISTORY_GRANULARITY, DEFAULT_PORTFOLIO_INCLUDE_PRICES,
 };
 pub use preflight::{run_preflight, PreflightOptions};
@@ -60,8 +60,9 @@ pub use types::{
     PriceHistoryScopeOutput, PriceHistoryStats, PriceSourceOutput, ProposedTransactionEditOutput,
     RecurringTransactionAmountOutput, RecurringTransactionOccurrenceOutput,
     RecurringTransactionOutput, RecurringTransactionsOptions, SpendingBreakdownEntryOutput,
-    SpendingOutput, SpendingPeriodOutput, SpendingScopeOutput, TaxImpactOutput, TaxImpactPoint,
-    TransactionAnnotationOutput, TransactionAnnotationPatchOutput, TransactionOutput,
+    SpendingOutput, SpendingPeriodOutput, SpendingScopeOutput, StackedHistoryComponent,
+    StackedHistoryOutput, StackedHistoryPoint, StackedHistorySeries, TaxImpactOutput,
+    TaxImpactPoint, TransactionAnnotationOutput, TransactionAnnotationPatchOutput, TransactionOutput,
 };
 
 fn maybe_auto_commit(config: &ResolvedConfig, action: &str) {

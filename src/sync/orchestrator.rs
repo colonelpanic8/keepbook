@@ -85,6 +85,14 @@ impl SyncOrchestrator {
                         ));
                     }
                 }
+                Asset::ManualValue { currency, .. } => {
+                    if currency.to_uppercase() != self.reporting_currency.to_uppercase() {
+                        needed_fx_pairs.insert((
+                            currency.to_uppercase(),
+                            self.reporting_currency.to_uppercase(),
+                        ));
+                    }
+                }
                 Asset::Equity { .. } | Asset::Crypto { .. } => {
                     if force {
                         match self.market_data.price_close_force(&asset, date).await {
@@ -200,6 +208,14 @@ impl SyncOrchestrator {
                     if iso_code.to_uppercase() != self.reporting_currency.to_uppercase() {
                         needed_fx_pairs.insert((
                             iso_code.to_uppercase(),
+                            self.reporting_currency.to_uppercase(),
+                        ));
+                    }
+                }
+                Asset::ManualValue { currency, .. } => {
+                    if currency.to_uppercase() != self.reporting_currency.to_uppercase() {
+                        needed_fx_pairs.insert((
+                            currency.to_uppercase(),
                             self.reporting_currency.to_uppercase(),
                         ));
                     }

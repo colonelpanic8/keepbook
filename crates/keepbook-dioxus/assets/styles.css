@@ -390,6 +390,10 @@ small,
   padding-top: 12px;
 }
 
+.compact-date-grid {
+  grid-template-columns: repeat(2, minmax(140px, 1fr));
+}
+
 .preset-row,
 .sampling-row,
 .range-summary {
@@ -446,6 +450,41 @@ small,
 .control-button:disabled {
   cursor: default;
   opacity: 0.48;
+}
+
+.stacked-series-controls {
+  border-top: 1px solid #eef2f1;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  margin-top: 12px;
+  padding-top: 12px;
+}
+
+.stacked-account-toggle {
+  align-items: center;
+  background: #f7faf9;
+  border: 1px solid #d7dfdd;
+  border-radius: 6px;
+  color: #31424e;
+  display: inline-flex;
+  font-size: 0.82rem;
+  font-weight: 700;
+  gap: 8px;
+  min-height: 36px;
+  min-width: 0;
+  padding: 0 10px;
+}
+
+.stacked-account-toggle input {
+  accent-color: #1f6f8b;
+  flex: 0 0 auto;
+}
+
+.stacked-account-toggle span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .icon-button {
@@ -509,6 +548,24 @@ small,
   min-height: 38px;
   min-width: 0;
   padding: 7px 9px;
+}
+
+.compact-control-field {
+  width: 140px;
+}
+
+.toggle-field {
+  align-items: center;
+  color: #24443d;
+  display: inline-flex;
+  font-size: 0.84rem;
+  font-weight: 800;
+  gap: 8px;
+  min-height: 38px;
+}
+
+.toggle-field input {
+  accent-color: #1f6f8b;
 }
 
 .directory-picker {
@@ -882,6 +939,10 @@ small,
   width: 100%;
 }
 
+.stacked-net-worth-chart {
+  aspect-ratio: 720 / 300;
+}
+
 .chart-grid {
   stroke: #e0e8e5;
   stroke-width: 1;
@@ -921,6 +982,30 @@ small,
   pointer-events: none;
   stroke: #1f6f8b;
   stroke-width: 2;
+}
+
+.stacked-area-layer {
+  cursor: default;
+  fill-opacity: 0.72;
+  stroke-opacity: 0.9;
+  stroke-width: 0.8;
+  transition:
+    fill-opacity 120ms ease,
+    filter 120ms ease;
+}
+
+.stacked-area-layer:hover {
+  filter: brightness(1.05);
+  fill-opacity: 0.9;
+}
+
+.stacked-total-line {
+  fill: none;
+  pointer-events: none;
+  stroke: #17202a;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.3;
 }
 
 .spending-over-time-card {
@@ -982,6 +1067,16 @@ button.stacked-legend-item {
   color: #17202a;
 }
 
+.stacked-legend-item.asset {
+  color: #62727f;
+}
+
+.stacked-legend-item span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .stacked-legend-swatch {
   border-radius: 3px;
   display: block;
@@ -1035,6 +1130,25 @@ button.stacked-legend-item {
   fill: #ffffff;
   font-size: 13px;
   font-weight: 800;
+}
+
+.chart-tooltip-detail {
+  fill: #d8e4e0;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.stacked-tooltip-label {
+  font-size: 11px;
+}
+
+.stacked-tooltip-swatch {
+  stroke: #ffffff;
+  stroke-width: 1;
+}
+
+.stacked-hover-line {
+  stroke: #17202a;
 }
 
 .chart-empty {

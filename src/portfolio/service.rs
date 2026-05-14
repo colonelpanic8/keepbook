@@ -693,6 +693,44 @@ impl PortfolioService {
                     }
                 }
             }
+            Asset::ManualValue { currency, .. } => {
+                if currency.eq_ignore_ascii_case(target_currency) {
+                    Ok(AssetValuation {
+                        value: Some(amount),
+                        price: None,
+                        price_date: None,
+                        price_timestamp: None,
+                        fx_rate: None,
+                        fx_date: None,
+                    })
+                } else {
+                    match self
+                        .market_data
+                        .fx_close(currency, target_currency, as_of_date)
+                        .await
+                    {
+                        Ok(rate) => {
+                            let fx_rate = Decimal::from_str(&rate.rate)?;
+                            Ok(AssetValuation {
+                                value: Some(amount * fx_rate),
+                                price: None,
+                                price_date: None,
+                                price_timestamp: None,
+                                fx_rate: Some(fx_rate.normalize().to_string()),
+                                fx_date: Some(rate.as_of_date),
+                            })
+                        }
+                        Err(_) => Ok(AssetValuation {
+                            value: None,
+                            price: None,
+                            price_date: None,
+                            price_timestamp: None,
+                            fx_rate: None,
+                            fx_date: None,
+                        }),
+                    }
+                }
+            }
             Asset::Equity { .. } | Asset::Crypto { .. } => {
                 // Use live pricing for today. Historical valuation uses cached/fetched prices
                 // at or before the requested date without special-casing price kind.
@@ -1484,6 +1522,71 @@ mod tests {
 
         let result = service.calculate(&query).await?;
         assert_eq!(result.total_value, "1000");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn manual_value_carries_back_without_becoming_currency() -> Result<()> {
+        let storage = Arc::new(MemoryStorage::new());
+        let connection = Connection::new(ConnectionConfig {
+            name: "Manual".to_string(),
+            synchronizer: "manual".to_string(),
+            credentials: None,
+            balance_staleness: None,
+        });
+        storage.save_connection(&connection).await?;
+
+        let account = Account::new("Expected Housing Value", connection.id().clone());
+        storage.save_account(&account).await?;
+        storage
+            .set_account_config(
+                &account.id,
+                AccountConfig {
+                    balance_backfill: Some(BalanceBackfillPolicy::CarryEarliest),
+                    ..AccountConfig::default()
+                },
+            )
+            .await;
+
+        let asset = Asset::manual_value("Expected Housing Value", "USD");
+        let future_snapshot = BalanceSnapshot::new(
+            Utc.with_ymd_and_hms(2026, 5, 2, 12, 0, 0).unwrap(),
+            vec![AssetBalance::new(asset.clone(), "600000")],
+        );
+        storage
+            .append_balance_snapshot(&account.id, &future_snapshot)
+            .await?;
+
+        let store = Arc::new(MemoryMarketDataStore::new());
+        let market_data = Arc::new(MarketDataService::new(store, None));
+        let service = PortfolioService::new(storage, market_data);
+
+        let query = PortfolioQuery {
+            as_of_date: chrono::NaiveDate::from_ymd_opt(2021, 10, 31).unwrap(),
+            currency: "USD".to_string(),
+            currency_decimals: None,
+            grouping: Grouping::Asset,
+            include_detail: true,
+            capital_gains_tax_rate: None,
+            equity_valuation_adjustment: None,
+            account_ids: Vec::new(),
+        };
+
+        let result = service.calculate(&query).await?;
+        assert_eq!(result.total_value, "600000");
+
+        let by_asset = result.by_asset.expect("asset summaries");
+        assert_eq!(by_asset.len(), 1);
+        assert_eq!(by_asset[0].asset, asset.normalized());
+        assert_eq!(by_asset[0].value_in_base.as_deref(), Some("600000"));
+        assert_eq!(by_asset[0].price, None);
+        assert_eq!(
+            by_asset[0].holdings.as_ref().unwrap()[0]
+                .balance_date
+                .to_string(),
+            "2026-05-02"
+        );
+
         Ok(())
     }
 

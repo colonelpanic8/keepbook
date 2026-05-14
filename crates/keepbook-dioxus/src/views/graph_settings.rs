@@ -30,6 +30,11 @@ pub(super) fn GraphsView(
                 show_header: true,
             }
         }
+        StackedHistoryGraphPanel {
+            currency,
+            defaults,
+            filter_overrides,
+        }
     }
 }
 

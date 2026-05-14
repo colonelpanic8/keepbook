@@ -252,6 +252,51 @@ pub struct HistoryOutput {
     pub summary: Option<HistorySummary>,
 }
 
+/// Metadata for a series in a stacked portfolio contribution graph.
+#[derive(Serialize)]
+pub struct StackedHistorySeries {
+    pub key: String,
+    pub label: String,
+    pub series_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connection_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub asset: Option<serde_json::Value>,
+}
+
+/// A component value for a date in a stacked portfolio contribution graph.
+#[derive(Serialize)]
+pub struct StackedHistoryComponent {
+    pub series_key: String,
+    pub value: String,
+}
+
+/// A single date in a stacked portfolio contribution graph.
+#[derive(Serialize)]
+pub struct StackedHistoryPoint {
+    pub timestamp: String,
+    pub date: String,
+    pub total_value: String,
+    pub components: Vec<StackedHistoryComponent>,
+}
+
+/// Output for stacked portfolio contribution history.
+#[derive(Serialize)]
+pub struct StackedHistoryOutput {
+    pub currency: String,
+    pub start_date: Option<String>,
+    pub end_date: Option<String>,
+    pub granularity: String,
+    pub series: Vec<StackedHistorySeries>,
+    pub points: Vec<StackedHistoryPoint>,
+}
+
 /// Summary statistics for the history
 #[derive(Serialize)]
 pub struct HistorySummary {

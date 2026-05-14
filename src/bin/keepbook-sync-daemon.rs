@@ -924,6 +924,7 @@ impl Daemon {
                     let date = row.timestamp.with_timezone(&chrono::Local).format("%m-%d");
                     let currency = match &row.asset {
                         keepbook::models::Asset::Currency { iso_code } => iso_code.as_str(),
+                        keepbook::models::Asset::ManualValue { currency, .. } => currency.as_str(),
                         keepbook::models::Asset::Equity { ticker, .. } => ticker.as_str(),
                         keepbook::models::Asset::Crypto { symbol, .. } => symbol.as_str(),
                     };

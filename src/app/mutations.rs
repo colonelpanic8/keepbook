@@ -1189,6 +1189,19 @@ pub fn parse_asset(s: &str) -> Result<Asset> {
             "equity" => return Ok(Asset::equity(value)),
             "crypto" => return Ok(Asset::crypto(value)),
             "currency" => return Ok(Asset::currency(value)),
+            "manual_value" | "value" => {
+                if let Some((currency, name)) = value.split_once(':') {
+                    let currency = currency.trim();
+                    let name = name.trim();
+                    if currency.is_empty() || name.is_empty() {
+                        anyhow::bail!(
+                            "Manual value asset must be value:<name> or value:<currency>:<name>"
+                        );
+                    }
+                    return Ok(Asset::manual_value(name, currency));
+                }
+                return Ok(Asset::manual_value(value, "USD"));
+            }
             _ => {}
         }
     }

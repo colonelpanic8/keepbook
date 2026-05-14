@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::{HashMap, HashSet};
 
 #[component]
 pub(super) fn AccountGraphPanel(
@@ -95,6 +96,242 @@ pub(super) fn AccountGraphPanel(
                     filter_overrides,
                     account: Some(selected_id),
                     show_header: false,
+                }
+            }
+        }
+    }
+}
+
+#[component]
+pub(super) fn StackedHistoryGraphPanel(
+    currency: String,
+    defaults: HistoryDefaults,
+    filter_overrides: FilterOverrides,
+) -> Element {
+    let initial_range_preset = range_preset_from_config(&defaults.graph_range);
+    let initial_sampling_granularity =
+        sampling_granularity_from_config(&defaults.graph_granularity);
+    let mut range_preset = use_signal(move || initial_range_preset);
+    let mut start_override = use_signal(String::new);
+    let mut end_override = use_signal(String::new);
+    let mut sampling_granularity = use_signal(move || initial_sampling_granularity);
+    let mut expanded_accounts = use_signal(HashSet::<String>::new);
+    let history = use_resource(move || {
+        let selected_range = range_preset();
+        let start_text = start_override();
+        let end_text = end_override();
+        let selected_sampling = sampling_granularity();
+        async move {
+            fetch_stacked_history(history_query_string(
+                selected_range,
+                &start_text,
+                &end_text,
+                selected_sampling,
+                &current_date_string(),
+                filter_overrides,
+                None,
+            ))
+            .await
+        }
+    });
+
+    let selected_range = range_preset();
+    let selected_sampling = sampling_granularity();
+    let start_text = start_override();
+    let end_text = end_override();
+    let history_state = history.cloned();
+    let is_history_loading = history_state.is_none();
+    let loaded_history = match &history_state {
+        Some(Ok(history)) => Some(history),
+        _ => None,
+    };
+    let data = loaded_history
+        .map(stacked_history_data_points)
+        .unwrap_or_default();
+    let bounds = stacked_date_bounds(&data);
+    let (start_date, end_date) =
+        visible_stacked_date_range(&data, selected_range, &start_text, &end_text);
+    let visible_data = filter_stacked_data_by_date_range(&data, &start_date, &end_date);
+    let resolved_sampling = resolve_stacked_sampling_granularity(selected_sampling, &visible_data);
+    let sampled_data = sample_stacked_data_by_granularity(&visible_data, resolved_sampling);
+    let sampled_point_count = sampled_data.len();
+    let sampling_label = resolved_sampling.label();
+    let current_total = sampled_data
+        .last()
+        .map(|point| point.total)
+        .unwrap_or_default();
+    let start_total = sampled_data
+        .first()
+        .map(|point| point.total)
+        .unwrap_or_default();
+    let absolute_change = current_total - start_total;
+    let change_class = if absolute_change >= 0.0 {
+        "change-positive"
+    } else {
+        "change-negative"
+    };
+    let min_date = bounds
+        .as_ref()
+        .map(|bounds| bounds.0.clone())
+        .unwrap_or_default();
+    let max_date = bounds
+        .as_ref()
+        .map(|bounds| bounds.1.clone())
+        .unwrap_or_default();
+    let account_series = loaded_history
+        .map(account_stacked_series)
+        .unwrap_or_default();
+    let active_series = loaded_history
+        .map(|history| active_stacked_series(history, &expanded_accounts()))
+        .unwrap_or_default();
+    let has_date_error = !start_date.is_empty() && !end_date.is_empty() && start_date > end_date;
+
+    rsx! {
+        section { class: "panel graph-panel stacked-graph-panel",
+            div { class: "panel-header",
+                div { class: "panel-title",
+                    h2 { "Net Worth Contributions" }
+                    span { "Zero baseline / stacked by account" }
+                }
+            }
+            if is_history_loading {
+                BackendActivity { message: "Waiting on backend contribution data" }
+            }
+            div { class: "chart-controls",
+                div { class: "preset-row",
+                    span { class: "control-label", "Range" }
+                    GraphPresetButton {
+                        label: "1M",
+                        selected: selected_range == RangePreset::OneMonth,
+                        onclick: move |_| {
+                            range_preset.set(RangePreset::OneMonth);
+                            start_override.set(String::new());
+                            end_override.set(String::new());
+                        }
+                    }
+                    GraphPresetButton {
+                        label: "90D",
+                        selected: selected_range == RangePreset::NinetyDays,
+                        onclick: move |_| {
+                            range_preset.set(RangePreset::NinetyDays);
+                            start_override.set(String::new());
+                            end_override.set(String::new());
+                        }
+                    }
+                    GraphPresetButton {
+                        label: "6M",
+                        selected: selected_range == RangePreset::SixMonths,
+                        onclick: move |_| {
+                            range_preset.set(RangePreset::SixMonths);
+                            start_override.set(String::new());
+                            end_override.set(String::new());
+                        }
+                    }
+                    GraphPresetButton {
+                        label: "1Y",
+                        selected: selected_range == RangePreset::OneYear,
+                        onclick: move |_| {
+                            range_preset.set(RangePreset::OneYear);
+                            start_override.set(String::new());
+                            end_override.set(String::new());
+                        }
+                    }
+                    GraphPresetButton {
+                        label: "2Y",
+                        selected: selected_range == RangePreset::TwoYears,
+                        onclick: move |_| {
+                            range_preset.set(RangePreset::TwoYears);
+                            start_override.set(String::new());
+                            end_override.set(String::new());
+                        }
+                    }
+                    GraphPresetButton {
+                        label: "Max",
+                        selected: selected_range == RangePreset::Max,
+                        onclick: move |_| {
+                            range_preset.set(RangePreset::Max);
+                            start_override.set(String::new());
+                            end_override.set(String::new());
+                        }
+                    }
+                }
+                div { class: "sampling-row",
+                    span { class: "control-label", "Sampling" }
+                    for option in SamplingGranularity::OPTIONS {
+                        GraphPresetButton {
+                            label: option.label(),
+                            selected: selected_sampling == option,
+                            onclick: move |_| sampling_granularity.set(option)
+                        }
+                    }
+                }
+            }
+            match history_state {
+                None => rsx! {
+                    GraphLoadingPanel {
+                        range: range_summary_text(&start_date, &end_date),
+                        sampling: selected_sampling.label()
+                    }
+                },
+                Some(Err(error)) => rsx! {
+                    InlineStatus { title: "Net Worth Contributions", message: error }
+                },
+                Some(Ok(_)) => rsx! {
+                    StackedNetWorthChart {
+                        data: sampled_data.clone(),
+                        series: active_series.clone(),
+                        currency: currency.clone(),
+                    }
+                    if !sampled_data.is_empty() {
+                        div { class: "chart-stats",
+                            strong { "{format_full_money(current_total, &currency)}" }
+                            span { class: "{change_class}",
+                                "{format_signed_money(absolute_change, &currency)}"
+                            }
+                        }
+                    }
+                    StackedSeriesControls {
+                        accounts: account_series.clone(),
+                        expanded_accounts: expanded_accounts(),
+                        ontoggle: move |account_id: String| {
+                            let mut next = expanded_accounts();
+                            if !next.insert(account_id.clone()) {
+                                next.remove(&account_id);
+                            }
+                            expanded_accounts.set(next);
+                        }
+                    }
+                }
+            }
+            div { class: "chart-controls chart-bottom-controls",
+                div { class: "control-grid compact-date-grid",
+                    DateInput {
+                        label: "Start",
+                        value: start_date.clone(),
+                        min: min_date.clone(),
+                        max: end_date.clone(),
+                        oninput: move |value| {
+                            start_override.set(value);
+                            range_preset.set(RangePreset::Custom);
+                        }
+                    }
+                    DateInput {
+                        label: "End",
+                        value: end_date.clone(),
+                        min: start_date.clone(),
+                        max: max_date.clone(),
+                        oninput: move |value| {
+                            end_override.set(value);
+                            range_preset.set(RangePreset::Custom);
+                        }
+                    }
+                }
+                if has_date_error {
+                    p { class: "validation", "Use a valid start date before end date." }
+                }
+                div { class: "range-summary",
+                    span { "Date range {start_date} to {end_date}" }
+                    span { "Sampling {sampling_label} / {sampled_point_count} points" }
                 }
             }
         }
@@ -640,6 +877,365 @@ fn NetWorthChart(
 }
 
 #[component]
+fn StackedSeriesControls(
+    accounts: Vec<StackedHistorySeries>,
+    expanded_accounts: HashSet<String>,
+    ontoggle: EventHandler<String>,
+) -> Element {
+    if accounts.is_empty() {
+        return rsx! {};
+    }
+
+    rsx! {
+        div { class: "stacked-series-controls",
+            for account in accounts {
+                {
+                    let account_id = account.account_id.clone().unwrap_or_default();
+                    let checked = expanded_accounts.contains(&account_id);
+                    rsx! {
+                        label { class: "stacked-account-toggle",
+                            input {
+                                r#type: "checkbox",
+                                checked,
+                                onchange: move |_| ontoggle.call(account_id.clone())
+                            }
+                            span { "{account.label}" }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn StackedNetWorthChart(
+    data: Vec<StackedHistoryDataPoint>,
+    series: Vec<ActiveStackedSeries>,
+    currency: String,
+) -> Element {
+    if data.is_empty() || series.is_empty() {
+        return rsx! {
+            div { class: "chart-empty",
+                strong { "No contribution history" }
+                small { "Refresh balances to populate the stacked graph." }
+            }
+        };
+    }
+
+    let width = 720.0;
+    let height = 300.0;
+    let padding_left = 68.0;
+    let padding_right = 20.0;
+    let padding_top = 18.0;
+    let padding_bottom = 38.0;
+    let plot_width = width - padding_left - padding_right;
+    let plot_height = height - padding_top - padding_bottom;
+    let count = data.len();
+    let stack_points = build_stack_points(&data, &series, padding_left, plot_width);
+    let (y_min, y_max) = stacked_y_domain(&stack_points, &data);
+    let y_range = (y_max - y_min).max(1.0);
+    let zero_y = stacked_y(0.0, y_min, y_range, padding_top, plot_height);
+    let mid_value = y_min + y_range / 2.0;
+    let min_label = format_compact_money(y_min, &currency);
+    let mid_label = format_compact_money(mid_value, &currency);
+    let max_label = format_compact_money(y_max, &currency);
+    let first_date = data
+        .first()
+        .map(|point| point.date.clone())
+        .unwrap_or_default();
+    let latest_date = data
+        .last()
+        .map(|point| point.date.clone())
+        .unwrap_or_default();
+    let latest_total = data.last().map(|point| point.total).unwrap_or_default();
+    let latest_value = format_compact_money(latest_total, &currency);
+    let total_path = data
+        .iter()
+        .enumerate()
+        .map(|(index, point)| {
+            let x = if count <= 1 {
+                padding_left + plot_width / 2.0
+            } else {
+                padding_left + (index as f64 / (count - 1) as f64) * plot_width
+            };
+            let y = stacked_y(point.total, y_min, y_range, padding_top, plot_height);
+            let command = if index == 0 { "M" } else { "L" };
+            format!("{command} {:.2} {:.2}", x, y)
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let layer_details = series
+        .iter()
+        .enumerate()
+        .filter_map(|(index, series)| {
+            let path = stack_area_path(
+                &series.key,
+                &stack_points,
+                y_min,
+                y_range,
+                padding_top,
+                plot_height,
+            )?;
+            let latest_stack_point = stack_points
+                .iter()
+                .rev()
+                .find(|point| point.series_key == series.key)?;
+            let value = latest_stack_point.y1_value - latest_stack_point.y0_value;
+            let y0 = stacked_y(
+                latest_stack_point.y0_value,
+                y_min,
+                y_range,
+                padding_top,
+                plot_height,
+            );
+            let y1 = stacked_y(
+                latest_stack_point.y1_value,
+                y_min,
+                y_range,
+                padding_top,
+                plot_height,
+            );
+            let share = if latest_total == 0.0 {
+                None
+            } else {
+                Some((value / latest_total) * 100.0)
+            };
+            Some(StackedLayerDetail {
+                index,
+                series: series.clone(),
+                path,
+                color: stacked_chart_color(index),
+                x: latest_stack_point.x,
+                y: (y0 + y1) / 2.0,
+                value,
+                share,
+            })
+        })
+        .collect::<Vec<_>>();
+    let hover_rules = layer_details
+        .iter()
+        .map(|layer| {
+            format!(
+                ".stacked-layer-hit-{0}:hover ~ .stacked-layer-tooltip-{0} {{ display: block; }}",
+                layer.index
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    rsx! {
+        div { class: "chart-card stacked-chart-card",
+            div { class: "chart-meta",
+                div {
+                    span { class: "metric-label", "Current" }
+                    strong { "{latest_value}" }
+                }
+                div {
+                    span { class: "metric-label", "Series" }
+                    strong { "{series.len()}" }
+                }
+            }
+            svg {
+                class: "net-worth-chart stacked-net-worth-chart",
+                view_box: "0 0 720 300",
+                role: "img",
+                style { "{hover_rules}" }
+                line {
+                    class: "chart-grid",
+                    x1: "{padding_left}",
+                    x2: "{width - padding_right}",
+                    y1: "{padding_top}",
+                    y2: "{padding_top}"
+                }
+                line {
+                    class: "chart-grid",
+                    x1: "{padding_left}",
+                    x2: "{width - padding_right}",
+                    y1: "{padding_top + plot_height / 2.0}",
+                    y2: "{padding_top + plot_height / 2.0}"
+                }
+                line {
+                    class: "chart-grid axis",
+                    x1: "{padding_left}",
+                    x2: "{width - padding_right}",
+                    y1: "{zero_y}",
+                    y2: "{zero_y}"
+                }
+                text {
+                    class: "chart-axis-label",
+                    x: "8",
+                    y: "{padding_top + 4.0}",
+                    "{max_label}"
+                }
+                text {
+                    class: "chart-axis-label",
+                    x: "8",
+                    y: "{padding_top + plot_height / 2.0 + 4.0}",
+                    "{mid_label}"
+                }
+                text {
+                    class: "chart-axis-label",
+                    x: "8",
+                    y: "{zero_y + 4.0}",
+                    "$0"
+                }
+                text {
+                    class: "chart-axis-label",
+                    x: "8",
+                    y: "{padding_top + plot_height + 4.0}",
+                    "{min_label}"
+                }
+                text {
+                    class: "chart-axis-label date-label",
+                    x: "{padding_left}",
+                    y: "{height - 10.0}",
+                    "{first_date}"
+                }
+                text {
+                    class: "chart-axis-label date-label end",
+                    x: "{width - padding_right}",
+                    y: "{height - 10.0}",
+                    "{latest_date}"
+                }
+                for layer in layer_details.iter() {
+                    path {
+                        class: "stacked-area-layer stacked-layer-hit stacked-layer-hit-{layer.index}",
+                        d: "{layer.path}",
+                        style: "fill: {layer.color}; stroke: {layer.color};",
+                        title { "{layer.series.label}: {format_full_money(layer.value, &currency)}" }
+                    }
+                }
+                if !total_path.is_empty() {
+                    path { class: "stacked-total-line", d: "{total_path}" }
+                }
+                for layer in layer_details.iter() {
+                    StackedLayerTooltip {
+                        layer: layer.clone(),
+                        currency: currency.clone(),
+                        chart_width: width,
+                        padding_right,
+                        padding_top,
+                    }
+                }
+            }
+            div { class: "stacked-legend",
+                for (index, item) in series.iter().enumerate() {
+                    {
+                        let color = stacked_chart_color(index);
+                        let class = if item.series_type == "account_asset" {
+                            "stacked-legend-item asset"
+                        } else {
+                            "stacked-legend-item"
+                        };
+                        rsx! {
+                            span { class: "{class}",
+                                span {
+                                    class: "stacked-legend-swatch",
+                                    style: "background: {color};"
+                                }
+                                span { "{item.label}" }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn StackedLayerTooltip(
+    layer: StackedLayerDetail,
+    currency: String,
+    chart_width: f64,
+    padding_right: f64,
+    padding_top: f64,
+) -> Element {
+    let tooltip_width = 220.0;
+    let tooltip_height = 68.0;
+    let tooltip_x = if layer.x + tooltip_width + 12.0 > chart_width - padding_right {
+        layer.x - tooltip_width - 12.0
+    } else {
+        layer.x + 12.0
+    }
+    .max(8.0);
+    let tooltip_y = if layer.y - tooltip_height / 2.0 < padding_top {
+        layer.y + 12.0
+    } else {
+        layer.y - tooltip_height / 2.0
+    }
+    .max(8.0);
+    let text_x = tooltip_x + 12.0;
+    let label_y = tooltip_y + 20.0;
+    let value_y = tooltip_y + 40.0;
+    let detail_y = tooltip_y + 58.0;
+    let value_text = format_full_money(layer.value, &currency);
+    let share_text = layer
+        .share
+        .map(|share| format!("{}% of total", format_number(share, 1)))
+        .unwrap_or_else(|| "No total share".to_string());
+    let series_type = if layer.series.series_type == "account_asset" {
+        "Asset contribution"
+    } else {
+        "Account contribution"
+    };
+
+    rsx! {
+        g { class: "chart-hover-detail stacked-layer-tooltip stacked-layer-tooltip-{layer.index}",
+            line {
+                class: "chart-hover-line stacked-hover-line",
+                x1: "{layer.x}",
+                x2: "{layer.x}",
+                y1: "{padding_top}",
+                y2: "{layer.y}"
+            }
+            circle {
+                class: "chart-hover-point",
+                cx: "{layer.x}",
+                cy: "{layer.y}",
+                r: "5"
+            }
+            rect {
+                class: "chart-tooltip",
+                x: "{tooltip_x}",
+                y: "{tooltip_y}",
+                width: "{tooltip_width}",
+                height: "{tooltip_height}",
+                rx: "6"
+            }
+            rect {
+                class: "stacked-tooltip-swatch",
+                x: "{text_x}",
+                y: "{tooltip_y + 10.0}",
+                width: "8",
+                height: "8",
+                rx: "2",
+                style: "fill: {layer.color};"
+            }
+            text {
+                class: "chart-tooltip-date stacked-tooltip-label",
+                x: "{text_x + 14.0}",
+                y: "{label_y}",
+                "{layer.series.label}"
+            }
+            text {
+                class: "chart-tooltip-value",
+                x: "{text_x}",
+                y: "{value_y}",
+                "{value_text}"
+            }
+            text {
+                class: "chart-tooltip-detail",
+                x: "{text_x}",
+                y: "{detail_y}",
+                "{series_type} / {share_text}"
+            }
+        }
+    }
+}
+
+#[component]
 fn ChartHoverDetail(
     index: usize,
     point: ChartPoint,
@@ -704,4 +1300,239 @@ fn ChartHoverDetail(
             }
         }
     }
+}
+
+#[derive(Clone, Debug)]
+struct StackPoint {
+    series_key: String,
+    x: f64,
+    y0_value: f64,
+    y1_value: f64,
+}
+
+fn account_stacked_series(history: &StackedHistory) -> Vec<StackedHistorySeries> {
+    let final_values = final_component_values(history);
+    let mut series = history
+        .series
+        .iter()
+        .filter(|series| series.series_type == "account")
+        .cloned()
+        .collect::<Vec<_>>();
+    series.sort_by(|a, b| compare_series_by_final_value(a, b, &final_values));
+    series
+}
+
+fn active_stacked_series(
+    history: &StackedHistory,
+    expanded_accounts: &HashSet<String>,
+) -> Vec<ActiveStackedSeries> {
+    let final_values = final_component_values(history);
+    let asset_series_by_account = history.series.iter().fold(
+        HashMap::<String, Vec<&StackedHistorySeries>>::new(),
+        |mut acc, series| {
+            if series.series_type == "account_asset" {
+                if let Some(account_id) = series.account_id.as_ref() {
+                    acc.entry(account_id.clone()).or_default().push(series);
+                }
+            }
+            acc
+        },
+    );
+
+    let mut active = Vec::new();
+    for account in account_stacked_series(history) {
+        let account_id = account.account_id.clone().unwrap_or_default();
+        if expanded_accounts.contains(&account_id) {
+            if let Some(asset_series) = asset_series_by_account.get(&account_id) {
+                let mut sorted_assets = asset_series.clone();
+                sorted_assets.sort_by(|a, b| compare_series_by_final_value(a, b, &final_values));
+                for asset in sorted_assets {
+                    active.push(ActiveStackedSeries {
+                        key: asset.key.clone(),
+                        label: asset.label.clone(),
+                        account_id: asset.account_id.clone(),
+                        series_type: asset.series_type.clone(),
+                    });
+                }
+                continue;
+            }
+        }
+        active.push(ActiveStackedSeries {
+            key: account.key,
+            label: account.label,
+            account_id: account.account_id,
+            series_type: account.series_type,
+        });
+    }
+    active.sort_by(|a, b| compare_active_series_by_final_value(a, b, &final_values));
+    active
+}
+
+fn final_component_values(history: &StackedHistory) -> HashMap<&str, f64> {
+    history
+        .points
+        .last()
+        .map(|point| {
+            point
+                .components
+                .iter()
+                .filter_map(|component| {
+                    component
+                        .value
+                        .parse::<f64>()
+                        .ok()
+                        .filter(|value| value.is_finite())
+                        .map(|value| (component.series_key.as_str(), value))
+                })
+                .collect::<HashMap<_, _>>()
+        })
+        .unwrap_or_default()
+}
+
+fn compare_series_by_final_value(
+    a: &StackedHistorySeries,
+    b: &StackedHistorySeries,
+    final_values: &HashMap<&str, f64>,
+) -> std::cmp::Ordering {
+    let value_a = *final_values.get(a.key.as_str()).unwrap_or(&0.0);
+    let value_b = *final_values.get(b.key.as_str()).unwrap_or(&0.0);
+    value_b
+        .partial_cmp(&value_a)
+        .unwrap_or(std::cmp::Ordering::Equal)
+        .then_with(|| a.label.cmp(&b.label))
+}
+
+fn compare_active_series_by_final_value(
+    a: &ActiveStackedSeries,
+    b: &ActiveStackedSeries,
+    final_values: &HashMap<&str, f64>,
+) -> std::cmp::Ordering {
+    let value_a = *final_values.get(a.key.as_str()).unwrap_or(&0.0);
+    let value_b = *final_values.get(b.key.as_str()).unwrap_or(&0.0);
+    value_b
+        .partial_cmp(&value_a)
+        .unwrap_or(std::cmp::Ordering::Equal)
+        .then_with(|| a.label.cmp(&b.label))
+}
+
+fn build_stack_points(
+    data: &[StackedHistoryDataPoint],
+    series: &[ActiveStackedSeries],
+    padding_left: f64,
+    plot_width: f64,
+) -> Vec<StackPoint> {
+    let count = data.len();
+    data.iter()
+        .enumerate()
+        .flat_map(|(index, point)| {
+            let x = if count <= 1 {
+                padding_left + plot_width / 2.0
+            } else {
+                padding_left + (index as f64 / (count - 1) as f64) * plot_width
+            };
+            let values = point
+                .components
+                .iter()
+                .map(|component| (component.series_key.as_str(), component.value))
+                .collect::<HashMap<_, _>>();
+            let mut positive = 0.0;
+            let mut negative = 0.0;
+            series
+                .iter()
+                .map(|series| {
+                    let value = *values.get(series.key.as_str()).unwrap_or(&0.0);
+                    if value >= 0.0 {
+                        let y0_value = positive;
+                        positive += value;
+                        StackPoint {
+                            series_key: series.key.clone(),
+                            x,
+                            y0_value,
+                            y1_value: positive,
+                        }
+                    } else {
+                        let y0_value = negative;
+                        negative += value;
+                        StackPoint {
+                            series_key: series.key.clone(),
+                            x,
+                            y0_value,
+                            y1_value: negative,
+                        }
+                    }
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+fn stacked_y_domain(points: &[StackPoint], data: &[StackedHistoryDataPoint]) -> (f64, f64) {
+    let mut min = 0.0_f64;
+    let mut max = 0.0_f64;
+    for point in points {
+        min = min.min(point.y0_value).min(point.y1_value);
+        max = max.max(point.y0_value).max(point.y1_value);
+    }
+    for point in data {
+        min = min.min(point.total);
+        max = max.max(point.total);
+    }
+    if min == max {
+        (0.0, max + 1.0)
+    } else {
+        let top_padding = (max - min).abs() * 0.04;
+        (min.min(0.0), max + top_padding)
+    }
+}
+
+fn stack_area_path(
+    series_key: &str,
+    points: &[StackPoint],
+    y_min: f64,
+    y_range: f64,
+    padding_top: f64,
+    plot_height: f64,
+) -> Option<String> {
+    let series_points = points
+        .iter()
+        .filter(|point| point.series_key == series_key)
+        .collect::<Vec<_>>();
+    if series_points.is_empty() {
+        return None;
+    }
+
+    let mut commands = series_points
+        .iter()
+        .enumerate()
+        .map(|(index, point)| {
+            let command = if index == 0 { "M" } else { "L" };
+            format!(
+                "{command} {:.2} {:.2}",
+                point.x,
+                stacked_y(point.y1_value, y_min, y_range, padding_top, plot_height)
+            )
+        })
+        .collect::<Vec<_>>();
+    commands.extend(series_points.iter().rev().map(|point| {
+        format!(
+            "L {:.2} {:.2}",
+            point.x,
+            stacked_y(point.y0_value, y_min, y_range, padding_top, plot_height)
+        )
+    }));
+    commands.push("Z".to_string());
+    Some(commands.join(" "))
+}
+
+fn stacked_y(value: f64, y_min: f64, y_range: f64, padding_top: f64, plot_height: f64) -> f64 {
+    padding_top + ((y_min + y_range - value) / y_range) * plot_height
+}
+
+fn stacked_chart_color(index: usize) -> &'static str {
+    const COLORS: [&str; 18] = [
+        "#1f6f8b", "#c2573f", "#4f7f39", "#7b5cb8", "#b7831f", "#2a9187", "#a83f6f", "#5867c2",
+        "#7a6a2f", "#3d7898", "#d06a2f", "#5f8c54", "#8f4fb0", "#c14d57", "#2f8fbd", "#9a7331",
+        "#516fb0", "#6f7d35",
+    ];
+    COLORS[index % COLORS.len()]
 }

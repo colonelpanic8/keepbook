@@ -63,6 +63,10 @@ pub(crate) async fn fetch_history(query: String) -> Result<History, String> {
     fetch_history_impl(query).await
 }
 
+pub(crate) async fn fetch_stacked_history(query: String) -> Result<StackedHistory, String> {
+    fetch_stacked_history_impl(query).await
+}
+
 pub(crate) async fn fetch_spending_dashboard(
     query: String,
     over_time_query: String,
@@ -181,6 +185,27 @@ pub(crate) async fn fetch_history_impl(query: String) -> Result<History, String>
         .json::<History>()
         .await
         .map_err(|error| format!("Could not decode net worth history: {error}"))
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn fetch_stacked_history_impl(query: String) -> Result<StackedHistory, String> {
+    let response = Request::get(&format!("{API_BASE}/api/portfolio/stacked-history?{query}"))
+        .send()
+        .await
+        .map_err(|error| format!("Could not reach keepbook-server at {API_BASE}: {error}"))?;
+
+    if !response.ok() {
+        return Err(format!(
+            "keepbook-server returned HTTP {} {}",
+            response.status(),
+            response.status_text()
+        ));
+    }
+
+    response
+        .json::<StackedHistory>()
+        .await
+        .map_err(|error| format!("Could not decode stacked net worth history: {error}"))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -458,6 +483,17 @@ pub(crate) async fn fetch_history_impl(query: String) -> Result<History, String>
         .await
         .map_err(|error| format!("Could not load net worth history: {error:#}"))?;
     from_native_output(output, "net worth history")
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn fetch_stacked_history_impl(query: String) -> Result<StackedHistory, String> {
+    let query = serde_urlencoded::from_str::<keepbook_server::HistoryQuery>(&query)
+        .map_err(|error| format!("Could not encode stacked history query: {error}"))?;
+    let output = native_api_state()?
+        .portfolio_stacked_history(query)
+        .await
+        .map_err(|error| format!("Could not load stacked net worth history: {error:#}"))?;
+    from_native_output(output, "stacked net worth history")
 }
 
 #[cfg(not(target_arch = "wasm32"))]

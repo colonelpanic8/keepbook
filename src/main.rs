@@ -394,7 +394,7 @@ enum SetCommand {
         #[arg(long)]
         account: String,
 
-        /// Asset type (e.g., "USD", "equity:AAPL", "crypto:BTC")
+        /// Asset type (e.g., "USD", "equity:AAPL", "crypto:BTC", "value:Expected Housing Value")
         #[arg(long)]
         asset: String,
 

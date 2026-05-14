@@ -306,6 +306,20 @@ pub async fn list_balances(
                                 symbol_override,
                             )
                         }
+                        Asset::ManualValue { currency, .. } => {
+                            let symbol_override =
+                                if currency.eq_ignore_ascii_case(&reporting_currency) {
+                                    reporting_currency_symbol
+                                } else {
+                                    None
+                                };
+                            format_currency_amount_display(
+                                &balance.amount,
+                                currency,
+                                &config.display,
+                                symbol_override,
+                            )
+                        }
                         Asset::Equity { .. } | Asset::Crypto { .. } => None,
                     };
                     let value_in_reporting_currency_display =

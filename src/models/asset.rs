@@ -9,6 +9,10 @@ pub enum Asset {
     Currency {
         iso_code: String,
     },
+    ManualValue {
+        name: String,
+        currency: String,
+    },
     Equity {
         ticker: String,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -45,10 +49,23 @@ impl Asset {
         }
     }
 
+    pub fn manual_value(name: impl Into<String>, currency: impl Into<String>) -> Self {
+        let name = name.into();
+        let currency = currency.into();
+        Asset::ManualValue {
+            name: name.trim().to_string(),
+            currency: currency.trim().to_string(),
+        }
+    }
+
     pub fn normalized(&self) -> Self {
         match self {
             Asset::Currency { iso_code } => Asset::Currency {
                 iso_code: normalize_currency_code(iso_code),
+            },
+            Asset::ManualValue { name, currency } => Asset::ManualValue {
+                name: normalize_name(name),
+                currency: normalize_currency_code(currency),
             },
             Asset::Equity { ticker, exchange } => Asset::Equity {
                 ticker: normalize_upper(ticker),
@@ -76,6 +93,14 @@ fn normalize_upper(value: &str) -> String {
     value.trim().to_uppercase()
 }
 
+fn normalize_name(value: &str) -> String {
+    value.trim().to_string()
+}
+
+fn normalize_name_for_key(value: &str) -> String {
+    value.trim().to_lowercase()
+}
+
 fn normalize_opt_upper(value: &Option<String>) -> Option<String> {
     value
         .as_deref()
@@ -97,6 +122,19 @@ impl PartialEq for Asset {
         match (self, other) {
             (Asset::Currency { iso_code: a }, Asset::Currency { iso_code: b }) => {
                 normalize_currency_code(a) == normalize_currency_code(b)
+            }
+            (
+                Asset::ManualValue {
+                    name: name_a,
+                    currency: currency_a,
+                },
+                Asset::ManualValue {
+                    name: name_b,
+                    currency: currency_b,
+                },
+            ) => {
+                normalize_name_for_key(name_a) == normalize_name_for_key(name_b)
+                    && normalize_currency_code(currency_a) == normalize_currency_code(currency_b)
             }
             (
                 Asset::Equity {
@@ -138,6 +176,11 @@ impl Hash for Asset {
                 "currency".hash(state);
                 normalize_currency_code(iso_code).hash(state);
             }
+            Asset::ManualValue { name, currency } => {
+                "manual_value".hash(state);
+                normalize_name_for_key(name).hash(state);
+                normalize_currency_code(currency).hash(state);
+            }
             Asset::Equity { ticker, exchange } => {
                 "equity".hash(state);
                 normalize_upper(ticker).hash(state);
@@ -165,6 +208,13 @@ mod tests {
         let btc = Asset::crypto("BTC");
         let json = serde_json::to_string(&btc).unwrap();
         assert_eq!(json, r#"{"type":"crypto","symbol":"BTC"}"#);
+
+        let value = Asset::manual_value("Expected Housing Value", "USD");
+        let json = serde_json::to_string(&value).unwrap();
+        assert_eq!(
+            json,
+            r#"{"type":"manual_value","name":"Expected Housing Value","currency":"USD"}"#
+        );
     }
 
     #[test]
@@ -190,6 +240,10 @@ mod tests {
         let crypto_lower = Asset::crypto("btc");
         let crypto_upper = Asset::crypto("BTC");
         assert_eq!(crypto_lower, crypto_upper);
+
+        let manual_value_lower = Asset::manual_value("expected housing value", "usd");
+        let manual_value_upper = Asset::manual_value("Expected Housing Value", "USD");
+        assert_eq!(manual_value_lower, manual_value_upper);
 
         let with_exchange = Asset::Equity {
             ticker: "aapl".to_string(),
@@ -223,6 +277,7 @@ mod tests {
             symbol: "ETH".to_string(),
             network: Some("Arbitrum".to_string()),
         });
+        assets.insert(Asset::manual_value("Expected Housing Value", "USD"));
 
         assert!(assets.contains(&Asset::currency(" usd ")));
         assert!(assets.contains(&Asset::equity("aapl")));
@@ -230,6 +285,7 @@ mod tests {
             symbol: "eth".to_string(),
             network: Some("arbitrum".to_string()),
         }));
+        assert!(assets.contains(&Asset::manual_value("expected housing value", "usd")));
     }
 
     #[test]
@@ -240,6 +296,18 @@ mod tests {
         match currency.normalized() {
             Asset::Currency { iso_code } => assert_eq!(iso_code, "USD"),
             _ => panic!("expected currency asset"),
+        }
+
+        let value = Asset::ManualValue {
+            name: " Expected Housing Value ".to_string(),
+            currency: " usd ".to_string(),
+        };
+        match value.normalized() {
+            Asset::ManualValue { name, currency } => {
+                assert_eq!(name, "Expected Housing Value");
+                assert_eq!(currency, "USD");
+            }
+            _ => panic!("expected manual value asset"),
         }
 
         let equity = Asset::Equity {

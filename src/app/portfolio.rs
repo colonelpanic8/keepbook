@@ -30,7 +30,8 @@ use super::sync::build_sync_service;
 use super::{
     maybe_auto_commit, AssetInfoOutput, ChangePointsOutput, HistoryOutput, HistoryPoint,
     HistorySummary, PriceHistoryFailure, PriceHistoryOutput, PriceHistoryScopeOutput,
-    PriceHistoryStats, TaxImpactOutput, TaxImpactPoint,
+    PriceHistoryStats, StackedHistoryComponent, StackedHistoryOutput, StackedHistoryPoint,
+    StackedHistorySeries, TaxImpactOutput, TaxImpactPoint,
 };
 
 pub struct PriceHistoryRequest<'a> {
@@ -270,6 +271,12 @@ struct HistoryValuation {
     prospective_capital_gains_tax: Option<Decimal>,
 }
 
+#[derive(Debug, Clone)]
+struct HistoryAssetValuation {
+    asset_id: String,
+    value: Decimal,
+}
+
 struct HistoryPointValue {
     total_value: String,
     prospective_capital_gains_tax: Option<String>,
@@ -293,31 +300,13 @@ fn compute_history_valuation_with_carry_forward(
 ) -> Option<HistoryValuation> {
     let mut total_value = Decimal::ZERO;
     let mut prospective_capital_gains_tax = None;
+    let asset_valuations =
+        compute_history_asset_valuations_with_carry_forward(by_asset, carry_forward_unit_values)?;
 
-    for asset_summary in by_asset {
+    for (asset_summary, asset_valuation) in by_asset.iter().zip(asset_valuations.iter()) {
         let asset_id = AssetId::from_asset(&asset_summary.asset).to_string();
         let total_amount = Decimal::from_str(&asset_summary.total_amount).ok()?;
-
-        let asset_value = match &asset_summary.value_in_base {
-            Some(value_str) => {
-                let value = Decimal::from_str(value_str).ok()?;
-                if total_amount != Decimal::ZERO {
-                    carry_forward_unit_values.insert(asset_id.clone(), value / total_amount);
-                }
-                value
-            }
-            None => {
-                if total_amount == Decimal::ZERO {
-                    Decimal::ZERO
-                } else {
-                    carry_forward_unit_values
-                        .get(&asset_id)
-                        .copied()
-                        .map(|unit_value| unit_value * total_amount)
-                        .unwrap_or(Decimal::ZERO)
-                }
-            }
-        };
+        let asset_value = asset_valuation.value;
 
         total_value += asset_value;
 
@@ -358,6 +347,41 @@ fn compute_history_valuation_with_carry_forward(
         total_value,
         prospective_capital_gains_tax,
     })
+}
+
+fn compute_history_asset_valuations_with_carry_forward(
+    by_asset: &[crate::portfolio::AssetSummary],
+    carry_forward_unit_values: &mut HashMap<String, Decimal>,
+) -> Option<Vec<HistoryAssetValuation>> {
+    by_asset
+        .iter()
+        .map(|asset_summary| {
+            let asset_id = AssetId::from_asset(&asset_summary.asset).to_string();
+            let total_amount = Decimal::from_str(&asset_summary.total_amount).ok()?;
+            let value = match &asset_summary.value_in_base {
+                Some(value_str) => {
+                    let value = Decimal::from_str(value_str).ok()?;
+                    if total_amount != Decimal::ZERO {
+                        carry_forward_unit_values.insert(asset_id.clone(), value / total_amount);
+                    }
+                    value
+                }
+                None => {
+                    if total_amount == Decimal::ZERO {
+                        Decimal::ZERO
+                    } else {
+                        carry_forward_unit_values
+                            .get(&asset_id)
+                            .copied()
+                            .map(|unit_value| unit_value * total_amount)
+                            .unwrap_or(Decimal::ZERO)
+                    }
+                }
+            };
+
+            Some(HistoryAssetValuation { asset_id, value })
+        })
+        .collect()
 }
 
 async fn collect_history_cost_basis_backfill(
@@ -547,6 +571,15 @@ struct HistoryPointInput<'a> {
     account_ids: &'a [Id],
 }
 
+struct StackedHistoryPointInput<'a> {
+    target_currency: &'a str,
+    as_of_date: NaiveDate,
+    timestamp: String,
+    capital_gains_tax_rate: Option<Decimal>,
+    include_latent_tax_adjustment: bool,
+    cost_basis_backfill: &'a HashMap<String, HistoryCostBasisBackfill>,
+}
+
 async fn build_history_point_for_date(
     service: &PortfolioService,
     config: &ResolvedConfig,
@@ -588,6 +621,208 @@ async fn build_history_point_for_date(
         },
         current_total_value,
     ))
+}
+
+async fn build_stacked_history_point_for_date(
+    service: &PortfolioService,
+    config: &ResolvedConfig,
+    input: StackedHistoryPointInput<'_>,
+    carry_forward_unit_values: &mut HashMap<String, Decimal>,
+    series_by_key: &mut HashMap<String, StackedHistorySeries>,
+    series_order: &mut Vec<String>,
+) -> Result<StackedHistoryPoint> {
+    let query = PortfolioQuery {
+        as_of_date: input.as_of_date,
+        currency: input.target_currency.to_string(),
+        currency_decimals: config.display.currency_decimals,
+        grouping: Grouping::Both,
+        include_detail: true,
+        capital_gains_tax_rate: input.capital_gains_tax_rate,
+        equity_valuation_adjustment: None,
+        account_ids: Vec::new(),
+    };
+
+    let snapshot = service.calculate(&query).await?;
+    let history_point_value = history_total_value_from_snapshot(
+        &snapshot,
+        config,
+        HistoryValueMode::Portfolio {
+            include_latent_tax_adjustment: input.include_latent_tax_adjustment,
+        },
+        input.capital_gains_tax_rate,
+        input.cost_basis_backfill,
+        carry_forward_unit_values,
+    )?;
+
+    let mut components = Vec::new();
+    let mut account_component_values = HashMap::<String, Decimal>::new();
+
+    if let Some(accounts) = snapshot.by_account.as_ref() {
+        for account in accounts {
+            let key = account_series_key(&account.account_id);
+            remember_series(
+                series_by_key,
+                series_order,
+                StackedHistorySeries {
+                    key: key.clone(),
+                    label: format!("{} / {}", account.connection_name, account.account_name),
+                    series_type: "account".to_string(),
+                    account_id: Some(account.account_id.clone()),
+                    account_name: Some(account.account_name.clone()),
+                    connection_name: Some(account.connection_name.clone()),
+                    parent_key: None,
+                    asset: None,
+                },
+            );
+        }
+    }
+
+    if let Some(assets) = snapshot.by_asset.as_ref() {
+        let asset_valuations =
+            compute_history_asset_valuations_with_carry_forward(assets, carry_forward_unit_values)
+                .unwrap_or_default();
+        for (asset_summary, asset_valuation) in assets.iter().zip(asset_valuations.iter()) {
+            let total_amount = Decimal::from_str(&asset_summary.total_amount).unwrap_or_default();
+            let Some(holdings) = asset_summary.holdings.as_ref() else {
+                continue;
+            };
+            for holding in holdings {
+                let holding_amount = Decimal::from_str(&holding.amount).unwrap_or_default();
+                let value = if total_amount == Decimal::ZERO {
+                    Decimal::ZERO
+                } else {
+                    asset_valuation.value * holding_amount / total_amount
+                };
+                let account_entry = account_component_values
+                    .entry(holding.account_id.clone())
+                    .or_insert(Decimal::ZERO);
+                *account_entry += value;
+                let key = account_asset_series_key(&holding.account_id, &asset_valuation.asset_id);
+                remember_series(
+                    series_by_key,
+                    series_order,
+                    StackedHistorySeries {
+                        key: key.clone(),
+                        label: format!(
+                            "{} / {}",
+                            holding.account_name,
+                            asset_display_label(&asset_summary.asset)
+                        ),
+                        series_type: "account_asset".to_string(),
+                        account_id: Some(holding.account_id.clone()),
+                        account_name: Some(holding.account_name.clone()),
+                        connection_name: None,
+                        parent_key: Some(account_series_key(&holding.account_id)),
+                        asset: Some(serde_json::to_value(&asset_summary.asset)?),
+                    },
+                );
+                components.push(StackedHistoryComponent {
+                    series_key: key,
+                    value: format_base_currency_value(value, config.display.currency_decimals),
+                });
+            }
+        }
+    }
+
+    if let Some(accounts) = snapshot.by_account.as_ref() {
+        for account in accounts {
+            let value = account_component_values
+                .get(&account.account_id)
+                .copied()
+                .or_else(|| {
+                    account
+                        .value_in_base
+                        .as_deref()
+                        .and_then(|value| Decimal::from_str(value).ok())
+                })
+                .unwrap_or(Decimal::ZERO);
+            components.push(StackedHistoryComponent {
+                series_key: account_series_key(&account.account_id),
+                value: format_base_currency_value(value, config.display.currency_decimals),
+            });
+        }
+    }
+
+    if input.include_latent_tax_adjustment {
+        if let Some(tax) = history_point_value
+            .prospective_capital_gains_tax
+            .as_deref()
+            .and_then(|value| Decimal::from_str(value).ok())
+            .filter(|tax| *tax > Decimal::ZERO)
+        {
+            let key = account_series_key(LATENT_CAPITAL_GAINS_TAX_ACCOUNT_ID);
+            remember_series(
+                series_by_key,
+                series_order,
+                StackedHistorySeries {
+                    key: key.clone(),
+                    label: config
+                        .portfolio
+                        .latent_capital_gains_tax
+                        .account_name
+                        .clone(),
+                    series_type: "account".to_string(),
+                    account_id: Some(LATENT_CAPITAL_GAINS_TAX_ACCOUNT_ID.to_string()),
+                    account_name: Some(
+                        config
+                            .portfolio
+                            .latent_capital_gains_tax
+                            .account_name
+                            .clone(),
+                    ),
+                    connection_name: Some("Virtual".to_string()),
+                    parent_key: None,
+                    asset: None,
+                },
+            );
+            components.push(StackedHistoryComponent {
+                series_key: key,
+                value: format_base_currency_value(-tax, config.display.currency_decimals),
+            });
+        }
+    }
+
+    Ok(StackedHistoryPoint {
+        timestamp: input.timestamp,
+        date: input.as_of_date.to_string(),
+        total_value: history_point_value.total_value,
+        components,
+    })
+}
+
+fn remember_series(
+    series_by_key: &mut HashMap<String, StackedHistorySeries>,
+    series_order: &mut Vec<String>,
+    series: StackedHistorySeries,
+) {
+    if series_by_key.contains_key(&series.key) {
+        return;
+    }
+    series_order.push(series.key.clone());
+    series_by_key.insert(series.key.clone(), series);
+}
+
+fn account_series_key(account_id: &str) -> String {
+    format!("account:{account_id}")
+}
+
+fn account_asset_series_key(account_id: &str, asset_id: &str) -> String {
+    format!("account_asset:{account_id}:{asset_id}")
+}
+
+fn asset_display_label(asset: &Asset) -> String {
+    match asset {
+        Asset::Currency { iso_code } => iso_code.clone(),
+        Asset::ManualValue { name, .. } => name.clone(),
+        Asset::Equity { ticker, exchange } => match exchange.as_deref() {
+            Some(exchange) if !exchange.is_empty() => format!("{ticker}.{exchange}"),
+            _ => ticker.clone(),
+        },
+        Asset::Crypto { symbol, network } => match network.as_deref() {
+            Some(network) if !network.is_empty() => format!("{symbol} ({network})"),
+            _ => symbol.clone(),
+        },
+    }
 }
 
 fn parse_tax_rate_fraction(rate: &str, context: &str) -> Result<Decimal> {
@@ -835,7 +1070,7 @@ pub async fn fetch_historical_prices(
                     tokio::time::sleep(delay).await;
                 }
             }
-            Asset::Currency { .. } => {}
+            Asset::Currency { .. } | Asset::ManualValue { .. } => {}
         }
     }
 
@@ -843,14 +1078,18 @@ pub async fn fetch_historical_prices(
 
     if include_fx {
         for asset_cache in &asset_caches {
-            if let Asset::Currency { iso_code } = &asset_cache.asset {
-                let base = iso_code.to_uppercase();
-                if base == target_currency_upper {
-                    continue;
-                }
-                let key = (base.clone(), target_currency_upper.clone());
-                if !fx_cache.contains_key(&key) {
-                    fx_cache.insert(key.clone(), load_fx_cache(&store, &key.0, &key.1).await?);
+            let base_currency = match &asset_cache.asset {
+                Asset::Currency { iso_code } => Some(iso_code),
+                Asset::ManualValue { currency, .. } => Some(currency),
+                Asset::Equity { .. } | Asset::Crypto { .. } => None,
+            };
+            if let Some(base_currency) = base_currency {
+                let base = base_currency.to_uppercase();
+                if base != target_currency_upper {
+                    let key = (base.clone(), target_currency_upper.clone());
+                    if !fx_cache.contains_key(&key) {
+                        fx_cache.insert(key.clone(), load_fx_cache(&store, &key.0, &key.1).await?);
+                    }
                 }
             }
         }
@@ -881,6 +1120,15 @@ pub async fn fetch_historical_prices(
                     Asset::Currency { iso_code } => {
                         if include_fx {
                             let base = iso_code.to_uppercase();
+                            if base != target_currency_upper {
+                                ensure_fx_rate(&mut fx_ctx, &base, &target_currency_upper, current)
+                                    .await?;
+                            }
+                        }
+                    }
+                    Asset::ManualValue { currency, .. } => {
+                        if include_fx {
+                            let base = currency.to_uppercase();
                             if base != target_currency_upper {
                                 ensure_fx_rate(&mut fx_ctx, &base, &target_currency_upper, current)
                                     .await?;
@@ -1549,8 +1797,8 @@ pub async fn portfolio_snapshot(
                         );
                         log_price_staleness(&asset_key, &check);
                     }
-                    Asset::Currency { .. } => {
-                        // Currency doesn't need price lookup (only FX)
+                    Asset::Currency { .. } | Asset::ManualValue { .. } => {
+                        // Currency and manual value assets don't need price lookup (only FX).
                     }
                 }
             }
@@ -1784,6 +2032,117 @@ pub async fn portfolio_history_for_accounts(
         },
     )
     .await
+}
+
+pub async fn portfolio_stacked_history(
+    storage: Arc<dyn Storage>,
+    config: &ResolvedConfig,
+    currency: Option<String>,
+    start: Option<String>,
+    end: Option<String>,
+    granularity: String,
+    include_prices: bool,
+) -> Result<StackedHistoryOutput> {
+    let today = Utc::now().date_naive();
+    let start_date = start
+        .as_ref()
+        .map(|s| parse_portfolio_date_bound(s, DateRangeBound::Start, today))
+        .transpose()?;
+    let end_date = end
+        .as_ref()
+        .map(|s| parse_portfolio_date_bound(s, DateRangeBound::End, today))
+        .transpose()?;
+    let start_date_output = start_date.map(|date| date.to_string());
+    let end_date_output = end_date.map(|date| date.to_string());
+
+    let granularity_enum = match granularity.as_str() {
+        "none" | "full" => Granularity::Full,
+        "hourly" => Granularity::Hourly,
+        "daily" => Granularity::Daily,
+        "weekly" => Granularity::Weekly,
+        "monthly" => Granularity::Monthly,
+        "yearly" => Granularity::Yearly,
+        _ => anyhow::bail!(
+            "Invalid granularity: {granularity}. Use: none, full, hourly, daily, weekly, monthly, yearly"
+        ),
+    };
+
+    let store: Arc<dyn MarketDataStore> = Arc::new(JsonlMarketDataStore::new(&config.data_dir));
+    let storage_arc: Arc<dyn Storage> = storage;
+    let options = CollectOptions {
+        account_ids: Vec::new(),
+        include_prices,
+        include_fx: false,
+        target_currency: currency.clone(),
+    };
+    let change_points = collect_change_points(&storage_arc, &store, &options).await?;
+    let filtered_by_date = filter_by_date_range(change_points, start_date, end_date);
+    let filtered =
+        filter_by_granularity(filtered_by_date, granularity_enum, CoalesceStrategy::Last);
+    let target_currency = currency.unwrap_or_else(|| config.reporting_currency.clone());
+
+    if filtered.is_empty() {
+        return Ok(StackedHistoryOutput {
+            currency: target_currency,
+            start_date: start_date_output,
+            end_date: end_date_output,
+            granularity,
+            series: Vec::new(),
+            points: Vec::new(),
+        });
+    }
+
+    let market_data = Arc::new(configure_history_market_data(
+        MarketDataServiceBuilder::new(store, config.data_dir.clone())
+            .with_quote_staleness(config.refresh.price_staleness)
+            .offline_only()
+            .build()
+            .await,
+        config,
+    ));
+    let service = PortfolioService::new(storage_arc.clone(), market_data);
+    let account_ids = Vec::new();
+    let cost_basis_backfill =
+        collect_history_cost_basis_backfill(storage_arc.as_ref(), &account_ids).await?;
+    let (capital_gains_tax_rate, include_latent_tax_adjustment) =
+        resolve_capital_gains_tax_rate(config, None)?;
+
+    let mut series_by_key = HashMap::<String, StackedHistorySeries>::new();
+    let mut series_order = Vec::<String>::new();
+    let mut points = Vec::with_capacity(filtered.len());
+    let mut carry_forward_unit_values: HashMap<String, Decimal> = HashMap::new();
+
+    for change_point in &filtered {
+        let point = build_stacked_history_point_for_date(
+            &service,
+            config,
+            StackedHistoryPointInput {
+                target_currency: &target_currency,
+                as_of_date: change_point.timestamp.date_naive(),
+                timestamp: change_point.timestamp.to_rfc3339(),
+                capital_gains_tax_rate,
+                include_latent_tax_adjustment,
+                cost_basis_backfill: &cost_basis_backfill,
+            },
+            &mut carry_forward_unit_values,
+            &mut series_by_key,
+            &mut series_order,
+        )
+        .await?;
+        points.push(point);
+    }
+
+    Ok(StackedHistoryOutput {
+        currency: target_currency,
+        start_date: start_date_output,
+        end_date: end_date_output,
+        granularity,
+        series: series_order
+            .into_iter()
+            .filter_map(|key| series_by_key.remove(&key))
+            .collect(),
+        points,
+    })
 }
 
 pub async fn latent_capital_gains_tax_history(
@@ -3094,6 +3453,24 @@ mod tests {
             _ => anyhow::bail!("expected currency asset"),
         }
 
+        let manual_value = parse_asset("value:Expected Housing Value")?;
+        match manual_value {
+            Asset::ManualValue { name, currency } => {
+                assert_eq!(name, "Expected Housing Value");
+                assert_eq!(currency, "USD");
+            }
+            _ => anyhow::bail!("expected manual value asset"),
+        }
+
+        let manual_value = parse_asset("manual_value:eur:Foreign Property")?;
+        match manual_value {
+            Asset::ManualValue { name, currency } => {
+                assert_eq!(name, "Foreign Property");
+                assert_eq!(currency, "eur");
+            }
+            _ => anyhow::bail!("expected manual value asset"),
+        }
+
         Ok(())
     }
 
@@ -3104,6 +3481,8 @@ mod tests {
         assert!(parse_asset("equity:").is_err());
         assert!(parse_asset("crypto:   ").is_err());
         assert!(parse_asset("currency:").is_err());
+        assert!(parse_asset("value:").is_err());
+        assert!(parse_asset("value:USD:").is_err());
     }
 
     #[test]
