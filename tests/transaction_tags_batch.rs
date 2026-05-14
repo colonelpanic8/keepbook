@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use anyhow::Result;
-use keepbook::app::set_transaction_categories;
+use keepbook::app::set_transaction_tags;
 use keepbook::config::{
     AiConfig, DisplayConfig, GitConfig, HistoryConfig, IgnoreConfig, PortfolioConfig,
     RefreshConfig, ResolvedConfig, SpendingConfig, TrayConfig,
@@ -26,8 +26,7 @@ fn resolved_config(data_dir: &Path) -> ResolvedConfig {
 }
 
 #[tokio::test]
-async fn set_transaction_categories_appends_category_patches_for_selected_transactions(
-) -> Result<()> {
+async fn set_transaction_tags_appends_tag_patches_for_selected_transactions() -> Result<()> {
     let dir = tempfile::tempdir()?;
     let storage = MemoryStorage::new();
     let config = resolved_config(dir.path());
@@ -41,21 +40,21 @@ async fn set_transaction_categories_appends_category_patches_for_selected_transa
         .append_transactions(&account.id, &[coffee.clone(), lunch.clone()])
         .await?;
 
-    let output = set_transaction_categories(
+    let output = set_transaction_tags(
         &storage,
         &config,
         vec![
             (account.id.to_string(), coffee.id.to_string()),
             (account.id.to_string(), lunch.id.to_string()),
         ],
-        Some("Dining".to_string()),
+        vec!["Dining".to_string()],
         false,
     )
     .await?;
 
     assert_eq!(output["success"], true);
     assert_eq!(output["updated_count"], 2);
-    assert_eq!(output["category"], "Dining");
+    assert_eq!(output["tags"], serde_json::json!(["Dining"]));
 
     let patches = storage
         .get_transaction_annotation_patches(&account.id)

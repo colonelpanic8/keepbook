@@ -12,6 +12,7 @@ use crate::config::ResolvedConfig;
 use crate::models::{Id, TransactionAnnotation, TransactionAnnotationPatch};
 use crate::storage::{find_account, find_connection, Storage};
 
+use super::classification::provider_virtual_tag_hierarchy;
 use super::maybe_auto_commit;
 
 const TRANSACTION_RULES_FILE: &str = "transaction_rules.jsonl";
@@ -19,13 +20,11 @@ const TRANSACTION_RULES_FILE: &str = "transaction_rules.jsonl";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransactionRule {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub set_category: Option<String>,
+    pub set_tags: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub set_subcategory: Option<String>,
+    pub set_subtags: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub set_description: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub set_tags: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub match_account_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -33,9 +32,9 @@ pub struct TransactionRule {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub match_description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub match_category: Option<String>,
+    pub match_tag: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub match_subcategory: Option<String>,
+    pub match_subtag: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub match_status: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -47,26 +46,22 @@ pub struct TransactionRuleInput<'a> {
     pub account_id: &'a str,
     pub account_name: &'a str,
     pub description: &'a str,
-    pub category: &'a str,
-    pub subcategory: &'a str,
+    pub tag: &'a str,
+    pub subtag: &'a str,
     pub status: &'a str,
     pub amount: &'a str,
 }
 
 #[derive(Debug, Clone)]
 struct TransactionRuleAction {
-    set_category: Option<String>,
-    set_subcategory: Option<String>,
-    set_description: Option<String>,
     set_tags: Option<Vec<String>>,
+    set_subtags: Option<Vec<String>>,
+    set_description: Option<String>,
 }
 
 impl TransactionRuleAction {
     fn is_empty(&self) -> bool {
-        self.set_category.is_none()
-            && self.set_subcategory.is_none()
-            && self.set_description.is_none()
-            && self.set_tags.is_none()
+        self.set_tags.is_none() && self.set_subtags.is_none() && self.set_description.is_none()
     }
 }
 
@@ -76,8 +71,8 @@ struct CompiledTransactionRule {
     match_account_id: Option<Regex>,
     match_account_name: Option<Regex>,
     match_description: Option<Regex>,
-    match_category: Option<Regex>,
-    match_subcategory: Option<Regex>,
+    match_tag: Option<Regex>,
+    match_subtag: Option<Regex>,
     match_status: Option<Regex>,
     match_amount: Option<Regex>,
 }
@@ -103,10 +98,9 @@ impl CompiledTransactionRule {
 
     fn from_rule(rule_index: usize, rule: &TransactionRule) -> Result<Self> {
         let action = TransactionRuleAction {
-            set_category: normalize_action_value(rule.set_category.as_deref()),
-            set_subcategory: normalize_action_value(rule.set_subcategory.as_deref()),
-            set_description: normalize_action_value(rule.set_description.as_deref()),
             set_tags: normalize_tag_values(rule.set_tags.as_deref()),
+            set_subtags: normalize_tag_values(rule.set_subtags.as_deref()),
+            set_description: normalize_action_value(rule.set_description.as_deref()),
         };
         if action.is_empty() {
             anyhow::bail!(
@@ -130,24 +124,16 @@ impl CompiledTransactionRule {
                 "match_description",
                 &rule.match_description,
             )?,
-            match_category: Self::compile_field(
-                rule_index,
-                "match_category",
-                &rule.match_category,
-            )?,
-            match_subcategory: Self::compile_field(
-                rule_index,
-                "match_subcategory",
-                &rule.match_subcategory,
-            )?,
+            match_tag: Self::compile_field(rule_index, "match_tag", &rule.match_tag)?,
+            match_subtag: Self::compile_field(rule_index, "match_subtag", &rule.match_subtag)?,
             match_status: Self::compile_field(rule_index, "match_status", &rule.match_status)?,
             match_amount: Self::compile_field(rule_index, "match_amount", &rule.match_amount)?,
         };
         let has_any_matcher = compiled.match_account_id.is_some()
             || compiled.match_account_name.is_some()
             || compiled.match_description.is_some()
-            || compiled.match_category.is_some()
-            || compiled.match_subcategory.is_some()
+            || compiled.match_tag.is_some()
+            || compiled.match_subtag.is_some()
             || compiled.match_status.is_some()
             || compiled.match_amount.is_some();
         if !has_any_matcher {
@@ -169,8 +155,8 @@ impl CompiledTransactionRule {
         Self::match_field(&self.match_account_id, input.account_id)
             && Self::match_field(&self.match_account_name, input.account_name)
             && Self::match_field(&self.match_description, input.description)
-            && Self::match_field(&self.match_category, input.category)
-            && Self::match_field(&self.match_subcategory, input.subcategory)
+            && Self::match_field(&self.match_tag, input.tag)
+            && Self::match_field(&self.match_subtag, input.subtag)
             && Self::match_field(&self.match_status, input.status)
             && Self::match_field(&self.match_amount, input.amount)
     }
@@ -190,16 +176,6 @@ impl TransactionRuleMatcher {
             .iter()
             .find(|rule| rule.is_match(input))
             .map(|rule| &rule.action)
-    }
-
-    pub fn match_category<'a>(&'a self, input: &TransactionRuleInput<'_>) -> Option<&'a str> {
-        self.match_rule(input)
-            .and_then(|action| action.set_category.as_deref())
-    }
-
-    pub fn match_subcategory<'a>(&'a self, input: &TransactionRuleInput<'_>) -> Option<&'a str> {
-        self.match_rule(input)
-            .and_then(|action| action.set_subcategory.as_deref())
     }
 
     pub fn len(&self) -> usize {
@@ -407,25 +383,28 @@ pub async fn apply_transaction_rules(
             {
                 continue;
             }
-            let existing_category = existing_annotation
+            let existing_tag = existing_annotation
                 .and_then(|annotation| annotation.tags.as_ref())
                 .and_then(|tags| tags.iter().find(|tag| !tag.trim().is_empty()))
                 .map(String::as_str)
                 .map(str::trim)
                 .filter(|value| !value.is_empty());
-            let metadata_category = tx
-                .standardized_metadata
-                .as_ref()
-                .and_then(|metadata| metadata.merchant_category_label.as_deref())
-                .map(str::trim)
-                .filter(|value| !value.is_empty());
-            let match_category = existing_category.or(metadata_category).unwrap_or("");
-            let existing_subcategory = existing_annotation
+            let existing_subtag = existing_annotation
                 .and_then(|annotation| annotation.subtags.as_ref())
                 .and_then(|subtags| subtags.iter().find(|subtag| !subtag.trim().is_empty()))
                 .map(String::as_str)
                 .map(str::trim)
                 .filter(|value| !value.is_empty());
+            let provider_hierarchy = provider_virtual_tag_hierarchy(
+                tx.standardized_metadata.as_ref(),
+                &tx.synchronizer_data,
+            );
+            let match_tag = existing_tag
+                .or_else(|| provider_hierarchy.tags.first().map(String::as_str))
+                .unwrap_or("");
+            let match_subtag = existing_subtag
+                .or_else(|| provider_hierarchy.subtags.first().map(String::as_str))
+                .unwrap_or("");
             let existing_description = existing_annotation
                 .and_then(|annotation| annotation.description.as_deref())
                 .map(str::trim)
@@ -433,13 +412,16 @@ pub async fn apply_transaction_rules(
             let existing_tags = existing_annotation
                 .and_then(|annotation| annotation.tags.as_ref())
                 .filter(|tags| !tags.is_empty());
+            let existing_subtags = existing_annotation
+                .and_then(|annotation| annotation.subtags.as_ref())
+                .filter(|subtags| !subtags.is_empty());
             let status = format!("{:?}", tx.status).to_lowercase();
             let Some(action) = matcher.match_rule(&TransactionRuleInput {
                 account_id: account.id.as_str(),
                 account_name: &account.name,
                 description: &tx.description,
-                category: match_category,
-                subcategory: existing_subcategory.unwrap_or(""),
+                tag: match_tag,
+                subtag: match_subtag,
                 status: &status,
                 amount: &tx.amount,
             }) else {
@@ -448,20 +430,6 @@ pub async fn apply_transaction_rules(
 
             matched_count += 1;
 
-            let category_update = if action.set_category.is_some()
-                && (opts.overwrite || existing_category.is_none())
-            {
-                action.set_category.clone()
-            } else {
-                None
-            };
-            let subcategory_update = if action.set_subcategory.is_some()
-                && (opts.overwrite || existing_subcategory.is_none())
-            {
-                action.set_subcategory.clone()
-            } else {
-                None
-            };
             let description_update = if action.set_description.is_some()
                 && (opts.overwrite || existing_description.is_none())
             {
@@ -473,15 +441,16 @@ pub async fn apply_transaction_rules(
                 if action.set_tags.is_some() && (opts.overwrite || existing_tags.is_none()) {
                     action.set_tags.clone()
                 } else {
-                    category_update.clone().map(|tag| vec![tag])
+                    None
                 };
-            let subtags_update = subcategory_update.clone().map(|subtag| vec![subtag]);
+            let subtags_update =
+                if action.set_subtags.is_some() && (opts.overwrite || existing_subtags.is_none()) {
+                    action.set_subtags.clone()
+                } else {
+                    None
+                };
 
-            if category_update.is_none()
-                && subcategory_update.is_none()
-                && description_update.is_none()
-                && tags_update.is_none()
-            {
+            if description_update.is_none() && tags_update.is_none() && subtags_update.is_none() {
                 skipped_existing_action_count += 1;
                 continue;
             }
@@ -492,15 +461,14 @@ pub async fn apply_transaction_rules(
                 "transaction_id": tx.id.to_string(),
                 "description": tx.description.clone(),
                 "amount": tx.amount.clone(),
-                "set_category": category_update,
-                "set_subcategory": subcategory_update,
                 "set_description": description_update,
                 "set_tags": tags_update,
                 "set_subtags": subtags_update,
-                "previous_category": existing_category,
-                "previous_subcategory": existing_subcategory,
+                "previous_tag": existing_tag,
+                "previous_subtag": existing_subtag,
                 "previous_description": existing_description,
                 "previous_tags": existing_tags,
+                "previous_subtags": existing_subtags,
             }));
             patches.push(TransactionAnnotationPatch {
                 transaction_id: tx.id,

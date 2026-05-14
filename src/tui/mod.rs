@@ -32,7 +32,7 @@ use crate::storage::Storage;
 const LOAD_START_DATE: &str = "1900-01-01";
 const LOAD_END_DATE: &str = "9999-12-31";
 const POLL_INTERVAL: Duration = Duration::from_millis(200);
-const CATEGORY_RULES_FILE: &str = "transaction_rules.jsonl";
+const TRANSACTION_RULES_FILE: &str = "transaction_rules.jsonl";
 const OPENAI_REGEX_SUGGESTION_MODEL_ENV: &str = "KEEPBOOK_REGEX_LLM_MODEL";
 const OPENAI_REGEX_SUGGESTION_MODEL_DEFAULT: &str = "gpt-4o-mini";
 const OPENAI_CHAT_COMPLETIONS_URL: &str = "https://api.openai.com/v1/chat/completions";
@@ -40,15 +40,13 @@ const OPENAI_TIMEOUT_SECS: u64 = 12;
 const SPENDING_IGNORE_TAGS: [&str; 3] = ["ignore_spending", "ignore-spending", "ignore:spending"];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct TransactionCategoryRule {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    set_category: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    set_subcategory: Option<String>,
+struct TransactionTagRule {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     set_description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     set_tags: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    set_subtags: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     match_account_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -56,9 +54,9 @@ struct TransactionCategoryRule {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     match_description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    match_category: Option<String>,
+    match_tag: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    match_subcategory: Option<String>,
+    match_subtag: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     match_status: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -66,29 +64,29 @@ struct TransactionCategoryRule {
 }
 
 #[derive(Debug, Clone)]
-struct TransactionCategoryRuleInput<'a> {
+struct TransactionTagRuleInput<'a> {
     account_id: &'a str,
     account_name: &'a str,
     description: &'a str,
-    category: &'a str,
-    subcategory: &'a str,
+    tag: &'a str,
+    subtag: &'a str,
     status: &'a str,
     amount: &'a str,
 }
 
 #[derive(Debug, Clone)]
-struct CompiledTransactionCategoryRule {
-    category: Option<String>,
+struct CompiledTransactionTagRule {
+    tag: Option<String>,
     account_id: Option<Regex>,
     account_name: Option<Regex>,
     description: Option<Regex>,
-    category_matcher: Option<Regex>,
-    subcategory_matcher: Option<Regex>,
+    tag_matcher: Option<Regex>,
+    subtag_matcher: Option<Regex>,
     status: Option<Regex>,
     amount: Option<Regex>,
 }
 
-impl CompiledTransactionCategoryRule {
+impl CompiledTransactionTagRule {
     fn compile_field(
         rule_index: usize,
         field_name: &str,
@@ -102,38 +100,34 @@ impl CompiledTransactionCategoryRule {
             return Ok(None);
         }
         let compiled = Regex::new(trimmed).with_context(|| {
-            format!("Invalid category rule regex [{rule_index}] {field_name}: {trimmed}")
+            format!("Invalid tag rule regex [{rule_index}] {field_name}: {trimmed}")
         })?;
         Ok(Some(compiled))
     }
 
-    fn from_rule(rule_index: usize, rule: &TransactionCategoryRule) -> Result<Self> {
-        let category = rule
-            .set_category
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(ToOwned::to_owned);
+    fn from_rule(rule_index: usize, rule: &TransactionTagRule) -> Result<Self> {
+        let tag = rule.set_tags.as_ref().and_then(|tags| {
+            tags.iter()
+                .map(String::as_str)
+                .map(str::trim)
+                .find(|value| !value.is_empty())
+                .map(ToOwned::to_owned)
+        });
         let description = rule
             .set_description
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty());
-        let subcategory = rule
-            .set_subcategory
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty());
-        let tags = rule
-            .set_tags
+        let subtags = rule
+            .set_subtags
             .as_ref()
-            .map(|tags| tags.iter().any(|tag| !tag.trim().is_empty()))
+            .map(|subtags| subtags.iter().any(|subtag| !subtag.trim().is_empty()))
             .unwrap_or(false);
-        if category.is_none() && description.is_none() && subcategory.is_none() && !tags {
-            anyhow::bail!("Invalid category rule [{rule_index}]: at least one action is required");
+        if tag.is_none() && description.is_none() && !subtags {
+            anyhow::bail!("Invalid tag rule [{rule_index}]: at least one action is required");
         }
         let compiled = Self {
-            category,
+            tag,
             account_id: Self::compile_field(
                 rule_index,
                 "match_account_id",
@@ -149,28 +143,20 @@ impl CompiledTransactionCategoryRule {
                 "match_description",
                 &rule.match_description,
             )?,
-            category_matcher: Self::compile_field(
-                rule_index,
-                "match_category",
-                &rule.match_category,
-            )?,
-            subcategory_matcher: Self::compile_field(
-                rule_index,
-                "match_subcategory",
-                &rule.match_subcategory,
-            )?,
+            tag_matcher: Self::compile_field(rule_index, "match_tag", &rule.match_tag)?,
+            subtag_matcher: Self::compile_field(rule_index, "match_subtag", &rule.match_subtag)?,
             status: Self::compile_field(rule_index, "match_status", &rule.match_status)?,
             amount: Self::compile_field(rule_index, "match_amount", &rule.match_amount)?,
         };
         let has_any_matcher = compiled.account_id.is_some()
             || compiled.account_name.is_some()
             || compiled.description.is_some()
-            || compiled.category_matcher.is_some()
-            || compiled.subcategory_matcher.is_some()
+            || compiled.tag_matcher.is_some()
+            || compiled.subtag_matcher.is_some()
             || compiled.status.is_some()
             || compiled.amount.is_some();
         if !has_any_matcher {
-            anyhow::bail!("Invalid category rule [{rule_index}]: at least one matcher is required");
+            anyhow::bail!("Invalid tag rule [{rule_index}]: at least one matcher is required");
         }
         Ok(compiled)
     }
@@ -182,51 +168,49 @@ impl CompiledTransactionCategoryRule {
             .unwrap_or(true)
     }
 
-    fn is_match(&self, input: &TransactionCategoryRuleInput<'_>) -> bool {
+    fn is_match(&self, input: &TransactionTagRuleInput<'_>) -> bool {
         Self::match_field(&self.account_id, input.account_id)
             && Self::match_field(&self.account_name, input.account_name)
             && Self::match_field(&self.description, input.description)
-            && Self::match_field(&self.category_matcher, input.category)
-            && Self::match_field(&self.subcategory_matcher, input.subcategory)
+            && Self::match_field(&self.tag_matcher, input.tag)
+            && Self::match_field(&self.subtag_matcher, input.subtag)
             && Self::match_field(&self.status, input.status)
             && Self::match_field(&self.amount, input.amount)
     }
 }
 
 #[derive(Debug, Clone, Default)]
-struct TransactionCategoryMatcher {
-    rules: Vec<CompiledTransactionCategoryRule>,
+struct TransactionTagMatcher {
+    rules: Vec<CompiledTransactionTagRule>,
 }
 
-impl TransactionCategoryMatcher {
-    fn match_category<'a>(&'a self, input: &TransactionCategoryRuleInput<'_>) -> Option<&'a str> {
+impl TransactionTagMatcher {
+    fn match_tag<'a>(&'a self, input: &TransactionTagRuleInput<'_>) -> Option<&'a str> {
         self.rules
             .iter()
-            .find(|rule| rule.category.is_some() && rule.is_match(input))
-            .and_then(|rule| rule.category.as_deref())
+            .find(|rule| rule.tag.is_some() && rule.is_match(input))
+            .and_then(|rule| rule.tag.as_deref())
     }
 }
 
-fn category_rules_path(data_dir: &Path) -> PathBuf {
-    data_dir.join(CATEGORY_RULES_FILE)
+fn tag_rules_path(data_dir: &Path) -> PathBuf {
+    data_dir.join(TRANSACTION_RULES_FILE)
 }
 
-fn load_transaction_category_rules(
-    path: &Path,
-) -> Result<(TransactionCategoryMatcher, Option<String>)> {
+fn load_transaction_tag_rules(path: &Path) -> Result<(TransactionTagMatcher, Option<String>)> {
     if !path.exists() {
-        return Ok((TransactionCategoryMatcher::default(), None));
+        return Ok((TransactionTagMatcher::default(), None));
     }
 
     let file = std::fs::File::open(path)
-        .with_context(|| format!("Unable to open category rules file: {}", path.display()))?;
+        .with_context(|| format!("Unable to open tag rules file: {}", path.display()))?;
     let mut compiled_rules = Vec::new();
     let mut warning_count = 0usize;
 
     for (line_number, line) in BufReader::new(file).lines().enumerate() {
         let raw = line.with_context(|| {
             format!(
-                "Unable to read category rules file line {}: {}",
+                "Unable to read tag rules file line {}: {}",
                 line_number + 1,
                 path.display()
             )
@@ -236,14 +220,14 @@ fn load_transaction_category_rules(
             continue;
         }
 
-        let parsed: TransactionCategoryRule = match serde_json::from_str(trimmed) {
+        let parsed: TransactionTagRule = match serde_json::from_str(trimmed) {
             Ok(rule) => rule,
             Err(_) => {
                 warning_count += 1;
                 continue;
             }
         };
-        match CompiledTransactionCategoryRule::from_rule(compiled_rules.len(), &parsed) {
+        match CompiledTransactionTagRule::from_rule(compiled_rules.len(), &parsed) {
             Ok(compiled) => compiled_rules.push(compiled),
             Err(_) => warning_count += 1,
         }
@@ -251,7 +235,7 @@ fn load_transaction_category_rules(
 
     let warning = if warning_count > 0 {
         Some(format!(
-            "Skipped {warning_count} invalid category rules from {}",
+            "Skipped {warning_count} invalid tag rules from {}",
             path.display()
         ))
     } else {
@@ -259,18 +243,17 @@ fn load_transaction_category_rules(
     };
 
     Ok((
-        TransactionCategoryMatcher {
+        TransactionTagMatcher {
             rules: compiled_rules,
         },
         warning,
     ))
 }
 
-fn append_transaction_category_rule(path: &Path, rule: &TransactionCategoryRule) -> Result<()> {
+fn append_transaction_tag_rule(path: &Path, rule: &TransactionTagRule) -> Result<()> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).with_context(|| {
-            format!("Unable to create category rules dir: {}", parent.display())
-        })?;
+        fs::create_dir_all(parent)
+            .with_context(|| format!("Unable to create tag rules dir: {}", parent.display()))?;
     }
 
     let mut file = OpenOptions::new()
@@ -279,15 +262,15 @@ fn append_transaction_category_rule(path: &Path, rule: &TransactionCategoryRule)
         .open(path)
         .with_context(|| {
             format!(
-                "Unable to open category rules file for append: {}",
+                "Unable to open tag rules file for append: {}",
                 path.display()
             )
         })?;
-    let encoded = serde_json::to_string(rule).context("Unable to encode category rule")?;
+    let encoded = serde_json::to_string(rule).context("Unable to encode tag rule")?;
     file.write_all(encoded.as_bytes())
-        .context("Unable to write category rule")?;
+        .context("Unable to write tag rule")?;
     file.write_all(b"\n")
-        .context("Unable to terminate category rule record")?;
+        .context("Unable to terminate tag rule record")?;
     Ok(())
 }
 
@@ -327,7 +310,7 @@ fn sanitize_openai_regex(raw: &str) -> String {
 }
 
 async fn suggest_regex_with_openai(
-    category: &str,
+    tag: &str,
     account_name: &str,
     status: &str,
     amount: &str,
@@ -341,7 +324,7 @@ async fn suggest_regex_with_openai(
         .unwrap_or_else(|_| OPENAI_REGEX_SUGGESTION_MODEL_DEFAULT.to_string());
 
     let prompt = format!(
-        "Category: {category}\nAccount: {account_name}\nStatus: {status}\nAmount: {amount}\nDescription: {description}\n\nReturn exactly one Rust regex pattern that matches this description style and avoids overmatching unrelated merchants. No explanation."
+        "Tag: {tag}\nAccount: {account_name}\nStatus: {status}\nAmount: {amount}\nDescription: {description}\n\nReturn exactly one Rust regex pattern that matches this description style and avoids overmatching unrelated merchants. No explanation."
     );
 
     let client = reqwest::Client::builder()
@@ -583,14 +566,14 @@ impl SelectedTransactionInfo {
 }
 
 #[derive(Debug, Clone)]
-enum CategoryAction {
+enum TagAction {
     OneOff { source: SelectedTransactionInfo },
     Rule { source: SelectedTransactionInfo },
 }
 
 #[derive(Debug, Clone)]
-struct CategoryModalState {
-    action: CategoryAction,
+struct TagModalState {
+    action: TagAction,
     input: String,
     cursor: usize,
     suggestions: Vec<String>,
@@ -601,7 +584,7 @@ struct CategoryModalState {
 #[derive(Debug, Clone)]
 struct RegexModalState {
     source: SelectedTransactionInfo,
-    category: String,
+    tag: String,
     input: String,
     cursor: usize,
     used_llm_suggestion: bool,
@@ -609,7 +592,7 @@ struct RegexModalState {
 
 #[derive(Debug, Clone)]
 enum ModalState {
-    Category(CategoryModalState),
+    Tag(TagModalState),
     Regex(RegexModalState),
 }
 
@@ -617,8 +600,8 @@ struct AppState {
     active_view: TuiView,
     all_transactions: Vec<TransactionOutput>,
     visible_transaction_indices: Vec<usize>,
-    category_matcher: TransactionCategoryMatcher,
-    category_rules_path: PathBuf,
+    tag_matcher: TransactionTagMatcher,
+    tag_rules_path: PathBuf,
     net_worth_points: Vec<HistoryPoint>,
     visible_net_worth_indices: Vec<usize>,
     net_worth_interval: NetWorthInterval,
@@ -636,8 +619,8 @@ struct AppState {
 impl AppState {
     fn new(
         all_transactions: Vec<TransactionOutput>,
-        category_matcher: TransactionCategoryMatcher,
-        category_rules_path: PathBuf,
+        tag_matcher: TransactionTagMatcher,
+        tag_rules_path: PathBuf,
         include_ignored: bool,
         options: TuiOptions,
     ) -> Self {
@@ -646,8 +629,8 @@ impl AppState {
             active_view: options.start_view,
             all_transactions,
             visible_transaction_indices: Vec::new(),
-            category_matcher,
-            category_rules_path,
+            tag_matcher,
+            tag_rules_path,
             net_worth_points: Vec::new(),
             visible_net_worth_indices: Vec::new(),
             net_worth_interval: options.net_worth_interval,
@@ -725,11 +708,11 @@ pub async fn run_tui(
 ) -> Result<()> {
     let include_ignored = false;
     let transactions = load_transactions(storage.as_ref(), config, include_ignored).await?;
-    let rules_path = category_rules_path(&config.data_dir);
-    let (category_matcher, rule_warning) = load_transaction_category_rules(&rules_path)?;
+    let rules_path = tag_rules_path(&config.data_dir);
+    let (tag_matcher, rule_warning) = load_transaction_tag_rules(&rules_path)?;
     let mut app_state = AppState::new(
         transactions,
-        category_matcher,
+        tag_matcher,
         rules_path,
         include_ignored,
         options,
@@ -768,8 +751,8 @@ async fn refresh_transactions_and_rules(
     app_state.transaction_last_refresh_utc = Utc::now();
     app_state.recompute_visible_transactions();
 
-    let (matcher, warning) = load_transaction_category_rules(&app_state.category_rules_path)?;
-    app_state.category_matcher = matcher;
+    let (matcher, warning) = load_transaction_tag_rules(&app_state.tag_rules_path)?;
+    app_state.tag_matcher = matcher;
     if warning.is_some() {
         app_state.status_message = warning;
     }
@@ -809,12 +792,12 @@ fn select_transaction_by_id(
 }
 
 #[derive(Debug, Clone, Copy)]
-enum CategoryActionKind {
+enum TagActionKind {
     OneOff,
     Rule,
 }
 
-fn collect_category_catalog(app_state: &AppState) -> Vec<String> {
+fn collect_tag_catalog(app_state: &AppState) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut out = Vec::new();
     let mut add = |raw: &str| {
@@ -828,34 +811,21 @@ fn collect_category_catalog(app_state: &AppState) -> Vec<String> {
         }
     };
 
-    for rule in &app_state.category_matcher.rules {
-        if let Some(category) = &rule.category {
-            add(category);
+    for rule in &app_state.tag_matcher.rules {
+        if let Some(tag) = &rule.tag {
+            add(tag);
         }
     }
     for tx in &app_state.all_transactions {
-        if let Some(category) = tx
-            .annotation
-            .as_ref()
-            .and_then(|ann| ann.tags.as_ref())
-            .and_then(|tags| tags.first())
-            .map(String::as_str)
-        {
-            add(category);
-        }
-        if let Some(category) = tx
-            .standardized_metadata
-            .as_ref()
-            .and_then(|md| md.merchant_category_label.as_deref())
-        {
-            add(category);
+        if let Some(tag) = tx.tags.first().map(String::as_str) {
+            add(tag);
         }
     }
     out.sort_by_key(|value| value.to_lowercase());
     out
 }
 
-fn filtered_category_suggestions(catalog: &[String], input: &str) -> Vec<String> {
+fn filtered_tag_suggestions(catalog: &[String], input: &str) -> Vec<String> {
     let trimmed = input.trim().to_lowercase();
     if trimmed.is_empty() {
         return catalog.to_vec();
@@ -875,8 +845,8 @@ fn filtered_category_suggestions(catalog: &[String], input: &str) -> Vec<String>
     starts_with
 }
 
-fn refresh_category_suggestions(modal: &mut CategoryModalState, catalog: &[String]) {
-    modal.suggestions = filtered_category_suggestions(catalog, &modal.input);
+fn refresh_tag_suggestions(modal: &mut TagModalState, catalog: &[String]) {
+    modal.suggestions = filtered_tag_suggestions(catalog, &modal.input);
     if modal.suggestions.is_empty() {
         modal.selected_suggestion = 0;
     } else {
@@ -886,7 +856,7 @@ fn refresh_category_suggestions(modal: &mut CategoryModalState, catalog: &[Strin
     }
 }
 
-fn selected_category_from_modal(modal: &CategoryModalState) -> String {
+fn selected_tag_from_modal(modal: &TagModalState) -> String {
     if modal.selection_active {
         if let Some(choice) = modal.suggestions.get(modal.selected_suggestion) {
             return choice.clone();
@@ -979,10 +949,10 @@ fn apply_text_input_edit(input: &mut String, cursor: &mut usize, key: KeyCode) -
     }
 }
 
-fn open_category_modal_for_selected(
+fn open_tag_modal_for_selected(
     app_state: &mut AppState,
     tx_table_state: &TableState,
-    action_kind: CategoryActionKind,
+    action_kind: TagActionKind,
 ) {
     let Some(selected) = selected_transaction(app_state, tx_table_state) else {
         app_state.status_message = Some("No transaction selected".to_string());
@@ -990,14 +960,14 @@ fn open_category_modal_for_selected(
     };
 
     let default_input =
-        resolved_transaction_category(selected, &app_state.category_matcher).unwrap_or_default();
+        resolved_transaction_tag(selected, &app_state.tag_matcher).unwrap_or_default();
     let source = SelectedTransactionInfo::from_output(selected);
     let action = match action_kind {
-        CategoryActionKind::OneOff => CategoryAction::OneOff { source },
-        CategoryActionKind::Rule => CategoryAction::Rule { source },
+        TagActionKind::OneOff => TagAction::OneOff { source },
+        TagActionKind::Rule => TagAction::Rule { source },
     };
-    let catalog = collect_category_catalog(app_state);
-    let mut modal = CategoryModalState {
+    let catalog = collect_tag_catalog(app_state);
+    let mut modal = TagModalState {
         action,
         input: default_input,
         cursor: 0,
@@ -1006,21 +976,21 @@ fn open_category_modal_for_selected(
         selection_active: false,
     };
     modal.cursor = text_char_len(&modal.input);
-    refresh_category_suggestions(&mut modal, &catalog);
-    app_state.modal = Some(ModalState::Category(modal));
+    refresh_tag_suggestions(&mut modal, &catalog);
+    app_state.modal = Some(ModalState::Tag(modal));
 }
 
-async fn handle_category_modal_key(
+async fn handle_tag_modal_key(
     app_state: &mut AppState,
     tx_table_state: &mut TableState,
     storage: Arc<dyn Storage>,
     config: &ResolvedConfig,
-    mut modal: CategoryModalState,
+    mut modal: TagModalState,
     key: KeyCode,
 ) -> Result<Option<ModalState>> {
     match key {
         KeyCode::Esc => {
-            app_state.status_message = Some("Recategorization canceled".to_string());
+            app_state.status_message = Some("Retagging canceled".to_string());
             Ok(None)
         }
         KeyCode::Up => {
@@ -1028,7 +998,7 @@ async fn handle_category_modal_key(
                 modal.selection_active = true;
                 modal.selected_suggestion = modal.selected_suggestion.saturating_sub(1);
             }
-            Ok(Some(ModalState::Category(modal)))
+            Ok(Some(ModalState::Tag(modal)))
         }
         KeyCode::Down => {
             if !modal.suggestions.is_empty() {
@@ -1036,7 +1006,7 @@ async fn handle_category_modal_key(
                 let max = modal.suggestions.len().saturating_sub(1);
                 modal.selected_suggestion = (modal.selected_suggestion + 1).min(max);
             }
-            Ok(Some(ModalState::Category(modal)))
+            Ok(Some(ModalState::Tag(modal)))
         }
         KeyCode::Tab => {
             if let Some(choice) = modal.suggestions.get(modal.selected_suggestion) {
@@ -1044,19 +1014,19 @@ async fn handle_category_modal_key(
                 modal.cursor = text_char_len(&modal.input);
                 modal.selection_active = false;
             }
-            let catalog = collect_category_catalog(app_state);
-            refresh_category_suggestions(&mut modal, &catalog);
-            Ok(Some(ModalState::Category(modal)))
+            let catalog = collect_tag_catalog(app_state);
+            refresh_tag_suggestions(&mut modal, &catalog);
+            Ok(Some(ModalState::Tag(modal)))
         }
         KeyCode::Enter => {
-            let chosen_category = selected_category_from_modal(&modal).trim().to_string();
+            let chosen_tag = selected_tag_from_modal(&modal).trim().to_string();
             match modal.action.clone() {
-                CategoryAction::OneOff { source } => {
-                    let clear_category = chosen_category.is_empty();
-                    let category_value = if clear_category {
-                        None
+                TagAction::OneOff { source } => {
+                    let clear_tag = chosen_tag.is_empty();
+                    let tags = if clear_tag {
+                        Vec::new()
                     } else {
-                        Some(chosen_category)
+                        vec![chosen_tag]
                     };
                     app::set_transaction_annotation(
                         storage.as_ref(),
@@ -1067,10 +1037,9 @@ async fn handle_category_modal_key(
                         false,
                         None,
                         false,
-                        category_value,
-                        clear_category,
-                        None,
+                        tags,
                         false,
+                        clear_tag,
                         vec![],
                         false,
                         false,
@@ -1086,23 +1055,22 @@ async fn handle_category_modal_key(
                         &source.transaction_id,
                     );
                     app_state.status_message = Some(format!(
-                        "{} category for {}",
-                        if clear_category { "Cleared" } else { "Updated" },
+                        "{} tag for {}",
+                        if clear_tag { "Cleared" } else { "Updated" },
                         source.transaction_id
                     ));
                     Ok(None)
                 }
-                CategoryAction::Rule { source } => {
-                    if chosen_category.is_empty() {
-                        app_state.status_message =
-                            Some("Rule category cannot be empty".to_string());
-                        return Ok(Some(ModalState::Category(modal)));
+                TagAction::Rule { source } => {
+                    if chosen_tag.is_empty() {
+                        app_state.status_message = Some("Rule tag cannot be empty".to_string());
+                        return Ok(Some(ModalState::Tag(modal)));
                     }
 
                     let mut regex_suggestion = fallback_regex_suggestion(&source.description);
                     let mut used_llm_suggestion = false;
                     match suggest_regex_with_openai(
-                        &chosen_category,
+                        &chosen_tag,
                         &source.account_name,
                         &source.status,
                         &source.amount,
@@ -1125,7 +1093,7 @@ async fn handle_category_modal_key(
                     let cursor = text_char_len(&regex_suggestion);
                     Ok(Some(ModalState::Regex(RegexModalState {
                         source,
-                        category: chosen_category,
+                        tag: chosen_tag,
                         input: regex_suggestion,
                         cursor,
                         used_llm_suggestion,
@@ -1136,10 +1104,10 @@ async fn handle_category_modal_key(
         _ => {
             if apply_text_input_edit(&mut modal.input, &mut modal.cursor, key) {
                 modal.selection_active = false;
-                let catalog = collect_category_catalog(app_state);
-                refresh_category_suggestions(&mut modal, &catalog);
+                let catalog = collect_tag_catalog(app_state);
+                refresh_tag_suggestions(&mut modal, &catalog);
             }
-            Ok(Some(ModalState::Category(modal)))
+            Ok(Some(ModalState::Tag(modal)))
         }
     }
 }
@@ -1166,28 +1134,26 @@ async fn handle_regex_modal_key(
                 return Ok(Some(ModalState::Regex(modal)));
             }
 
-            let rule = TransactionCategoryRule {
-                set_category: Some(modal.category.clone()),
-                set_subcategory: None,
+            let rule = TransactionTagRule {
                 set_description: None,
-                set_tags: None,
+                set_tags: Some(vec![modal.tag.clone()]),
+                set_subtags: None,
                 match_account_id: None,
                 match_account_name: exact_ci_regex_pattern(&modal.source.account_name),
                 match_description: Some(regex_pattern.to_string()),
-                match_category: None,
-                match_subcategory: None,
+                match_tag: None,
+                match_subtag: None,
                 match_status: None,
                 match_amount: None,
             };
-            append_transaction_category_rule(&app_state.category_rules_path, &rule)?;
-            let (matcher, warning) =
-                load_transaction_category_rules(&app_state.category_rules_path)?;
-            app_state.category_matcher = matcher;
+            append_transaction_tag_rule(&app_state.tag_rules_path, &rule)?;
+            let (matcher, warning) = load_transaction_tag_rules(&app_state.tag_rules_path)?;
+            app_state.tag_matcher = matcher;
             if let Some(message) = warning {
                 app_state.status_message = Some(message);
             } else {
                 app_state.status_message = Some(format!(
-                    "Added category rule for {} ({})",
+                    "Added tag rule for {} ({})",
                     modal.source.transaction_id,
                     if modal.used_llm_suggestion {
                         "LLM suggestion"
@@ -1223,9 +1189,8 @@ async fn handle_modal_key(
     };
 
     let next_modal = match modal_state {
-        ModalState::Category(modal) => {
-            handle_category_modal_key(app_state, tx_table_state, storage, config, modal, key)
-                .await?
+        ModalState::Tag(modal) => {
+            handle_tag_modal_key(app_state, tx_table_state, storage, config, modal, key).await?
         }
         ModalState::Regex(modal) => {
             handle_regex_modal_key(app_state, tx_table_state, modal, key).await?
@@ -1347,7 +1312,7 @@ async fn run_event_loop(
                 TuiView::Transactions => {
                     refresh_transactions_and_rules(app_state, storage.as_ref(), config).await?;
                     app_state.status_message =
-                        Some("Reloaded transactions and category rules".to_string());
+                        Some("Reloaded transactions and tag rules".to_string());
                 }
                 TuiView::NetWorth => {
                     refresh_net_worth(app_state, storage.clone(), config).await;
@@ -1366,18 +1331,10 @@ async fn run_event_loop(
                 ));
             }
             KeyCode::Char('c') if app_state.active_view == TuiView::Transactions => {
-                open_category_modal_for_selected(
-                    app_state,
-                    tx_table_state,
-                    CategoryActionKind::OneOff,
-                );
+                open_tag_modal_for_selected(app_state, tx_table_state, TagActionKind::OneOff);
             }
             KeyCode::Char('C') if app_state.active_view == TuiView::Transactions => {
-                open_category_modal_for_selected(
-                    app_state,
-                    tx_table_state,
-                    CategoryActionKind::Rule,
-                );
+                open_tag_modal_for_selected(app_state, tx_table_state, TagActionKind::Rule);
             }
             _ => {}
         }
@@ -1443,7 +1400,7 @@ fn centered_rect(
 
 fn render_modal(frame: &mut Frame<'_>, modal: &ModalState) {
     match modal {
-        ModalState::Category(category_modal) => render_category_modal(frame, category_modal),
+        ModalState::Tag(tag_modal) => render_tag_modal(frame, tag_modal),
         ModalState::Regex(regex_modal) => render_regex_modal(frame, regex_modal),
     }
 }
@@ -1466,17 +1423,17 @@ fn render_input_line(label: &str, input: &str, cursor: usize) -> Line<'static> {
     Line::from(spans)
 }
 
-fn render_category_modal(frame: &mut Frame<'_>, modal: &CategoryModalState) {
+fn render_tag_modal(frame: &mut Frame<'_>, modal: &TagModalState) {
     let popup = centered_rect(80, 62, frame.area());
     frame.render_widget(Clear, popup);
 
     let title = match &modal.action {
-        CategoryAction::OneOff { .. } => "Set Category",
-        CategoryAction::Rule { .. } => "Create Category Rule",
+        TagAction::OneOff { .. } => "Set Tag",
+        TagAction::Rule { .. } => "Create Tag Rule",
     };
     let source = match &modal.action {
-        CategoryAction::OneOff { source } => source,
-        CategoryAction::Rule { source } => source,
+        TagAction::OneOff { source } => source,
+        TagAction::Rule { source } => source,
     };
 
     let mut lines: Vec<Line<'_>> = vec![
@@ -1486,7 +1443,7 @@ fn render_category_modal(frame: &mut Frame<'_>, modal: &CategoryModalState) {
         )),
         Line::from(format!("description: {}", source.description)),
         Line::from(""),
-        render_input_line("category", &modal.input, modal.cursor),
+        render_input_line("tag", &modal.input, modal.cursor),
         Line::from("type to filter | left/right/home/end move | backspace/delete edit"),
         Line::from("up/down select | tab autocomplete | enter confirm | esc cancel"),
         Line::from(""),
@@ -1527,7 +1484,7 @@ fn render_regex_modal(frame: &mut Frame<'_>, modal: &RegexModalState) {
             "tx={}  account={}",
             modal.source.transaction_id, modal.source.account_name
         )),
-        Line::from(format!("category: {}", modal.category)),
+        Line::from(format!("tag: {}", modal.tag)),
         Line::from(""),
         render_input_line("regex", &modal.input, modal.cursor),
         Line::from("left/right/home/end move | backspace/delete edit"),
@@ -1622,7 +1579,7 @@ fn render_transactions_view(
                 Cell::from(transaction_date_string(tx)),
                 Cell::from(tx.account_name.clone()),
                 Cell::from(description.to_string()),
-                Cell::from(transaction_category_string(tx, &app_state.category_matcher)),
+                Cell::from(transaction_tag_string(tx, &app_state.tag_matcher)),
                 Cell::from(amount).style(amount_style),
                 Cell::from(asset_label(&tx.asset)),
                 Cell::from(tx.status.clone()),
@@ -1646,7 +1603,7 @@ fn render_transactions_view(
             "date",
             "account",
             "description",
-            "category",
+            "tag",
             "amount",
             "asset",
             "status",
@@ -1663,7 +1620,7 @@ fn render_transactions_view(
     frame.render_stateful_widget(table, table_area, table_state);
 
     let help = Paragraph::new(
-        "q/esc quit | tab/v switch view | j/k or arrows move | 1..5 span | [ ] cycle span | s sort | i ignored | r reload | c one-off category | C add regex rule",
+        "q/esc quit | tab/v switch view | j/k or arrows move | 1..5 span | [ ] cycle span | s sort | i ignored | r reload | c one-off tag | C add regex rule",
     )
     .block(Block::default().borders(Borders::ALL).title("Keys"));
     frame.render_widget(help, help_area);
@@ -1884,11 +1841,11 @@ fn transaction_date_string(tx: &TransactionOutput) -> String {
         .unwrap_or_else(|| tx.timestamp.clone())
 }
 
-fn resolved_transaction_category(
+fn resolved_transaction_tag(
     tx: &TransactionOutput,
-    matcher: &TransactionCategoryMatcher,
+    matcher: &TransactionTagMatcher,
 ) -> Option<String> {
-    let annotation_category = tx
+    let annotation_tag = tx
         .annotation
         .as_ref()
         .and_then(|ann| ann.tags.as_ref())
@@ -1897,47 +1854,42 @@ fn resolved_transaction_category(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned);
-    if annotation_category.is_some() {
-        return annotation_category;
+    if annotation_tag.is_some() {
+        return annotation_tag;
     }
 
-    let metadata_category = tx
-        .standardized_metadata
-        .as_ref()
-        .and_then(|md| md.merchant_category_label.as_deref())
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    let existing_subcategory = tx
-        .annotation
-        .as_ref()
-        .and_then(|ann| ann.subtags.as_ref())
-        .and_then(|subtags| subtags.first())
+    let effective_tag = tx
+        .tags
+        .first()
         .map(String::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty());
-    let rule_category = matcher
-        .match_category(&TransactionCategoryRuleInput {
+    let effective_subtag = tx
+        .subtags
+        .first()
+        .map(String::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let rule_tag = matcher
+        .match_tag(&TransactionTagRuleInput {
             account_id: &tx.account_id,
             account_name: &tx.account_name,
             description: &tx.description,
-            category: metadata_category.unwrap_or(""),
-            subcategory: existing_subcategory.unwrap_or(""),
+            tag: effective_tag.unwrap_or(""),
+            subtag: effective_subtag.unwrap_or(""),
             status: &tx.status,
             amount: &tx.amount,
         })
         .map(ToOwned::to_owned);
-    if rule_category.is_some() {
-        return rule_category;
+    if rule_tag.is_some() {
+        return rule_tag;
     }
 
-    metadata_category.map(ToOwned::to_owned)
+    effective_tag.map(ToOwned::to_owned)
 }
 
-fn transaction_category_string(
-    tx: &TransactionOutput,
-    matcher: &TransactionCategoryMatcher,
-) -> String {
-    resolved_transaction_category(tx, matcher).unwrap_or_else(|| "-".to_string())
+fn transaction_tag_string(tx: &TransactionOutput, matcher: &TransactionTagMatcher) -> String {
+    resolved_transaction_tag(tx, matcher).unwrap_or_else(|| "-".to_string())
 }
 
 fn transaction_amount_string(tx: &TransactionOutput, config: &ResolvedConfig) -> String {
@@ -2294,7 +2246,7 @@ mod tests {
                 tx("a", "2026-01-01T00:00:00+00:00", "1"),
                 tx("b", "2026-02-01T00:00:00+00:00", "1"),
             ],
-            TransactionCategoryMatcher::default(),
+            TransactionTagMatcher::default(),
             PathBuf::from("/tmp/transaction-rules-test.jsonl"),
             false,
             TuiOptions::default(),
@@ -2326,19 +2278,13 @@ mod tests {
     }
 
     #[test]
-    fn display_uses_annotation_category_when_present() {
-        let matcher = TransactionCategoryMatcher::default();
+    fn display_uses_annotation_tag_when_present() {
+        let matcher = TransactionTagMatcher::default();
         let mut t = tx("a", "2026-02-01T00:00:00+00:00", "1");
-        assert_eq!(transaction_category_string(&t, &matcher), "-");
+        assert_eq!(transaction_tag_string(&t, &matcher), "-");
 
-        t.standardized_metadata = Some(crate::models::TransactionStandardizedMetadata {
-            merchant_name: None,
-            merchant_category_code: None,
-            merchant_category_label: Some("Groceries".to_string()),
-            transaction_kind: None,
-            is_internal_transfer_hint: None,
-        });
-        assert_eq!(transaction_category_string(&t, &matcher), "Groceries");
+        t.tags = vec!["Groceries".to_string()];
+        assert_eq!(transaction_tag_string(&t, &matcher), "Groceries");
 
         t.annotation = Some(TransactionAnnotationOutput {
             description: None,
@@ -2347,32 +2293,31 @@ mod tests {
             subtags: None,
             effective_date: None,
         });
-        assert_eq!(transaction_category_string(&t, &matcher), "food");
+        assert_eq!(transaction_tag_string(&t, &matcher), "food");
     }
 
     #[test]
-    fn display_uses_rule_category_when_annotation_missing() {
+    fn display_uses_rule_tag_when_annotation_missing() {
         let mut t = tx("a", "2026-02-01T00:00:00+00:00", "1");
         t.description = "Starbucks #123".to_string();
 
-        let rule = TransactionCategoryRule {
-            set_category: Some("coffee".to_string()),
-            set_subcategory: None,
+        let rule = TransactionTagRule {
             set_description: None,
-            set_tags: None,
+            set_tags: Some(vec!["coffee".to_string()]),
+            set_subtags: None,
             match_account_id: None,
             match_account_name: exact_ci_regex_pattern("Checking"),
             match_description: Some("(?i)^starbucks".to_string()),
-            match_category: None,
-            match_subcategory: None,
+            match_tag: None,
+            match_subtag: None,
             match_status: None,
             match_amount: None,
         };
-        let matcher = TransactionCategoryMatcher {
-            rules: vec![CompiledTransactionCategoryRule::from_rule(0, &rule).expect("valid rule")],
+        let matcher = TransactionTagMatcher {
+            rules: vec![CompiledTransactionTagRule::from_rule(0, &rule).expect("valid rule")],
         };
 
-        assert_eq!(transaction_category_string(&t, &matcher), "coffee");
+        assert_eq!(transaction_tag_string(&t, &matcher), "coffee");
     }
 
     #[test]
@@ -2384,14 +2329,14 @@ mod tests {
     }
 
     #[test]
-    fn filtered_category_suggestions_prefers_prefix_matches() {
+    fn filtered_tag_suggestions_prefers_prefix_matches() {
         let catalog = vec![
             "Groceries".to_string(),
             "Coffee".to_string(),
             "Dining Out".to_string(),
             "Office Coffee".to_string(),
         ];
-        let out = filtered_category_suggestions(&catalog, "cof");
+        let out = filtered_tag_suggestions(&catalog, "cof");
         assert_eq!(
             out,
             vec!["Coffee".to_string(), "Office Coffee".to_string(),]
@@ -2399,9 +2344,9 @@ mod tests {
     }
 
     #[test]
-    fn selected_category_from_modal_uses_active_selection() {
-        let modal = CategoryModalState {
-            action: CategoryAction::OneOff {
+    fn selected_tag_from_modal_uses_active_selection() {
+        let modal = TagModalState {
+            action: TagAction::OneOff {
                 source: SelectedTransactionInfo {
                     account_id: "acct-1".to_string(),
                     account_name: "Checking".to_string(),
@@ -2417,7 +2362,7 @@ mod tests {
             selected_suggestion: 0,
             selection_active: true,
         };
-        assert_eq!(selected_category_from_modal(&modal), "Dining".to_string());
+        assert_eq!(selected_tag_from_modal(&modal), "Dining".to_string());
     }
 
     #[test]

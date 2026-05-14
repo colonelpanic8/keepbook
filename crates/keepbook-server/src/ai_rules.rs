@@ -17,9 +17,9 @@ pub struct AiRuleTransactionInput {
     pub amount: String,
     pub status: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub category: Option<String>,
+    pub tag: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub subcategory: Option<String>,
+    pub subtag: Option<String>,
     #[serde(default)]
     pub ignored_from_spending: bool,
 }
@@ -30,7 +30,7 @@ pub struct AiRuleSuggestionInput {
     #[serde(default)]
     pub transactions: Vec<AiRuleTransactionInput>,
     #[serde(default)]
-    pub existing_categories: Vec<String>,
+    pub existing_tags: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -158,10 +158,10 @@ fn openai_request_body(
     let context = json!({
         "user_prompt": prompt,
         "reporting_currency": config.reporting_currency,
-        "existing_categories": input.existing_categories,
+        "existing_tags": input.existing_tags,
         "current_ignore_rules": config.ignore.transaction_rules,
         "available_tools": [
-            "propose_categorization_rule",
+            "propose_tag_rule",
             "propose_ignore_rule",
             "propose_rename_rule"
         ],
@@ -187,13 +187,13 @@ Rules must be conservative:
 - Prefer regexes that match the selected merchant/title shape without catching unrelated merchants.
 - Include account/status/amount constraints when they materially reduce false positives.
 - Keep regexes compatible with Rust and JavaScript regex engines.
-- Use existing categories when they fit; propose a new category only if needed.
+- Use existing tags when they fit; propose a new tag only if needed.
 - For ignore rules, target spending exclusions such as transfers, reversals, duplicate cash movements, and non-spending bookkeeping entries.
 - For rename rules, preserve useful merchant/account detail and remove volatile IDs or noise.
 
 The keepbook config supports:
 - [[ignore.transaction_rules]] with regex fields: account_id, account_name, connection_id, connection_name, synchronizer, description, status, amount.
-- Transaction annotation patches for category/subcategory and display description.
+- Transaction annotation patches for tags/subtags and display description.
 "#
 }
 
@@ -201,8 +201,8 @@ fn rule_tools() -> Vec<Value> {
     vec![
         json!({
             "type": "function",
-            "name": "propose_categorization_rule",
-            "description": "Propose a transaction auto-categorization rule for matching future transactions.",
+            "name": "propose_tag_rule",
+            "description": "Propose a transaction auto-tagging rule for matching future transactions.",
             "strict": true,
             "parameters": {
                 "type": "object",
@@ -212,8 +212,8 @@ fn rule_tools() -> Vec<Value> {
                     "account_name_regex": {"type": "string", "description": "Regex matching account names, or an empty string if not needed."},
                     "status_regex": {"type": "string", "description": "Regex matching statuses, usually ^posted$."},
                     "amount_regex": {"type": "string", "description": "Regex matching amounts, or an empty string if not needed."},
-                    "category": {"type": "string"},
-                    "subcategory": {"type": "string", "description": "Subcategory or empty string."},
+                    "tag": {"type": "string"},
+                    "subtag": {"type": "string", "description": "Subtag or empty string."},
                     "matching_transaction_ids": {"type": "array", "items": {"type": "string"}},
                     "rationale": {"type": "string"}
                 },
@@ -222,8 +222,8 @@ fn rule_tools() -> Vec<Value> {
                     "account_name_regex",
                     "status_regex",
                     "amount_regex",
-                    "category",
-                    "subcategory",
+                    "tag",
+                    "subtag",
                     "matching_transaction_ids",
                     "rationale"
                 ]

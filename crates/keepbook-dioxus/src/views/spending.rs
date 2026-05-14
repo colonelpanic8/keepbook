@@ -30,7 +30,13 @@ pub(super) fn SpendingView(currency: String) -> Element {
             async move {
                 let today = current_date_string();
                 fetch_spending_dashboard(
-                    spending_query_string(selected_range, &start_text, &end_text, &today, &currency),
+                    spending_query_string(
+                        selected_range,
+                        &start_text,
+                        &end_text,
+                        &today,
+                        &currency,
+                    ),
                     spending_over_time_query_string(
                         selected_range,
                         &start_text,
@@ -66,19 +72,18 @@ pub(super) fn SpendingView(currency: String) -> Element {
     let resolved_end = loaded
         .map(|data| data.spending.end_date.clone())
         .unwrap_or_else(|| end_text.clone());
-    let categories = loaded
-        .map(|data| spending_categories(&data.spending))
+    let tags = loaded
+        .map(|data| spending_tags(&data.spending))
         .unwrap_or_default();
-    let category_colors = spending_category_color_map(&categories);
+    let tag_colors = spending_tag_color_map(&tags);
     let tag_options = loaded
-        .map(|data| transaction_tag_options(&data.transactions, &categories))
+        .map(|data| transaction_tag_options(&data.transactions, &tags))
         .unwrap_or_default();
     let total = loaded
         .and_then(|data| parse_money_input(&data.spending.total))
         .unwrap_or_default();
     let selected_total = selected.as_ref().and_then(|tag| {
-        categories
-            .iter()
+        tags.iter()
             .find(|entry| &entry.key == tag)
             .and_then(|entry| parse_money_input(&entry.total))
     });
@@ -102,7 +107,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
     let selected_tag_targets = filtered_transactions
         .iter()
         .filter(|transaction| selected_keys.contains(&transaction_key(transaction)))
-        .map(|transaction| TransactionCategoryTargetInput {
+        .map(|transaction| TransactionTagTargetInput {
             account_id: transaction.account_id.clone(),
             transaction_id: transaction.id.clone(),
         })
@@ -272,26 +277,26 @@ pub(super) fn SpendingView(currency: String) -> Element {
                         spending: data.spending_over_time.clone(),
                         selected: selected.clone(),
                         bucket_label: selected_bucket.label().to_string(),
-                        colors: category_colors.clone(),
-                        onclick: move |category| {
-                            selected_tag.set(Some(category));
+                        colors: tag_colors.clone(),
+                        onclick: move |tag| {
+                            selected_tag.set(Some(tag));
                             transaction_page.set(0);
                         }
                     }
                     div { class: "spending-layout",
                         div { class: "spending-chart-area",
                             SpendingPieChart {
-                                categories: categories.clone(),
+                                tags: tags.clone(),
                                 selected: selected.clone(),
                                 currency: data.spending.currency.clone(),
-                                colors: category_colors.clone(),
-                                onclick: move |category| {
-                                    selected_tag.set(Some(category));
+                                colors: tag_colors.clone(),
+                                onclick: move |tag| {
+                                    selected_tag.set(Some(tag));
                                     transaction_page.set(0);
                                 }
                             }
                         }
-                        div { class: "category-list",
+                        div { class: "tag-list",
                             div { class: "spending-total",
                                 span { class: "metric-label", "Total" }
                                 strong { "{format_full_money(total, &data.spending.currency)}" }
@@ -304,14 +309,14 @@ pub(super) fn SpendingView(currency: String) -> Element {
                                     small { "{selected_label}" }
                                 }
                             }
-                            for (index, entry) in categories.iter().enumerate() {
+                            for (index, entry) in tags.iter().enumerate() {
                                 TagRow {
                                     entry: entry.clone(),
-                                    color: spending_category_color_for(&category_colors, &entry.key, index),
+                                    color: spending_tag_color_for(&tag_colors, &entry.key, index),
                                     currency: data.spending.currency.clone(),
                                     selected: selected.as_ref() == Some(&entry.key),
-                                    onclick: move |category| {
-                                        selected_tag.set(Some(category));
+                                    onclick: move |tag| {
+                                        selected_tag.set(Some(tag));
                                         transaction_page.set(0);
                                     }
                                 }
@@ -383,7 +388,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
                         onairulesubmit: move |_| {
                             let prompt = ai_prompt().trim().to_string();
                             let transactions = selected_ai_transactions.clone();
-                            let existing_categories = tag_options.clone();
+                            let existing_tags = tag_options.clone();
                             ai_result.set(None);
                             if prompt.is_empty() {
                                 ai_status.set(Some("Enter a prompt for the rule assistant.".to_string()));
@@ -401,7 +406,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
                                     match suggest_ai_rules(AiRuleSuggestionInput {
                                         prompt,
                                         transactions,
-                                        existing_categories,
+                                        existing_tags,
                                     }).await {
                                         Ok(output) => {
                                             ai_status.set(Some(format!(
@@ -582,7 +587,7 @@ fn SpendingOverTimeChart(
                     y: y1,
                     width: bar_width,
                     height: (y0 - y1).max(0.6),
-                    color: spending_category_color_for(&colors, key, series_index),
+                    color: spending_tag_color_for(&colors, key, series_index),
                 });
             }
         }
@@ -695,7 +700,7 @@ fn SpendingOverTimeChart(
             div { class: "stacked-legend spending-bar-legend",
                 for (index, item) in series.iter().enumerate() {
                     {
-                        let color = spending_category_color_for(&colors, &item.key, index);
+                        let color = spending_tag_color_for(&colors, &item.key, index);
                         let key = item.key.clone();
                         let key_for_click = key.clone();
                         let class = if selected.as_ref() == Some(&key) {
@@ -723,13 +728,13 @@ fn SpendingOverTimeChart(
 
 #[component]
 fn SpendingPieChart(
-    categories: Vec<SpendingBreakdownEntry>,
+    tags: Vec<SpendingBreakdownEntry>,
     selected: Option<String>,
     currency: String,
     colors: HashMap<String, &'static str>,
     onclick: EventHandler<String>,
 ) -> Element {
-    let slices = pie_slices(&categories, &colors);
+    let slices = pie_slices(&tags, &colors);
     if slices.is_empty() {
         return rsx! {
             div { class: "chart-empty spending-empty",
@@ -755,7 +760,7 @@ fn SpendingPieChart(
             }
             circle { class: "pie-hole", cx: "130", cy: "130", r: "56" }
             text { class: "pie-center-label", x: "130", y: "124", "Spend" }
-            text { class: "pie-center-value", x: "130", y: "145", "{categories.len()}" }
+            text { class: "pie-center-value", x: "130", y: "145", "{tags.len()}" }
         }
     }
 }
@@ -769,9 +774,9 @@ fn TagRow(
     onclick: EventHandler<String>,
 ) -> Element {
     let class = if selected {
-        "category-row selected"
+        "tag-row selected"
     } else {
-        "category-row"
+        "tag-row"
     };
     let total = parse_money_input(&entry.total).unwrap_or_default();
 
@@ -780,11 +785,11 @@ fn TagRow(
             class: "{class}",
             onclick: move |_| onclick.call(entry.key.clone()),
             span {
-                class: "category-swatch",
+                class: "tag-swatch",
                 style: "background: {color};",
                 aria_hidden: "true",
             }
-            span { class: "category-name", "{entry.key}" }
+            span { class: "tag-name", "{entry.key}" }
             strong { "{format_full_money(total, &currency)}" }
             small { "{entry.transaction_count} tx" }
         }
@@ -818,7 +823,7 @@ fn TransactionList(
     ai_prompt: String,
     ai_status: Option<String>,
     ai_result: Option<AiRuleSuggestionsOutput>,
-    tag_targets: Vec<TransactionCategoryTargetInput>,
+    tag_targets: Vec<TransactionTagTargetInput>,
     onpromptchange: EventHandler<String>,
     onairulesubmit: EventHandler<MouseEvent>,
     ontagssave: EventHandler<SetTransactionTagsInput>,
@@ -904,7 +909,7 @@ fn TransactionList(
                 textarea {
                     class: "ai-rule-prompt",
                     value: "{ai_prompt}",
-                    placeholder: "Ask for a categorization, ignore, or rename rule for the selected transactions.",
+                    placeholder: "Ask for a tag, ignore, or rename rule for the selected transactions.",
                     oninput: move |event| onpromptchange.call(event.value())
                 }
                 div { class: "ai-rule-actions",
@@ -971,7 +976,7 @@ fn TransactionList(
                         }
                         TransactionSortHeader {
                             label: "Tags",
-                            field: TransactionSortField::Category,
+                            field: TransactionSortField::Tag,
                             selected_field: sort_field,
                             direction: sort_direction,
                             onsortfieldchange,
@@ -1008,8 +1013,8 @@ fn TransactionList(
                             }
                             span { "{transaction_date(&tx)}" }
                             strong { "{transaction_description(&tx)}" }
-                            span { class: "transaction-category-cell",
-                                div { class: "transaction-category-stack",
+                            span { class: "transaction-tag-cell",
+                                div { class: "transaction-tag-stack",
                                     TransactionTagsEditor {
                                         transaction: tx.clone(),
                                         tag_options: tag_options.clone(),
@@ -1048,7 +1053,7 @@ fn TransactionList(
 #[component]
 fn GroupTagsEditor(
     selected_count: usize,
-    tag_targets: Vec<TransactionCategoryTargetInput>,
+    tag_targets: Vec<TransactionTagTargetInput>,
     tag_options: Vec<String>,
     onclose: EventHandler<()>,
     ontagsbulksave: EventHandler<SetTransactionTagsInput>,
@@ -1090,7 +1095,7 @@ fn GroupTagsEditor(
                     }
                     div { class: "tag-entry-row",
                         input {
-                            class: "category-editor-input tag-entry-input",
+                            class: "tag-editor-input tag-entry-input",
                             r#type: "text",
                             list: "{list_id}",
                             value: "{draft}",
@@ -1104,7 +1109,7 @@ fn GroupTagsEditor(
                             }
                         }
                         button {
-                            class: "category-editor-button",
+                            class: "tag-editor-button",
                             title: "Add tag",
                             disabled: !can_add,
                             onclick: move |_| {
@@ -1128,7 +1133,7 @@ fn GroupTagsEditor(
                     }
                 }
             }
-            div { class: "group-category-row tag-action-row",
+            div { class: "group-tag-row tag-action-row",
                 button {
                     class: "control-button selected",
                     disabled: !has_selection || tags.is_empty(),
@@ -1212,7 +1217,7 @@ fn TransactionTagsEditor(
                 }
                 div { class: "tag-entry-row",
                     input {
-                        class: "category-editor-input tag-entry-input",
+                        class: "tag-editor-input tag-entry-input",
                         r#type: "text",
                         list: "{list_id}",
                         value: "{draft}",
@@ -1225,7 +1230,7 @@ fn TransactionTagsEditor(
                         }
                     }
                     button {
-                        class: "category-editor-button",
+                        class: "tag-editor-button",
                         title: "Add tag",
                         disabled: !can_add,
                         onclick: move |_| {
@@ -1237,13 +1242,13 @@ fn TransactionTagsEditor(
                 }
             }
             button {
-                class: "category-editor-button tag-save-button",
+                class: "tag-editor-button tag-save-button",
                 title: "Save tags",
                 disabled: !changed,
                 onclick: move |_| {
                     let tags = selected_tags();
                     ontagssave.call(SetTransactionTagsInput {
-                        transactions: vec![TransactionCategoryTargetInput {
+                        transactions: vec![TransactionTagTargetInput {
                             account_id: transaction.account_id.clone(),
                             transaction_id: transaction.id.clone(),
                         }],

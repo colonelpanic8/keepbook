@@ -52,15 +52,14 @@ async fn transaction_rules_append_and_apply_to_existing_transactions() -> Result
     let add_output = add_transaction_rule(
         &config,
         TransactionRule {
-            set_category: Some("Coffee".to_string()),
-            set_subcategory: None,
+            set_tags: Some(vec!["Coffee".to_string()]),
+            set_subtags: None,
             set_description: Some("Blue Bottle".to_string()),
-            set_tags: None,
             match_account_id: None,
             match_account_name: Some("(?i)^checking$".to_string()),
             match_description: Some("(?i)coffee".to_string()),
-            match_category: None,
-            match_subcategory: None,
+            match_tag: None,
+            match_subtag: None,
             match_status: None,
             match_amount: None,
         },
@@ -154,11 +153,11 @@ async fn transaction_rules_do_not_overwrite_existing_annotations_by_default() ->
         .append_transactions(&account.id, std::slice::from_ref(&lunch))
         .await?;
 
-    keepbook::app::set_transaction_categories(
+    keepbook::app::set_transaction_tags(
         &storage,
         &config,
         vec![(account.id.to_string(), lunch.id.to_string())],
-        Some("Manual".to_string()),
+        vec!["Manual".to_string()],
         false,
     )
     .await?;
@@ -166,15 +165,14 @@ async fn transaction_rules_do_not_overwrite_existing_annotations_by_default() ->
     add_transaction_rule(
         &config,
         TransactionRule {
-            set_category: Some("Dining".to_string()),
-            set_subcategory: None,
+            set_tags: Some(vec!["Dining".to_string()]),
+            set_subtags: None,
             set_description: Some("Lunch".to_string()),
-            set_tags: None,
             match_account_id: None,
             match_account_name: None,
             match_description: Some("(?i)lunch".to_string()),
-            match_category: None,
-            match_subcategory: None,
+            match_tag: None,
+            match_subtag: None,
             match_status: None,
             match_amount: None,
         },
@@ -256,7 +254,7 @@ async fn transaction_rules_do_not_overwrite_existing_annotations_by_default() ->
 }
 
 #[tokio::test]
-async fn transaction_rules_can_remap_metadata_category_and_set_subcategory() -> Result<()> {
+async fn transaction_rules_can_remap_provider_tag_and_set_subtag() -> Result<()> {
     let dir = tempfile::tempdir()?;
     let storage = JsonFileStorage::new(dir.path());
     let config = resolved_config(dir.path());
@@ -286,15 +284,14 @@ async fn transaction_rules_can_remap_metadata_category_and_set_subcategory() -> 
     add_transaction_rule(
         &config,
         TransactionRule {
-            set_category: Some("Food".to_string()),
-            set_subcategory: Some("Groceries".to_string()),
-            set_description: None,
             set_tags: Some(vec!["Food".to_string()]),
+            set_subtags: Some(vec!["Groceries".to_string()]),
+            set_description: None,
             match_account_id: None,
             match_account_name: None,
             match_description: None,
-            match_category: Some("(?i)^groceries$".to_string()),
-            match_subcategory: None,
+            match_tag: Some("(?i)^food$".to_string()),
+            match_subtag: Some("(?i)^groceries$".to_string()),
             match_status: None,
             match_amount: None,
         },
@@ -303,15 +300,14 @@ async fn transaction_rules_can_remap_metadata_category_and_set_subcategory() -> 
     add_transaction_rule(
         &config,
         TransactionRule {
-            set_category: Some("Food".to_string()),
-            set_subcategory: None,
-            set_description: None,
             set_tags: Some(vec!["Food".to_string()]),
+            set_subtags: None,
+            set_description: None,
             match_account_id: None,
             match_account_name: None,
             match_description: None,
-            match_category: Some("(?i)^food and drink$".to_string()),
-            match_subcategory: None,
+            match_tag: Some("(?i)^food$".to_string()),
+            match_subtag: Some("(?i)^food & drink$".to_string()),
             match_status: None,
             match_amount: None,
         },

@@ -315,57 +315,6 @@ impl ApiState {
         )
     }
 
-    pub async fn set_transaction_category(
-        &self,
-        input: TransactionCategoryInput,
-    ) -> Result<serde_json::Value> {
-        let state = self.snapshot().await;
-        let category = input
-            .category
-            .map(|category| category.trim().to_string())
-            .filter(|category| !category.is_empty());
-        keepbook::app::set_transaction_annotation(
-            state.storage.as_ref(),
-            &state.config,
-            &input.account_id,
-            &input.transaction_id,
-            None,
-            false,
-            None,
-            false,
-            category,
-            input.clear_category,
-            None,
-            false,
-            Vec::new(),
-            false,
-            false,
-            None,
-            false,
-        )
-        .await
-    }
-
-    pub async fn set_transaction_categories(
-        &self,
-        input: TransactionCategoryBatchInput,
-    ) -> Result<serde_json::Value> {
-        let state = self.snapshot().await;
-        let targets = input
-            .transactions
-            .into_iter()
-            .map(|transaction| (transaction.account_id, transaction.transaction_id))
-            .collect::<Vec<_>>();
-        keepbook::app::set_transaction_categories(
-            state.storage.as_ref(),
-            &state.config,
-            targets,
-            input.category,
-            input.clear_category,
-        )
-        .await
-    }
-
     pub async fn set_transaction_tags(
         &self,
         input: TransactionTagsBatchInput,
@@ -382,6 +331,26 @@ impl ApiState {
             targets,
             input.tags,
             input.clear_tags,
+        )
+        .await
+    }
+
+    pub async fn set_transaction_subtags(
+        &self,
+        input: TransactionSubtagsBatchInput,
+    ) -> Result<serde_json::Value> {
+        let state = self.snapshot().await;
+        let targets = input
+            .transactions
+            .into_iter()
+            .map(|transaction| (transaction.account_id, transaction.transaction_id))
+            .collect::<Vec<_>>();
+        keepbook::app::set_transaction_subtags(
+            state.storage.as_ref(),
+            &state.config,
+            targets,
+            input.subtags,
+            input.clear_subtags,
         )
         .await
     }
@@ -911,39 +880,29 @@ pub struct TransactionQuery {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct TransactionCategoryInput {
+pub struct TransactionTagTargetInput {
     pub account_id: String,
     pub transaction_id: String,
-    #[serde(default)]
-    pub category: Option<String>,
-    #[serde(default)]
-    pub clear_category: bool,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct TransactionCategoryTargetInput {
-    pub account_id: String,
-    pub transaction_id: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct TransactionCategoryBatchInput {
-    #[serde(default)]
-    pub transactions: Vec<TransactionCategoryTargetInput>,
-    #[serde(default)]
-    pub category: Option<String>,
-    #[serde(default)]
-    pub clear_category: bool,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct TransactionTagsBatchInput {
     #[serde(default)]
-    pub transactions: Vec<TransactionCategoryTargetInput>,
+    pub transactions: Vec<TransactionTagTargetInput>,
     #[serde(default)]
     pub tags: Vec<String>,
     #[serde(default)]
     pub clear_tags: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TransactionSubtagsBatchInput {
+    #[serde(default)]
+    pub transactions: Vec<TransactionTagTargetInput>,
+    #[serde(default)]
+    pub subtags: Vec<String>,
+    #[serde(default)]
+    pub clear_subtags: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1360,12 +1319,11 @@ pub fn router(state: ApiState) -> Router {
         .route("/api/accounts", get(accounts))
         .route("/api/balances", get(balances))
         .route("/api/transactions", get(transactions))
-        .route("/api/transactions/category", post(set_transaction_category))
-        .route(
-            "/api/transactions/category/batch",
-            post(set_transaction_categories),
-        )
         .route("/api/transactions/tags/batch", post(set_transaction_tags))
+        .route(
+            "/api/transactions/subtags/batch",
+            post(set_transaction_subtags),
+        )
         .route("/api/spending", get(spending))
         .route("/api/tray", get(tray))
         .route(
@@ -1461,27 +1419,19 @@ async fn transactions(
 }
 
 #[cfg(feature = "http")]
-async fn set_transaction_category(
-    State(state): State<ApiState>,
-    Json(input): Json<TransactionCategoryInput>,
-) -> Result<Json<serde_json::Value>, ApiError> {
-    Ok(Json(state.set_transaction_category(input).await?))
-}
-
-#[cfg(feature = "http")]
-async fn set_transaction_categories(
-    State(state): State<ApiState>,
-    Json(input): Json<TransactionCategoryBatchInput>,
-) -> Result<Json<serde_json::Value>, ApiError> {
-    Ok(Json(state.set_transaction_categories(input).await?))
-}
-
-#[cfg(feature = "http")]
 async fn set_transaction_tags(
     State(state): State<ApiState>,
     Json(input): Json<TransactionTagsBatchInput>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     Ok(Json(state.set_transaction_tags(input).await?))
+}
+
+#[cfg(feature = "http")]
+async fn set_transaction_subtags(
+    State(state): State<ApiState>,
+    Json(input): Json<TransactionSubtagsBatchInput>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    Ok(Json(state.set_transaction_subtags(input).await?))
 }
 
 #[cfg(feature = "http")]

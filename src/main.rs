@@ -239,7 +239,7 @@ enum Command {
         #[arg(long, default_value = "outflow")]
         direction: String,
 
-        /// Grouping: none, category, subcategory, merchant, account, tag (default: none)
+        /// Grouping: none, tag, subtag, merchant, account
         #[arg(long, default_value = "none")]
         group_by: String,
 
@@ -264,8 +264,8 @@ enum Command {
         include_empty: bool,
     },
 
-    /// Spending report grouped by category
-    SpendingCategories {
+    /// Spending report grouped by top-level tag
+    SpendingTags {
         /// Period granularity: daily, weekly, monthly, quarterly, yearly, range, custom
         #[arg(long, default_value = "monthly")]
         period: String,
@@ -314,7 +314,7 @@ enum Command {
         #[arg(long, default_value = "outflow")]
         direction: String,
 
-        /// Limit category rows per period
+        /// Limit tag rows per period
         #[arg(long)]
         top: Option<usize>,
 
@@ -448,22 +448,6 @@ enum SetCommand {
         #[arg(long)]
         clear_note: bool,
 
-        /// Set category
-        #[arg(long, conflicts_with = "clear_category")]
-        category: Option<String>,
-
-        /// Clear category
-        #[arg(long)]
-        clear_category: bool,
-
-        /// Set subcategory
-        #[arg(long, conflicts_with = "clear_subcategory")]
-        subcategory: Option<String>,
-
-        /// Clear subcategory
-        #[arg(long)]
-        clear_subcategory: bool,
-
         /// Set tags (repeatable)
         #[arg(long, short)]
         tag: Vec<String>,
@@ -475,6 +459,18 @@ enum SetCommand {
         /// Clear tags field
         #[arg(long)]
         clear_tags: bool,
+
+        /// Set subtags (repeatable)
+        #[arg(long)]
+        subtag: Vec<String>,
+
+        /// Set subtags to empty array
+        #[arg(long, conflicts_with = "clear_subtags")]
+        subtags_empty: bool,
+
+        /// Clear subtags field
+        #[arg(long)]
+        clear_subtags: bool,
 
         /// Override reporting date (YYYY-MM-DD) without changing synced timestamp
         #[arg(long, conflicts_with = "clear_effective_date")]
@@ -514,22 +510,6 @@ enum ProposeCommand {
         #[arg(long)]
         clear_note: bool,
 
-        /// Set category
-        #[arg(long, conflicts_with = "clear_category")]
-        category: Option<String>,
-
-        /// Clear category
-        #[arg(long)]
-        clear_category: bool,
-
-        /// Set subcategory
-        #[arg(long, conflicts_with = "clear_subcategory")]
-        subcategory: Option<String>,
-
-        /// Clear subcategory
-        #[arg(long)]
-        clear_subcategory: bool,
-
         /// Set tags (repeatable)
         #[arg(long, short)]
         tag: Vec<String>,
@@ -541,6 +521,18 @@ enum ProposeCommand {
         /// Clear tags field
         #[arg(long)]
         clear_tags: bool,
+
+        /// Set subtags (repeatable)
+        #[arg(long)]
+        subtag: Vec<String>,
+
+        /// Set subtags to empty array
+        #[arg(long, conflicts_with = "clear_subtags")]
+        subtags_empty: bool,
+
+        /// Clear subtags field
+        #[arg(long)]
+        clear_subtags: bool,
 
         /// Override reporting date (YYYY-MM-DD) without changing synced timestamp
         #[arg(long, conflicts_with = "clear_effective_date")]
@@ -556,21 +548,17 @@ enum ProposeCommand {
 enum TransactionRulesCommand {
     /// Append a transaction annotation regex rule
     Add {
-        /// Category to assign when the rule matches
-        #[arg(long = "set-category")]
-        set_category: Option<String>,
+        /// Tags to assign when the rule matches. Repeat for multiple tags.
+        #[arg(long = "set-tag")]
+        set_tags: Vec<String>,
 
-        /// Subcategory to assign when the rule matches
-        #[arg(long = "set-subcategory")]
-        set_subcategory: Option<String>,
+        /// Subtags to assign when the rule matches. Repeat for multiple subtags.
+        #[arg(long = "set-subtag")]
+        set_subtags: Vec<String>,
 
         /// Description override to assign when the rule matches
         #[arg(long = "set-description")]
         set_description: Option<String>,
-
-        /// Tag to assign when the rule matches. Repeat for multiple tags.
-        #[arg(long = "set-tag")]
-        set_tags: Vec<String>,
 
         /// Account ID regex matcher
         #[arg(long = "match-account-id")]
@@ -584,13 +572,13 @@ enum TransactionRulesCommand {
         #[arg(long = "match-description")]
         match_description: Option<String>,
 
-        /// Resolved category regex matcher
-        #[arg(long = "match-category")]
-        match_category: Option<String>,
+        /// Resolved top-level tag regex matcher
+        #[arg(long = "match-tag")]
+        match_tag: Option<String>,
 
-        /// Existing explicit subcategory regex matcher
-        #[arg(long = "match-subcategory")]
-        match_subcategory: Option<String>,
+        /// Resolved subtag regex matcher
+        #[arg(long = "match-subtag")]
+        match_subtag: Option<String>,
 
         /// Transaction status regex matcher
         #[arg(long = "match-status")]
@@ -1172,13 +1160,12 @@ async fn main() -> Result<()> {
                 clear_description,
                 note,
                 clear_note,
-                category,
-                clear_category,
-                subcategory,
-                clear_subcategory,
                 tag,
                 tags_empty,
                 clear_tags,
+                subtag,
+                subtags_empty,
+                clear_subtags,
                 effective_date,
                 clear_effective_date,
             } => {
@@ -1191,13 +1178,12 @@ async fn main() -> Result<()> {
                     clear_description,
                     note,
                     clear_note,
-                    category,
-                    clear_category,
-                    subcategory,
-                    clear_subcategory,
                     tag,
                     tags_empty,
                     clear_tags,
+                    subtag,
+                    subtags_empty,
+                    clear_subtags,
                     effective_date,
                     clear_effective_date,
                 )
@@ -1214,13 +1200,12 @@ async fn main() -> Result<()> {
                 clear_description,
                 note,
                 clear_note,
-                category,
-                clear_category,
-                subcategory,
-                clear_subcategory,
                 tag,
                 tags_empty,
                 clear_tags,
+                subtag,
+                subtags_empty,
+                clear_subtags,
                 effective_date,
                 clear_effective_date,
             } => {
@@ -1233,13 +1218,12 @@ async fn main() -> Result<()> {
                     clear_description,
                     note,
                     clear_note,
-                    category,
-                    clear_category,
-                    subcategory,
-                    clear_subcategory,
                     tag,
                     tags_empty,
                     clear_tags,
+                    subtag,
+                    subtags_empty,
+                    clear_subtags,
                     effective_date,
                     clear_effective_date,
                 )
@@ -1277,34 +1261,36 @@ async fn main() -> Result<()> {
 
         Some(Command::TransactionRules(transaction_rules_cmd)) => match transaction_rules_cmd {
             TransactionRulesCommand::Add {
-                set_category,
-                set_subcategory,
-                set_description,
                 set_tags,
+                set_subtags,
+                set_description,
                 match_account_id,
                 match_account_name,
                 match_description,
-                match_category,
-                match_subcategory,
+                match_tag,
+                match_subtag,
                 match_status,
                 match_amount,
             } => {
                 let result = app::add_transaction_rule(
                     &config,
                     app::TransactionRule {
-                        set_category,
-                        set_subcategory,
-                        set_description,
                         set_tags: if set_tags.is_empty() {
                             None
                         } else {
                             Some(set_tags)
                         },
+                        set_subtags: if set_subtags.is_empty() {
+                            None
+                        } else {
+                            Some(set_subtags)
+                        },
+                        set_description,
                         match_account_id,
                         match_account_name,
                         match_description,
-                        match_category,
-                        match_subcategory,
+                        match_tag,
+                        match_subtag,
                         match_status,
                         match_amount,
                     },
@@ -1759,7 +1745,7 @@ async fn main() -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
 
-        Some(Command::SpendingCategories {
+        Some(Command::SpendingTags {
             period,
             period_alignment,
             start,
@@ -1793,7 +1779,7 @@ async fn main() -> Result<()> {
                     connection,
                     status,
                     direction,
-                    group_by: "category".to_string(),
+                    group_by: "tag".to_string(),
                     top,
                     lookback_days,
                     include_noncurrency,

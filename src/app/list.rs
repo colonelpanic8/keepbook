@@ -13,6 +13,9 @@ use crate::market_data::{MarketDataServiceBuilder, PriceSourceRegistry};
 use crate::models::{Asset, Id, TransactionAnnotation};
 use crate::storage::Storage;
 
+use super::classification::{
+    effective_transaction_subtags, effective_transaction_tags, provider_virtual_tag_hierarchy,
+};
 use super::ignore_rules::{TransactionIgnoreInput, TransactionIgnoreMatcher};
 use super::value::value_in_reporting_currency_best_effort;
 use super::{
@@ -67,63 +70,6 @@ fn annotation_ignores_spending(annotation: &TransactionAnnotation) -> bool {
             })
         })
         .unwrap_or(false)
-}
-
-fn push_non_empty_tag(tags: &mut Vec<String>, value: Option<String>) {
-    let Some(value) = value.map(|value| value.trim().to_string()) else {
-        return;
-    };
-    if value.is_empty() {
-        return;
-    }
-    if !tags.iter().any(|tag| tag.eq_ignore_ascii_case(&value)) {
-        tags.push(value);
-    }
-}
-
-fn effective_transaction_tags(
-    annotation: Option<&TransactionAnnotation>,
-    metadata_category: Option<String>,
-) -> Vec<String> {
-    if let Some(tags) = annotation.and_then(|annotation| annotation.tags.clone()) {
-        return tags
-            .into_iter()
-            .map(|tag| tag.trim().to_string())
-            .filter(|tag| !tag.is_empty())
-            .fold(Vec::<String>::new(), |mut acc, tag| {
-                if !acc
-                    .iter()
-                    .any(|existing| existing.eq_ignore_ascii_case(&tag))
-                {
-                    acc.push(tag);
-                }
-                acc
-            });
-    }
-
-    let mut tags = Vec::new();
-    if tags.is_empty() {
-        push_non_empty_tag(&mut tags, metadata_category);
-    }
-    tags
-}
-
-fn effective_transaction_subtags(annotation: Option<&TransactionAnnotation>) -> Vec<String> {
-    annotation
-        .and_then(|annotation| annotation.subtags.clone())
-        .unwrap_or_default()
-        .into_iter()
-        .map(|subtag| subtag.trim().to_string())
-        .filter(|subtag| !subtag.is_empty())
-        .fold(Vec::<String>::new(), |mut acc, subtag| {
-            if !acc
-                .iter()
-                .any(|existing| existing.eq_ignore_ascii_case(&subtag))
-            {
-                acc.push(subtag);
-            }
-            acc
-        })
 }
 
 pub async fn list_connections(storage: &dyn Storage) -> Result<Vec<ConnectionOutput>> {
@@ -490,12 +436,12 @@ pub async fn list_transactions(
                 }
             });
             let raw_annotation = annotations_by_tx.get(&tx.id);
-            let metadata_category = tx
-                .standardized_metadata
-                .as_ref()
-                .and_then(|metadata| metadata.merchant_category_label.clone());
-            let tags = effective_transaction_tags(raw_annotation, metadata_category);
-            let subtags = effective_transaction_subtags(raw_annotation);
+            let provider_hierarchy = provider_virtual_tag_hierarchy(
+                tx.standardized_metadata.as_ref(),
+                &tx.synchronizer_data,
+            );
+            let tags = effective_transaction_tags(raw_annotation, &provider_hierarchy);
+            let subtags = effective_transaction_subtags(raw_annotation, &provider_hierarchy);
             if skip_ignored
                 && annotations_by_tx
                     .get(&tx.id)
@@ -650,6 +596,66 @@ mod tests {
         );
         assert_eq!(out[0].tags, vec!["food".to_string()]);
         assert_eq!(out[0].subtags, vec!["coffee".to_string()]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn list_transactions_rolls_provider_category_hierarchy_into_virtual_tags() -> Result<()> {
+        let storage = MemoryStorage::new();
+        let clock = FixedClock::new(Utc.with_ymd_and_hms(2026, 2, 5, 12, 0, 0).unwrap());
+
+        let account_id = Id::from_string("acct-1");
+        let account = Account::new_with(
+            account_id.clone(),
+            clock.now(),
+            "Checking",
+            Id::from_string("conn-1"),
+        );
+        storage.save_account(&account).await?;
+
+        let ids = FixedIdGenerator::new([Id::from_string("tx-1")]);
+        let tx = Transaction::new_with_generator(
+            &ids,
+            &clock,
+            "-12",
+            Asset::currency("USD"),
+            "Grocery Store",
+        )
+        .with_timestamp(clock.now())
+        .with_synchronizer_data(serde_json::json!({
+            "category": ["Food and Drink", "Groceries"]
+        }));
+        storage.append_transactions(&account_id, &[tx]).await?;
+
+        let out = list_transactions(
+            &storage,
+            Some("2000-01-01".to_string()),
+            Some("2099-12-31".to_string()),
+            None,
+            false,
+            true,
+            &ResolvedConfig {
+                data_dir: std::path::PathBuf::from("/tmp"),
+                reporting_currency: "USD".to_string(),
+                display: crate::config::DisplayConfig::default(),
+                refresh: crate::config::RefreshConfig::default(),
+                history: crate::config::HistoryConfig::default(),
+                tray: crate::config::TrayConfig::default(),
+                spending: crate::config::SpendingConfig::default(),
+                portfolio: crate::config::PortfolioConfig::default(),
+                ignore: crate::config::IgnoreConfig::default(),
+                ai: crate::config::AiConfig::default(),
+                git: crate::config::GitConfig::default(),
+            },
+        )
+        .await?;
+
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].tags, vec!["Food".to_string()]);
+        assert_eq!(
+            out[0].subtags,
+            vec!["Food & Drink".to_string(), "Groceries".to_string()]
+        );
         Ok(())
     }
 

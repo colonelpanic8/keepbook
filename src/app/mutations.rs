@@ -351,13 +351,12 @@ pub async fn set_transaction_annotation(
     clear_description: bool,
     note: Option<String>,
     clear_note: bool,
-    category: Option<String>,
-    clear_category: bool,
-    subcategory: Option<String>,
-    clear_subcategory: bool,
     tags: Vec<String>,
     tags_empty: bool,
     clear_tags: bool,
+    subtags: Vec<String>,
+    subtags_empty: bool,
+    clear_subtags: bool,
     effective_date: Option<String>,
     clear_effective_date: bool,
 ) -> Result<serde_json::Value> {
@@ -367,14 +366,11 @@ pub async fn set_transaction_annotation(
     if clear_note && note.is_some() {
         anyhow::bail!("Cannot use --note and --clear-note together");
     }
-    if clear_category && category.is_some() {
-        anyhow::bail!("Cannot use --category and --clear-category together");
-    }
-    if clear_subcategory && subcategory.is_some() {
-        anyhow::bail!("Cannot use --subcategory and --clear-subcategory together");
-    }
     if clear_tags && (tags_empty || !tags.is_empty()) {
         anyhow::bail!("Cannot use --clear-tags with --tag/--tags-empty");
+    }
+    if clear_subtags && (subtags_empty || !subtags.is_empty()) {
+        anyhow::bail!("Cannot use --clear-subtags with --subtag/--subtags-empty");
     }
     if clear_effective_date && effective_date.is_some() {
         anyhow::bail!("Cannot use --effective-date and --clear-effective-date together");
@@ -389,13 +385,12 @@ pub async fn set_transaction_annotation(
         || clear_description
         || note.is_some()
         || clear_note
-        || category.is_some()
-        || clear_category
-        || subcategory.is_some()
-        || clear_subcategory
         || !tags.is_empty()
         || tags_empty
         || clear_tags
+        || !subtags.is_empty()
+        || subtags_empty
+        || clear_subtags
         || effective_date.is_some()
         || clear_effective_date;
     if !has_change {
@@ -442,22 +437,19 @@ pub async fn set_transaction_annotation(
     } else if let Some(v) = note {
         patch.note = Some(Some(v));
     }
-    if clear_category {
-        patch.tags = Some(None);
-    } else if let Some(v) = category {
-        patch.tags = Some(Some(normalize_tags(vec![v])));
-    }
-    if clear_subcategory {
-        patch.subtags = Some(None);
-    } else if let Some(v) = subcategory {
-        patch.subtags = Some(Some(normalize_tags(vec![v])));
-    }
     if clear_tags {
         patch.tags = Some(None);
     } else if tags_empty {
         patch.tags = Some(Some(Vec::new()));
     } else if !tags.is_empty() {
-        patch.tags = Some(Some(tags));
+        patch.tags = Some(Some(normalize_tags(tags)));
+    }
+    if clear_subtags {
+        patch.subtags = Some(None);
+    } else if subtags_empty {
+        patch.subtags = Some(Some(Vec::new()));
+    } else if !subtags.is_empty() {
+        patch.subtags = Some(Some(normalize_tags(subtags)));
     }
     if clear_effective_date {
         patch.effective_date = Some(None);
@@ -577,22 +569,21 @@ pub async fn set_transaction_annotation(
     Ok(result)
 }
 
-pub async fn set_transaction_categories(
+async fn set_transaction_label_list(
     storage: &dyn Storage,
     config: &ResolvedConfig,
     targets: Vec<(String, String)>,
-    category: Option<String>,
-    clear_category: bool,
+    field_name: &'static str,
+    values: Vec<String>,
+    clear_values: bool,
 ) -> Result<serde_json::Value> {
-    if clear_category && category.is_some() {
-        anyhow::bail!("Cannot set and clear category together");
+    if clear_values && !values.is_empty() {
+        anyhow::bail!("Cannot set and clear {field_name} together");
     }
 
-    let category = category
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
-    if !clear_category && category.is_none() {
-        anyhow::bail!("No category change specified");
+    let values = normalize_tags(values);
+    if !clear_values && values.is_empty() {
+        anyhow::bail!("No {field_name} change specified");
     }
     if targets.is_empty() {
         anyhow::bail!("No transactions specified");
@@ -632,6 +623,11 @@ pub async fn set_transaction_categories(
             }
         }
 
+        let values_patch = if clear_values {
+            None
+        } else {
+            Some(values.clone())
+        };
         let patches = transaction_ids
             .into_iter()
             .map(|transaction_id| TransactionAnnotationPatch {
@@ -639,8 +635,16 @@ pub async fn set_transaction_categories(
                 timestamp,
                 description: None,
                 note: None,
-                tags: Some(category.clone().map(|tag| normalize_tags(vec![tag]))),
-                subtags: None,
+                tags: if field_name == "tags" {
+                    Some(values_patch.clone())
+                } else {
+                    None
+                },
+                subtags: if field_name == "subtags" {
+                    Some(values_patch.clone())
+                } else {
+                    None
+                },
                 effective_date: None,
             })
             .collect::<Vec<_>>();
@@ -650,19 +654,24 @@ pub async fn set_transaction_categories(
             .await?;
     }
 
-    let result = serde_json::json!({
-        "success": true,
-        "updated_count": updated_count,
-        "category": category,
-        "clear_category": clear_category,
-    });
+    let mut result = serde_json::Map::new();
+    result.insert("success".to_string(), serde_json::Value::Bool(true));
+    result.insert(
+        "updated_count".to_string(),
+        serde_json::json!(updated_count),
+    );
+    result.insert(field_name.to_string(), serde_json::json!(values));
+    result.insert(
+        format!("clear_{field_name}"),
+        serde_json::Value::Bool(clear_values),
+    );
 
     maybe_auto_commit(
         config,
-        &format!("set transaction categories for {updated_count} transactions"),
+        &format!("set transaction {field_name} for {updated_count} transactions"),
     );
 
-    Ok(result)
+    Ok(serde_json::Value::Object(result))
 }
 
 pub async fn set_transaction_tags(
@@ -672,84 +681,17 @@ pub async fn set_transaction_tags(
     tags: Vec<String>,
     clear_tags: bool,
 ) -> Result<serde_json::Value> {
-    if clear_tags && !tags.is_empty() {
-        anyhow::bail!("Cannot set and clear tags together");
-    }
+    set_transaction_label_list(storage, config, targets, "tags", tags, clear_tags).await
+}
 
-    let tags = normalize_tags(tags);
-    if !clear_tags && tags.is_empty() {
-        anyhow::bail!("No tag change specified");
-    }
-    if targets.is_empty() {
-        anyhow::bail!("No transactions specified");
-    }
-
-    let mut by_account: HashMap<Id, Vec<Id>> = HashMap::new();
-    let mut seen = HashSet::new();
-    for (account_id, transaction_id) in targets {
-        let account_id = Id::from_string_checked(&account_id)
-            .with_context(|| format!("Invalid account id: {account_id}"))?;
-        let transaction_id = Id::from_string_checked(&transaction_id)
-            .with_context(|| format!("Invalid transaction id: {transaction_id}"))?;
-        if seen.insert((account_id.clone(), transaction_id.clone())) {
-            by_account
-                .entry(account_id)
-                .or_default()
-                .push(transaction_id);
-        }
-    }
-
-    let timestamp = chrono::Utc::now();
-    let mut updated_count = 0usize;
-    for (account_id, transaction_ids) in by_account {
-        storage
-            .get_account(&account_id)
-            .await?
-            .context("Account not found")?;
-
-        let txns = storage.get_transactions(&account_id).await?;
-        let valid_transaction_ids = txns
-            .iter()
-            .map(|transaction| transaction.id.clone())
-            .collect::<HashSet<_>>();
-        for transaction_id in &transaction_ids {
-            if !valid_transaction_ids.contains(transaction_id) {
-                anyhow::bail!("Transaction not found for account: {transaction_id}");
-            }
-        }
-
-        let tags_patch = if clear_tags { None } else { Some(tags.clone()) };
-        let patches = transaction_ids
-            .into_iter()
-            .map(|transaction_id| TransactionAnnotationPatch {
-                transaction_id,
-                timestamp,
-                description: None,
-                note: None,
-                tags: Some(tags_patch.clone()),
-                subtags: None,
-                effective_date: None,
-            })
-            .collect::<Vec<_>>();
-        updated_count += patches.len();
-        storage
-            .append_transaction_annotation_patches(&account_id, &patches)
-            .await?;
-    }
-
-    let result = serde_json::json!({
-        "success": true,
-        "updated_count": updated_count,
-        "tags": tags,
-        "clear_tags": clear_tags,
-    });
-
-    maybe_auto_commit(
-        config,
-        &format!("set transaction tags for {updated_count} transactions"),
-    );
-
-    Ok(result)
+pub async fn set_transaction_subtags(
+    storage: &dyn Storage,
+    config: &ResolvedConfig,
+    targets: Vec<(String, String)>,
+    subtags: Vec<String>,
+    clear_subtags: bool,
+) -> Result<serde_json::Value> {
+    set_transaction_label_list(storage, config, targets, "subtags", subtags, clear_subtags).await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -762,13 +704,12 @@ pub async fn propose_transaction_edit(
     clear_description: bool,
     note: Option<String>,
     clear_note: bool,
-    category: Option<String>,
-    clear_category: bool,
-    subcategory: Option<String>,
-    clear_subcategory: bool,
     tags: Vec<String>,
     tags_empty: bool,
     clear_tags: bool,
+    subtags: Vec<String>,
+    subtags_empty: bool,
+    clear_subtags: bool,
     effective_date: Option<String>,
     clear_effective_date: bool,
 ) -> Result<serde_json::Value> {
@@ -781,13 +722,12 @@ pub async fn propose_transaction_edit(
         clear_description,
         note,
         clear_note,
-        category,
-        clear_category,
-        subcategory,
-        clear_subcategory,
         tags,
         tags_empty,
         clear_tags,
+        subtags,
+        subtags_empty,
+        clear_subtags,
         effective_date,
         clear_effective_date,
         &UuidIdGenerator,
@@ -806,13 +746,12 @@ pub async fn propose_transaction_edit_with(
     clear_description: bool,
     note: Option<String>,
     clear_note: bool,
-    category: Option<String>,
-    clear_category: bool,
-    subcategory: Option<String>,
-    clear_subcategory: bool,
     tags: Vec<String>,
     tags_empty: bool,
     clear_tags: bool,
+    subtags: Vec<String>,
+    subtags_empty: bool,
+    clear_subtags: bool,
     effective_date: Option<String>,
     clear_effective_date: bool,
     ids: &dyn IdGenerator,
@@ -823,13 +762,12 @@ pub async fn propose_transaction_edit_with(
         clear_description,
         note,
         clear_note,
-        category,
-        clear_category,
-        subcategory,
-        clear_subcategory,
         tags,
         tags_empty,
         clear_tags,
+        subtags,
+        subtags_empty,
+        clear_subtags,
         effective_date,
         clear_effective_date,
     )?;
@@ -991,13 +929,12 @@ fn build_transaction_annotation_patch(
     clear_description: bool,
     note: Option<String>,
     clear_note: bool,
-    category: Option<String>,
-    clear_category: bool,
-    subcategory: Option<String>,
-    clear_subcategory: bool,
     tags: Vec<String>,
     tags_empty: bool,
     clear_tags: bool,
+    subtags: Vec<String>,
+    subtags_empty: bool,
+    clear_subtags: bool,
     effective_date: Option<String>,
     clear_effective_date: bool,
 ) -> Result<TransactionAnnotationPatch> {
@@ -1007,14 +944,11 @@ fn build_transaction_annotation_patch(
     if clear_note && note.is_some() {
         anyhow::bail!("Cannot use --note and --clear-note together");
     }
-    if clear_category && category.is_some() {
-        anyhow::bail!("Cannot use --category and --clear-category together");
-    }
-    if clear_subcategory && subcategory.is_some() {
-        anyhow::bail!("Cannot use --subcategory and --clear-subcategory together");
-    }
     if clear_tags && (tags_empty || !tags.is_empty()) {
         anyhow::bail!("Cannot use --clear-tags with --tag/--tags-empty");
+    }
+    if clear_subtags && (subtags_empty || !subtags.is_empty()) {
+        anyhow::bail!("Cannot use --clear-subtags with --subtag/--subtags-empty");
     }
     if clear_effective_date && effective_date.is_some() {
         anyhow::bail!("Cannot use --effective-date and --clear-effective-date together");
@@ -1032,13 +966,12 @@ fn build_transaction_annotation_patch(
         || clear_description
         || note.is_some()
         || clear_note
-        || category.is_some()
-        || clear_category
-        || subcategory.is_some()
-        || clear_subcategory
         || !tags.is_empty()
         || tags_empty
         || clear_tags
+        || !subtags.is_empty()
+        || subtags_empty
+        || clear_subtags
         || effective_date.is_some()
         || clear_effective_date;
     if !has_change {
@@ -1064,22 +997,19 @@ fn build_transaction_annotation_patch(
     } else if let Some(v) = note {
         patch.note = Some(Some(v));
     }
-    if clear_category {
-        patch.tags = Some(None);
-    } else if let Some(v) = category {
-        patch.tags = Some(Some(normalize_tags(vec![v])));
-    }
-    if clear_subcategory {
-        patch.subtags = Some(None);
-    } else if let Some(v) = subcategory {
-        patch.subtags = Some(Some(normalize_tags(vec![v])));
-    }
     if clear_tags {
         patch.tags = Some(None);
     } else if tags_empty {
         patch.tags = Some(Some(Vec::new()));
     } else if !tags.is_empty() {
-        patch.tags = Some(Some(tags));
+        patch.tags = Some(Some(normalize_tags(tags)));
+    }
+    if clear_subtags {
+        patch.subtags = Some(None);
+    } else if subtags_empty {
+        patch.subtags = Some(Some(Vec::new()));
+    } else if !subtags.is_empty() {
+        patch.subtags = Some(Some(normalize_tags(subtags)));
     }
     if clear_effective_date {
         patch.effective_date = Some(None);

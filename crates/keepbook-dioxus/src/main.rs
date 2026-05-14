@@ -441,9 +441,9 @@ struct AiRuleTransactionInput {
     amount: String,
     status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    category: Option<String>,
+    tag: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    subcategory: Option<String>,
+    subtag: Option<String>,
     ignored_from_spending: bool,
 }
 
@@ -451,7 +451,7 @@ struct AiRuleTransactionInput {
 struct AiRuleSuggestionInput {
     prompt: String,
     transactions: Vec<AiRuleTransactionInput>,
-    existing_categories: Vec<String>,
+    existing_tags: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -472,14 +472,14 @@ struct AiRuleToolCallOutput {
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
-struct TransactionCategoryTargetInput {
+struct TransactionTagTargetInput {
     account_id: String,
     transaction_id: String,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
 struct SetTransactionTagsInput {
-    transactions: Vec<TransactionCategoryTargetInput>,
+    transactions: Vec<TransactionTagTargetInput>,
     tags: Vec<String>,
     clear_tags: bool,
 }
@@ -590,7 +590,7 @@ enum TransactionSortField {
     Date,
     Amount,
     Description,
-    Category,
+    Tag,
     Account,
     #[allow(dead_code)]
     Counted,

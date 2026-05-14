@@ -647,12 +647,12 @@ pub(crate) async fn suggest_ai_rules_impl(
                     description: transaction.description,
                     amount: transaction.amount,
                     status: transaction.status,
-                    category: transaction.category,
-                    subcategory: transaction.subcategory,
+                    tag: transaction.tag,
+                    subtag: transaction.subtag,
                     ignored_from_spending: transaction.ignored_from_spending,
                 })
                 .collect(),
-            existing_categories: input.existing_categories,
+            existing_tags: input.existing_tags,
         })
         .await
         .map_err(|error| format!("AI rule suggestion failed: {error:#}"))?;
@@ -668,12 +668,10 @@ pub(crate) async fn set_transaction_tags_impl(
             transactions: input
                 .transactions
                 .into_iter()
-                .map(
-                    |transaction| keepbook_server::TransactionCategoryTargetInput {
-                        account_id: transaction.account_id,
-                        transaction_id: transaction.transaction_id,
-                    },
-                )
+                .map(|transaction| keepbook_server::TransactionTagTargetInput {
+                    account_id: transaction.account_id,
+                    transaction_id: transaction.transaction_id,
+                })
                 .collect(),
             tags: input.tags,
             clear_tags: input.clear_tags,

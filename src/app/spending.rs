@@ -12,6 +12,10 @@ use crate::market_data::{MarketDataServiceBuilder, MarketDataStore};
 use crate::models::{Account, Asset, Id, TransactionAnnotation, TransactionStatus};
 use crate::storage::{find_account, find_connection, Storage};
 
+use super::classification::{
+    effective_transaction_subtags, effective_transaction_tags, provider_virtual_tag_hierarchy,
+    VirtualTagHierarchy,
+};
 use super::ignore_rules::{TransactionIgnoreInput, TransactionIgnoreMatcher};
 use super::types::{
     SpendingBreakdownEntryOutput, SpendingOutput, SpendingPeriodOutput, SpendingScopeOutput,
@@ -205,8 +209,8 @@ fn parse_status_filter(s: &str) -> Result<(StatusFilter, String)> {
 fn parse_group_by(s: &str) -> Result<(GroupBy, String)> {
     match s.trim().to_lowercase().as_str() {
         "none" => Ok((GroupBy::None, "none".to_string())),
-        "category" | "tag" => Ok((GroupBy::Tag, "tag".to_string())),
-        "subcategory" | "subtag" => Ok((GroupBy::Subtag, "subtag".to_string())),
+        "tag" => Ok((GroupBy::Tag, "tag".to_string())),
+        "subtag" => Ok((GroupBy::Subtag, "subtag".to_string())),
         "merchant" => Ok((GroupBy::Merchant, "merchant".to_string())),
         "account" => Ok((GroupBy::Account, "account".to_string())),
         _ => anyhow::bail!("Invalid group_by: {s}. Use: none, tag, subtag, merchant, account"),
@@ -463,63 +467,6 @@ fn annotation_ignores_spending(annotation: Option<&TransactionAnnotation>) -> bo
         .unwrap_or(false)
 }
 
-fn push_non_empty_tag(tags: &mut Vec<String>, value: Option<String>) {
-    let Some(value) = value.map(|value| value.trim().to_string()) else {
-        return;
-    };
-    if value.is_empty() {
-        return;
-    }
-    if !tags.iter().any(|tag| tag.eq_ignore_ascii_case(&value)) {
-        tags.push(value);
-    }
-}
-
-fn effective_transaction_tags(
-    annotation: Option<&TransactionAnnotation>,
-    metadata_category: Option<String>,
-) -> Vec<String> {
-    if let Some(tags) = annotation.and_then(|annotation| annotation.tags.clone()) {
-        return tags
-            .into_iter()
-            .map(|tag| tag.trim().to_string())
-            .filter(|tag| !tag.is_empty())
-            .fold(Vec::<String>::new(), |mut acc, tag| {
-                if !acc
-                    .iter()
-                    .any(|existing| existing.eq_ignore_ascii_case(&tag))
-                {
-                    acc.push(tag);
-                }
-                acc
-            });
-    }
-
-    let mut tags = Vec::new();
-    if tags.is_empty() {
-        push_non_empty_tag(&mut tags, metadata_category);
-    }
-    tags
-}
-
-fn effective_transaction_subtags(annotation: Option<&TransactionAnnotation>) -> Vec<String> {
-    annotation
-        .and_then(|annotation| annotation.subtags.clone())
-        .unwrap_or_default()
-        .into_iter()
-        .map(|subtag| subtag.trim().to_string())
-        .filter(|subtag| !subtag.is_empty())
-        .fold(Vec::<String>::new(), |mut acc, subtag| {
-            if !acc
-                .iter()
-                .any(|existing| existing.eq_ignore_ascii_case(&subtag))
-            {
-                acc.push(subtag);
-            }
-            acc
-        })
-}
-
 async fn ignored_account_ids_for_portfolio_spending(
     config: &ResolvedConfig,
     accounts: &[Account],
@@ -649,7 +596,7 @@ async fn spending_report_with_store(
         asset: Asset,
         amount: String,
         raw_description: String,
-        metadata_category: Option<String>,
+        provider_hierarchy: VirtualTagHierarchy,
         annotation: Option<TransactionAnnotation>,
     }
 
@@ -748,10 +695,10 @@ async fn spending_report_with_store(
                 asset,
                 amount: tx.amount,
                 raw_description: tx.description,
-                metadata_category: tx
-                    .standardized_metadata
-                    .as_ref()
-                    .and_then(|m| m.merchant_category_label.clone()),
+                provider_hierarchy: provider_virtual_tag_hierarchy(
+                    tx.standardized_metadata.as_ref(),
+                    &tx.synchronizer_data,
+                ),
                 annotation,
             });
         }
@@ -844,23 +791,18 @@ async fn spending_report_with_store(
         if group_by != GroupBy::None {
             let keys: Vec<String> = match group_by {
                 GroupBy::None => vec![],
-                GroupBy::Subtag => effective_transaction_subtags(row.annotation.as_ref()),
+                GroupBy::Subtag => {
+                    effective_transaction_subtags(row.annotation.as_ref(), &row.provider_hierarchy)
+                }
                 GroupBy::Merchant => vec![row
                     .annotation
                     .as_ref()
                     .and_then(|a| a.description.clone())
                     .unwrap_or_else(|| row.raw_description.clone())],
                 GroupBy::Account => vec![row.account_id.to_string()],
-                GroupBy::Tag => row
-                    .annotation
-                    .as_ref()
-                    .and_then(|a| a.tags.clone())
-                    .unwrap_or_else(|| {
-                        effective_transaction_tags(
-                            row.annotation.as_ref(),
-                            row.metadata_category.clone(),
-                        )
-                    }),
+                GroupBy::Tag => {
+                    effective_transaction_tags(row.annotation.as_ref(), &row.provider_hierarchy)
+                }
             };
 
             let keys = if matches!(group_by, GroupBy::Tag) && keys.is_empty() {
@@ -1289,7 +1231,7 @@ mod tests {
             &clock,
             "-10",
             Asset::currency("USD"),
-            "Fallback to metadata category",
+            "Fallback to provider tag",
         )
         .with_timestamp(clock.now())
         .with_standardized_metadata(TransactionStandardizedMetadata {
@@ -1301,7 +1243,7 @@ mod tests {
             &clock,
             "-20",
             Asset::currency("USD"),
-            "Annotation category wins",
+            "Annotation tag wins",
         )
         .with_timestamp(clock.now())
         .with_standardized_metadata(TransactionStandardizedMetadata {
@@ -1373,7 +1315,7 @@ mod tests {
         assert_eq!(out.periods[0].breakdown.len(), 2);
         assert_eq!(out.periods[0].breakdown[0].key, "Dining");
         assert_eq!(out.periods[0].breakdown[0].total, "20");
-        assert_eq!(out.periods[0].breakdown[1].key, "Groceries");
+        assert_eq!(out.periods[0].breakdown[1].key, "Food");
         assert_eq!(out.periods[0].breakdown[1].total, "10");
 
         let subtag_out = spending_report_with_store(
@@ -1403,7 +1345,7 @@ mod tests {
         .await?;
         assert_eq!(subtag_out.periods[0].breakdown[0].key, "Restaurants");
         assert_eq!(subtag_out.periods[0].breakdown[0].total, "20");
-        assert_eq!(subtag_out.periods[0].breakdown[1].key, "unsubtagged");
+        assert_eq!(subtag_out.periods[0].breakdown[1].key, "Groceries");
         assert_eq!(subtag_out.periods[0].breakdown[1].total, "10");
         Ok(())
     }

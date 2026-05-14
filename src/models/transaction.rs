@@ -72,7 +72,7 @@ pub struct Transaction {
     /// Opaque data for deduplication, original IDs, etc.
     #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
     pub synchronizer_data: serde_json::Value,
-    /// Provider-agnostic metadata used for categorization/rule matching.
+    /// Provider-agnostic metadata used for virtual tags and rule matching.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub standardized_metadata: Option<TransactionStandardizedMetadata>,
 }

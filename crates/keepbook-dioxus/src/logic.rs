@@ -831,11 +831,11 @@ pub(crate) fn enabled_label(value: bool) -> &'static str {
     }
 }
 
-pub(crate) fn spending_categories(spending: &SpendingOutput) -> Vec<SpendingBreakdownEntry> {
+pub(crate) fn spending_tags(spending: &SpendingOutput) -> Vec<SpendingBreakdownEntry> {
     let mut totals: Vec<SpendingBreakdownEntry> = Vec::new();
     for period in &spending.periods {
         for entry in &period.breakdown {
-            let key = normalize_spending_category_key(&entry.key);
+            let key = normalize_spending_tag_key(&entry.key);
             if let Some(existing) = totals.iter_mut().find(|item| item.key == key) {
                 let current = parse_money_input(&existing.total).unwrap_or_default();
                 let next = parse_money_input(&entry.total).unwrap_or_default();
@@ -875,7 +875,7 @@ pub(crate) fn spending_over_time_points(spending: &SpendingOutput) -> Vec<Spendi
                         return None;
                     }
                     Some(SpendingBarSegment {
-                        key: normalize_spending_category_key(&entry.key),
+                        key: normalize_spending_tag_key(&entry.key),
                         value,
                         transaction_count: entry.transaction_count,
                     })
@@ -945,9 +945,9 @@ fn spending_period_label(start: &str, end: &str) -> String {
 
 pub(crate) fn transaction_tag_options(
     transactions: &[Transaction],
-    categories: &[SpendingBreakdownEntry],
+    tags: &[SpendingBreakdownEntry],
 ) -> Vec<String> {
-    let mut options = categories
+    let mut options = tags
         .iter()
         .map(|entry| entry.key.clone())
         .chain(transactions.iter().flat_map(transaction_tags))
@@ -1002,7 +1002,7 @@ pub(crate) fn compare_transactions(
         TransactionSortField::Description => {
             compare_case_insensitive(&transaction_description(a), &transaction_description(b))
         }
-        TransactionSortField::Category => {
+        TransactionSortField::Tag => {
             compare_case_insensitive(&transaction_tags_label(a), &transaction_tags_label(b))
         }
         TransactionSortField::Account => compare_case_insensitive(&a.account_name, &b.account_name),
@@ -1029,15 +1029,15 @@ pub(crate) fn ai_rule_transaction_input(transaction: &Transaction) -> AiRuleTran
         description: transaction_description(transaction),
         amount: transaction.amount.clone(),
         status: transaction.status.clone(),
-        category: transaction_tags(transaction).first().cloned(),
-        subcategory: transaction_subtags(transaction).first().cloned(),
+        tag: transaction_tags(transaction).first().cloned(),
+        subtag: transaction_subtags(transaction).first().cloned(),
         ignored_from_spending: transaction.ignored_from_spending,
     }
 }
 
 pub(crate) fn ai_tool_label(name: &str) -> &'static str {
     match name {
-        "propose_categorization_rule" => "Categorization rule",
+        "propose_tag_rule" => "Tag rule",
         "propose_ignore_rule" => "Ignore rule",
         "propose_rename_rule" => "Rename rule",
         _ => "Tool call",
@@ -1052,7 +1052,7 @@ pub(crate) fn default_transaction_sort_direction(field: TransactionSortField) ->
     match field {
         TransactionSortField::Date | TransactionSortField::Amount => SortDirection::Desc,
         TransactionSortField::Description
-        | TransactionSortField::Category
+        | TransactionSortField::Tag
         | TransactionSortField::Account
         | TransactionSortField::Counted => SortDirection::Asc,
     }
@@ -1118,35 +1118,34 @@ pub(crate) fn is_spending_transaction(transaction: &Transaction) -> bool {
             .unwrap_or(false)
 }
 
-pub(crate) fn normalize_spending_category_key(category: &str) -> String {
-    let trimmed = category.trim();
-    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("uncategorized") {
-        "Uncategorized".to_string()
+pub(crate) fn normalize_spending_tag_key(tag: &str) -> String {
+    let trimmed = tag.trim();
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("untagged") {
+        "Untagged".to_string()
     } else {
         trimmed.to_string()
     }
 }
 
-const SPENDING_CATEGORY_COLORS: [&str; 10] = [
+const SPENDING_TAG_COLORS: [&str; 10] = [
     "#1f6f8b", "#238a57", "#8a5cf6", "#bf6b21", "#b83280", "#52677a", "#2f9e9e", "#9b6a28",
     "#6f7d1f", "#bf3d3d",
 ];
 
-pub(crate) fn spending_category_color(index: usize) -> &'static str {
-    SPENDING_CATEGORY_COLORS[index % SPENDING_CATEGORY_COLORS.len()]
+pub(crate) fn spending_tag_color(index: usize) -> &'static str {
+    SPENDING_TAG_COLORS[index % SPENDING_TAG_COLORS.len()]
 }
 
-pub(crate) fn spending_category_color_map(
-    categories: &[SpendingBreakdownEntry],
+pub(crate) fn spending_tag_color_map(
+    tags: &[SpendingBreakdownEntry],
 ) -> HashMap<String, &'static str> {
-    categories
-        .iter()
+    tags.iter()
         .enumerate()
-        .map(|(index, entry)| (entry.key.clone(), spending_category_color(index)))
+        .map(|(index, entry)| (entry.key.clone(), spending_tag_color(index)))
         .collect()
 }
 
-pub(crate) fn spending_category_color_for(
+pub(crate) fn spending_tag_color_for(
     colors: &HashMap<String, &'static str>,
     key: &str,
     fallback_index: usize,
@@ -1154,14 +1153,14 @@ pub(crate) fn spending_category_color_for(
     colors
         .get(key)
         .copied()
-        .unwrap_or_else(|| spending_category_color(fallback_index))
+        .unwrap_or_else(|| spending_tag_color(fallback_index))
 }
 
 pub(crate) fn pie_slices(
-    categories: &[SpendingBreakdownEntry],
+    tags: &[SpendingBreakdownEntry],
     colors: &HashMap<String, &'static str>,
 ) -> Vec<PieSlice> {
-    let values = categories
+    let values = tags
         .iter()
         .map(|entry| parse_money_input(&entry.total).unwrap_or_default().abs())
         .collect::<Vec<_>>();
@@ -1171,8 +1170,7 @@ pub(crate) fn pie_slices(
     }
 
     let mut cursor = -std::f64::consts::FRAC_PI_2;
-    categories
-        .iter()
+    tags.iter()
         .zip(values.iter())
         .enumerate()
         .filter_map(|(index, (entry, value))| {
@@ -1189,7 +1187,7 @@ pub(crate) fn pie_slices(
                 transaction_count: entry.transaction_count,
                 percentage: (*value / total) * 100.0,
                 path: pie_slice_path(130.0, 130.0, 104.0, start, end),
-                color: spending_category_color_for(colors, &entry.key, index),
+                color: spending_tag_color_for(colors, &entry.key, index),
             })
         })
         .collect()
@@ -1240,8 +1238,8 @@ pub(crate) fn transaction_subtags(transaction: &Transaction) -> Vec<String> {
         .and_then(|annotation| annotation.subtags.clone())
         .unwrap_or_else(|| transaction.subtags.clone())
         .into_iter()
-        .map(|value| normalize_spending_category_key(&value))
-        .filter(|value| !value.is_empty() && value != "Uncategorized")
+        .map(|value| normalize_spending_tag_key(&value))
+        .filter(|value| !value.is_empty() && value != "Untagged")
         .fold(Vec::<String>::new(), |mut acc, subtag| {
             if !acc
                 .iter()
@@ -1255,10 +1253,6 @@ pub(crate) fn transaction_subtags(transaction: &Transaction) -> Vec<String> {
 
 pub(crate) fn transaction_subtag(transaction: &Transaction) -> Option<String> {
     transaction_subtags(transaction).into_iter().next()
-}
-
-pub(crate) fn transaction_subcategory(transaction: &Transaction) -> Option<String> {
-    transaction_subtag(transaction)
 }
 
 pub(crate) fn transaction_tags(transaction: &Transaction) -> Vec<String> {

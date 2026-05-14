@@ -176,7 +176,7 @@ fn spending_over_time_points_preserve_bucket_breakdowns() {
                         transaction_count: 1,
                     },
                     SpendingBreakdownEntry {
-                        key: "uncategorized".to_string(),
+                        key: "untagged".to_string(),
                         total: "15".to_string(),
                         transaction_count: 1,
                     },
@@ -205,7 +205,7 @@ fn spending_over_time_points_preserve_bucket_breakdowns() {
     assert_eq!(points[0].label, "2026-01");
     assert_eq!(points[0].total, 40.0);
     assert_eq!(points[0].segments[0].key, "food");
-    assert_eq!(points[0].segments[1].key, "Uncategorized");
+    assert_eq!(points[0].segments[1].key, "Untagged");
     assert_eq!(series[0].key, "food");
     assert_eq!(series[0].total, "45");
 }
@@ -335,7 +335,7 @@ fn spending_transactions_sort_by_each_visible_text_field() {
             &rows,
             None,
             "",
-            TransactionSortField::Category,
+            TransactionSortField::Tag,
             SortDirection::Asc,
             true,
         )[0]
@@ -369,7 +369,7 @@ fn spending_transactions_sort_by_each_visible_text_field() {
 }
 
 #[test]
-fn transaction_subcategory_prefers_annotation_value() {
+fn transaction_subtag_prefers_annotation_value() {
     let mut row = transaction("annotated", "-12.50", "posted");
     row.subtags = vec!["Fallback".to_string()];
     row.annotation = Some(TransactionAnnotation {
@@ -379,7 +379,7 @@ fn transaction_subcategory_prefers_annotation_value() {
         effective_date: None,
     });
 
-    assert_eq!(transaction_subcategory(&row).as_deref(), Some("Coffee"));
+    assert_eq!(transaction_subtag(&row).as_deref(), Some("Coffee"));
 }
 
 #[test]
