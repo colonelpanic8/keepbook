@@ -1251,6 +1251,7 @@ pub(crate) fn transaction_subtags(transaction: &Transaction) -> Vec<String> {
         })
 }
 
+#[cfg(test)]
 pub(crate) fn transaction_subtag(transaction: &Transaction) -> Option<String> {
     transaction_subtags(transaction).into_iter().next()
 }
