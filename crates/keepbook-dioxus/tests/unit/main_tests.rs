@@ -379,7 +379,10 @@ fn transaction_subtag_prefers_annotation_value() {
         effective_date: None,
     });
 
-    assert_eq!(transaction_subtag(&row).as_deref(), Some("Coffee"));
+    assert_eq!(
+        transaction_subtags(&row).into_iter().next().as_deref(),
+        Some("Coffee")
+    );
 }
 
 #[test]

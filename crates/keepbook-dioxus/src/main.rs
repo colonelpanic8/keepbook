@@ -747,4 +747,5 @@ fn desktop_config() -> dioxus::desktop::Config {
 }
 
 #[cfg(test)]
-mod tests;
+#[path = "../tests/unit/main_tests.rs"]
+mod main_tests;
