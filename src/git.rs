@@ -4,6 +4,8 @@ use std::process::Command;
 
 use anyhow::{Context, Result};
 
+const AUTO_COMMIT_PATHSPEC: &[&str] = &["--", ".", ":!keepbook.toml"];
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum AutoCommitOutcome {
     SkippedNotRepo { reason: String },
@@ -62,7 +64,9 @@ pub fn try_auto_commit(
         });
     }
 
-    let status = git_output(&data_dir, &["status", "--porcelain"])?;
+    let mut status_args = vec!["status", "--porcelain"];
+    status_args.extend_from_slice(AUTO_COMMIT_PATHSPEC);
+    let status = git_output(&data_dir, &status_args)?;
     if !status.status.success() {
         let stderr = String::from_utf8_lossy(&status.stderr);
         anyhow::bail!("git status failed: {stderr}");
@@ -72,7 +76,9 @@ pub fn try_auto_commit(
         return Ok(AutoCommitOutcome::SkippedNoChanges);
     }
 
-    let add = git_output(&data_dir, &["add", "-A"])?;
+    let mut add_args = vec!["add", "-A"];
+    add_args.extend_from_slice(AUTO_COMMIT_PATHSPEC);
+    let add = git_output(&data_dir, &add_args)?;
     if !add.status.success() {
         let stderr = String::from_utf8_lossy(&add.stderr);
         anyhow::bail!("git add failed: {stderr}");
@@ -499,6 +505,66 @@ mod tests {
 
         let outcome = try_auto_commit(dir.path(), "sync mock", false)?;
         assert_eq!(outcome, AutoCommitOutcome::SkippedNoChanges);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_auto_commit_ignores_keepbook_config_changes() -> Result<()> {
+        if !git_available() {
+            return Ok(());
+        }
+
+        let dir = TempDir::new()?;
+        init_repo(dir.path())?;
+
+        fs::write(dir.path().join("keepbook.toml"), "data_dir = \".\"\n")?;
+        commit_all(dir.path(), "initial")?;
+
+        fs::write(
+            dir.path().join("keepbook.toml"),
+            "data_dir = \"/Users/kat/Library/Application Support/keepbook\"\n",
+        )?;
+
+        let outcome = try_auto_commit(dir.path(), "sync mock", false)?;
+        assert_eq!(outcome, AutoCommitOutcome::SkippedNoChanges);
+
+        let status = run_git(dir.path(), &["status", "--porcelain"])?;
+        let status_output = String::from_utf8_lossy(&status.stdout);
+        assert!(status_output.contains(" M keepbook.toml"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_auto_commit_commits_data_but_leaves_keepbook_config_unstaged() -> Result<()> {
+        if !git_available() {
+            return Ok(());
+        }
+
+        let dir = TempDir::new()?;
+        init_repo(dir.path())?;
+
+        fs::write(dir.path().join("keepbook.toml"), "data_dir = \".\"\n")?;
+        commit_all(dir.path(), "initial")?;
+
+        fs::write(
+            dir.path().join("keepbook.toml"),
+            "data_dir = \"/Users/kat/Library/Application Support/keepbook\"\n",
+        )?;
+        fs::write(dir.path().join("balances.json"), "[]\n")?;
+
+        let outcome = try_auto_commit(dir.path(), "sync mock", false)?;
+        assert_eq!(outcome, AutoCommitOutcome::Committed);
+
+        let show = run_git(dir.path(), &["show", "--name-only", "--pretty=", "HEAD"])?;
+        let committed_paths = String::from_utf8_lossy(&show.stdout);
+        assert!(committed_paths.contains("balances.json"));
+        assert!(!committed_paths.contains("keepbook.toml"));
+
+        let status = run_git(dir.path(), &["status", "--porcelain"])?;
+        let status_output = String::from_utf8_lossy(&status.stdout);
+        assert!(status_output.contains(" M keepbook.toml"));
 
         Ok(())
     }

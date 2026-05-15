@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -552,7 +552,7 @@ impl ApiState {
         let snapshot = self.snapshot().await;
         let git = load_git_remote_settings(&snapshot.config_path)?;
         prepare_git_ssh_environment(&snapshot.config_path)?;
-        let git = with_default_desktop_ssh_key_path(git);
+        let git = with_default_desktop_ssh_key_path(&snapshot.config_path, git);
         Ok(GitSettingsOutput {
             config_path: snapshot.config_path.display().to_string(),
             data_dir: snapshot.config.data_dir.display().to_string(),
@@ -605,7 +605,8 @@ impl ApiState {
         validate_git_data_dir(&data_dir)?;
         prepare_git_ssh_environment(&snapshot.config_path)?;
         let configured_git = load_git_remote_settings(&snapshot.config_path)?;
-        let auth_git = with_default_desktop_ssh_key_path(configured_git.clone());
+        let auth_git =
+            with_default_desktop_ssh_key_path(&snapshot.config_path, configured_git.clone());
         let private_key_pem = resolve_git_private_key(&snapshot.config_path, &auth_git, &input)?;
         let repo_state = read_git_repo_state(&data_dir);
         let branch = repo_state
@@ -626,14 +627,9 @@ impl ApiState {
         )?;
 
         if input.save_settings {
-            let ssh_key_path = if input.private_key_pem.trim().is_empty() {
-                auth_git.ssh_key_path
-            } else {
-                Some(persist_git_private_key(
-                    &snapshot.config_path,
-                    &input.private_key_pem,
-                )?)
-            };
+            if !input.private_key_pem.trim().is_empty() {
+                persist_git_private_key(&snapshot.config_path, &input.private_key_pem)?;
+            }
             write_git_settings(
                 &snapshot.config_path,
                 &GitSettingsInput {
@@ -642,7 +638,7 @@ impl ApiState {
                     repo: input.repo.clone(),
                     branch: input.branch.clone(),
                     ssh_user: input.ssh_user.clone(),
-                    ssh_key_path,
+                    ssh_key_path: None,
                 },
             )?;
         }
@@ -1791,11 +1787,14 @@ fn load_git_remote_settings(config_path: &Path) -> Result<GitRemoteSettings> {
         repo: table_string(git_sync, "repo").unwrap_or(defaults.repo),
         branch: table_string(git_sync, "branch").unwrap_or(defaults.branch),
         ssh_user: table_string(git_sync, "ssh_user").unwrap_or(defaults.ssh_user),
-        ssh_key_path: table_string(git_sync, "ssh_key_path"),
+        ssh_key_path: None,
     })
 }
 
-fn with_default_desktop_ssh_key_path(mut settings: GitRemoteSettings) -> GitRemoteSettings {
+fn with_default_desktop_ssh_key_path(
+    config_path: &Path,
+    mut settings: GitRemoteSettings,
+) -> GitRemoteSettings {
     if settings
         .ssh_key_path
         .as_deref()
@@ -1805,16 +1804,22 @@ fn with_default_desktop_ssh_key_path(mut settings: GitRemoteSettings) -> GitRemo
         return settings;
     }
 
-    if let Some(path) = default_desktop_ssh_key_path() {
+    if let Some(path) = default_desktop_ssh_key_path(config_path) {
         settings.ssh_key_path = Some(path.display().to_string());
     }
 
     settings
 }
 
-fn default_desktop_ssh_key_path() -> Option<PathBuf> {
+fn default_desktop_ssh_key_path(config_path: &Path) -> Option<PathBuf> {
     if cfg!(target_os = "android") {
         return None;
+    }
+
+    if let Ok(path) = default_git_ssh_key_path(config_path) {
+        if path.is_file() {
+            return Some(path);
+        }
     }
 
     let home_dir = std::env::var_os("HOME").map(PathBuf::from)?;
@@ -1845,7 +1850,7 @@ fn write_git_settings(config_path: &Path, input: &GitSettingsInput) -> Result<()
             .with_context(|| format!("failed to create {}", parent.display()))?;
     }
 
-    doc["data_dir"] = value(input.data_dir.trim());
+    doc["data_dir"] = value(portable_data_dir_value(config_path, input.data_dir.trim()));
     if doc
         .get("git_sync")
         .is_none_or(|item| item.as_table_like().is_none())
@@ -1856,13 +1861,8 @@ fn write_git_settings(config_path: &Path, input: &GitSettingsInput) -> Result<()
     doc["git_sync"]["repo"] = value(input.repo.trim());
     doc["git_sync"]["branch"] = value(non_empty(input.branch.trim(), "master"));
     doc["git_sync"]["ssh_user"] = value(non_empty(input.ssh_user.trim(), "git"));
-    if let Some(ssh_key_path) = input
-        .ssh_key_path
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        doc["git_sync"]["ssh_key_path"] = value(ssh_key_path);
+    if let Some(git_sync) = doc["git_sync"].as_table_like_mut() {
+        git_sync.remove("ssh_key_path");
     }
 
     std::fs::write(config_path, doc.to_string())
@@ -1963,10 +1963,10 @@ fn default_git_ssh_key_path(config_path: &Path) -> Result<PathBuf> {
     Ok(state_dir.join(".ssh").join("keepbook_sync_key"))
 }
 
-fn private_state_dir(config_path: &Path) -> Option<PathBuf> {
-    let config_dir = config_path.parent()?;
+fn private_state_dir(_config_path: &Path) -> Option<PathBuf> {
     #[cfg(target_os = "android")]
     {
+        let config_dir = _config_path.parent()?;
         Some(
             config_dir
                 .parent()
@@ -1976,7 +1976,12 @@ fn private_state_dir(config_path: &Path) -> Option<PathBuf> {
     }
     #[cfg(not(target_os = "android"))]
     {
-        Some(config_dir.to_path_buf())
+        std::env::var_os("XDG_STATE_HOME")
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state"))
+            })
+            .map(|state_dir| state_dir.join("keepbook"))
     }
 }
 
@@ -2047,7 +2052,8 @@ fn resolve_git_private_key(
 }
 
 fn activate_age_identity_from_git_settings(config_path: &Path) -> Result<()> {
-    let settings = load_git_remote_settings(config_path)?;
+    let settings =
+        with_default_desktop_ssh_key_path(config_path, load_git_remote_settings(config_path)?);
     let Some(ssh_key_path) = settings
         .ssh_key_path
         .as_deref()
@@ -2088,6 +2094,58 @@ fn expand_home_path(path: &str) -> PathBuf {
     }
 
     PathBuf::from(path)
+}
+
+fn portable_data_dir_value(config_path: &Path, data_dir: &str) -> String {
+    let resolved = normalize_path_components(resolve_config_relative_path(config_path, data_dir));
+    if let Some(config_dir) = config_path.parent() {
+        if resolved == normalize_path_components(config_dir.to_path_buf()) {
+            return ".".to_string();
+        }
+    }
+
+    if Path::new(data_dir).is_absolute() {
+        portable_path_value(&resolved)
+    } else {
+        data_dir.to_string()
+    }
+}
+
+fn portable_path_value(path: &Path) -> String {
+    home_relative_path(path)
+        .unwrap_or_else(|| path.to_path_buf())
+        .display()
+        .to_string()
+}
+
+fn home_relative_path(path: &Path) -> Option<PathBuf> {
+    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    let path = normalize_path_components(path.to_path_buf());
+    let home = normalize_path_components(home);
+    let relative = path.strip_prefix(home).ok()?;
+    if relative.as_os_str().is_empty() {
+        Some(PathBuf::from("~"))
+    } else {
+        Some(PathBuf::from("~").join(relative))
+    }
+}
+
+fn normalize_path_components(path: PathBuf) -> PathBuf {
+    let mut normalized = PathBuf::new();
+
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !normalized.pop() {
+                    normalized.push(component.as_os_str());
+                }
+            }
+            _ => normalized.push(component.as_os_str()),
+        }
+    }
+
+    normalized
 }
 
 fn log_git_sync_event(message: impl AsRef<str>) {
@@ -2356,12 +2414,46 @@ mod tests {
         assert_eq!(settings.repo, "colonelpanic8/keepbook-data");
         assert_eq!(settings.branch, "master");
         assert_eq!(settings.ssh_user, "git");
-        assert_eq!(
-            settings.ssh_key_path.as_deref(),
-            Some(".ssh/keepbook_sync_key")
-        );
+        assert_eq!(settings.ssh_key_path, None);
         let content = std::fs::read_to_string(&config_path)?;
         assert!(content.contains("[git_sync]"));
+        assert!(!content.contains("ssh_key_path"));
+        remove_test_config(config_path);
+        Ok(())
+    }
+
+    #[test]
+    fn write_git_settings_keeps_data_dir_portable_and_removes_ssh_key_path() -> Result<()> {
+        let config_path = unique_test_config_path("write-git-portable-paths");
+        let config_dir = config_path
+            .parent()
+            .expect("test config should have parent")
+            .to_path_buf();
+        write_test_config(
+            &config_path,
+            "data_dir = \"./old-data\"\n[git_sync]\nssh_key_path = \"/Users/kat/.ssh/id_ed25519\"\n",
+        )?;
+
+        let home = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| config_dir.join("home"));
+        let ssh_key_path = home.join(".ssh").join("id_ed25519");
+
+        write_git_settings(
+            &config_path,
+            &GitSettingsInput {
+                data_dir: config_dir.display().to_string(),
+                host: "github.com".to_string(),
+                repo: "colonelpanic8/keepbook-data".to_string(),
+                branch: "master".to_string(),
+                ssh_user: "git".to_string(),
+                ssh_key_path: Some(ssh_key_path.display().to_string()),
+            },
+        )?;
+
+        let content = std::fs::read_to_string(&config_path)?;
+        assert!(content.contains("data_dir = \".\""));
+        assert!(!content.contains("ssh_key_path"));
         remove_test_config(config_path);
         Ok(())
     }
@@ -2419,10 +2511,14 @@ mod tests {
 
     #[test]
     fn configured_ssh_key_path_wins_over_default() {
-        let settings = with_default_desktop_ssh_key_path(GitRemoteSettings {
-            ssh_key_path: Some(".ssh/keepbook_sync_key".to_string()),
-            ..GitRemoteSettings::default()
-        });
+        let config_path = unique_test_config_path("configured-ssh-key-wins");
+        let settings = with_default_desktop_ssh_key_path(
+            &config_path,
+            GitRemoteSettings {
+                ssh_key_path: Some(".ssh/keepbook_sync_key".to_string()),
+                ..GitRemoteSettings::default()
+            },
+        );
 
         assert_eq!(
             settings.ssh_key_path.as_deref(),
