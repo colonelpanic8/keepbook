@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1 - 2026-05-22
+
+### Fixed
+
+- Constrained the Dioxus desktop workspace and spending layout so fullscreen ultrawide windows do not over-expand the UI.
+
 ## 0.4.0 - 2026-05-15
 
 ### Added

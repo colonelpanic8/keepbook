@@ -195,9 +195,9 @@
             <key>CFBundlePackageType</key>
             <string>APPL</string>
             <key>CFBundleShortVersionString</key>
-            <string>0.4.0</string>
+            <string>0.4.1</string>
             <key>CFBundleVersion</key>
-            <string>0.4.0</string>
+            <string>0.4.1</string>
             <key>LSMinimumSystemVersion</key>
             <string>13.0</string>
             <key>NSHighResolutionCapable</key>
@@ -626,7 +626,7 @@
         }:
           rustPlatform.buildRustPackage {
             inherit pname buildFeatures buildNoDefaultFeatures postInstall;
-            version = "0.4.0";
+            version = "0.4.1";
             src = cleanSrc;
             cargoLock = {
               lockFile = ./Cargo.lock;
