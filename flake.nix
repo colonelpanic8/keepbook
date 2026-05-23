@@ -25,8 +25,8 @@
         };
         fenixPkgs = fenix.packages.${system};
         lib = pkgs.lib;
-        appVersion = "0.4.2";
-        androidVersionCode = "402";
+        appVersion = "0.4.3";
+        androidVersionCode = "403";
         sourceRoot = ./.;
         cleanSrc = pkgs.lib.cleanSourceWith {
           src = sourceRoot;
@@ -292,11 +292,14 @@
                   for density in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
                     local qualifier="''${density%%:*}"
                     local size="''${density##*:}"
+                    local icon_inner_size="$((size * 90 / 100))"
                     local dir="$res/mipmap-$qualifier"
                     mkdir -p "$dir"
                     rm -f "$dir/ic_launcher.webp"
                     magick -background none "$repo/assets/keepbook-icon.svg" \
-                      -resize "''${size}x''${size}" \
+                      -alpha set -trim +repage \
+                      -resize "''${icon_inner_size}x''${icon_inner_size}" \
+                      -gravity center -extent "''${size}x''${size}" \
                       "$dir/ic_launcher.png"
                   done
                 fi

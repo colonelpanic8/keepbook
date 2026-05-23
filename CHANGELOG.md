@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.3 - 2026-05-23
+
+### Fixed
+
+- Enlarged the Keepbook launcher artwork on mobile by removing excess transparent icon padding.
+
 ## 0.4.2 - 2026-05-23
 
 ### Fixed
