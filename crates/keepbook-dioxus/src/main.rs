@@ -556,18 +556,6 @@ struct ActiveStackedSeries {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-struct StackedLayerDetail {
-    index: usize,
-    series: ActiveStackedSeries,
-    path: String,
-    color: &'static str,
-    x: f64,
-    y: f64,
-    value: f64,
-    share: Option<f64>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
 struct SpendingBarChartPoint {
     label: String,
     start_date: String,

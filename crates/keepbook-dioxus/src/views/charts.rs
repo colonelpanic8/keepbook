@@ -281,6 +281,11 @@ pub(super) fn StackedHistoryGraphPanel(
                         data: sampled_data.clone(),
                         series: active_series.clone(),
                         currency: currency.clone(),
+                        onselectrange: move |(start, end): (String, String)| {
+                            start_override.set(start);
+                            end_override.set(end);
+                            range_preset.set(RangePreset::Custom);
+                        },
                     }
                     if !sampled_data.is_empty() {
                         div { class: "chart-stats",
@@ -561,6 +566,11 @@ pub(super) fn HistoryGraphPanel(
                     y_domain,
                     empty_title: empty_title.clone(),
                     empty_detail: empty_detail.clone(),
+                    onselectrange: move |(start, end): (String, String)| {
+                        start_override.set(start);
+                        end_override.set(end);
+                        range_preset.set(RangePreset::Custom);
+                    },
                 }
                 if !sampled_data.is_empty() {
                     div { class: "chart-stats",
@@ -628,7 +638,10 @@ fn NetWorthChart(
     y_domain: Option<(f64, f64)>,
     empty_title: String,
     empty_detail: String,
+    onselectrange: EventHandler<(String, String)>,
 ) -> Element {
+    let mut drag_start = use_signal(|| None::<usize>);
+    let mut drag_current = use_signal(|| None::<usize>);
     let values = data
         .iter()
         .map(|point| (point.date.clone(), point.value))
@@ -733,6 +746,17 @@ fn NetWorthChart(
                 hit_width: (next_x - previous_x).max(1.0),
             }
         })
+        .collect::<Vec<_>>();
+    let drag_selection = chart_drag_selection(
+        drag_start(),
+        drag_current(),
+        hover_points.iter().map(|point| point.point.x).collect(),
+        padding_top,
+        plot_height,
+    );
+    let date_values = hover_points
+        .iter()
+        .map(|point| point.point.date.clone())
         .collect::<Vec<_>>();
     let hover_rules = hover_points
         .iter()
@@ -841,6 +865,15 @@ fn NetWorthChart(
                     path { class: "chart-area", d: "{area_path}" }
                     path { class: "chart-line", d: "{line_path}" }
                 }
+                if let Some(selection) = drag_selection {
+                    rect {
+                        class: "chart-drag-selection",
+                        x: "{selection.x}",
+                        y: "{selection.y}",
+                        width: "{selection.width}",
+                        height: "{selection.height}"
+                    }
+                }
                 for point in chart_points {
                     circle {
                         class: "chart-point",
@@ -852,12 +885,38 @@ fn NetWorthChart(
                 }
                 g { class: "chart-hover-layer",
                     for hover_point in hover_points.iter() {
+                        {
+                            let index = hover_point.index;
+                            let dates_for_mouseup = date_values.clone();
+                            rsx! {
                         rect {
                             class: "chart-hit-zone chart-hit-zone-{hover_point.index}",
                             x: "{hover_point.hit_x}",
                             y: "{padding_top}",
                             width: "{hover_point.hit_width}",
-                            height: "{plot_height}"
+                            height: "{plot_height}",
+                            onmousedown: move |_| {
+                                drag_start.set(Some(index));
+                                drag_current.set(Some(index));
+                            },
+                            onmouseenter: move |_| {
+                                if drag_start().is_some() {
+                                    drag_current.set(Some(index));
+                                }
+                            },
+                            onmouseup: move |_| {
+                                if let Some((start, end)) = selected_date_range(
+                                    drag_start(),
+                                    drag_current().or(Some(index)),
+                                    &dates_for_mouseup,
+                                ) {
+                                    onselectrange.call((start, end));
+                                }
+                                drag_start.set(None);
+                                drag_current.set(None);
+                            }
+                        }
+                            }
                         }
                     }
                     for hover_point in hover_points {
@@ -913,7 +972,10 @@ fn StackedNetWorthChart(
     data: Vec<StackedHistoryDataPoint>,
     series: Vec<ActiveStackedSeries>,
     currency: String,
+    onselectrange: EventHandler<(String, String)>,
 ) -> Element {
+    let mut drag_start = use_signal(|| None::<usize>);
+    let mut drag_current = use_signal(|| None::<usize>);
     if data.is_empty() || series.is_empty() {
         return rsx! {
             div { class: "chart-empty",
@@ -977,48 +1039,43 @@ fn StackedNetWorthChart(
                 padding_top,
                 plot_height,
             )?;
-            let latest_stack_point = stack_points
-                .iter()
-                .rev()
-                .find(|point| point.series_key == series.key)?;
-            let value = latest_stack_point.y1_value - latest_stack_point.y0_value;
-            let y0 = stacked_y(
-                latest_stack_point.y0_value,
-                y_min,
-                y_range,
-                padding_top,
-                plot_height,
-            );
-            let y1 = stacked_y(
-                latest_stack_point.y1_value,
-                y_min,
-                y_range,
-                padding_top,
-                plot_height,
-            );
-            let share = if latest_total == 0.0 {
-                None
-            } else {
-                Some((value / latest_total) * 100.0)
-            };
-            Some(StackedLayerDetail {
+            Some(StackedLayerRender {
                 index,
                 series: series.clone(),
                 path,
                 color: stacked_chart_color(index),
-                x: latest_stack_point.x,
-                y: (y0 + y1) / 2.0,
-                value,
-                share,
             })
         })
         .collect::<Vec<_>>();
-    let hover_rules = layer_details
+    let hover_points = stacked_hover_points(
+        &data,
+        &series,
+        y_min,
+        y_range,
+        padding_left,
+        padding_right,
+        padding_top,
+        plot_width,
+        plot_height,
+        width,
+    );
+    let drag_selection = chart_drag_selection(
+        drag_start(),
+        drag_current(),
+        hover_points.iter().map(|point| point.x).collect(),
+        padding_top,
+        plot_height,
+    );
+    let date_values = hover_points
         .iter()
-        .map(|layer| {
+        .map(|point| point.date.clone())
+        .collect::<Vec<_>>();
+    let hover_rules = hover_points
+        .iter()
+        .map(|hover_point| {
             format!(
-                ".stacked-layer-hit-{0}:hover ~ .stacked-layer-tooltip-{0} {{ display: block; }}",
-                layer.index
+                ".stacked-point-hit-{0}:hover ~ .stacked-point-tooltip-{0} {{ display: block; }}",
+                hover_point.index
             )
         })
         .collect::<Vec<_>>()
@@ -1100,22 +1157,69 @@ fn StackedNetWorthChart(
                 }
                 for layer in layer_details.iter() {
                     path {
-                        class: "stacked-area-layer stacked-layer-hit stacked-layer-hit-{layer.index}",
+                        class: "stacked-area-layer",
                         d: "{layer.path}",
                         style: "fill: {layer.color}; stroke: {layer.color};",
-                        title { "{layer.series.label}: {format_full_money(layer.value, &currency)}" }
+                        title { "{layer.series.label}" }
                     }
                 }
                 if !total_path.is_empty() {
                     path { class: "stacked-total-line", d: "{total_path}" }
                 }
-                for layer in layer_details.iter() {
-                    StackedLayerTooltip {
-                        layer: layer.clone(),
-                        currency: currency.clone(),
-                        chart_width: width,
-                        padding_right,
-                        padding_top,
+                if let Some(selection) = drag_selection {
+                    rect {
+                        class: "chart-drag-selection",
+                        x: "{selection.x}",
+                        y: "{selection.y}",
+                        width: "{selection.width}",
+                        height: "{selection.height}"
+                    }
+                }
+                g { class: "chart-hover-layer",
+                    for hover_point in hover_points.iter() {
+                        {
+                            let index = hover_point.index;
+                            let dates_for_mouseup = date_values.clone();
+                            rsx! {
+                        rect {
+                            class: "chart-hit-zone stacked-point-hit stacked-point-hit-{hover_point.index}",
+                            x: "{hover_point.hit_x}",
+                            y: "{padding_top}",
+                            width: "{hover_point.hit_width}",
+                            height: "{plot_height}",
+                            onmousedown: move |_| {
+                                drag_start.set(Some(index));
+                                drag_current.set(Some(index));
+                            },
+                            onmouseenter: move |_| {
+                                if drag_start().is_some() {
+                                    drag_current.set(Some(index));
+                                }
+                            },
+                            onmouseup: move |_| {
+                                if let Some((start, end)) = selected_date_range(
+                                    drag_start(),
+                                    drag_current().or(Some(index)),
+                                    &dates_for_mouseup,
+                                ) {
+                                    onselectrange.call((start, end));
+                                }
+                                drag_start.set(None);
+                                drag_current.set(None);
+                            }
+                        }
+                            }
+                        }
+                    }
+                    for hover_point in hover_points {
+                        StackedPointTooltip {
+                            hover_point: hover_point.clone(),
+                            currency: currency.clone(),
+                            chart_width: width,
+                            chart_height: height,
+                            padding_right,
+                            padding_top,
+                        }
                     }
                 }
             }
@@ -1145,56 +1249,49 @@ fn StackedNetWorthChart(
 }
 
 #[component]
-fn StackedLayerTooltip(
-    layer: StackedLayerDetail,
+fn StackedPointTooltip(
+    hover_point: StackedHoverPoint,
     currency: String,
     chart_width: f64,
+    chart_height: f64,
     padding_right: f64,
     padding_top: f64,
 ) -> Element {
-    let tooltip_width = 220.0;
-    let tooltip_height = 68.0;
-    let tooltip_x = if layer.x + tooltip_width + 12.0 > chart_width - padding_right {
-        layer.x - tooltip_width - 12.0
+    let row_height = 16.0;
+    let tooltip_width = 272.0;
+    let tooltip_height = 50.0 + (hover_point.breakdown.len() as f64 * row_height);
+    let tooltip_x = if hover_point.x + tooltip_width + 12.0 > chart_width - padding_right {
+        hover_point.x - tooltip_width - 12.0
     } else {
-        layer.x + 12.0
+        hover_point.x + 12.0
     }
     .max(8.0);
-    let tooltip_y = if layer.y - tooltip_height / 2.0 < padding_top {
-        layer.y + 12.0
+    let tooltip_y = if hover_point.y + tooltip_height + 12.0 > chart_height - 6.0 {
+        hover_point.y - tooltip_height - 12.0
     } else {
-        layer.y - tooltip_height / 2.0
+        hover_point.y + 12.0
     }
-    .max(8.0);
+    .max(padding_top);
     let text_x = tooltip_x + 12.0;
-    let label_y = tooltip_y + 20.0;
-    let value_y = tooltip_y + 40.0;
-    let detail_y = tooltip_y + 58.0;
-    let value_text = format_full_money(layer.value, &currency);
-    let share_text = layer
-        .share
-        .map(|share| format!("{}% of total", format_number(share, 1)))
-        .unwrap_or_else(|| "No total share".to_string());
-    let series_type = if layer.series.series_type == "account_asset" {
-        "Asset contribution"
-    } else {
-        "Account contribution"
-    };
+    let date_y = tooltip_y + 20.0;
+    let total_y = tooltip_y + 39.0;
+    let rows_start_y = tooltip_y + 60.0;
+    let total_text = format_full_money(hover_point.total, &currency);
 
     rsx! {
-        g { class: "chart-hover-detail stacked-layer-tooltip stacked-layer-tooltip-{layer.index}",
+        g { class: "chart-hover-detail stacked-point-tooltip stacked-point-tooltip-{hover_point.index}",
             line {
-                class: "chart-hover-line stacked-hover-line",
-                x1: "{layer.x}",
-                x2: "{layer.x}",
+                class: "chart-hover-line",
+                x1: "{hover_point.x}",
+                x2: "{hover_point.x}",
                 y1: "{padding_top}",
-                y2: "{layer.y}"
+                y2: "{hover_point.y}"
             }
             circle {
                 class: "chart-hover-point",
-                cx: "{layer.x}",
-                cy: "{layer.y}",
-                r: "5"
+                cx: "{hover_point.x}",
+                cy: "{hover_point.y}",
+                r: "6"
             }
             rect {
                 class: "chart-tooltip",
@@ -1204,32 +1301,52 @@ fn StackedLayerTooltip(
                 height: "{tooltip_height}",
                 rx: "6"
             }
-            rect {
-                class: "stacked-tooltip-swatch",
-                x: "{text_x}",
-                y: "{tooltip_y + 10.0}",
-                width: "8",
-                height: "8",
-                rx: "2",
-                style: "fill: {layer.color};"
-            }
             text {
-                class: "chart-tooltip-date stacked-tooltip-label",
-                x: "{text_x + 14.0}",
-                y: "{label_y}",
-                "{layer.series.label}"
+                class: "chart-tooltip-date",
+                x: "{text_x}",
+                y: "{date_y}",
+                "{hover_point.date}"
             }
             text {
                 class: "chart-tooltip-value",
                 x: "{text_x}",
-                y: "{value_y}",
-                "{value_text}"
+                y: "{total_y}",
+                "Total {total_text}"
             }
-            text {
-                class: "chart-tooltip-detail",
-                x: "{text_x}",
-                y: "{detail_y}",
-                "{series_type} / {share_text}"
+            for (row_index, row) in hover_point.breakdown.iter().enumerate() {
+                {
+                    let row_y = rows_start_y + row_index as f64 * row_height;
+                    let label = tooltip_label(&row.label, 28);
+                    let value_text = format_full_money(row.value, &currency);
+                    let value_class = if row.value < 0.0 {
+                        "chart-tooltip-detail stacked-tooltip-value negative"
+                    } else {
+                        "chart-tooltip-detail stacked-tooltip-value"
+                    };
+                    rsx! {
+                        rect {
+                            class: "stacked-tooltip-swatch",
+                            x: "{text_x}",
+                            y: "{row_y - 8.0}",
+                            width: "8",
+                            height: "8",
+                            rx: "2",
+                            style: "fill: {row.color};"
+                        }
+                        text {
+                            class: "chart-tooltip-detail stacked-tooltip-label",
+                            x: "{text_x + 14.0}",
+                            y: "{row_y}",
+                            "{label}"
+                        }
+                        text {
+                            class: "{value_class}",
+                            x: "{tooltip_x + tooltip_width - 12.0}",
+                            y: "{row_y}",
+                            "{value_text}"
+                        }
+                    }
+                }
             }
         }
     }
@@ -1308,6 +1425,41 @@ struct StackPoint {
     x: f64,
     y0_value: f64,
     y1_value: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct StackedLayerRender {
+    index: usize,
+    series: ActiveStackedSeries,
+    path: String,
+    color: &'static str,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct StackedHoverPoint {
+    index: usize,
+    date: String,
+    total: f64,
+    x: f64,
+    y: f64,
+    hit_x: f64,
+    hit_width: f64,
+    breakdown: Vec<StackedTooltipRow>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct StackedTooltipRow {
+    label: String,
+    value: f64,
+    color: &'static str,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ChartDragSelection {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
 }
 
 fn account_stacked_series(history: &StackedHistory) -> Vec<StackedHistorySeries> {
@@ -1526,6 +1678,135 @@ fn stack_area_path(
 
 fn stacked_y(value: f64, y_min: f64, y_range: f64, padding_top: f64, plot_height: f64) -> f64 {
     padding_top + ((y_min + y_range - value) / y_range) * plot_height
+}
+
+fn chart_drag_selection(
+    start: Option<usize>,
+    current: Option<usize>,
+    point_xs: Vec<f64>,
+    padding_top: f64,
+    plot_height: f64,
+) -> Option<ChartDragSelection> {
+    let start = start?;
+    let current = current?;
+    if start == current {
+        return None;
+    }
+    let start_x = *point_xs.get(start)?;
+    let current_x = *point_xs.get(current)?;
+    let x = start_x.min(current_x);
+    Some(ChartDragSelection {
+        x,
+        y: padding_top,
+        width: (start_x - current_x).abs().max(1.0),
+        height: plot_height,
+    })
+}
+
+fn selected_date_range(
+    start: Option<usize>,
+    current: Option<usize>,
+    dates: &[String],
+) -> Option<(String, String)> {
+    let start = start?;
+    let current = current?;
+    if start == current {
+        return None;
+    }
+    let min_index = start.min(current);
+    let max_index = start.max(current);
+    Some((dates.get(min_index)?.clone(), dates.get(max_index)?.clone()))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn stacked_hover_points(
+    data: &[StackedHistoryDataPoint],
+    series: &[ActiveStackedSeries],
+    y_min: f64,
+    y_range: f64,
+    padding_left: f64,
+    padding_right: f64,
+    padding_top: f64,
+    plot_width: f64,
+    plot_height: f64,
+    chart_width: f64,
+) -> Vec<StackedHoverPoint> {
+    let count = data.len();
+    data.iter()
+        .enumerate()
+        .map(|(index, point)| {
+            let x = if count <= 1 {
+                padding_left + plot_width / 2.0
+            } else {
+                padding_left + (index as f64 / (count - 1) as f64) * plot_width
+            };
+            let previous_x = if index == 0 {
+                padding_left
+            } else if count <= 1 {
+                padding_left
+            } else {
+                padding_left + ((index as f64 - 0.5) / (count - 1) as f64) * plot_width
+            };
+            let next_x = if index + 1 == count {
+                chart_width - padding_right
+            } else if count <= 1 {
+                chart_width - padding_right
+            } else {
+                padding_left + ((index as f64 + 0.5) / (count - 1) as f64) * plot_width
+            };
+            let component_values = point
+                .components
+                .iter()
+                .map(|component| (component.series_key.as_str(), component.value))
+                .collect::<HashMap<_, _>>();
+            let mut breakdown = series
+                .iter()
+                .enumerate()
+                .filter_map(|(series_index, series)| {
+                    let value = *component_values.get(series.key.as_str()).unwrap_or(&0.0);
+                    if value.abs() <= f64::EPSILON {
+                        return None;
+                    }
+                    Some(StackedTooltipRow {
+                        label: series.label.clone(),
+                        value,
+                        color: stacked_chart_color(series_index),
+                    })
+                })
+                .collect::<Vec<_>>();
+            breakdown.sort_by(|a, b| {
+                b.value
+                    .abs()
+                    .partial_cmp(&a.value.abs())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| a.label.cmp(&b.label))
+            });
+
+            StackedHoverPoint {
+                index,
+                date: point.date.clone(),
+                total: point.total,
+                x,
+                y: stacked_y(point.total, y_min, y_range, padding_top, plot_height),
+                hit_x: previous_x,
+                hit_width: (next_x - previous_x).max(1.0),
+                breakdown,
+            }
+        })
+        .collect()
+}
+
+fn tooltip_label(label: &str, max_chars: usize) -> String {
+    if label.chars().count() <= max_chars {
+        return label.to_string();
+    }
+
+    let mut truncated = label
+        .chars()
+        .take(max_chars.saturating_sub(1))
+        .collect::<String>();
+    truncated.push_str("...");
+    truncated
 }
 
 fn stacked_chart_color(index: usize) -> &'static str {

@@ -1113,8 +1113,17 @@ button.stacked-legend-item {
 }
 
 .chart-hit-zone {
+  cursor: ew-resize;
   fill: transparent;
   pointer-events: all;
+}
+
+.chart-drag-selection {
+  fill: rgba(31, 111, 139, 0.16);
+  pointer-events: none;
+  stroke: rgba(31, 111, 139, 0.42);
+  stroke-dasharray: 4 3;
+  stroke-width: 1;
 }
 
 .chart-hover-detail {
@@ -1155,6 +1164,14 @@ button.stacked-legend-item {
 
 .stacked-tooltip-label {
   font-size: 11px;
+}
+
+.stacked-tooltip-value {
+  text-anchor: end;
+}
+
+.stacked-tooltip-value.negative {
+  fill: #ffd2ca;
 }
 
 .stacked-tooltip-swatch {
