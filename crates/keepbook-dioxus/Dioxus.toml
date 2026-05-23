@@ -4,3 +4,4 @@ name = "KeepbookDioxus"
 [bundle]
 identifier = "org.colonelpanic.keepbook.dioxus"
 publisher = "Ivan Malison"
+icon = ["../../assets/keepbook-icon.svg"]

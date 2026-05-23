@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.2 - 2026-05-23
+
+### Fixed
+
+- Corrected Android Git clone paths that retained stale macOS Application Support locations.
+- Made the Android Git Sync clone location editable in settings.
+- Packaged the keepbook launcher icon in Android release builds.
+
 ## 0.4.1 - 2026-05-22
 
 ### Fixed

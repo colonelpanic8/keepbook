@@ -233,9 +233,11 @@ pub(super) fn SettingsView(
                         staged_data_dir: git_data_dir(),
                         staged_remote: remote_input_from_settings(&host(), &repo(), &ssh_user()),
                         staged_branch: branch(),
-                        disabled: is_busy
+                        location_disabled: is_busy,
+                        clone_disabled: is_busy
                             || (private_key().trim().is_empty()
                                 && ssh_key_path().as_deref().unwrap_or_default().trim().is_empty()),
+                        onlocationchange: move |value| git_data_dir.set(value),
                         onclone: move |_| {
                             let repo_cloned = current.repo_state.cloned;
                             let input = GitSyncInput {
@@ -560,7 +562,9 @@ fn GitLocationList(
     staged_data_dir: String,
     staged_remote: String,
     staged_branch: String,
-    disabled: bool,
+    location_disabled: bool,
+    clone_disabled: bool,
+    onlocationchange: EventHandler<String>,
     onclone: EventHandler<()>,
 ) -> Element {
     let state = current.repo_state;
@@ -596,14 +600,20 @@ fn GitLocationList(
                         }
                         div { class: "git-state-row",
                             span { "Location" }
-                            code { "{staged_data_dir}" }
+                            input {
+                                class: "control-input git-location-input",
+                                r#type: "text",
+                                value: "{staged_data_dir}",
+                                disabled: location_disabled,
+                                oninput: move |event| onlocationchange.call(event.value()),
+                            }
                         }
                     }
                 }
                 div { class: "git-location-actions",
                     button {
                         class: "control-button selected",
-                        disabled,
+                        disabled: clone_disabled,
                         onclick: move |_| onclone.call(()),
                         "{action_label}"
                     }

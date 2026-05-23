@@ -25,6 +25,8 @@
         };
         fenixPkgs = fenix.packages.${system};
         lib = pkgs.lib;
+        appVersion = "0.4.2";
+        androidVersionCode = "402";
         sourceRoot = ./.;
         cleanSrc = pkgs.lib.cleanSourceWith {
           src = sourceRoot;
@@ -195,9 +197,9 @@
             <key>CFBundlePackageType</key>
             <string>APPL</string>
             <key>CFBundleShortVersionString</key>
-            <string>0.4.1</string>
+            <string>${appVersion}</string>
             <key>CFBundleVersion</key>
-            <string>0.4.1</string>
+            <string>${appVersion}</string>
             <key>LSMinimumSystemVersion</key>
             <string>13.0</string>
             <key>NSHighResolutionCapable</key>
@@ -215,6 +217,7 @@
             runtimeInputs = [
               pkgs.coreutils
               pkgs.findutils
+              pkgs.imagemagick
               pkgs.gnused
               pkgs.jq
               pkgs.nix
@@ -257,6 +260,7 @@
                 local app_gradle="$gradle_root/app/build.gradle.kts"
                 local gradle_properties="$gradle_root/gradle.properties"
                 local manifest="$gradle_root/app/src/main/AndroidManifest.xml"
+                local res="$gradle_root/app/src/main/res"
 
                 if [[ -f "$root_gradle" ]]; then
                   sed -i \
@@ -269,6 +273,8 @@
                   sed -i \
                     -e 's/compileSdk = [0-9][0-9]*/compileSdk = ${androidCompileSdkVersion}\n    buildToolsVersion = "${androidBuildToolsVersion}"/' \
                     -e 's/targetSdk = [0-9][0-9]*/targetSdk = ${androidTargetSdkVersion}/' \
+                    -e 's/versionCode = [0-9][0-9]*/versionCode = ${androidVersionCode}/' \
+                    -e 's/versionName = "[^"]*"/versionName = "${appVersion}"/' \
                     -e '/^[[:space:]]*kotlinOptions[[:space:]]*{/,/^[[:space:]]*}/c\    kotlin {\n        compilerOptions {\n            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)\n        }\n    }' \
                     "$app_gradle"
                 fi
@@ -279,6 +285,20 @@
 
                 if [[ -f "$manifest" ]]; then
                   sed -i '/android:extractNativeLibs=/d' "$manifest"
+                fi
+
+                if [[ -d "$res" && -f "$repo/assets/keepbook-icon.svg" ]]; then
+                  rm -f "$res/mipmap-anydpi-v26/ic_launcher.xml"
+                  for density in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
+                    local qualifier="''${density%%:*}"
+                    local size="''${density##*:}"
+                    local dir="$res/mipmap-$qualifier"
+                    mkdir -p "$dir"
+                    rm -f "$dir/ic_launcher.webp"
+                    magick -background none "$repo/assets/keepbook-icon.svg" \
+                      -resize "''${size}x''${size}" \
+                      "$dir/ic_launcher.png"
+                  done
                 fi
               }
 
@@ -626,7 +646,7 @@
         }:
           rustPlatform.buildRustPackage {
             inherit pname buildFeatures buildNoDefaultFeatures postInstall;
-            version = "0.4.1";
+            version = appVersion;
             src = cleanSrc;
             cargoLock = {
               lockFile = ./Cargo.lock;

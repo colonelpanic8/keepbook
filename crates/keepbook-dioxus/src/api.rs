@@ -856,6 +856,10 @@ pub(crate) fn android_default_git_data_dir() -> PathBuf {
 #[cfg(all(not(target_arch = "wasm32"), target_os = "android"))]
 pub(crate) fn normalize_android_app_data_path(path: String) -> String {
     let legacy_prefix = "/data/data/org.colonelpanic.keepbook.dioxus";
+    if path.contains("/Library/Application Support/keepbook") {
+        return android_default_git_data_dir().display().to_string();
+    }
+
     path.strip_prefix(legacy_prefix)
         .map(|suffix| format!("{ANDROID_PACKAGE_DATA_DIR}{suffix}"))
         .unwrap_or(path)
