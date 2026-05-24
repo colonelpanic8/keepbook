@@ -1,7 +1,12 @@
 [application]
-name = "KeepbookDioxus"
+name = "Keepbook"
 
 [bundle]
 identifier = "org.colonelpanic.keepbook.dioxus"
 publisher = "Ivan Malison"
-icon = ["../../assets/keepbook-icon.svg"]
+icon = [
+  "../../assets/keepbook-icon.svg",
+  "../../assets/keepbook-icon-32.png",
+  "../../assets/keepbook-icon-48.png",
+  "../../assets/keepbook-icon-64.png",
+]

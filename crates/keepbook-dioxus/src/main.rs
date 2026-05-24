@@ -15,6 +15,8 @@ const ANDROID_PACKAGE_DATA_DIR: &str = "/data/user/0/org.colonelpanic.keepbook.d
 
 const APP_CSS: &str = include_str!("../assets/styles.css");
 #[cfg(feature = "desktop")]
+const APP_ID: &str = "org.colonelpanic.keepbook.dioxus";
+#[cfg(feature = "desktop")]
 const APP_ICON_PNG: &[u8] = include_bytes!("../../../assets/keepbook-icon-64.png");
 const SSH_KEY_FILE_PICKER_BRIDGE_JS: &str = r#"
 (function () {
@@ -727,6 +729,15 @@ fn main() {
 #[cfg(feature = "desktop")]
 fn desktop_config() -> dioxus::desktop::Config {
     let config = dioxus::desktop::Config::new().with_disable_dma_buf_on_wayland(false);
+    #[cfg(target_os = "linux")]
+    let config = {
+        use dioxus::desktop::tao::event_loop::EventLoopBuilder;
+        use dioxus::desktop::tao::platform::unix::EventLoopBuilderExtUnix;
+
+        let mut event_loop_builder = EventLoopBuilder::with_user_event();
+        event_loop_builder.with_app_id(APP_ID);
+        config.with_event_loop(event_loop_builder.build())
+    };
     match dioxus::desktop::icon_from_memory::<dioxus::desktop::tao::window::Icon>(APP_ICON_PNG) {
         Ok(icon) => config.with_icon(icon),
         Err(error) => {

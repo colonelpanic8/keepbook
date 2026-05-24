@@ -732,8 +732,9 @@ fn open_dioxus_app() -> Result<()> {
         }
     }
 
-    let candidates: [(&str, &[&str]); 2] = [
+    let candidates: [(&str, &[&str]); 3] = [
         ("keepbook-dioxus", &[]),
+        ("gtk-launch", &["org.colonelpanic.keepbook.dioxus"]),
         ("gtk-launch", &["keepbook-dioxus"]),
     ];
     let mut errors = Vec::new();

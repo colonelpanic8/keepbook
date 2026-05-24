@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.4 - 2026-05-24
+
+### Fixed
+
+- Set the Dioxus desktop window and launcher icon identity consistently on Linux.
+
 ## 0.4.3 - 2026-05-23
 
 ### Fixed

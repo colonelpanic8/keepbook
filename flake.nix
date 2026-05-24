@@ -25,8 +25,9 @@
         };
         fenixPkgs = fenix.packages.${system};
         lib = pkgs.lib;
-        appVersion = "0.4.3";
-        androidVersionCode = "403";
+        appVersion = "0.4.4";
+        androidVersionCode = "404";
+        keepbookDioxusAppId = "org.colonelpanic.keepbook.dioxus";
         sourceRoot = ./.;
         cleanSrc = pkgs.lib.cleanSourceWith {
           src = sourceRoot;
@@ -189,7 +190,7 @@
             <key>CFBundleIconFile</key>
             <string>keepbook-icon.png</string>
             <key>CFBundleIdentifier</key>
-            <string>org.colonelpanic.keepbook.dioxus</string>
+            <string>${keepbookDioxusAppId}</string>
             <key>CFBundleInfoDictionaryVersion</key>
             <string>6.0</string>
             <key>CFBundleName</key>
@@ -446,19 +447,29 @@
           '';
         };
         keepbookDioxusDesktopItem = pkgs.makeDesktopItem {
-          name = "keepbook-dioxus";
+          name = keepbookDioxusAppId;
           desktopName = "Keepbook";
           genericName = "Personal finance toolkit";
           comment = "Local-first personal finance toolkit";
           exec = "keepbook-dioxus";
-          icon = "keepbook";
+          icon = keepbookDioxusAppId;
           categories = ["Office" "Finance"];
           startupNotify = true;
+          startupWMClass = keepbookDioxusAppId;
         };
         keepbookDioxusDesktopLinuxPostInstall = lib.optionalString isLinux ''
           wrapProgram "$out/bin/keepbook-dioxus" \
             --set WEBKIT_DISABLE_DMABUF_RENDERER 1 \
             --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath dioxusLinuxLibraryPathInputs}
+
+          install -Dm644 ${cleanSrc}/assets/keepbook-icon.svg \
+            "$out/share/icons/hicolor/scalable/apps/${keepbookDioxusAppId}.svg"
+          install -Dm644 ${cleanSrc}/assets/keepbook-icon-32.png \
+            "$out/share/icons/hicolor/32x32/apps/${keepbookDioxusAppId}.png"
+          install -Dm644 ${cleanSrc}/assets/keepbook-icon-48.png \
+            "$out/share/icons/hicolor/48x48/apps/${keepbookDioxusAppId}.png"
+          install -Dm644 ${cleanSrc}/assets/keepbook-icon-64.png \
+            "$out/share/icons/hicolor/64x64/apps/${keepbookDioxusAppId}.png"
 
           install -Dm644 ${cleanSrc}/assets/keepbook-icon.svg \
             "$out/share/icons/hicolor/scalable/apps/keepbook.svg"
@@ -468,8 +479,8 @@
             "$out/share/icons/hicolor/48x48/apps/keepbook.png"
           install -Dm644 ${cleanSrc}/assets/keepbook-icon-64.png \
             "$out/share/icons/hicolor/64x64/apps/keepbook.png"
-          install -Dm644 ${keepbookDioxusDesktopItem}/share/applications/keepbook-dioxus.desktop \
-            "$out/share/applications/keepbook-dioxus.desktop"
+          install -Dm644 ${keepbookDioxusDesktopItem}/share/applications/${keepbookDioxusAppId}.desktop \
+            "$out/share/applications/${keepbookDioxusAppId}.desktop"
         '';
         keepbookDioxusDesktopDarwinPostInstall = lib.optionalString isDarwin ''
           app="$out/Applications/Keepbook.app"
