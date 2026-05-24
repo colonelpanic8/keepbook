@@ -139,6 +139,31 @@ fn account_graph_query_scopes_history() {
 }
 
 #[test]
+fn default_spending_queries_request_one_year_monthly_total() {
+    assert_eq!(
+        spending_query_string(
+            DEFAULT_SPENDING_RANGE_PRESET,
+            "",
+            "",
+            "2026-04-25",
+            "USD",
+        ),
+        "period=range&group_by=tag&direction=outflow&status=posted&currency=USD&start=2025-04-25&end=2026-04-25"
+    );
+    assert_eq!(
+        spending_over_time_query_string(
+            DEFAULT_SPENDING_RANGE_PRESET,
+            "",
+            "",
+            "2026-04-25",
+            "USD",
+            DEFAULT_SPENDING_BUCKET,
+        ),
+        "period=monthly&period_alignment=calendar&group_by=tag&direction=outflow&status=posted&include_empty=true&currency=USD&start=2025-04-25&end=2026-04-25"
+    );
+}
+
+#[test]
 fn spending_over_time_query_requests_bucketed_tag_breakdowns() {
     assert_eq!(
         spending_over_time_query_string(

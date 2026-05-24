@@ -85,6 +85,8 @@ const SSH_KEY_FILE_PICKER_BRIDGE_JS: &str = r#"
 const API_BASE: &str = "http://127.0.0.1:8799";
 const DEFAULT_RANGE_PRESET: RangePreset = RangePreset::OneYear;
 const DEFAULT_SAMPLING_GRANULARITY: SamplingGranularity = SamplingGranularity::Weekly;
+const DEFAULT_SPENDING_RANGE_PRESET: RangePreset = RangePreset::OneYear;
+const DEFAULT_SPENDING_BUCKET: SpendingBucket = SpendingBucket::Monthly;
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 struct Overview {

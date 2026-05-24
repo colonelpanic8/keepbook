@@ -4,10 +4,10 @@ use std::collections::{HashMap, HashSet};
 
 #[component]
 pub(super) fn SpendingView(currency: String) -> Element {
-    let mut range_preset = use_signal(|| RangePreset::NinetyDays);
+    let mut range_preset = use_signal(|| DEFAULT_SPENDING_RANGE_PRESET);
     let mut start_override = use_signal(String::new);
     let mut end_override = use_signal(String::new);
-    let mut spending_bucket = use_signal(|| SpendingBucket::Weekly);
+    let mut spending_bucket = use_signal(|| DEFAULT_SPENDING_BUCKET);
     let mut selected_tag = use_signal(|| None::<String>);
     let mut transaction_page = use_signal(|| 0usize);
     let mut transaction_sort_field = use_signal(|| TransactionSortField::Date);
