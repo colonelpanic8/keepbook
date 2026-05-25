@@ -14,6 +14,13 @@ enum TrayCommand {
     Quit,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TrayOverlayStatus {
+    Idle,
+    Syncing,
+    Error,
+}
+
 struct TrayState {
     sender: mpsc::Sender<TrayThreadMessage>,
 }
@@ -95,7 +102,6 @@ pub fn KeepbookTray(
                     TrayCommand::ShowWindow => show_window(),
                     TrayCommand::ToggleWindow => toggle_window_visibility(),
                     TrayCommand::SyncNow => {
-                        show_window();
                         onsyncnow.call(());
                     }
                     TrayCommand::Quit => {
@@ -175,6 +181,7 @@ fn run_tray_thread(handle: Handle<KeepbookTrayItem>, receiver: mpsc::Receiver<Tr
                     tray.overview = update.overview;
                     tray.tray_snapshot = update.tray_snapshot;
                     tray.runtime = update.runtime;
+                    tray.bump_icon_generation();
                 });
             }
             TrayThreadMessage::Shutdown => {
@@ -371,12 +378,46 @@ fn load_icon_set() -> Vec<ksni::Icon> {
     ]
 }
 
+fn load_sync_overlay_icon_set() -> Vec<ksni::Icon> {
+    vec![
+        png_to_argb32(include_bytes!("../../../assets/overlay-sync-32.png")),
+        png_to_argb32(include_bytes!("../../../assets/overlay-sync-48.png")),
+        png_to_argb32(include_bytes!("../../../assets/overlay-sync-64.png")),
+    ]
+}
+
+fn load_error_overlay_icon_set() -> Vec<ksni::Icon> {
+    vec![
+        png_to_argb32(include_bytes!("../../../assets/overlay-error-32.png")),
+        png_to_argb32(include_bytes!("../../../assets/overlay-error-48.png")),
+        png_to_argb32(include_bytes!("../../../assets/overlay-error-64.png")),
+    ]
+}
+
+fn overlay_status_from_runtime(
+    runtime: &TrayRuntime,
+    tray_snapshot: Option<&Result<TraySnapshot, String>>,
+) -> TrayOverlayStatus {
+    if runtime.status_text.starts_with("Error:") || matches!(tray_snapshot, Some(Err(_))) {
+        TrayOverlayStatus::Error
+    } else if runtime.status_text.starts_with("Refreshing")
+        || runtime.status_text.starts_with("Syncing")
+    {
+        TrayOverlayStatus::Syncing
+    } else {
+        TrayOverlayStatus::Idle
+    }
+}
+
 struct KeepbookTrayItem {
     overview: Option<Overview>,
     tray_snapshot: Option<Result<TraySnapshot, String>>,
     runtime: TrayRuntime,
     sender: UnboundedSender<TrayCommand>,
     icons: Vec<ksni::Icon>,
+    sync_overlays: Vec<ksni::Icon>,
+    error_overlays: Vec<ksni::Icon>,
+    icon_generation: u64,
 }
 
 impl KeepbookTrayItem {
@@ -387,7 +428,37 @@ impl KeepbookTrayItem {
             runtime: TrayRuntime::default(),
             sender,
             icons: load_icon_set(),
+            sync_overlays: load_sync_overlay_icon_set(),
+            error_overlays: load_error_overlay_icon_set(),
+            icon_generation: 0,
         }
+    }
+
+    fn bump_icon_generation(&mut self) {
+        self.icon_generation = self.icon_generation.wrapping_add(1);
+    }
+
+    fn generation_pixel(&self) -> ksni::Icon {
+        let generation = self.icon_generation;
+        let r = (generation & 0xFF) as u8;
+        let g = ((generation >> 8) & 0xFF) as u8;
+        let b = ((generation >> 16) & 0xFF) as u8;
+        ksni::Icon {
+            width: 1,
+            height: 1,
+            data: vec![0, r, g, b],
+        }
+    }
+
+    fn overlay_icon_pixmaps(&self) -> Vec<ksni::Icon> {
+        let mut icons =
+            match overlay_status_from_runtime(&self.runtime, self.tray_snapshot.as_ref()) {
+                TrayOverlayStatus::Idle => Vec::new(),
+                TrayOverlayStatus::Syncing => self.sync_overlays.clone(),
+                TrayOverlayStatus::Error => self.error_overlays.clone(),
+            };
+        icons.push(self.generation_pixel());
+        icons
     }
 }
 
@@ -408,6 +479,10 @@ impl ksni::Tray for KeepbookTrayItem {
 
     fn icon_pixmap(&self) -> Vec<ksni::Icon> {
         self.icons.clone()
+    }
+
+    fn overlay_icon_pixmap(&self) -> Vec<ksni::Icon> {
+        self.overlay_icon_pixmaps()
     }
 
     fn tool_tip(&self) -> ksni::ToolTip {
@@ -447,8 +522,7 @@ impl ksni::Tray for KeepbookTrayItem {
         items.push(submenu("Recent Transactions", &transaction_lines));
         items.extend([
             MenuItem::Separator,
-            action_item("Refresh Prices", TrayCommand::SyncNow, &self.sender),
-            action_item("Open App", TrayCommand::ShowWindow, &self.sender),
+            action_item("Sync Prices", TrayCommand::SyncNow, &self.sender),
             action_item("Show/Hide Window", TrayCommand::ToggleWindow, &self.sender),
             MenuItem::Separator,
             action_item("Quit", TrayCommand::Quit, &self.sender),
@@ -457,3 +531,7 @@ impl ksni::Tray for KeepbookTrayItem {
         items
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/unit/tray_tests.rs"]
+mod tray_tests;
