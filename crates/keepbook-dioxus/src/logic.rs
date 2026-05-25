@@ -99,6 +99,99 @@ pub(crate) fn stacked_history_data_points(
     points
 }
 
+pub(crate) fn coalesce_minor_stacked_series(
+    data: &[StackedHistoryDataPoint],
+    series: &[ActiveStackedSeries],
+    threshold_percent: f64,
+) -> (Vec<StackedHistoryDataPoint>, Vec<ActiveStackedSeries>) {
+    if data.is_empty()
+        || series.is_empty()
+        || !threshold_percent.is_finite()
+        || threshold_percent <= 0.0
+    {
+        return (data.to_vec(), series.to_vec());
+    }
+
+    let threshold = threshold_percent / 100.0;
+    let mut major_series = Vec::new();
+    let mut minor_keys = HashSet::new();
+
+    for item in series {
+        let max_share = data
+            .iter()
+            .filter_map(|point| {
+                let value = point
+                    .components
+                    .iter()
+                    .find(|component| component.series_key == item.key)
+                    .map(|component| component.value)
+                    .unwrap_or_default()
+                    .abs();
+                let total = point.total.abs();
+                if total <= f64::EPSILON {
+                    if value <= f64::EPSILON {
+                        Some(0.0)
+                    } else {
+                        Some(f64::INFINITY)
+                    }
+                } else {
+                    Some(value / total)
+                }
+            })
+            .fold(0.0_f64, f64::max);
+
+        if max_share < threshold {
+            minor_keys.insert(item.key.clone());
+        } else {
+            major_series.push(item.clone());
+        }
+    }
+
+    if minor_keys.is_empty() {
+        return (data.to_vec(), series.to_vec());
+    }
+
+    let other_key = "__other_minor_contributions".to_string();
+    major_series.push(ActiveStackedSeries {
+        key: other_key.clone(),
+        label: format!("Other <{threshold_percent}%"),
+        account_id: None,
+        series_type: "other".to_string(),
+    });
+
+    let coalesced_data = data
+        .iter()
+        .map(|point| {
+            let mut other_value = 0.0;
+            let mut components = point
+                .components
+                .iter()
+                .filter_map(|component| {
+                    if minor_keys.contains(&component.series_key) {
+                        other_value += component.value;
+                        None
+                    } else {
+                        Some(component.clone())
+                    }
+                })
+                .collect::<Vec<_>>();
+            if other_value.abs() > f64::EPSILON {
+                components.push(StackedValue {
+                    series_key: other_key.clone(),
+                    value: other_value,
+                });
+            }
+            StackedHistoryDataPoint {
+                date: point.date.clone(),
+                total: point.total,
+                components,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    (coalesced_data, major_series)
+}
+
 pub(crate) fn date_bounds(points: &[NetWorthDataPoint]) -> Option<(String, String)> {
     Some((points.first()?.date.clone(), points.last()?.date.clone()))
 }

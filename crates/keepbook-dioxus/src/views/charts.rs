@@ -116,6 +116,8 @@ pub(super) fn StackedHistoryGraphPanel(
     let mut end_override = use_signal(String::new);
     let mut sampling_granularity = use_signal(move || initial_sampling_granularity);
     let mut expanded_accounts = use_signal(HashSet::<String>::new);
+    let mut group_minor_series = use_signal(|| false);
+    let mut minor_series_threshold = use_signal(|| "2".to_string());
     let history = use_resource(move || {
         let selected_range = range_preset();
         let start_text = start_override();
@@ -137,6 +139,14 @@ pub(super) fn StackedHistoryGraphPanel(
 
     let selected_range = range_preset();
     let selected_sampling = sampling_granularity();
+    let group_minor = group_minor_series();
+    let threshold_text = minor_series_threshold();
+    let threshold_percent = threshold_text
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .unwrap_or_default();
     let start_text = start_override();
     let end_text = end_override();
     let history_state = history.cloned();
@@ -184,6 +194,11 @@ pub(super) fn StackedHistoryGraphPanel(
     let active_series = loaded_history
         .map(|history| active_stacked_series(history, &expanded_accounts()))
         .unwrap_or_default();
+    let (display_data, display_series) = if group_minor {
+        coalesce_minor_stacked_series(&sampled_data, &active_series, threshold_percent)
+    } else {
+        (sampled_data.clone(), active_series.clone())
+    };
     let has_date_error = !start_date.is_empty() && !end_date.is_empty() && start_date > end_date;
 
     rsx! {
@@ -265,6 +280,30 @@ pub(super) fn StackedHistoryGraphPanel(
                         }
                     }
                 }
+                div { class: "sampling-row minor-series-row",
+                    label { class: "stacked-account-toggle minor-series-toggle",
+                        input {
+                            r#type: "checkbox",
+                            checked: group_minor,
+                            onchange: move |_| group_minor_series.set(!group_minor_series())
+                        }
+                        span { "Group small" }
+                    }
+                    label { class: "minor-series-threshold",
+                        span { class: "control-label", "Below" }
+                        input {
+                            class: "control-input minor-series-input",
+                            r#type: "number",
+                            min: "0",
+                            max: "100",
+                            step: "0.1",
+                            disabled: !group_minor,
+                            value: "{threshold_text}",
+                            oninput: move |event| minor_series_threshold.set(event.value())
+                        }
+                        span { class: "control-label", "%" }
+                    }
+                }
             }
             match history_state {
                 None => rsx! {
@@ -278,8 +317,8 @@ pub(super) fn StackedHistoryGraphPanel(
                 },
                 Some(Ok(_)) => rsx! {
                     StackedNetWorthChart {
-                        data: sampled_data.clone(),
-                        series: active_series.clone(),
+                        data: display_data.clone(),
+                        series: display_series.clone(),
                         currency: currency.clone(),
                         onselectrange: move |(start, end): (String, String)| {
                             start_override.set(start);

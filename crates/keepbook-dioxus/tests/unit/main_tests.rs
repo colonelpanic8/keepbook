@@ -8,6 +8,29 @@ fn point(date: &str, value: f64) -> NetWorthDataPoint {
     }
 }
 
+fn active_series(key: &str, label: &str) -> ActiveStackedSeries {
+    ActiveStackedSeries {
+        key: key.to_string(),
+        label: label.to_string(),
+        account_id: None,
+        series_type: "account_asset".to_string(),
+    }
+}
+
+fn stacked_point(date: &str, total: f64, components: &[(&str, f64)]) -> StackedHistoryDataPoint {
+    StackedHistoryDataPoint {
+        date: date.to_string(),
+        total,
+        components: components
+            .iter()
+            .map(|(series_key, value)| StackedValue {
+                series_key: (*series_key).to_string(),
+                value: *value,
+            })
+            .collect(),
+    }
+}
+
 #[test]
 fn two_year_range_starts_two_years_before_latest_point() {
     let points = vec![
@@ -136,6 +159,62 @@ fn account_graph_query_scopes_history() {
         ),
         "granularity=monthly&account=account%20id"
     );
+}
+
+#[test]
+fn coalesce_minor_stacked_series_groups_series_below_visible_threshold() {
+    let series = vec![
+        active_series("cash", "Cash"),
+        active_series("brokerage", "Brokerage"),
+        active_series("tiny", "Tiny"),
+    ];
+    let data = vec![
+        stacked_point(
+            "2026-01-01",
+            100.0,
+            &[("cash", 60.0), ("brokerage", 39.0), ("tiny", 1.0)],
+        ),
+        stacked_point(
+            "2026-02-01",
+            200.0,
+            &[("cash", 100.0), ("brokerage", 98.0), ("tiny", 2.0)],
+        ),
+    ];
+
+    let (coalesced_data, coalesced_series) = coalesce_minor_stacked_series(&data, &series, 2.0);
+
+    assert_eq!(
+        coalesced_series
+            .iter()
+            .map(|series| series.label.as_str())
+            .collect::<Vec<_>>(),
+        vec!["Cash", "Brokerage", "Other <2%"]
+    );
+    assert_eq!(
+        coalesced_data[1]
+            .components
+            .iter()
+            .find(|component| component.series_key == "__other_minor_contributions")
+            .map(|component| component.value),
+        Some(2.0)
+    );
+}
+
+#[test]
+fn coalesce_minor_stacked_series_keeps_series_material_anywhere_in_visible_range() {
+    let series = vec![
+        active_series("cash", "Cash"),
+        active_series("volatile", "Volatile"),
+    ];
+    let data = vec![
+        stacked_point("2026-01-01", 100.0, &[("cash", 96.0), ("volatile", 4.0)]),
+        stacked_point("2026-02-01", 200.0, &[("cash", 198.0), ("volatile", 2.0)]),
+    ];
+
+    let (coalesced_data, coalesced_series) = coalesce_minor_stacked_series(&data, &series, 2.0);
+
+    assert_eq!(coalesced_data, data);
+    assert_eq!(coalesced_series, series);
 }
 
 #[test]

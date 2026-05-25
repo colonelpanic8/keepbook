@@ -502,6 +502,24 @@ small,
   white-space: nowrap;
 }
 
+.minor-series-row {
+  align-items: center;
+}
+
+.minor-series-toggle {
+  min-width: 132px;
+}
+
+.minor-series-threshold {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+}
+
+.minor-series-input {
+  max-width: 88px;
+}
+
 .icon-button {
   align-items: center;
   background: transparent;
