@@ -676,7 +676,7 @@
             nativeBuildInputs = [pkgs.pkg-config] ++ extraNativeBuildInputs;
             buildInputs = extraBuildInputs;
             OPENSSL_NO_VENDOR = "1";
-            RUST_MIN_STACK = "16777216";
+            RUST_MIN_STACK = "33554432";
           };
         keepbookDioxusDesktop = mkKeepbookPackage {
           pname = "keepbook-dioxus";
