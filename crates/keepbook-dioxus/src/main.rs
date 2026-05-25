@@ -717,6 +717,7 @@ impl SpendingBucket {
 fn main() {
     #[cfg(feature = "desktop")]
     {
+        configure_linux_webkit_backend();
         dioxus::LaunchBuilder::desktop()
             .with_cfg(desktop_config())
             .launch(views::App);
@@ -726,9 +727,21 @@ fn main() {
     dioxus::launch(views::App);
 }
 
+#[cfg(all(feature = "desktop", target_os = "linux"))]
+fn configure_linux_webkit_backend() {
+    if std::env::var("XDG_SESSION_TYPE").unwrap_or_default() == "wayland" {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        std::env::set_var("GDK_BACKEND", "x11");
+    }
+}
+
+#[cfg(not(all(feature = "desktop", target_os = "linux")))]
+fn configure_linux_webkit_backend() {}
+
 #[cfg(feature = "desktop")]
 fn desktop_config() -> dioxus::desktop::Config {
-    let config = dioxus::desktop::Config::new().with_disable_dma_buf_on_wayland(false);
+    let config = dioxus::desktop::Config::new()
+        .with_window(dioxus::desktop::tao::window::WindowBuilder::new().with_title("Keepbook"));
     #[cfg(target_os = "linux")]
     let config = {
         use dioxus::desktop::tao::event_loop::EventLoopBuilder;
