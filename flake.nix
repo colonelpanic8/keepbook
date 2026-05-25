@@ -28,6 +28,7 @@
         appVersion = "0.4.4";
         androidVersionCode = "404";
         keepbookDioxusAppId = "org.colonelpanic.keepbook.dioxus";
+        keepbookDioxusDesktopAlias = "keepbook-dioxus";
         sourceRoot = ./.;
         cleanSrc = pkgs.lib.cleanSourceWith {
           src = sourceRoot;
@@ -457,6 +458,17 @@
           startupNotify = true;
           startupWMClass = keepbookDioxusAppId;
         };
+        keepbookDioxusDesktopAliasItem = pkgs.makeDesktopItem {
+          name = keepbookDioxusDesktopAlias;
+          desktopName = "Keepbook";
+          genericName = "Personal finance toolkit";
+          comment = "Local-first personal finance toolkit";
+          exec = "keepbook-dioxus";
+          icon = keepbookDioxusDesktopAlias;
+          categories = ["Office" "Finance"];
+          startupNotify = true;
+          startupWMClass = keepbookDioxusDesktopAlias;
+        };
         keepbookDioxusDesktopLinuxPostInstall = lib.optionalString isLinux ''
           wrapProgram "$out/bin/keepbook-dioxus" \
             --set WEBKIT_DISABLE_DMABUF_RENDERER 1 \
@@ -479,8 +491,19 @@
             "$out/share/icons/hicolor/48x48/apps/keepbook.png"
           install -Dm644 ${cleanSrc}/assets/keepbook-icon-64.png \
             "$out/share/icons/hicolor/64x64/apps/keepbook.png"
+
+          install -Dm644 ${cleanSrc}/assets/keepbook-icon.svg \
+            "$out/share/icons/hicolor/scalable/apps/${keepbookDioxusDesktopAlias}.svg"
+          install -Dm644 ${cleanSrc}/assets/keepbook-icon-32.png \
+            "$out/share/icons/hicolor/32x32/apps/${keepbookDioxusDesktopAlias}.png"
+          install -Dm644 ${cleanSrc}/assets/keepbook-icon-48.png \
+            "$out/share/icons/hicolor/48x48/apps/${keepbookDioxusDesktopAlias}.png"
+          install -Dm644 ${cleanSrc}/assets/keepbook-icon-64.png \
+            "$out/share/icons/hicolor/64x64/apps/${keepbookDioxusDesktopAlias}.png"
           install -Dm644 ${keepbookDioxusDesktopItem}/share/applications/${keepbookDioxusAppId}.desktop \
             "$out/share/applications/${keepbookDioxusAppId}.desktop"
+          install -Dm644 ${keepbookDioxusDesktopAliasItem}/share/applications/${keepbookDioxusDesktopAlias}.desktop \
+            "$out/share/applications/${keepbookDioxusDesktopAlias}.desktop"
         '';
         keepbookDioxusDesktopDarwinPostInstall = lib.optionalString isDarwin ''
           app="$out/Applications/Keepbook.app"

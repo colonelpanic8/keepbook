@@ -17,11 +17,14 @@ serde_json = "1"
 image = { version = "0.25", optional = true, default-features = false, features = ["png"] }
 ksni = { version = "0.3", optional = true, features = ["blocking"] }
 futures-util = { version = "0.3", optional = true }
+gdk = { version = "0.18", optional = true }
+glib = { version = "0.18", optional = true }
+gtk = { version = "0.18", optional = true }
 
 [features]
 default = ["web"]
 web = ["dioxus/web", "dep:gloo-net"]
-desktop = ["dioxus/desktop", "dep:image", "dep:ksni", "dep:futures-util"]
+desktop = ["dioxus/desktop", "dep:image", "dep:ksni", "dep:futures-util", "dep:gdk", "dep:glib", "dep:gtk"]
 mobile = ["dioxus/mobile"]
 android = ["mobile"]
 

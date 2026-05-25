@@ -717,7 +717,7 @@ impl SpendingBucket {
 fn main() {
     #[cfg(feature = "desktop")]
     {
-        configure_linux_webkit_backend();
+        configure_linux_desktop_environment();
         dioxus::LaunchBuilder::desktop()
             .with_cfg(desktop_config())
             .launch(views::App);
@@ -728,7 +728,11 @@ fn main() {
 }
 
 #[cfg(all(feature = "desktop", target_os = "linux"))]
-fn configure_linux_webkit_backend() {
+fn configure_linux_desktop_environment() {
+    glib::set_application_name("Keepbook");
+    gdk::set_program_class(APP_ID);
+    gtk::Window::set_default_icon_name(APP_ID);
+
     if std::env::var("XDG_SESSION_TYPE").unwrap_or_default() == "wayland" {
         std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
         std::env::set_var("GDK_BACKEND", "x11");
@@ -736,7 +740,7 @@ fn configure_linux_webkit_backend() {
 }
 
 #[cfg(not(all(feature = "desktop", target_os = "linux")))]
-fn configure_linux_webkit_backend() {}
+fn configure_linux_desktop_environment() {}
 
 #[cfg(feature = "desktop")]
 fn desktop_config() -> dioxus::desktop::Config {
