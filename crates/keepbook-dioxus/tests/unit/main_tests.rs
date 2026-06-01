@@ -385,6 +385,7 @@ fn spending_transactions_sort_by_amount_in_both_directions() {
     let ascending = filtered_transactions(
         &rows,
         None,
+        None,
         "",
         TransactionSortField::Amount,
         SortDirection::Asc,
@@ -392,6 +393,7 @@ fn spending_transactions_sort_by_amount_in_both_directions() {
     );
     let descending = filtered_transactions(
         &rows,
+        None,
         None,
         "",
         TransactionSortField::Amount,
@@ -426,6 +428,7 @@ fn spending_transactions_sort_by_each_visible_text_field() {
         filtered_transactions(
             &rows,
             None,
+            None,
             "",
             TransactionSortField::Description,
             SortDirection::Asc,
@@ -437,6 +440,7 @@ fn spending_transactions_sort_by_each_visible_text_field() {
     assert_eq!(
         filtered_transactions(
             &rows,
+            None,
             None,
             "",
             TransactionSortField::Tag,
@@ -450,6 +454,7 @@ fn spending_transactions_sort_by_each_visible_text_field() {
         filtered_transactions(
             &rows,
             None,
+            None,
             "",
             TransactionSortField::Account,
             SortDirection::Asc,
@@ -461,6 +466,7 @@ fn spending_transactions_sort_by_each_visible_text_field() {
     assert_eq!(
         filtered_transactions(
             &rows,
+            None,
             None,
             "",
             TransactionSortField::Counted,
@@ -499,6 +505,7 @@ fn spending_transactions_can_hide_ignored_rows() {
     let without_ignored = filtered_transactions(
         &rows,
         None,
+        None,
         "",
         TransactionSortField::Date,
         SortDirection::Desc,
@@ -506,6 +513,7 @@ fn spending_transactions_can_hide_ignored_rows() {
     );
     let with_ignored = filtered_transactions(
         &rows,
+        None,
         None,
         "",
         TransactionSortField::Date,
@@ -528,6 +536,7 @@ fn spending_transactions_filter_untagged_bucket() {
     let filtered = filtered_transactions(
         &rows,
         Some("untagged"),
+        None,
         "",
         TransactionSortField::Date,
         SortDirection::Desc,
@@ -536,6 +545,30 @@ fn spending_transactions_filter_untagged_bucket() {
 
     assert_eq!(filtered.len(), 1);
     assert_eq!(filtered[0].id, "untagged");
+}
+
+#[test]
+fn spending_transactions_filter_by_selected_period() {
+    let mut january = transaction("january", "-12.50", "posted");
+    january.timestamp = "2026-01-15T12:00:00+00:00".to_string();
+    january.tags = vec!["Dining".to_string()];
+    let mut february = transaction("february", "-8.00", "posted");
+    february.timestamp = "2026-02-01T12:00:00+00:00".to_string();
+    february.tags = vec!["Dining".to_string()];
+    let rows = vec![january, february];
+
+    let filtered = filtered_transactions(
+        &rows,
+        None,
+        Some(("2026-01-01", "2026-01-31")),
+        "",
+        TransactionSortField::Date,
+        SortDirection::Desc,
+        true,
+    );
+
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].id, "january");
 }
 
 #[test]

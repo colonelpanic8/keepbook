@@ -577,6 +577,13 @@ struct SpendingBarSegment {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+struct SpendingPeriodSelection {
+    label: String,
+    start_date: String,
+    end_date: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 struct ChartPoint {
     date: String,
     value: f64,

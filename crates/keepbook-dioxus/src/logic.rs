@@ -1054,6 +1054,7 @@ pub(crate) fn transaction_tag_options(
 pub(crate) fn filtered_transactions(
     transactions: &[Transaction],
     selected_tag: Option<&str>,
+    selected_period: Option<(&str, &str)>,
     title_filter: &str,
     sort_field: TransactionSortField,
     sort_direction: SortDirection,
@@ -1065,6 +1066,12 @@ pub(crate) fn filtered_transactions(
         .filter(|transaction| {
             if transaction.ignored_from_spending && !show_ignored {
                 return false;
+            }
+            if let Some((start_date, end_date)) = selected_period {
+                let date = transaction_date(transaction);
+                if date.as_str() < start_date || date.as_str() > end_date {
+                    return false;
+                }
             }
             if !normalized_title_filter.is_empty()
                 && !transaction_description(transaction)

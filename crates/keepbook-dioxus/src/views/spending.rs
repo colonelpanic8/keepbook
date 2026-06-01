@@ -9,6 +9,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
     let mut end_override = use_signal(String::new);
     let mut spending_bucket = use_signal(|| DEFAULT_SPENDING_BUCKET);
     let mut selected_tag = use_signal(|| None::<String>);
+    let mut selected_period = use_signal(|| None::<SpendingPeriodSelection>);
     let mut transaction_page = use_signal(|| 0usize);
     let mut transaction_sort_field = use_signal(|| TransactionSortField::Date);
     let mut transaction_sort_direction = use_signal(|| SortDirection::Desc);
@@ -56,6 +57,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
     let start_text = start_override();
     let end_text = end_override();
     let selected = selected_tag();
+    let selected_period_value = selected_period();
     let selected_sort_field = transaction_sort_field();
     let selected_sort_direction = transaction_sort_direction();
     let show_ignored = show_ignored_transactions();
@@ -92,6 +94,9 @@ pub(super) fn SpendingView(currency: String) -> Element {
             filtered_transactions(
                 &data.transactions,
                 selected.as_deref(),
+                selected_period_value
+                    .as_ref()
+                    .map(|period| (period.start_date.as_str(), period.end_date.as_str())),
                 &title_filter,
                 selected_sort_field,
                 selected_sort_direction,
@@ -168,6 +173,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
                             start_override.set(String::new());
                             end_override.set(String::new());
                             selected_tag.set(None);
+                            selected_period.set(None);
                             transaction_page.set(0);
                         }
                     }
@@ -179,6 +185,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
                             start_override.set(String::new());
                             end_override.set(String::new());
                             selected_tag.set(None);
+                            selected_period.set(None);
                             transaction_page.set(0);
                         }
                     }
@@ -190,6 +197,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
                             start_override.set(String::new());
                             end_override.set(String::new());
                             selected_tag.set(None);
+                            selected_period.set(None);
                             transaction_page.set(0);
                         }
                     }
@@ -201,6 +209,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
                             start_override.set(String::new());
                             end_override.set(String::new());
                             selected_tag.set(None);
+                            selected_period.set(None);
                             transaction_page.set(0);
                         }
                     }
@@ -212,14 +221,16 @@ pub(super) fn SpendingView(currency: String) -> Element {
                             start_override.set(String::new());
                             end_override.set(String::new());
                             selected_tag.set(None);
+                            selected_period.set(None);
                             transaction_page.set(0);
                         }
                     }
                     button {
                         class: "control-button",
-                        disabled: selected.is_none(),
+                        disabled: selected.is_none() && selected_period_value.is_none(),
                         onclick: move |_| {
                             selected_tag.set(None);
+                            selected_period.set(None);
                             transaction_page.set(0);
                         },
                         "All"
@@ -235,6 +246,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
                             start_override.set(value);
                             range_preset.set(RangePreset::Custom);
                             selected_tag.set(None);
+                            selected_period.set(None);
                             transaction_page.set(0);
                         }
                     }
@@ -247,6 +259,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
                             end_override.set(value);
                             range_preset.set(RangePreset::Custom);
                             selected_tag.set(None);
+                            selected_period.set(None);
                             transaction_page.set(0);
                         }
                     }
@@ -257,7 +270,11 @@ pub(super) fn SpendingView(currency: String) -> Element {
                         GraphPresetButton {
                             label: option.label(),
                             selected: selected_bucket == option,
-                            onclick: move |_| spending_bucket.set(option)
+                            onclick: move |_| {
+                                spending_bucket.set(option);
+                                selected_period.set(None);
+                                transaction_page.set(0);
+                            }
                         }
                     }
                 }
@@ -276,10 +293,17 @@ pub(super) fn SpendingView(currency: String) -> Element {
                     SpendingOverTimeChart {
                         spending: data.spending_over_time.clone(),
                         selected: selected.clone(),
+                        selected_period: selected_period_value.clone(),
                         bucket_label: selected_bucket.label().to_string(),
                         colors: tag_colors.clone(),
-                        onclick: move |tag| {
+                        onclick: move |period| {
+                            selected_period.set(Some(period));
+                            selected_tag.set(None);
+                            transaction_page.set(0);
+                        },
+                        onselecttag: move |tag| {
                             selected_tag.set(Some(tag));
+                            selected_period.set(None);
                             transaction_page.set(0);
                         }
                     }
@@ -292,6 +316,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
                                 colors: tag_colors.clone(),
                                 onclick: move |tag| {
                                     selected_tag.set(Some(tag));
+                                    selected_period.set(None);
                                     transaction_page.set(0);
                                 }
                             }
@@ -301,6 +326,13 @@ pub(super) fn SpendingView(currency: String) -> Element {
                                 span { class: "metric-label", "Total" }
                                 strong { "{format_full_money(total, &data.spending.currency)}" }
                                 small { "{data.spending.transaction_count} transactions / {data.spending.start_date} to {data.spending.end_date}" }
+                            }
+                            if let Some(period) = selected_period_value.clone() {
+                                div { class: "spending-total selected-total",
+                                    span { class: "metric-label", "Period" }
+                                    strong { "{period.label}" }
+                                    small { "{period.start_date} to {period.end_date}" }
+                                }
                             }
                             if let Some(value) = selected_total {
                                 div { class: "spending-total selected-total",
@@ -317,6 +349,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
                                     selected: selected.as_ref() == Some(&entry.key),
                                     onclick: move |tag| {
                                         selected_tag.set(Some(tag));
+                                        selected_period.set(None);
                                         transaction_page.set(0);
                                     }
                                 }
@@ -495,6 +528,9 @@ fn SpendingPresetButton(
 struct SpendingBarRect {
     key: String,
     label: String,
+    start_date: String,
+    end_date: String,
+    total: f64,
     value: f64,
     transaction_count: usize,
     x: f64,
@@ -508,9 +544,11 @@ struct SpendingBarRect {
 fn SpendingOverTimeChart(
     spending: SpendingOutput,
     selected: Option<String>,
+    selected_period: Option<SpendingPeriodSelection>,
     bucket_label: String,
     colors: HashMap<String, &'static str>,
-    onclick: EventHandler<String>,
+    onclick: EventHandler<SpendingPeriodSelection>,
+    onselecttag: EventHandler<String>,
 ) -> Element {
     let points = spending_over_time_points(&spending);
     let series = spending_over_time_series(&points);
@@ -581,6 +619,9 @@ fn SpendingOverTimeChart(
                 bar_rects.push(SpendingBarRect {
                     key: key.clone(),
                     label: point.label.clone(),
+                    start_date: point.start_date.clone(),
+                    end_date: point.end_date.clone(),
+                    total: point.total,
                     value: segment.value,
                     transaction_count: segment.transaction_count,
                     x,
@@ -664,6 +705,9 @@ fn SpendingOverTimeChart(
                     {
                         let key = rect.key.clone();
                         let label = rect.label.clone();
+                        let start_date = rect.start_date.clone();
+                        let end_date = rect.end_date.clone();
+                        let total = rect.total;
                         let value = rect.value;
                         let transaction_count = rect.transaction_count;
                         let x = rect.x;
@@ -671,8 +715,17 @@ fn SpendingOverTimeChart(
                         let width = rect.width;
                         let height = rect.height;
                         let color = rect.color;
-                        let key_for_click = key.clone();
+                        let selection = SpendingPeriodSelection {
+                            label: label.clone(),
+                            start_date: start_date.clone(),
+                            end_date: end_date.clone(),
+                        };
                         let selected_class = if selected.as_ref() == Some(&key) {
+                            " selected"
+                        } else if selected_period
+                            .as_ref()
+                            .is_some_and(|period| period.start_date == start_date && period.end_date == end_date)
+                        {
                             " selected"
                         } else if selected.is_some() {
                             " dimmed"
@@ -688,9 +741,9 @@ fn SpendingOverTimeChart(
                                 width: "{width}",
                                 height: "{height}",
                                 style: "fill: {color};",
-                                onclick: move |_| onclick.call(key_for_click.clone()),
+                                onclick: move |_| onclick.call(selection.clone()),
                                 title {
-                                    "{label} / {key}: {format_full_money(value, &spending.currency)} ({transaction_count} tx)"
+                                    "{label}: {format_full_money(total, &spending.currency)} total / {key}: {format_full_money(value, &spending.currency)} ({transaction_count} tx)"
                                 }
                             }
                         }
@@ -711,7 +764,7 @@ fn SpendingOverTimeChart(
                         rsx! {
                             button {
                                 class: "{class}",
-                                onclick: move |_| onclick.call(key_for_click.clone()),
+                                onclick: move |_| onselecttag.call(key_for_click.clone()),
                                 span {
                                     class: "stacked-legend-swatch",
                                     style: "background: {color};"
