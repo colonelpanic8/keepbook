@@ -463,7 +463,7 @@ impl KeepbookTrayItem {
 }
 
 impl ksni::Tray for KeepbookTrayItem {
-    const MENU_ON_ACTIVATE: bool = true;
+    const MENU_ON_ACTIVATE: bool = false;
 
     fn id(&self) -> String {
         "keepbook-dioxus".to_string()

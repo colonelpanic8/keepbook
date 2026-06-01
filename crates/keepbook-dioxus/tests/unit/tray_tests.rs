@@ -32,3 +32,8 @@ fn overlay_status_tracks_runtime_state() {
         TrayOverlayStatus::Error
     );
 }
+
+#[test]
+fn tray_left_click_activates_window_instead_of_menu() {
+    assert!(!<KeepbookTrayItem as ksni::Tray>::MENU_ON_ACTIVATE);
+}
