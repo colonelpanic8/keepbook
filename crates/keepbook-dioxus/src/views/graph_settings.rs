@@ -6,16 +6,11 @@ use crate::api::{
 use dioxus::core::Task;
 
 #[component]
-pub(super) fn GraphsView(
+pub(super) fn NetWorthGraphView(
     currency: String,
     defaults: HistoryDefaults,
-    accounts: Vec<Account>,
-    connections: Vec<Connection>,
     filter_overrides: FilterOverrides,
 ) -> Element {
-    let _ = accounts;
-    let _ = connections;
-
     rsx! {
         section { class: "panel graph-panel",
             HistoryGraphPanel {
@@ -30,6 +25,16 @@ pub(super) fn GraphsView(
                 show_header: true,
             }
         }
+    }
+}
+
+#[component]
+pub(super) fn ContributionsGraphView(
+    currency: String,
+    defaults: HistoryDefaults,
+    filter_overrides: FilterOverrides,
+) -> Element {
+    rsx! {
         StackedHistoryGraphPanel {
             currency,
             defaults,

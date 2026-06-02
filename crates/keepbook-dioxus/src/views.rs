@@ -15,7 +15,7 @@ mod spending;
 use accounts::AccountsView;
 use charts::{HistoryGraphPanel, StackedHistoryGraphPanel};
 use connections::ConnectionsView;
-use graph_settings::{GraphsView, SettingsView};
+use graph_settings::{ContributionsGraphView, NetWorthGraphView, SettingsView};
 use proposed_edits::ProposedEditsView;
 use recurring::RecurringView;
 use shared::*;
@@ -24,7 +24,8 @@ use spending::SpendingView;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ActiveView {
     Spending,
-    Graphs,
+    NetWorth,
+    Contributions,
     Accounts,
     Connections,
     Recurring,
@@ -33,11 +34,12 @@ enum ActiveView {
 }
 
 impl ActiveView {
-    const ALL: [Self; 7] = [
+    const ALL: [Self; 8] = [
         Self::Accounts,
         Self::Spending,
         Self::Recurring,
-        Self::Graphs,
+        Self::NetWorth,
+        Self::Contributions,
         Self::Connections,
         Self::ProposedEdits,
         Self::Settings,
@@ -46,7 +48,8 @@ impl ActiveView {
     fn label(self) -> &'static str {
         match self {
             Self::Spending => "Spending",
-            Self::Graphs => "Net Worth",
+            Self::NetWorth => "Net Worth",
+            Self::Contributions => "Contributions",
             Self::Accounts => "Accounts",
             Self::Connections => "Connections",
             Self::Recurring => "Recurring",
@@ -241,20 +244,14 @@ fn Dashboard(
     onrefresh: EventHandler<()>,
 ) -> Element {
     let mut active_view = use_signal(|| ActiveView::Accounts);
-    let mut nav_open = use_signal(|| false);
     let active = active_view();
-    let nav_class = if nav_open() {
-        "app-nav open"
-    } else {
-        "app-nav"
-    };
 
     rsx! {
         div { class: "app-shell",
             DesktopTrayViewActions {
                 onshowsettings: move |_| active_view.set(ActiveView::Settings),
             }
-            aside { class: "{nav_class}",
+            aside { class: "app-nav",
                 div { class: "nav-title",
                     strong { "Keepbook" }
                     small { "{overview.reporting_currency}" }
@@ -266,46 +263,29 @@ fn Dashboard(
                             selected: active == view,
                             onclick: move |_| {
                                 active_view.set(view);
-                                nav_open.set(false);
                             }
                         }
                     }
                 }
             }
-            if nav_open() {
-                button {
-                    class: "nav-backdrop",
-                    aria_label: "Close menu",
-                    title: "Close menu",
-                    onclick: move |_| nav_open.set(false),
-                }
-            }
             div { class: "workspace",
-                header { class: "topbar",
-                    button {
-                        class: "hamburger-button",
-                        title: "Menu",
-                        onclick: move |_| nav_open.set(!nav_open()),
-                        span { class: "hamburger-line" }
-                        span { class: "hamburger-line" }
-                        span { class: "hamburger-line" }
-                    }
-                    div {
-                        h1 { "{active.label()}" }
-                    }
-                }
                 match active {
                     ActiveView::Spending => rsx! {
                         SpendingView {
                             currency: overview.reporting_currency.clone(),
                         }
                     },
-                    ActiveView::Graphs => rsx! {
-                        GraphsView {
+                    ActiveView::NetWorth => rsx! {
+                        NetWorthGraphView {
                             currency: overview.reporting_currency.clone(),
                             defaults: overview.history_defaults.clone(),
-                            accounts: overview.accounts.clone(),
-                            connections: overview.connections.clone(),
+                            filter_overrides,
+                        }
+                    },
+                    ActiveView::Contributions => rsx! {
+                        ContributionsGraphView {
+                            currency: overview.reporting_currency.clone(),
+                            defaults: overview.history_defaults.clone(),
                             filter_overrides,
                         }
                     },

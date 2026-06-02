@@ -4,7 +4,18 @@ use dioxus::prelude::*;
 use futures_util::StreamExt;
 use ksni::blocking::{Handle, TrayMethods};
 use ksni::menu::{MenuItem, StandardItem, SubMenu};
+#[cfg(unix)]
+use std::io;
+#[cfg(unix)]
+use std::os::unix::net::{UnixListener, UnixStream};
+#[cfg(unix)]
+use std::path::PathBuf;
 use std::sync::mpsc;
+#[cfg(unix)]
+use std::time::Duration;
+
+#[cfg(unix)]
+const ACTIVATION_SOCKET_NAME: &str = "keepbook-dioxus.activate.sock";
 
 #[derive(Clone, Copy, Debug)]
 enum TrayCommand {
@@ -23,11 +34,17 @@ enum TrayOverlayStatus {
 
 struct TrayState {
     sender: mpsc::Sender<TrayThreadMessage>,
+    #[cfg(unix)]
+    activation_socket_path: Option<PathBuf>,
 }
 
 impl Drop for TrayState {
     fn drop(&mut self) {
         let _ = self.sender.send(TrayThreadMessage::Shutdown);
+        #[cfg(unix)]
+        if let Some(path) = &self.activation_socket_path {
+            let _ = std::fs::remove_file(path);
+        }
     }
 }
 
@@ -63,8 +80,17 @@ impl Default for TrayRuntime {
 
 pub fn show_window() {
     let win = window();
+    win.set_minimized(false);
     win.set_visible(true);
     win.set_focus();
+
+    #[cfg(target_os = "linux")]
+    {
+        let win = win.clone();
+        glib::timeout_add_local_once(Duration::from_millis(75), move || {
+            win.set_focus();
+        });
+    }
 }
 
 fn toggle_window_visibility() {
@@ -72,8 +98,7 @@ fn toggle_window_visibility() {
     if win.is_visible() {
         win.set_visible(false);
     } else {
-        win.set_visible(true);
-        win.set_focus();
+        show_window();
     }
 }
 
@@ -147,6 +172,8 @@ fn create_tray_state(sender: UnboundedSender<TrayCommand>) -> Option<TrayState> 
 }
 
 fn create_tray_state_inner(sender: UnboundedSender<TrayCommand>) -> Result<TrayState, String> {
+    #[cfg(unix)]
+    let activation_sender = sender.clone();
     let tray = KeepbookTrayItem::new(sender);
     let (thread_sender, thread_receiver) = mpsc::channel();
     let (handle_sender, handle_receiver) = mpsc::channel();
@@ -167,10 +194,91 @@ fn create_tray_state_inner(sender: UnboundedSender<TrayCommand>) -> Result<TrayS
     handle_receiver
         .recv()
         .map_err(|error| format!("failed to start keepbook tray thread: {error}"))??;
+    #[cfg(unix)]
+    let activation_socket_path = start_activation_listener(activation_sender);
 
     Ok(TrayState {
         sender: thread_sender,
+        #[cfg(unix)]
+        activation_socket_path,
     })
+}
+
+#[cfg(unix)]
+pub fn activate_existing_instance() -> bool {
+    match UnixStream::connect(activation_socket_path()) {
+        Ok(_) => true,
+        Err(error) => {
+            if error.kind() != io::ErrorKind::NotFound
+                && error.kind() != io::ErrorKind::ConnectionRefused
+            {
+                eprintln!("Failed to contact existing keepbook Dioxus app: {error}");
+            }
+            false
+        }
+    }
+}
+
+#[cfg(not(unix))]
+pub fn activate_existing_instance() -> bool {
+    false
+}
+
+#[cfg(unix)]
+fn activation_socket_path() -> PathBuf {
+    if let Some(runtime_dir) = std::env::var_os("XDG_RUNTIME_DIR") {
+        return PathBuf::from(runtime_dir).join(ACTIVATION_SOCKET_NAME);
+    }
+
+    std::env::temp_dir().join(ACTIVATION_SOCKET_NAME)
+}
+
+#[cfg(unix)]
+fn start_activation_listener(sender: UnboundedSender<TrayCommand>) -> Option<PathBuf> {
+    let path = activation_socket_path();
+
+    if path.exists() {
+        match UnixStream::connect(&path) {
+            Ok(_) => {
+                eprintln!("Keepbook activation socket already belongs to a running app.");
+                return None;
+            }
+            Err(error)
+                if error.kind() == io::ErrorKind::ConnectionRefused
+                    || error.kind() == io::ErrorKind::NotFound =>
+            {
+                let _ = std::fs::remove_file(&path);
+            }
+            Err(error) => {
+                eprintln!("Failed to inspect keepbook activation socket: {error}");
+                return None;
+            }
+        }
+    }
+
+    let listener = match UnixListener::bind(&path) {
+        Ok(listener) => listener,
+        Err(error) => {
+            eprintln!("Failed to bind keepbook activation socket: {error}");
+            return None;
+        }
+    };
+
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            match stream {
+                Ok(_) => {
+                    let _ = sender.unbounded_send(TrayCommand::ShowWindow);
+                }
+                Err(error) => {
+                    eprintln!("Keepbook activation listener failed: {error}");
+                    break;
+                }
+            }
+        }
+    });
+
+    Some(path)
 }
 
 fn run_tray_thread(handle: Handle<KeepbookTrayItem>, receiver: mpsc::Receiver<TrayThreadMessage>) {

@@ -2,6 +2,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::time::Duration;
+#[cfg(unix)]
+use std::{io, os::unix::net::UnixStream};
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Local, NaiveDate};
@@ -42,6 +44,8 @@ const OVERLAY_ERROR_32: &[u8] = include_bytes!("../../assets/overlay-error-32.pn
 const OVERLAY_ERROR_48: &[u8] = include_bytes!("../../assets/overlay-error-48.png");
 const OVERLAY_ERROR_64: &[u8] = include_bytes!("../../assets/overlay-error-64.png");
 const DATA_WATCH_DEBOUNCE: Duration = Duration::from_millis(500);
+#[cfg(unix)]
+const DIOXUS_ACTIVATION_SOCKET_NAME: &str = "keepbook-dioxus.activate.sock";
 
 fn png_to_argb32(png_data: &[u8]) -> ksni::Icon {
     let img = image::load_from_memory_with_format(png_data, image::ImageFormat::Png)
@@ -725,7 +729,40 @@ fn spawn_detached(program: &str, args: &[&str]) -> Result<()> {
     Ok(())
 }
 
+#[cfg(unix)]
+fn dioxus_activation_socket_path() -> PathBuf {
+    if let Some(runtime_dir) = std::env::var_os("XDG_RUNTIME_DIR") {
+        return PathBuf::from(runtime_dir).join(DIOXUS_ACTIVATION_SOCKET_NAME);
+    }
+
+    std::env::temp_dir().join(DIOXUS_ACTIVATION_SOCKET_NAME)
+}
+
+#[cfg(unix)]
+fn activate_running_dioxus_app() -> bool {
+    match UnixStream::connect(dioxus_activation_socket_path()) {
+        Ok(_) => true,
+        Err(error) => {
+            if error.kind() != io::ErrorKind::NotFound
+                && error.kind() != io::ErrorKind::ConnectionRefused
+            {
+                warn!(error = %error, "failed to contact running Dioxus app");
+            }
+            false
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn activate_running_dioxus_app() -> bool {
+    false
+}
+
 fn open_dioxus_app() -> Result<()> {
+    if activate_running_dioxus_app() {
+        return Ok(());
+    }
+
     if let Ok(command) = std::env::var("KEEPBOOK_DIOXUS_APP_CMD") {
         if !command.trim().is_empty() {
             return spawn_detached("sh", &["-lc", &command]);

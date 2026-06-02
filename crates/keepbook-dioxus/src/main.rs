@@ -724,6 +724,10 @@ impl SpendingBucket {
 fn main() {
     #[cfg(feature = "desktop")]
     {
+        if tray::activate_existing_instance() {
+            return;
+        }
+
         configure_linux_desktop_environment();
         dioxus::LaunchBuilder::desktop()
             .with_cfg(desktop_config())
