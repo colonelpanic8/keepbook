@@ -30,6 +30,7 @@ allow_future_projection = false
 # lookback_days = 7
 
 [tray]
+start_minimized = false
 history_points = 17
 history_spec = ["last 4 days", "1 week ago", "2 weeks ago", "last 12 months"]
 spending_windows_days = [7, 30, 90, 365]

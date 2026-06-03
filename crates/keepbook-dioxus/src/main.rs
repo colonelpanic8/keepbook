@@ -759,8 +759,12 @@ fn configure_linux_desktop_environment() {}
 
 #[cfg(feature = "desktop")]
 fn desktop_config() -> dioxus::desktop::Config {
-    let config = dioxus::desktop::Config::new()
-        .with_window(dioxus::desktop::tao::window::WindowBuilder::new().with_title("Keepbook"));
+    let startup_options = desktop_startup_options();
+    let config = dioxus::desktop::Config::new().with_window(
+        dioxus::desktop::tao::window::WindowBuilder::new()
+            .with_title("Keepbook")
+            .with_visible(desktop_window_visible(startup_options)),
+    );
     #[cfg(target_os = "linux")]
     let config = {
         use dioxus::desktop::tao::event_loop::EventLoopBuilder;
@@ -777,6 +781,34 @@ fn desktop_config() -> dioxus::desktop::Config {
             config
         }
     }
+}
+
+#[cfg(feature = "desktop")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct DesktopStartupOptions {
+    start_minimized_to_tray: bool,
+}
+
+#[cfg(feature = "desktop")]
+fn desktop_startup_options() -> DesktopStartupOptions {
+    match keepbook_server::desktop_start_minimized_to_tray(
+        keepbook_server::default_server_config_path(),
+    ) {
+        Ok(start_minimized_to_tray) => DesktopStartupOptions {
+            start_minimized_to_tray,
+        },
+        Err(error) => {
+            eprintln!("Failed to load Keepbook desktop startup config: {error:#}");
+            DesktopStartupOptions {
+                start_minimized_to_tray: false,
+            }
+        }
+    }
+}
+
+#[cfg(feature = "desktop")]
+fn desktop_window_visible(options: DesktopStartupOptions) -> bool {
+    !options.start_minimized_to_tray
 }
 
 #[cfg(test)]

@@ -222,10 +222,12 @@ fn test_load_tray_config() -> Result<()> {
 
     let mut file = std::fs::File::create(&config_path)?;
     writeln!(file, "[tray]")?;
+    writeln!(file, "start_minimized = true")?;
     writeln!(file, "history_points = 5")?;
     writeln!(file, "spending_windows_days = [3, 14, 60]")?;
 
     let config = Config::load(&config_path)?;
+    assert!(config.tray.start_minimized);
     assert_eq!(config.tray.history_points, 5);
     assert_eq!(config.tray.spending_windows_days, vec![3, 14, 60]);
 
@@ -281,6 +283,7 @@ fn test_default_git_config() {
 #[test]
 fn test_default_tray_config() {
     let config = Config::default();
+    assert!(!config.tray.start_minimized);
     assert_eq!(config.tray.history_points, 17);
     assert_eq!(
         config.tray.history_spec,

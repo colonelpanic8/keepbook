@@ -42,6 +42,9 @@ pub struct DisplayConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TrayConfig {
+    /// When true, desktop UI starts hidden and is opened from the tray icon.
+    pub start_minimized: bool,
+
     /// Maximum number of recent portfolio history rows shown in the tray menu.
     pub history_points: usize,
 
@@ -58,6 +61,7 @@ pub struct TrayConfig {
 impl Default for TrayConfig {
     fn default() -> Self {
         Self {
+            start_minimized: false,
             history_points: 17,
             history_spec: vec![
                 "last 4 days".to_string(),

@@ -161,6 +161,16 @@ fn configured_ssh_key_path_wins_over_default() {
     );
 }
 
+#[test]
+fn desktop_start_minimized_to_tray_reads_tray_config() -> Result<()> {
+    let config_path = unique_test_config_path("desktop-start-minimized");
+    write_test_config(&config_path, "[tray]\nstart_minimized = true\n")?;
+
+    assert!(desktop_start_minimized_to_tray(&config_path)?);
+    remove_test_config(config_path);
+    Ok(())
+}
+
 fn unique_test_config_path(name: &str) -> PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)

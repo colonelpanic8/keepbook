@@ -242,6 +242,17 @@ fn default_spending_queries_request_one_year_monthly_total() {
     );
 }
 
+#[cfg(feature = "desktop")]
+#[test]
+fn desktop_start_minimized_to_tray_starts_window_hidden() {
+    assert!(!desktop_window_visible(DesktopStartupOptions {
+        start_minimized_to_tray: true,
+    }));
+    assert!(desktop_window_visible(DesktopStartupOptions {
+        start_minimized_to_tray: false,
+    }));
+}
+
 #[test]
 fn spending_over_time_query_requests_bucketed_tag_breakdowns() {
     assert_eq!(

@@ -2357,6 +2357,12 @@ pub fn default_server_config_path() -> PathBuf {
     default_config_path()
 }
 
+pub fn desktop_start_minimized_to_tray(config_path: impl AsRef<Path>) -> Result<bool> {
+    Ok(ResolvedConfig::load_or_default(config_path.as_ref())?
+        .tray
+        .start_minimized)
+}
+
 #[cfg(test)]
 #[path = "../tests/unit/lib_tests.rs"]
 mod lib_tests;

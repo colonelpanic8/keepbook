@@ -166,6 +166,7 @@ fn create_tray_state(sender: UnboundedSender<TrayCommand>) -> Option<TrayState> 
         Ok(state) => Some(state),
         Err(error) => {
             eprintln!("Failed to initialize keepbook tray icon: {error}");
+            show_window();
             None
         }
     }
