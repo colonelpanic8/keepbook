@@ -744,7 +744,7 @@ fn main() {
 fn configure_linux_desktop_environment() {
     if std::env::var("XDG_SESSION_TYPE").unwrap_or_default() == "wayland" {
         std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
-        std::env::set_var("GDK_BACKEND", "x11");
+        std::env::set_var("GDK_BACKEND", "wayland,x11");
     }
 
     glib::set_application_name("Keepbook");
@@ -762,11 +762,15 @@ fn configure_linux_desktop_environment() {}
 #[cfg(feature = "desktop")]
 fn desktop_config() -> dioxus::desktop::Config {
     let startup_options = desktop_startup_options();
-    let config = dioxus::desktop::Config::new().with_window(
-        dioxus::desktop::tao::window::WindowBuilder::new()
-            .with_title("Keepbook")
-            .with_visible(desktop_window_visible(startup_options)),
-    );
+    let config = dioxus::desktop::Config::new()
+        // Dioxus's default Linux workaround forces GTK to X11. Keepbook prefers
+        // native Wayland so fractional-scaled compositors do not blur the UI.
+        .with_disable_dma_buf_on_wayland(false)
+        .with_window(
+            dioxus::desktop::tao::window::WindowBuilder::new()
+                .with_title("Keepbook")
+                .with_visible(desktop_window_visible(startup_options)),
+        );
     #[cfg(target_os = "linux")]
     let config = {
         use dioxus::desktop::tao::event_loop::EventLoopBuilder;
