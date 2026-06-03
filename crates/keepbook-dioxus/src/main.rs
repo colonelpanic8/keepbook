@@ -581,6 +581,8 @@ struct SpendingPeriodSelection {
     label: String,
     start_date: String,
     end_date: String,
+    total: f64,
+    transaction_count: usize,
 }
 
 #[derive(Clone, Debug, PartialEq)]

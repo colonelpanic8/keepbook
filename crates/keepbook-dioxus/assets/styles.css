@@ -978,6 +978,37 @@ small,
   opacity: 0.32;
 }
 
+.spending-bar-hit-zone {
+  cursor: pointer;
+  fill: transparent;
+  pointer-events: all;
+}
+
+.spending-chart-tooltip {
+  pointer-events: none;
+}
+
+.spending-chart-tooltip rect {
+  fill: rgba(23, 32, 42, 0.94);
+  stroke: rgba(255, 255, 255, 0.86);
+  stroke-width: 1;
+}
+
+.spending-chart-tooltip text {
+  fill: #ffffff;
+  font-weight: 800;
+  text-anchor: middle;
+}
+
+.spending-tooltip-title {
+  font-size: 0.82rem;
+}
+
+.spending-tooltip-detail {
+  font-size: 0.72rem;
+  opacity: 0.86;
+}
+
 .stacked-legend {
   border-top: 1px solid #eef2f1;
   display: flex;

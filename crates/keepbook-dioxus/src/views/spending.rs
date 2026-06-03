@@ -146,6 +146,10 @@ pub(super) fn SpendingView(currency: String) -> Element {
         format!("{first}-{last} of {}", filtered_transactions.len())
     };
     let selected_label = selected.as_deref().unwrap_or("All tags");
+    let transaction_scope = selected_period_value
+        .as_ref()
+        .map(|period| format!("{} / {}", period.label, transaction_range))
+        .unwrap_or_else(|| transaction_range.clone());
 
     rsx! {
         section { class: "panel spending-panel",
@@ -331,7 +335,9 @@ pub(super) fn SpendingView(currency: String) -> Element {
                                 div { class: "spending-total selected-total",
                                     span { class: "metric-label", "Period" }
                                     strong { "{period.label}" }
-                                    small { "{period.start_date} to {period.end_date}" }
+                                    small {
+                                        "{format_full_money(period.total, &data.spending.currency)} / {period.transaction_count} transactions / {period.start_date} to {period.end_date}"
+                                    }
                                 }
                             }
                             if let Some(value) = selected_total {
@@ -359,7 +365,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
                     TransactionList {
                         transactions: page_transactions.clone(),
                         currency: data.spending.currency.clone(),
-                        range_text: transaction_range.clone(),
+                        range_text: transaction_scope.clone(),
                         sort_field: selected_sort_field,
                         sort_direction: selected_sort_direction,
                         show_ignored,
@@ -540,6 +546,17 @@ struct SpendingBarRect {
     color: &'static str,
 }
 
+#[derive(Clone, Debug)]
+struct SpendingBarHitZone {
+    selection: SpendingPeriodSelection,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    tooltip_x: f64,
+    tooltip_y: f64,
+}
+
 #[component]
 fn SpendingOverTimeChart(
     spending: SpendingOutput,
@@ -550,6 +567,7 @@ fn SpendingOverTimeChart(
     onclick: EventHandler<SpendingPeriodSelection>,
     onselecttag: EventHandler<String>,
 ) -> Element {
+    let mut hovered_period = use_signal(|| None::<SpendingPeriodSelection>);
     let points = spending_over_time_points(&spending);
     let series = spending_over_time_series(&points);
     let visible_points = points
@@ -602,8 +620,24 @@ fn SpendingOverTimeChart(
     let max_label = format_compact_money(y_max, &spending.currency);
     let total_label = format_full_money(range_total, &spending.currency);
     let mut bar_rects = Vec::new();
+    let mut bar_hit_zones = Vec::new();
     for (point_index, point) in visible_points.iter().enumerate() {
         let x = padding_left + point_index as f64 * slot_width + gap / 2.0;
+        bar_hit_zones.push(SpendingBarHitZone {
+            selection: SpendingPeriodSelection {
+                label: point.label.clone(),
+                start_date: point.start_date.clone(),
+                end_date: point.end_date.clone(),
+                total: point.total,
+                transaction_count: point.transaction_count,
+            },
+            x: padding_left + point_index as f64 * slot_width,
+            y: padding_top,
+            width: slot_width,
+            height: plot_height,
+            tooltip_x: x + bar_width / 2.0,
+            tooltip_y: padding_top + 14.0,
+        });
         let values = point
             .segments
             .iter()
@@ -633,6 +667,16 @@ fn SpendingOverTimeChart(
             }
         }
     }
+    let tooltip_period = hovered_period().or_else(|| selected_period.clone());
+    let tooltip = tooltip_period.as_ref().and_then(|period| {
+        bar_hit_zones
+            .iter()
+            .find(|zone| {
+                zone.selection.start_date == period.start_date
+                    && zone.selection.end_date == period.end_date
+            })
+            .map(|zone| (period.clone(), zone.tooltip_x, zone.tooltip_y))
+    });
 
     rsx! {
         div { class: "chart-card spending-over-time-card",
@@ -719,6 +763,8 @@ fn SpendingOverTimeChart(
                             label: label.clone(),
                             start_date: start_date.clone(),
                             end_date: end_date.clone(),
+                            total,
+                            transaction_count,
                         };
                         let selected_class = if selected.as_ref() == Some(&key) {
                             " selected"
@@ -746,6 +792,59 @@ fn SpendingOverTimeChart(
                                     "{label}: {format_full_money(total, &spending.currency)} total / {key}: {format_full_money(value, &spending.currency)} ({transaction_count} tx)"
                                 }
                             }
+                        }
+                    }
+                }
+                g { class: "spending-bar-hit-layer",
+                    for hit in bar_hit_zones {
+                        {
+                            let selection_for_click = hit.selection.clone();
+                            let selection_for_enter = hit.selection.clone();
+                            let tooltip_text = format!(
+                                "{}: {} / {} transactions / {} to {}",
+                                hit.selection.label,
+                                format_full_money(hit.selection.total, &spending.currency),
+                                hit.selection.transaction_count,
+                                hit.selection.start_date,
+                                hit.selection.end_date
+                            );
+                            rsx! {
+                                rect {
+                                    class: "spending-bar-hit-zone",
+                                    x: "{hit.x}",
+                                    y: "{hit.y}",
+                                    width: "{hit.width}",
+                                    height: "{hit.height}",
+                                    onmouseenter: move |_| hovered_period.set(Some(selection_for_enter.clone())),
+                                    onmouseleave: move |_| hovered_period.set(None),
+                                    onclick: move |_| onclick.call(selection_for_click.clone()),
+                                    title { "{tooltip_text}" }
+                                }
+                            }
+                        }
+                    }
+                }
+                if let Some((period, tooltip_x, tooltip_y)) = tooltip {
+                    g { class: "spending-chart-tooltip",
+                        transform: "translate({tooltip_x}, {tooltip_y})",
+                        rect {
+                            x: "-86",
+                            y: "-11",
+                            width: "172",
+                            height: "42",
+                            rx: "5"
+                        }
+                        text {
+                            class: "spending-tooltip-title",
+                            x: "0",
+                            y: "3",
+                            "{period.label}"
+                        }
+                        text {
+                            class: "spending-tooltip-detail",
+                            x: "0",
+                            y: "19",
+                            "{format_full_money(period.total, &spending.currency)} / {period.transaction_count} tx"
                         }
                     }
                 }
