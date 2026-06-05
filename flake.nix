@@ -165,6 +165,19 @@
           pkgs.xdotool
           pkgs.zlib
         ];
+        dioxusLinuxGSettingsDataDirs = lib.concatMapStringsSep ":" (pkg: "${pkg}/share/gsettings-schemas/${pkg.name}") [
+          pkgs.gsettings-desktop-schemas
+          pkgs.gtk3
+        ];
+        dioxusLinuxXdgDataDirs = lib.concatStringsSep ":" [
+          dioxusLinuxGSettingsDataDirs
+          (lib.makeSearchPath "share" [
+            pkgs.adwaita-icon-theme
+            pkgs.gtk3
+            pkgs.hicolor-icon-theme
+            pkgs.shared-mime-info
+          ])
+        ];
         dioxusDarwinBuildInputs = lib.optionals isDarwin [
           pkgs.apple-sdk_15
         ];
@@ -472,6 +485,9 @@
         keepbookDioxusDesktopLinuxPostInstall = lib.optionalString isLinux ''
           wrapProgram "$out/bin/keepbook-dioxus" \
             --set WEBKIT_DISABLE_DMABUF_RENDERER 1 \
+            --prefix XDG_DATA_DIRS : "$out/share:${dioxusLinuxXdgDataDirs}" \
+            --run 'if [ -z "''${WAYLAND_DISPLAY:-}" ] && [ -n "''${XDG_RUNTIME_DIR:-}" ]; then for socket in "''${XDG_RUNTIME_DIR}"/wayland-*; do [ -S "$socket" ] || continue; export WAYLAND_DISPLAY="''${socket##*/}"; break; done; fi' \
+            --run 'if [ -n "''${WAYLAND_DISPLAY:-}" ]; then export XDG_SESSION_TYPE="''${XDG_SESSION_TYPE:-wayland}"; export GDK_BACKEND="''${GDK_BACKEND:-wayland,x11}"; fi' \
             --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath dioxusLinuxLibraryPathInputs}
 
           install -Dm644 ${cleanSrc}/assets/keepbook-icon.svg \
