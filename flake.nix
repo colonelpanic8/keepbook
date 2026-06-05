@@ -695,6 +695,7 @@
           buildNoDefaultFeatures ? false,
           extraBuildInputs ? [],
           extraNativeBuildInputs ? [],
+          checkLibraryPathInputs ? [],
           postInstall ? "",
         }:
           rustPlatform.buildRustPackage {
@@ -714,6 +715,7 @@
             ];
             nativeBuildInputs = [pkgs.pkg-config] ++ extraNativeBuildInputs;
             buildInputs = extraBuildInputs;
+            LD_LIBRARY_PATH = lib.optionalString (checkLibraryPathInputs != []) (lib.makeLibraryPath checkLibraryPathInputs);
             OPENSSL_NO_VENDOR = "1";
             RUST_MIN_STACK = "33554432";
           };
@@ -724,6 +726,7 @@
           buildFeatures = ["desktop"];
           extraNativeBuildInputs = [pkgs.makeWrapper];
           extraBuildInputs = dioxusLinuxBuildInputs ++ dioxusDarwinBuildInputs ++ [pkgs.openssl];
+          checkLibraryPathInputs = dioxusLinuxLibraryPathInputs;
           postInstall = keepbookDioxusDesktopLinuxPostInstall + keepbookDioxusDesktopDarwinPostInstall;
         };
       in {
