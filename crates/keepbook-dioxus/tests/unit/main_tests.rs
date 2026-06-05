@@ -253,6 +253,18 @@ fn desktop_start_minimized_to_tray_starts_window_hidden() {
     }));
 }
 
+#[cfg(feature = "desktop")]
+#[test]
+fn desktop_window_builder_removes_native_window_chrome() {
+    let window_builder = desktop_window_builder(DesktopStartupOptions {
+        start_minimized_to_tray: false,
+    });
+
+    assert_eq!(window_builder.window.title, "Keepbook");
+    assert!(!window_builder.window.decorations);
+    assert!(window_builder.window.visible);
+}
+
 #[test]
 fn spending_over_time_query_requests_bucketed_tag_breakdowns() {
     assert_eq!(
