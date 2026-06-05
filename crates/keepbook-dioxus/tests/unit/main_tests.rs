@@ -326,12 +326,77 @@ fn spending_over_time_points_preserve_bucket_breakdowns() {
 }
 
 #[test]
+fn spending_over_time_visible_points_keep_empty_periods() {
+    let spending = SpendingOutput {
+        currency: "USD".to_string(),
+        tz: "local".to_string(),
+        start_date: "2026-05-01".to_string(),
+        end_date: "2026-06-04".to_string(),
+        period: "monthly".to_string(),
+        total: "10".to_string(),
+        transaction_count: 1,
+        periods: vec![
+            SpendingPeriod {
+                start_date: "2026-05-01".to_string(),
+                end_date: "2026-05-31".to_string(),
+                total: "10".to_string(),
+                transaction_count: 1,
+                breakdown: vec![SpendingBreakdownEntry {
+                    key: "Food".to_string(),
+                    total: "10".to_string(),
+                    transaction_count: 1,
+                }],
+            },
+            SpendingPeriod {
+                start_date: "2026-06-01".to_string(),
+                end_date: "2026-06-04".to_string(),
+                total: "0".to_string(),
+                transaction_count: 0,
+                breakdown: vec![],
+            },
+        ],
+        skipped_transaction_count: 0,
+        missing_price_transaction_count: 0,
+        missing_fx_transaction_count: 0,
+    };
+
+    let points = spending_over_time_points(&spending);
+    let series = spending_over_time_series(&points);
+    let visible_points = visible_spending_over_time_points(&points, &series);
+
+    assert_eq!(visible_points.len(), 2);
+    assert_eq!(visible_points[1].label, "2026-06");
+    assert_eq!(visible_points[1].total, 0.0);
+}
+
+#[test]
 fn filter_override_query_includes_latent_tax_override() {
     assert_eq!(
         filter_override_query_string(FilterOverrides {
             include_latent_capital_gains_tax: Some(false),
+            ..FilterOverrides::default()
         }),
         "include_latent_capital_gains_tax=false"
+    );
+}
+
+#[test]
+fn filter_override_query_includes_account_overrides() {
+    assert_eq!(
+        filter_override_query_string(FilterOverrides {
+            account_portfolio_exclusions: vec![
+                AccountPortfolioExclusionOverride {
+                    account_id: "taxable account".to_string(),
+                    exclude_from_portfolio: true,
+                },
+                AccountPortfolioExclusionOverride {
+                    account_id: "retirement".to_string(),
+                    exclude_from_portfolio: false,
+                },
+            ],
+            ..FilterOverrides::default()
+        }),
+        "account_portfolio_overrides=%5B%7B%22account_id%22%3A%22retirement%22%2C%22exclude_from_portfolio%22%3Afalse%7D%2C%7B%22account_id%22%3A%22taxable%20account%22%2C%22exclude_from_portfolio%22%3Atrue%7D%5D"
     );
 }
 

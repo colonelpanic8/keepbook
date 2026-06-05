@@ -1,6 +1,6 @@
 [package]
 name = "keepbook-server"
-version = "0.4.4"
+version = "0.4.5"
 edition = "2021"
 description = "HTTP API server for keepbook clients"
 license = "MIT OR Apache-2.0"
@@ -29,6 +29,7 @@ http = [
 
 [dependencies]
 anyhow = "1"
+async-trait = "0.1"
 axum = { version = "0.8", optional = true }
 chrono = "0.4"
 clap = { version = "4", features = ["derive"], optional = true }
@@ -53,3 +54,6 @@ toml_edit = "0.22"
 tower-http = { version = "0.6", features = ["cors", "trace"], optional = true }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"], optional = true }
+
+[dev-dependencies]
+serde_urlencoded = "0.7"

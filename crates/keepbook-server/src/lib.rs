@@ -19,8 +19,12 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{Local, Utc};
 use keepbook::config::{default_config_path, ResolvedConfig};
+use keepbook::credentials::CredentialStore;
 use keepbook::format::{currency_symbol, format_base_currency_display};
-use keepbook::models::Asset;
+use keepbook::models::{
+    Account, AccountConfig, Asset, BalanceSnapshot, Connection, ConnectionConfig, Id,
+    ProposedTransactionEdit, RecurringTransactionReview, Transaction, TransactionAnnotationPatch,
+};
 use keepbook::storage::{JsonFileStorage, Storage};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -61,6 +65,170 @@ struct ApiSnapshot {
     config_path: PathBuf,
     config: ResolvedConfig,
     storage: Arc<dyn Storage>,
+}
+
+struct AccountConfigOverrideStorage {
+    inner: Arc<dyn Storage>,
+    exclude_from_portfolio: HashMap<String, bool>,
+}
+
+impl AccountConfigOverrideStorage {
+    fn wrap(inner: Arc<dyn Storage>, overrides: HashMap<String, bool>) -> Arc<dyn Storage> {
+        if overrides.is_empty() {
+            inner
+        } else {
+            Arc::new(Self {
+                inner,
+                exclude_from_portfolio: overrides,
+            })
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl Storage for AccountConfigOverrideStorage {
+    fn get_credential_store(&self, connection_id: &Id) -> Result<Option<Box<dyn CredentialStore>>> {
+        self.inner.get_credential_store(connection_id)
+    }
+
+    fn get_account_config(&self, account_id: &Id) -> Result<Option<AccountConfig>> {
+        let stored = self.inner.get_account_config(account_id)?;
+        if let Some(excluded) = self.exclude_from_portfolio.get(account_id.as_str()) {
+            let mut config = stored.unwrap_or_default();
+            config.exclude_from_portfolio = Some(*excluded);
+            return Ok(Some(config));
+        }
+        Ok(stored)
+    }
+
+    async fn list_connections(&self) -> Result<Vec<Connection>> {
+        self.inner.list_connections().await
+    }
+
+    async fn get_connection(&self, id: &Id) -> Result<Option<Connection>> {
+        self.inner.get_connection(id).await
+    }
+
+    async fn save_connection(&self, conn: &Connection) -> Result<()> {
+        self.inner.save_connection(conn).await
+    }
+
+    async fn delete_connection(&self, id: &Id) -> Result<bool> {
+        self.inner.delete_connection(id).await
+    }
+
+    async fn save_connection_config(&self, id: &Id, config: &ConnectionConfig) -> Result<()> {
+        self.inner.save_connection_config(id, config).await
+    }
+
+    async fn list_accounts(&self) -> Result<Vec<Account>> {
+        self.inner.list_accounts().await
+    }
+
+    async fn get_account(&self, id: &Id) -> Result<Option<Account>> {
+        self.inner.get_account(id).await
+    }
+
+    async fn save_account(&self, account: &Account) -> Result<()> {
+        self.inner.save_account(account).await
+    }
+
+    async fn delete_account(&self, id: &Id) -> Result<bool> {
+        self.inner.delete_account(id).await
+    }
+
+    async fn save_account_config(&self, id: &Id, config: &AccountConfig) -> Result<()> {
+        self.inner.save_account_config(id, config).await
+    }
+
+    async fn get_balance_snapshots(&self, account_id: &Id) -> Result<Vec<BalanceSnapshot>> {
+        self.inner.get_balance_snapshots(account_id).await
+    }
+
+    async fn append_balance_snapshot(
+        &self,
+        account_id: &Id,
+        snapshot: &BalanceSnapshot,
+    ) -> Result<()> {
+        self.inner
+            .append_balance_snapshot(account_id, snapshot)
+            .await
+    }
+
+    async fn get_latest_balance_snapshot(
+        &self,
+        account_id: &Id,
+    ) -> Result<Option<BalanceSnapshot>> {
+        self.inner.get_latest_balance_snapshot(account_id).await
+    }
+
+    async fn get_latest_balances(&self) -> Result<Vec<(Id, BalanceSnapshot)>> {
+        self.inner.get_latest_balances().await
+    }
+
+    async fn get_latest_balances_for_connection(
+        &self,
+        connection_id: &Id,
+    ) -> Result<Vec<(Id, BalanceSnapshot)>> {
+        self.inner
+            .get_latest_balances_for_connection(connection_id)
+            .await
+    }
+
+    async fn get_transactions(&self, account_id: &Id) -> Result<Vec<Transaction>> {
+        self.inner.get_transactions(account_id).await
+    }
+
+    async fn get_transactions_raw(&self, account_id: &Id) -> Result<Vec<Transaction>> {
+        self.inner.get_transactions_raw(account_id).await
+    }
+
+    async fn append_transactions(&self, account_id: &Id, txns: &[Transaction]) -> Result<()> {
+        self.inner.append_transactions(account_id, txns).await
+    }
+
+    async fn get_transaction_annotation_patches(
+        &self,
+        account_id: &Id,
+    ) -> Result<Vec<TransactionAnnotationPatch>> {
+        self.inner
+            .get_transaction_annotation_patches(account_id)
+            .await
+    }
+
+    async fn append_transaction_annotation_patches(
+        &self,
+        account_id: &Id,
+        patches: &[TransactionAnnotationPatch],
+    ) -> Result<()> {
+        self.inner
+            .append_transaction_annotation_patches(account_id, patches)
+            .await
+    }
+
+    async fn get_proposed_transaction_edits(&self) -> Result<Vec<ProposedTransactionEdit>> {
+        self.inner.get_proposed_transaction_edits().await
+    }
+
+    async fn append_proposed_transaction_edits(
+        &self,
+        edits: &[ProposedTransactionEdit],
+    ) -> Result<()> {
+        self.inner.append_proposed_transaction_edits(edits).await
+    }
+
+    async fn get_recurring_transaction_reviews(&self) -> Result<Vec<RecurringTransactionReview>> {
+        self.inner.get_recurring_transaction_reviews().await
+    }
+
+    async fn append_recurring_transaction_reviews(
+        &self,
+        reviews: &[RecurringTransactionReview],
+    ) -> Result<()> {
+        self.inner
+            .append_recurring_transaction_reviews(reviews)
+            .await
+    }
 }
 
 impl ApiState {
@@ -141,12 +309,15 @@ impl ApiState {
         let state = self.snapshot().await;
         let effective_config =
             config_with_filter_overrides(&state.config, query.include_latent_capital_gains_tax);
-        let connections = keepbook::app::list_connections(state.storage.as_ref()).await?;
-        let accounts = keepbook::app::list_accounts(state.storage.as_ref()).await?;
-        let balances =
-            keepbook::app::list_balances(state.storage.as_ref(), &effective_config).await?;
-        let snapshot = keepbook::app::portfolio_snapshot(
+        let storage = storage_with_account_overrides(
             state.storage.clone(),
+            &query.account_portfolio_overrides,
+        )?;
+        let connections = keepbook::app::list_connections(storage.as_ref()).await?;
+        let accounts = keepbook::app::list_accounts(storage.as_ref()).await?;
+        let balances = keepbook::app::list_balances(storage.as_ref(), &effective_config).await?;
+        let snapshot = keepbook::app::portfolio_snapshot(
+            storage.clone(),
             &effective_config,
             None,
             None,
@@ -172,7 +343,7 @@ impl ApiState {
                 .unwrap_or(effective_config.history.include_prices);
             Some(json_value(
                 keepbook::app::portfolio_history(
-                    state.storage.clone(),
+                    storage.clone(),
                     &effective_config,
                     None,
                     history_start,
@@ -454,6 +625,10 @@ impl ApiState {
         let state = self.snapshot().await;
         let effective_config =
             config_with_filter_overrides(&state.config, query.include_latent_capital_gains_tax);
+        let storage = storage_with_account_overrides(
+            state.storage.clone(),
+            &query.account_portfolio_overrides,
+        )?;
         let granularity = query
             .granularity
             .unwrap_or_else(|| effective_config.history.portfolio_granularity.clone());
@@ -461,7 +636,7 @@ impl ApiState {
             .include_prices
             .unwrap_or(effective_config.history.include_prices);
         let selection = keepbook::app::resolve_portfolio_history_selection(
-            state.storage.as_ref(),
+            storage.as_ref(),
             &effective_config,
             query.account.as_deref(),
             query.connection.as_deref(),
@@ -470,7 +645,7 @@ impl ApiState {
         let output = match selection {
             keepbook::app::PortfolioHistorySelection::Portfolio => {
                 keepbook::app::portfolio_history(
-                    state.storage.clone(),
+                    storage.clone(),
                     &effective_config,
                     query.currency,
                     query.start,
@@ -482,7 +657,7 @@ impl ApiState {
             }
             keepbook::app::PortfolioHistorySelection::Accounts(account_ids) => {
                 keepbook::app::portfolio_history_for_accounts(
-                    state.storage.clone(),
+                    storage.clone(),
                     &effective_config,
                     query.currency,
                     query.start,
@@ -495,7 +670,7 @@ impl ApiState {
             }
             keepbook::app::PortfolioHistorySelection::LatentCapitalGainsTax => {
                 keepbook::app::latent_capital_gains_tax_history(
-                    state.storage.clone(),
+                    storage.clone(),
                     &effective_config,
                     query.currency,
                     query.start,
@@ -516,6 +691,10 @@ impl ApiState {
         let state = self.snapshot().await;
         let effective_config =
             config_with_filter_overrides(&state.config, query.include_latent_capital_gains_tax);
+        let storage = storage_with_account_overrides(
+            state.storage.clone(),
+            &query.account_portfolio_overrides,
+        )?;
         let granularity = query
             .granularity
             .unwrap_or_else(|| effective_config.history.portfolio_granularity.clone());
@@ -524,7 +703,7 @@ impl ApiState {
             .unwrap_or(effective_config.history.include_prices);
         json_value(
             keepbook::app::portfolio_stacked_history(
-                state.storage.clone(),
+                storage,
                 &effective_config,
                 query.currency,
                 query.start,
@@ -1136,6 +1315,7 @@ pub struct HistoryQuery {
     pub granularity: Option<String>,
     pub include_prices: Option<bool>,
     pub include_latent_capital_gains_tax: Option<bool>,
+    pub account_portfolio_overrides: Option<String>,
     pub account: Option<String>,
     pub connection: Option<String>,
 }
@@ -1147,8 +1327,15 @@ pub struct OverviewQuery {
     pub history_granularity: Option<String>,
     pub include_prices: Option<bool>,
     pub include_latent_capital_gains_tax: Option<bool>,
+    pub account_portfolio_overrides: Option<String>,
     #[serde(default)]
     pub include_history: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct AccountPortfolioExclusionOverride {
+    account_id: String,
+    exclude_from_portfolio: bool,
 }
 
 #[cfg(feature = "http")]
@@ -1482,6 +1669,42 @@ fn config_with_filter_overrides(
         config.portfolio.latent_capital_gains_tax.enabled = enabled;
     }
     config
+}
+
+fn storage_with_account_overrides(
+    storage: Arc<dyn Storage>,
+    account_portfolio_overrides: &Option<String>,
+) -> Result<Arc<dyn Storage>> {
+    let storage = AccountConfigOverrideStorage::wrap(
+        storage,
+        account_portfolio_exclusion_overrides(account_portfolio_overrides)?,
+    );
+    Ok(storage)
+}
+
+fn account_portfolio_exclusion_overrides(
+    account_portfolio_overrides: &Option<String>,
+) -> Result<HashMap<String, bool>> {
+    let mut overrides = HashMap::new();
+    let Some(raw_overrides) = account_portfolio_overrides
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(overrides);
+    };
+    let parsed: Vec<AccountPortfolioExclusionOverride> =
+        serde_json::from_str(raw_overrides).context("invalid account_portfolio_overrides")?;
+    for override_entry in parsed {
+        let account_id = override_entry.account_id.trim();
+        if !account_id.is_empty() {
+            overrides.insert(
+                account_id.to_string(),
+                override_entry.exclude_from_portfolio,
+            );
+        }
+    }
+    Ok(overrides)
 }
 
 fn filtering_output(

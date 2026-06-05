@@ -38,6 +38,7 @@ pub(super) fn AccountsView(
     currency: String,
     defaults: HistoryDefaults,
     filter_overrides: FilterOverrides,
+    onfilterchange: EventHandler<FilterOverrides>,
     connection_count: usize,
     onrefresh: EventHandler<()>,
 ) -> Element {
@@ -153,7 +154,7 @@ pub(super) fn AccountsView(
                             empty_detail: "Refresh balances for this account to populate the chart.".to_string(),
                             currency: currency.clone(),
                             defaults: defaults.clone(),
-                            filter_overrides,
+                            filter_overrides: filter_overrides.clone(),
                             account: Some(selection.id.clone()),
                             show_header: false,
                         }
@@ -229,7 +230,9 @@ pub(super) fn AccountsView(
                                     .collect::<Vec<_>>(),
                                 account_summaries: account_summaries.clone(),
                                 currency: currency.clone(),
+                                filter_overrides: filter_overrides.clone(),
                                 onselect: move |selection| selected_graph.set(Some(selection)),
+                                onfilterchange,
                             }
                         }
                                     }
@@ -260,6 +263,7 @@ fn VirtualAccountGroup(
                     span { "Balance ({currency})" }
                     span { "Status" }
                     span { "Tags" }
+                    span { "Include" }
                 }
                 for account in accounts {
                     VirtualAccountRow {
@@ -300,6 +304,7 @@ fn VirtualAccountRow(
             span { "{value}" }
             span { class: "status liability-status", "Virtual" }
             small { "{account.connection_name}" }
+            span {}
         }
     }
 }
@@ -310,7 +315,9 @@ fn AccountGroup(
     accounts: Vec<Account>,
     account_summaries: Vec<AccountSummary>,
     currency: String,
+    filter_overrides: FilterOverrides,
     onselect: EventHandler<AccountGraphSelection>,
+    onfilterchange: EventHandler<FilterOverrides>,
 ) -> Element {
     let active_count = accounts.iter().filter(|account| account.active).count();
     let ignored_count = accounts
@@ -341,6 +348,7 @@ fn AccountGroup(
                     span { "Balance ({currency})" }
                     span { "Status" }
                     span { "Tags" }
+                    span { "Include" }
                 }
                 for account in accounts {
                     AccountRow {
@@ -348,7 +356,9 @@ fn AccountGroup(
                         connection_name: connection.name.clone(),
                         account_summaries: account_summaries.clone(),
                         currency: currency.clone(),
+                        filter_overrides: filter_overrides.clone(),
                         onselect,
+                        onfilterchange,
                     }
                 }
             }
@@ -362,21 +372,28 @@ fn AccountRow(
     connection_name: String,
     account_summaries: Vec<AccountSummary>,
     currency: String,
+    filter_overrides: FilterOverrides,
     onselect: EventHandler<AccountGraphSelection>,
+    onfilterchange: EventHandler<FilterOverrides>,
 ) -> Element {
-    let status = if account.exclude_from_portfolio {
+    let configured_excluded = account.exclude_from_portfolio;
+    let override_excluded = filter_overrides.account_exclude_override(&account.id);
+    let effective_excluded = override_excluded.unwrap_or(configured_excluded);
+    let override_active = override_excluded.is_some();
+    let included = !effective_excluded;
+    let status = if effective_excluded {
         "Ignored"
     } else if account.active {
         "Active"
     } else {
         "Inactive"
     };
-    let row_class = if account.exclude_from_portfolio {
+    let row_class = if effective_excluded {
         "table-row ignored-account-row"
     } else {
         "table-row"
     };
-    let status_class = if account.exclude_from_portfolio {
+    let status_class = if effective_excluded {
         "status ignored-status"
     } else {
         "status"
@@ -385,21 +402,62 @@ fn AccountRow(
     let balance = account_snapshot_value(&account.id, &account_summaries)
         .map(|value| format_full_money(value, &currency))
         .unwrap_or_else(|| "N/A".to_string());
+    let account_id = account.id.clone();
+    let account_name = account.name.clone();
+    let toggle_account_id = account_id.clone();
+    let reset_account_id = account_id.clone();
+    let toggle_filter_overrides = filter_overrides.clone();
+    let reset_filter_overrides = filter_overrides.clone();
     let selection = AccountGraphSelection {
-        id: account.id.clone(),
-        name: account.name.clone(),
+        id: account_id.clone(),
+        name: account_name.clone(),
         connection_name,
     };
 
     rsx! {
-        button {
-            class: "{row_class} account-click-row",
-            title: "View graph",
-            onclick: move |_| onselect.call(selection.clone()),
-            strong { "{account.name}" }
+        div {
+            class: "{row_class} account-row-with-toggle",
+            button {
+                class: "account-row-main account-click-row",
+                title: "View graph",
+                onclick: move |_| onselect.call(selection.clone()),
+                strong { "{account_name}" }
+            }
             span { "{balance}" }
             span { class: "{status_class}", "{status}" }
             small { "{tags}" }
+            div { class: "account-override-cell",
+                label { class: "compact-check account-include-toggle",
+                    input {
+                        r#type: "checkbox",
+                        checked: included,
+                        onchange: move |event| {
+                            let next = toggle_filter_overrides
+                                .clone()
+                                .with_account_exclude_override(
+                                    toggle_account_id.clone(),
+                                    !event.checked(),
+                                );
+                            onfilterchange.call(next);
+                        }
+                    }
+                    span { "Include" }
+                }
+                if override_active {
+                    button {
+                        class: "text-button reset-account-override",
+                        title: "Reset account override",
+                        onclick: move |_| {
+                            onfilterchange.call(
+                                reset_filter_overrides
+                                    .clone()
+                                    .without_account_exclude_override(&reset_account_id)
+                            );
+                        },
+                        "Reset"
+                    }
+                }
+            }
         }
     }
 }

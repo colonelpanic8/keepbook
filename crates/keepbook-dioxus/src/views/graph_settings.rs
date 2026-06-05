@@ -65,6 +65,8 @@ fn PortfolioSettingsPanel(
     } else {
         "Missing"
     };
+    let toggle_filter_overrides = filter_overrides.clone();
+    let reset_filter_overrides = filter_overrides.clone();
 
     rsx! {
         section { class: "panel settings-panel",
@@ -83,7 +85,7 @@ fn PortfolioSettingsPanel(
                             r#type: "checkbox",
                             checked: latent_tax.effective_enabled,
                             onchange: move |event| {
-                                let mut next = filter_overrides;
+                                let mut next = toggle_filter_overrides.clone();
                                 next.include_latent_capital_gains_tax = Some(event.checked());
                                 onfilterchange.call(next);
                             }
@@ -104,7 +106,7 @@ fn PortfolioSettingsPanel(
                     class: "control-button",
                     disabled: !override_active,
                     onclick: move |_| {
-                        let mut next = filter_overrides;
+                        let mut next = reset_filter_overrides.clone();
                         next.include_latent_capital_gains_tax = None;
                         onfilterchange.call(next);
                     },

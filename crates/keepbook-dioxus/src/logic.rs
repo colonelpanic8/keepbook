@@ -1,6 +1,42 @@
 use super::*;
 use std::collections::{HashMap, HashSet};
 
+impl FilterOverrides {
+    pub(crate) fn account_exclude_override(&self, account_id: &str) -> Option<bool> {
+        self.account_portfolio_exclusions
+            .iter()
+            .find(|override_entry| override_entry.account_id == account_id)
+            .map(|override_entry| override_entry.exclude_from_portfolio)
+    }
+
+    pub(crate) fn with_account_exclude_override(
+        mut self,
+        account_id: String,
+        exclude_from_portfolio: bool,
+    ) -> Self {
+        if let Some(override_entry) = self
+            .account_portfolio_exclusions
+            .iter_mut()
+            .find(|override_entry| override_entry.account_id == account_id)
+        {
+            override_entry.exclude_from_portfolio = exclude_from_portfolio;
+        } else {
+            self.account_portfolio_exclusions
+                .push(AccountPortfolioExclusionOverride {
+                    account_id,
+                    exclude_from_portfolio,
+                });
+        }
+        self
+    }
+
+    pub(crate) fn without_account_exclude_override(mut self, account_id: &str) -> Self {
+        self.account_portfolio_exclusions
+            .retain(|override_entry| override_entry.account_id != account_id);
+        self
+    }
+}
+
 pub(crate) fn range_preset_from_config(value: &str) -> RangePreset {
     match normalize_config_key(value).as_str() {
         "1m" | "1month" | "month" | "onemonth" => RangePreset::OneMonth,
@@ -370,6 +406,13 @@ pub(crate) fn append_filter_override_params(params: &mut Vec<String>, overrides:
             "include_latent_capital_gains_tax",
             bool_query_value(enabled),
         );
+    }
+    let mut account_overrides = overrides.account_portfolio_exclusions;
+    account_overrides.sort_by(|a, b| a.account_id.cmp(&b.account_id));
+    if !account_overrides.is_empty() {
+        if let Ok(encoded) = serde_json::to_string(&account_overrides) {
+            push_query_param(params, "account_portfolio_overrides", &encoded);
+        }
     }
 }
 
@@ -1021,6 +1064,17 @@ pub(crate) fn spending_over_time_series(
             .then_with(|| a.key.cmp(&b.key))
     });
     series
+}
+
+pub(crate) fn visible_spending_over_time_points(
+    points: &[SpendingBarChartPoint],
+    series: &[SpendingBreakdownEntry],
+) -> Vec<SpendingBarChartPoint> {
+    if series.is_empty() {
+        Vec::new()
+    } else {
+        points.to_vec()
+    }
 }
 
 fn spending_period_label(start: &str, end: &str) -> String {

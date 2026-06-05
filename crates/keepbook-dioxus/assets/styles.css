@@ -1916,11 +1916,49 @@ button.stacked-legend-item {
 .account-table .table-head,
 .account-table .table-row {
   grid-template-columns:
-    minmax(220px, 1.2fr)
+    minmax(200px, 1.2fr)
     minmax(150px, 0.7fr)
     minmax(110px, 0.4fr)
-    minmax(220px, 1fr);
-  min-width: 760px;
+    minmax(180px, 1fr)
+    minmax(132px, 0.6fr);
+  min-width: 900px;
+}
+
+.account-row-with-toggle {
+  align-items: center;
+}
+
+.account-row-main {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+}
+
+.account-row-main:hover strong,
+.account-row-main:focus-visible strong {
+  color: #1f6f8b;
+}
+
+.account-override-cell {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.account-include-toggle {
+  color: #31424e;
+}
+
+.reset-account-override {
+  min-height: 26px;
+  padding: 0 6px;
 }
 
 .connection-table .table-head,

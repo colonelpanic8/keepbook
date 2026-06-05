@@ -298,6 +298,7 @@ fn Dashboard(
                             currency: overview.reporting_currency.clone(),
                             defaults: overview.history_defaults.clone(),
                             filter_overrides,
+                            onfilterchange,
                             connection_count: overview.connections.len(),
                             onrefresh: move |_| onrefresh.call(()),
                         }

@@ -45,6 +45,7 @@ pub(crate) async fn fetch_overview_impl(overrides: FilterOverrides) -> Result<Ov
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) async fn fetch_overview_impl(overrides: FilterOverrides) -> Result<Overview, String> {
+    let account_portfolio_overrides = account_filter_override_param(&overrides);
     let output = native_api_state()?
         .overview(keepbook_server::OverviewQuery {
             history_start: None,
@@ -52,6 +53,7 @@ pub(crate) async fn fetch_overview_impl(overrides: FilterOverrides) -> Result<Ov
             history_granularity: None,
             include_prices: None,
             include_latent_capital_gains_tax: overrides.include_latent_capital_gains_tax,
+            account_portfolio_overrides,
             include_history: false,
         })
         .await
@@ -240,6 +242,15 @@ pub(crate) async fn fetch_history_impl(query: String) -> Result<History, String>
         .json::<History>()
         .await
         .map_err(|error| format!("Could not decode net worth history: {error}"))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn account_filter_override_param(overrides: &FilterOverrides) -> Option<String> {
+    if overrides.account_portfolio_exclusions.is_empty() {
+        None
+    } else {
+        serde_json::to_string(&overrides.account_portfolio_exclusions).ok()
+    }
 }
 
 #[cfg(target_arch = "wasm32")]

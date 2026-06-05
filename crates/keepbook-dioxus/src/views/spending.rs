@@ -570,11 +570,7 @@ fn SpendingOverTimeChart(
     let mut hovered_period = use_signal(|| None::<SpendingPeriodSelection>);
     let points = spending_over_time_points(&spending);
     let series = spending_over_time_series(&points);
-    let visible_points = points
-        .iter()
-        .filter(|point| point.total > 0.0)
-        .cloned()
-        .collect::<Vec<_>>();
+    let visible_points = visible_spending_over_time_points(&points, &series);
 
     if visible_points.is_empty() || series.is_empty() {
         return rsx! {

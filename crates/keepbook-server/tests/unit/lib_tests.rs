@@ -171,6 +171,40 @@ fn desktop_start_minimized_to_tray_reads_tray_config() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn account_portfolio_override_query_decodes_json_param() -> Result<()> {
+    let encoded_overrides = serde_json::to_string(&serde_json::json!([
+        {
+            "account_id": "checking",
+            "exclude_from_portfolio": false
+        },
+        {
+            "account_id": "brokerage",
+            "exclude_from_portfolio": true
+        },
+        {
+            "account_id": "ira",
+            "exclude_from_portfolio": true
+        }
+    ]))?;
+    let encoded_query = serde_urlencoded::to_string([
+        ("granularity", "weekly"),
+        ("account_portfolio_overrides", encoded_overrides.as_str()),
+    ])?;
+    let query = serde_urlencoded::from_str::<HistoryQuery>(&encoded_query)?;
+
+    assert_eq!(
+        query.account_portfolio_overrides.as_deref(),
+        Some(encoded_overrides.as_str())
+    );
+
+    let overrides = account_portfolio_exclusion_overrides(&query.account_portfolio_overrides)?;
+    assert_eq!(overrides.get("checking"), Some(&false));
+    assert_eq!(overrides.get("brokerage"), Some(&true));
+    assert_eq!(overrides.get("ira"), Some(&true));
+    Ok(())
+}
+
 fn unique_test_config_path(name: &str) -> PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)

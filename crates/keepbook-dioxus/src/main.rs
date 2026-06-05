@@ -139,9 +139,16 @@ impl Default for LatentCapitalGainsTaxFilter {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct FilterOverrides {
     include_latent_capital_gains_tax: Option<bool>,
+    account_portfolio_exclusions: Vec<AccountPortfolioExclusionOverride>,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+struct AccountPortfolioExclusionOverride {
+    account_id: String,
+    exclude_from_portfolio: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]

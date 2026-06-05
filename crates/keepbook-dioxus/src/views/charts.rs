@@ -123,6 +123,7 @@ pub(super) fn StackedHistoryGraphPanel(
         let start_text = start_override();
         let end_text = end_override();
         let selected_sampling = sampling_granularity();
+        let current_filter_overrides = filter_overrides.clone();
         async move {
             fetch_stacked_history(history_query_string(
                 selected_range,
@@ -130,7 +131,7 @@ pub(super) fn StackedHistoryGraphPanel(
                 &end_text,
                 selected_sampling,
                 &current_date_string(),
-                filter_overrides,
+                current_filter_overrides,
                 None,
             ))
             .await
@@ -409,6 +410,7 @@ pub(super) fn HistoryGraphPanel(
         let end_text = end_override();
         let selected_sampling = sampling_granularity();
         let selected_account = account.clone();
+        let current_filter_overrides = filter_overrides.clone();
         async move {
             fetch_history(history_query_string(
                 selected_range,
@@ -416,7 +418,7 @@ pub(super) fn HistoryGraphPanel(
                 &end_text,
                 selected_sampling,
                 &current_date_string(),
-                filter_overrides,
+                current_filter_overrides,
                 selected_account.as_deref(),
             ))
             .await
