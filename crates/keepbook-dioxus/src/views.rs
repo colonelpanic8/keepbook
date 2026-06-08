@@ -287,6 +287,14 @@ fn Dashboard(
                     }
                 }
             }
+            if mobile_nav_open() {
+                button {
+                    class: "nav-backdrop",
+                    r#type: "button",
+                    aria_label: "Close navigation",
+                    onclick: move |_| mobile_nav_open.set(false),
+                }
+            }
             div { class: "workspace",
                 match active {
                     ActiveView::Spending => rsx! {

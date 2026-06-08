@@ -116,6 +116,10 @@ small,
   width: 18px;
 }
 
+.nav-backdrop {
+  display: none;
+}
+
 .nav-button {
   background: transparent;
   border: 0;
@@ -2302,6 +2306,7 @@ button.stacked-legend-item {
   .mobile-nav-toggle {
     display: flex;
     flex: 0 0 auto;
+    order: -1;
   }
 
   .app-nav nav {
@@ -2310,6 +2315,37 @@ button.stacked-legend-item {
 
   .app-nav.open nav {
     display: flex;
+  }
+
+  .app-nav.open {
+    bottom: 0;
+    border-bottom: 0;
+    border-right: 1px solid #d7dfdd;
+    box-shadow: 18px 0 34px rgba(23, 32, 42, 0.18);
+    height: 100vh;
+    height: 100dvh;
+    left: 0;
+    max-width: calc(100vw - 44px);
+    overflow-y: auto;
+    padding:
+      calc(18px + var(--safe-area-top))
+      16px
+      calc(18px + var(--safe-area-bottom))
+      calc(16px + var(--safe-area-left));
+    position: fixed;
+    top: 0;
+    width: 284px;
+    z-index: 30;
+  }
+
+  .nav-backdrop {
+    background: rgba(23, 32, 42, 0.28);
+    border: 0;
+    display: block;
+    inset: 0;
+    padding: 0;
+    position: fixed;
+    z-index: 25;
   }
 
   .summary-grid {
