@@ -244,17 +244,35 @@ fn Dashboard(
     onrefresh: EventHandler<()>,
 ) -> Element {
     let mut active_view = use_signal(|| ActiveView::Accounts);
+    let mut mobile_nav_open = use_signal(|| false);
     let active = active_view();
+    let nav_class = if mobile_nav_open() {
+        "app-nav open"
+    } else {
+        "app-nav"
+    };
 
     rsx! {
         div { class: "app-shell",
             DesktopTrayViewActions {
                 onshowsettings: move |_| active_view.set(ActiveView::Settings),
             }
-            aside { class: "app-nav",
-                div { class: "nav-title",
-                    strong { "Keepbook" }
-                    small { "{overview.reporting_currency}" }
+            aside { class: "{nav_class}",
+                div { class: "nav-header",
+                    div { class: "nav-title",
+                        strong { "Keepbook" }
+                        small { "{overview.reporting_currency}" }
+                    }
+                    button {
+                        class: "mobile-nav-toggle",
+                        r#type: "button",
+                        aria_label: "Toggle navigation",
+                        aria_expanded: "{mobile_nav_open()}",
+                        onclick: move |_| mobile_nav_open.set(!mobile_nav_open()),
+                        span { aria_hidden: "true" }
+                        span { aria_hidden: "true" }
+                        span { aria_hidden: "true" }
+                    }
                 }
                 nav {
                     for view in ActiveView::ALL {
@@ -263,6 +281,7 @@ fn Dashboard(
                             selected: active == view,
                             onclick: move |_| {
                                 active_view.set(view);
+                                mobile_nav_open.set(false);
                             }
                         }
                     }
