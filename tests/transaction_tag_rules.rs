@@ -4,8 +4,8 @@ use std::path::Path;
 use anyhow::Result;
 use chrono::TimeZone;
 use keepbook::app::{
-    add_transaction_rule, apply_transaction_rules, list_transaction_rules, list_transactions,
-    ApplyTransactionRulesOptions, TransactionRule,
+    add_transaction_rule, apply_transaction_rules, import_schwab_transactions,
+    list_transaction_rules, list_transactions, ApplyTransactionRulesOptions, TransactionRule,
 };
 use keepbook::config::{
     AiConfig, DisplayConfig, GitConfig, HistoryConfig, IgnoreConfig, PortfolioConfig,
@@ -136,6 +136,78 @@ async fn transaction_rules_append_and_apply_to_existing_transactions() -> Result
             .as_ref()
             .and_then(|annotation| annotation.description.as_deref()),
         Some("Blue Bottle")
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn schwab_transaction_import_applies_matching_transaction_rules() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let storage = JsonFileStorage::new(dir.path());
+    let config = resolved_config(dir.path());
+
+    let mut account = Account::new("Brokerage", Id::from_string("conn-1"));
+    account.id = Id::from_string("acct-1");
+    storage.save_account(&account).await?;
+
+    add_transaction_rule(
+        &config,
+        TransactionRule {
+            set_tags: Some(vec!["Income".to_string()]),
+            set_subtags: Some(vec!["Dividends".to_string()]),
+            set_description: Some("VTI dividend".to_string()),
+            match_account_id: None,
+            match_account_name: Some("(?i)^brokerage$".to_string()),
+            match_description: Some("(?i)VANGUARD TOTAL STOCK MARKET ETF".to_string()),
+            match_tag: None,
+            match_subtag: None,
+            match_status: None,
+            match_amount: None,
+        },
+    )
+    .await?;
+
+    let import_file = dir.path().join("schwab-export.json");
+    std::fs::write(
+        &import_file,
+        r#"
+[
+  {
+    "Date": "05/20/2024 as of 05/17/2024",
+    "Action": "Dividend",
+    "Symbol": "VTI",
+    "Description": "VANGUARD TOTAL STOCK MARKET ETF",
+    "Amount": "$1.23"
+  }
+]
+"#,
+    )?;
+
+    let output = import_schwab_transactions(&storage, &config, "Brokerage", &import_file).await?;
+    assert_eq!(output["imported"], 1);
+    assert_eq!(output["transaction_rules"]["matched_count"], 1);
+    assert_eq!(output["transaction_rules"]["updated_count"], 1);
+
+    let transactions = list_transactions(
+        &storage,
+        Some("2024-05-01".to_string()),
+        Some("2024-05-31".to_string()),
+        None,
+        false,
+        false,
+        &config,
+    )
+    .await?;
+    assert_eq!(transactions.len(), 1);
+    assert_eq!(transactions[0].tags, vec!["Income".to_string()]);
+    assert_eq!(transactions[0].subtags, vec!["Dividends".to_string()]);
+    assert_eq!(
+        transactions[0]
+            .annotation
+            .as_ref()
+            .and_then(|annotation| annotation.description.as_deref()),
+        Some("VTI dividend")
     );
 
     Ok(())

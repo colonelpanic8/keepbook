@@ -317,6 +317,23 @@ pub async fn apply_transaction_rules(
     config: &ResolvedConfig,
     opts: ApplyTransactionRulesOptions,
 ) -> Result<serde_json::Value> {
+    apply_transaction_rules_with_auto_commit(storage, config, opts, true).await
+}
+
+pub(crate) async fn apply_transaction_rules_without_auto_commit(
+    storage: &dyn Storage,
+    config: &ResolvedConfig,
+    opts: ApplyTransactionRulesOptions,
+) -> Result<serde_json::Value> {
+    apply_transaction_rules_with_auto_commit(storage, config, opts, false).await
+}
+
+async fn apply_transaction_rules_with_auto_commit(
+    storage: &dyn Storage,
+    config: &ResolvedConfig,
+    opts: ApplyTransactionRulesOptions,
+    auto_commit: bool,
+) -> Result<serde_json::Value> {
     if opts.account.is_some() && opts.connection.is_some() {
         anyhow::bail!("--account and --connection are mutually exclusive");
     }
@@ -483,7 +500,7 @@ pub async fn apply_transaction_rules(
         }
     }
 
-    if !opts.dry_run && updated_count > 0 {
+    if auto_commit && !opts.dry_run && updated_count > 0 {
         maybe_auto_commit(
             config,
             &format!("apply transaction rules to {updated_count} transactions"),

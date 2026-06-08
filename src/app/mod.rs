@@ -53,6 +53,7 @@ pub use sync::{
     sync_connection, sync_connection_if_stale, sync_prices, sync_recompact, sync_symlinks,
     SyncPricesScopeArg,
 };
+pub(crate) use transaction_rules::apply_transaction_rules_without_auto_commit;
 pub use transaction_rules::{
     add_transaction_rule, append_transaction_rule, apply_transaction_rules, list_transaction_rules,
     load_transaction_rules, transaction_rules_config_path, transaction_rules_path,
