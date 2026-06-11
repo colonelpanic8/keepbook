@@ -2287,7 +2287,7 @@ button.stacked-legend-item {
     max-width: 100%;
     overflow-y: visible;
     padding:
-      12px
+      calc(12px + var(--safe-area-top))
       calc(16px + var(--safe-area-right))
       12px
       calc(16px + var(--safe-area-left));
