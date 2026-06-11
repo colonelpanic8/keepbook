@@ -1,6 +1,6 @@
 [package]
 name = "keepbook"
-version = "0.4.8"
+version = "0.4.9"
 edition = "2021"
 description = "Local-first personal finance toolkit"
 license = "MIT OR Apache-2.0"
@@ -67,7 +67,7 @@ app = []
 tui = ["app", "config", "dep:dialoguer", "dep:ratatui", "dep:crossterm", "dep:reqwest"]
 config = []
 credentials = ["dep:age"]
-git = []
+git = ["dep:git2"]
 market_data = ["dep:reqwest"]
 portfolio = []
 staleness = []
@@ -143,6 +143,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"], optio
 ksni = { version = "0.3", optional = true }
 image = { version = "0.25", optional = true, default-features = false, features = ["png"] }
 notify = { version = "8", optional = true }
+git2 = { version = "0.21", optional = true, default-features = false, features = ["cred", "ssh"] }
 
 [dev-dependencies]
 wiremock = "0.6"

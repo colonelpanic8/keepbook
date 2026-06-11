@@ -2275,6 +2275,13 @@ fn resolve_git_private_key(
 }
 
 fn activate_age_identity_from_git_settings(config_path: &Path) -> Result<()> {
+    if let Ok(default_key_path) = default_git_ssh_key_path(config_path) {
+        if default_key_path.is_file() {
+            std::env::set_var("KEEPBOOK_CREDENTIALS_AGE_IDENTITY_PATH", default_key_path);
+            return Ok(());
+        }
+    }
+
     let settings =
         with_default_desktop_ssh_key_path(config_path, load_git_remote_settings(config_path)?);
     let Some(ssh_key_path) = settings

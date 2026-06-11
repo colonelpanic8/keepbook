@@ -1,5 +1,6 @@
 use super::*;
 use std::fs;
+use std::process::Command;
 use tempfile::TempDir;
 
 fn git_available() -> bool {

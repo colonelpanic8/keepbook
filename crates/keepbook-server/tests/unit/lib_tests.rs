@@ -162,6 +162,42 @@ fn configured_ssh_key_path_wins_over_default() {
 }
 
 #[test]
+fn activate_age_identity_prefers_saved_keepbook_sync_key() -> Result<()> {
+    let config_path = unique_test_config_path("age-identity-saved-key");
+    write_test_config(&config_path, "data_dir = \".\"\n")?;
+
+    let state_home = config_path
+        .parent()
+        .expect("test config should have parent")
+        .join("state");
+    let old_state_home = std::env::var_os("XDG_STATE_HOME");
+    let old_age_identity = std::env::var_os("KEEPBOOK_CREDENTIALS_AGE_IDENTITY_PATH");
+    std::env::set_var("XDG_STATE_HOME", &state_home);
+    std::env::remove_var("KEEPBOOK_CREDENTIALS_AGE_IDENTITY_PATH");
+
+    let key_path = default_git_ssh_key_path(&config_path)?;
+    std::fs::create_dir_all(key_path.parent().expect("key path should have parent"))?;
+    std::fs::write(&key_path, "fake test key")?;
+
+    activate_age_identity_from_git_settings(&config_path)?;
+    assert_eq!(
+        std::env::var_os("KEEPBOOK_CREDENTIALS_AGE_IDENTITY_PATH").as_deref(),
+        Some(key_path.as_os_str())
+    );
+
+    match old_state_home {
+        Some(value) => std::env::set_var("XDG_STATE_HOME", value),
+        None => std::env::remove_var("XDG_STATE_HOME"),
+    }
+    match old_age_identity {
+        Some(value) => std::env::set_var("KEEPBOOK_CREDENTIALS_AGE_IDENTITY_PATH", value),
+        None => std::env::remove_var("KEEPBOOK_CREDENTIALS_AGE_IDENTITY_PATH"),
+    }
+    remove_test_config(config_path);
+    Ok(())
+}
+
+#[test]
 fn desktop_start_minimized_to_tray_reads_tray_config() -> Result<()> {
     let config_path = unique_test_config_path("desktop-start-minimized");
     write_test_config(&config_path, "[tray]\nstart_minimized = true\n")?;
