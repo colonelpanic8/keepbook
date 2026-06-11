@@ -25,8 +25,8 @@
         };
         fenixPkgs = fenix.packages.${system};
         lib = pkgs.lib;
-        appVersion = "0.4.7";
-        androidVersionCode = "407";
+        appVersion = "0.4.8";
+        androidVersionCode = "408";
         keepbookDioxusAppId = "org.colonelpanic.keepbook.dioxus";
         keepbookDioxusDesktopAlias = "keepbook-dioxus";
         sourceRoot = ./.;

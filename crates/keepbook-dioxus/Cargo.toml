@@ -1,6 +1,6 @@
 [package]
 name = "keepbook-dioxus"
-version = "0.4.7"
+version = "0.4.8"
 edition = "2021"
 description = "Dioxus client for keepbook"
 license = "MIT OR Apache-2.0"
