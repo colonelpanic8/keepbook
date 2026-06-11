@@ -325,9 +325,9 @@ fn merge_ref(repo: &Repository, ref_name: &str, label: &str) -> Result<MergeResu
     let theirs = repo
         .find_commit(annotated.id())
         .with_context(|| format!("failed to read git commit for {label}"))?;
-    let mut merge_options = MergeOptions::new();
+    let merge_options = MergeOptions::new();
     let mut index = repo
-        .merge_commits(&ours, &theirs, Some(&mut merge_options))
+        .merge_commits(&ours, &theirs, Some(&merge_options))
         .with_context(|| format!("git merge {label} failed"))?;
 
     if index.has_conflicts() {
