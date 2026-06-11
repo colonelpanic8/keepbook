@@ -382,6 +382,67 @@ fn spending_over_time_visible_points_keep_empty_periods() {
 }
 
 #[test]
+fn narrow_spending_points_to_tag_keeps_only_selected_tag_totals() {
+    let spending = SpendingOutput {
+        currency: "USD".to_string(),
+        tz: "local".to_string(),
+        start_date: "2026-01-01".to_string(),
+        end_date: "2026-02-28".to_string(),
+        period: "monthly".to_string(),
+        total: "60".to_string(),
+        transaction_count: 3,
+        periods: vec![
+            SpendingPeriod {
+                start_date: "2026-01-01".to_string(),
+                end_date: "2026-01-31".to_string(),
+                total: "40".to_string(),
+                transaction_count: 2,
+                breakdown: vec![
+                    SpendingBreakdownEntry {
+                        key: "food".to_string(),
+                        total: "25".to_string(),
+                        transaction_count: 1,
+                    },
+                    SpendingBreakdownEntry {
+                        key: "travel".to_string(),
+                        total: "15".to_string(),
+                        transaction_count: 1,
+                    },
+                ],
+            },
+            SpendingPeriod {
+                start_date: "2026-02-01".to_string(),
+                end_date: "2026-02-28".to_string(),
+                total: "20".to_string(),
+                transaction_count: 1,
+                breakdown: vec![SpendingBreakdownEntry {
+                    key: "travel".to_string(),
+                    total: "20".to_string(),
+                    transaction_count: 1,
+                }],
+            },
+        ],
+        skipped_transaction_count: 0,
+        missing_price_transaction_count: 0,
+        missing_fx_transaction_count: 0,
+    };
+
+    let points = spending_over_time_points(&spending);
+    let narrowed = narrow_spending_points_to_tag(&points, "food");
+
+    assert_eq!(narrowed.len(), 2);
+    assert_eq!(narrowed[0].label, "2026-01");
+    assert_eq!(narrowed[0].total, 25.0);
+    assert_eq!(narrowed[0].transaction_count, 1);
+    assert_eq!(narrowed[0].segments.len(), 1);
+    assert_eq!(narrowed[0].segments[0].key, "food");
+    assert_eq!(narrowed[1].label, "2026-02");
+    assert_eq!(narrowed[1].total, 0.0);
+    assert_eq!(narrowed[1].transaction_count, 0);
+    assert!(narrowed[1].segments.is_empty());
+}
+
+#[test]
 fn filter_override_query_includes_latent_tax_override() {
     assert_eq!(
         filter_override_query_string(FilterOverrides {

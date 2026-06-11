@@ -89,6 +89,30 @@ pub(super) fn SpendingView(currency: String) -> Element {
             .find(|entry| &entry.key == tag)
             .and_then(|entry| parse_money_input(&entry.total))
     });
+    let period_metric = selected_period_value.as_ref().map(|period| {
+        let (total, transaction_count) = loaded
+            .and_then(|data| {
+                let points = spending_over_time_points(&data.spending_over_time);
+                let points = match selected.as_deref() {
+                    Some(tag) => narrow_spending_points_to_tag(&points, tag),
+                    None => points,
+                };
+                points
+                    .iter()
+                    .find(|point| {
+                        point.start_date == period.start_date && point.end_date == period.end_date
+                    })
+                    .map(|point| (point.total, point.transaction_count))
+            })
+            .unwrap_or((period.total, period.transaction_count));
+        SpendingPeriodSelection {
+            label: period.label.clone(),
+            start_date: period.start_date.clone(),
+            end_date: period.end_date.clone(),
+            total,
+            transaction_count,
+        }
+    });
     let filtered_transactions = loaded
         .map(|data| {
             filtered_transactions(
@@ -300,14 +324,21 @@ pub(super) fn SpendingView(currency: String) -> Element {
                         selected_period: selected_period_value.clone(),
                         bucket_label: selected_bucket.label().to_string(),
                         colors: tag_colors.clone(),
-                        onclick: move |period| {
-                            selected_period.set(Some(period));
-                            selected_tag.set(None);
+                        onclick: move |period: SpendingPeriodSelection| {
+                            let same_period = selected_period().is_some_and(|current| {
+                                current.start_date == period.start_date
+                                    && current.end_date == period.end_date
+                            });
+                            selected_period.set(if same_period { None } else { Some(period) });
                             transaction_page.set(0);
                         },
-                        onselecttag: move |tag| {
-                            selected_tag.set(Some(tag));
-                            selected_period.set(None);
+                        onselecttag: move |tag: String| {
+                            let next = if selected_tag() == Some(tag.clone()) {
+                                None
+                            } else {
+                                Some(tag)
+                            };
+                            selected_tag.set(next);
                             transaction_page.set(0);
                         }
                     }
@@ -318,9 +349,13 @@ pub(super) fn SpendingView(currency: String) -> Element {
                                 selected: selected.clone(),
                                 currency: data.spending.currency.clone(),
                                 colors: tag_colors.clone(),
-                                onclick: move |tag| {
-                                    selected_tag.set(Some(tag));
-                                    selected_period.set(None);
+                                onclick: move |tag: String| {
+                                    let next = if selected_tag() == Some(tag.clone()) {
+                                        None
+                                    } else {
+                                        Some(tag)
+                                    };
+                                    selected_tag.set(next);
                                     transaction_page.set(0);
                                 }
                             }
@@ -331,7 +366,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
                                 strong { "{format_full_money(total, &data.spending.currency)}" }
                                 small { "{data.spending.transaction_count} transactions / {data.spending.start_date} to {data.spending.end_date}" }
                             }
-                            if let Some(period) = selected_period_value.clone() {
+                            if let Some(period) = period_metric.clone() {
                                 div { class: "spending-total selected-total",
                                     span { class: "metric-label", "Period" }
                                     strong { "{period.label}" }
@@ -353,9 +388,13 @@ pub(super) fn SpendingView(currency: String) -> Element {
                                     color: spending_tag_color_for(&tag_colors, &entry.key, index),
                                     currency: data.spending.currency.clone(),
                                     selected: selected.as_ref() == Some(&entry.key),
-                                    onclick: move |tag| {
-                                        selected_tag.set(Some(tag));
-                                        selected_period.set(None);
+                                    onclick: move |tag: String| {
+                                        let next = if selected_tag() == Some(tag.clone()) {
+                                            None
+                                        } else {
+                                            Some(tag)
+                                        };
+                                        selected_tag.set(next);
                                         transaction_page.set(0);
                                     }
                                 }
@@ -570,7 +609,11 @@ fn SpendingOverTimeChart(
     let mut hovered_period = use_signal(|| None::<SpendingPeriodSelection>);
     let points = spending_over_time_points(&spending);
     let series = spending_over_time_series(&points);
-    let visible_points = visible_spending_over_time_points(&points, &series);
+    let narrowed_points = selected
+        .as_ref()
+        .map(|tag| narrow_spending_points_to_tag(&points, tag));
+    let display_points = narrowed_points.as_ref().unwrap_or(&points);
+    let visible_points = visible_spending_over_time_points(display_points, &series);
 
     if visible_points.is_empty() || series.is_empty() {
         return rsx! {
@@ -603,7 +646,15 @@ fn SpendingOverTimeChart(
         .iter()
         .map(|entry| entry.key.clone())
         .collect::<Vec<_>>();
-    let range_total = parse_money_input(&spending.total).unwrap_or_default().abs();
+    let range_total = if selected.is_some() {
+        visible_points.iter().map(|point| point.total).sum::<f64>()
+    } else {
+        parse_money_input(&spending.total).unwrap_or_default().abs()
+    };
+    let over_time_label = match &selected {
+        Some(tag) => format!("Over Time · {tag}"),
+        None => "Over Time".to_string(),
+    };
     let first_label = visible_points
         .first()
         .map(|point| point.label.clone())
@@ -678,7 +729,7 @@ fn SpendingOverTimeChart(
         div { class: "chart-card spending-over-time-card",
             div { class: "chart-meta",
                 div {
-                    span { class: "metric-label", "Over Time" }
+                    span { class: "metric-label", "{over_time_label}" }
                     strong { "{total_label}" }
                 }
                 div {
@@ -762,15 +813,11 @@ fn SpendingOverTimeChart(
                             total,
                             transaction_count,
                         };
-                        let selected_class = if selected.as_ref() == Some(&key) {
-                            " selected"
-                        } else if selected_period
+                        let selected_class = if selected_period
                             .as_ref()
                             .is_some_and(|period| period.start_date == start_date && period.end_date == end_date)
                         {
                             " selected"
-                        } else if selected.is_some() {
-                            " dimmed"
                         } else {
                             ""
                         };

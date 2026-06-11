@@ -1066,6 +1066,36 @@ pub(crate) fn spending_over_time_series(
     series
 }
 
+pub(crate) fn narrow_spending_points_to_tag(
+    points: &[SpendingBarChartPoint],
+    tag: &str,
+) -> Vec<SpendingBarChartPoint> {
+    points
+        .iter()
+        .map(|point| {
+            let segments = point
+                .segments
+                .iter()
+                .filter(|segment| segment.key == tag)
+                .cloned()
+                .collect::<Vec<_>>();
+            let total = segments.iter().map(|segment| segment.value).sum();
+            let transaction_count = segments
+                .iter()
+                .map(|segment| segment.transaction_count)
+                .sum();
+            SpendingBarChartPoint {
+                label: point.label.clone(),
+                start_date: point.start_date.clone(),
+                end_date: point.end_date.clone(),
+                total,
+                transaction_count,
+                segments,
+            }
+        })
+        .collect()
+}
+
 pub(crate) fn visible_spending_over_time_points(
     points: &[SpendingBarChartPoint],
     series: &[SpendingBreakdownEntry],
