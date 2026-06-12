@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use keepbook::models::{
     Account, Asset, AssetBalance, BalanceSnapshot, Connection, ConnectionConfig, ConnectionState,
     ConnectionStatus, Id, Transaction, TransactionAnnotationPatch, TransactionStatus,
@@ -96,6 +96,8 @@ struct SeedTransactionAnnotationPatch {
     tags: Option<Vec<String>>,
     #[serde(default)]
     subtags: Option<Vec<String>>,
+    #[serde(default)]
+    effective_date: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -232,6 +234,14 @@ async fn seed_storage(storage: &dyn Storage, seed: &Seed) -> Result<()> {
             .timestamp
             .parse()
             .with_context(|| format!("Invalid annotation timestamp: {}", p.timestamp))?;
+        let effective_date = p
+            .effective_date
+            .as_deref()
+            .map(|date| {
+                NaiveDate::parse_from_str(date, "%Y-%m-%d")
+                    .with_context(|| format!("Invalid annotation effective_date: {date}"))
+            })
+            .transpose()?;
         let patch = TransactionAnnotationPatch {
             transaction_id,
             timestamp,
@@ -239,7 +249,7 @@ async fn seed_storage(storage: &dyn Storage, seed: &Seed) -> Result<()> {
             note: p.note.clone().map(Some),
             tags: p.tags.clone().map(Some),
             subtags: p.subtags.clone().map(Some),
-            effective_date: None,
+            effective_date: effective_date.map(Some),
         };
         storage
             .append_transaction_annotation_patches(&account_id, &[patch])

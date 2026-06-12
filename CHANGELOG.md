@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.10 - 2026-06-12
+
+### Added
+
+- Added transaction effective dates for assigning transactions to a reporting date without changing the synced transaction date.
+- Added Dioxus spending UI controls for saving and clearing transaction effective dates.
+
 ## 0.4.4 - 2026-05-24
 
 ### Fixed

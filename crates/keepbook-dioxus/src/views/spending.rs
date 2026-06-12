@@ -1,5 +1,8 @@
 use super::*;
-use crate::api::{fetch_spending_dashboard, set_transaction_tags, suggest_ai_rules};
+use crate::api::{
+    fetch_spending_dashboard, set_transaction_effective_date, set_transaction_tags,
+    suggest_ai_rules,
+};
 use std::collections::{HashMap, HashSet};
 
 #[component]
@@ -541,6 +544,24 @@ pub(super) fn SpendingView(currency: String) -> Element {
                                     }
                                 }
                             });
+                        },
+                        oneffectivedatesave: move |input: SetTransactionEffectiveDateInput| {
+                            tag_update_status.set(Some("Saving date...".to_string()));
+                            spawn({
+                                let mut spending = spending;
+                                let mut tag_update_status = tag_update_status;
+                                async move {
+                                    match set_transaction_effective_date(input).await {
+                                        Ok(()) => {
+                                            tag_update_status.set(Some("Date saved.".to_string()));
+                                            spending.restart();
+                                        }
+                                        Err(error) => {
+                                            tag_update_status.set(Some(error));
+                                        }
+                                    }
+                                }
+                            });
                         }
                     }
                     if data.spending.skipped_transaction_count > 0 {
@@ -1023,6 +1044,7 @@ fn TransactionList(
     onairulesubmit: EventHandler<MouseEvent>,
     ontagssave: EventHandler<SetTransactionTagsInput>,
     ontagsbulksave: EventHandler<SetTransactionTagsInput>,
+    oneffectivedatesave: EventHandler<SetTransactionEffectiveDateInput>,
 ) -> Element {
     let has_any_selection = !selected_keys.is_empty();
     let has_visible_selection = selected_count > 0 && !tag_targets.is_empty();
@@ -1206,7 +1228,12 @@ fn TransactionList(
                                     onchange: move |_| ontoggleselection.call(transaction_key(&tx))
                                 }
                             }
-                            span { "{transaction_date(&tx)}" }
+                            span { class: "transaction-date-cell",
+                                TransactionEffectiveDateEditor {
+                                    transaction: tx.clone(),
+                                    oneffectivedatesave,
+                                }
+                            }
                             strong { "{transaction_description(&tx)}" }
                             span { class: "transaction-tag-cell",
                                 div { class: "transaction-tag-stack",
@@ -1373,6 +1400,92 @@ fn AiRuleSuggestions(result: AiRuleSuggestionsOutput) -> Element {
                 div { class: "ai-rule-suggestion",
                     strong { "{ai_tool_label(&suggestion.name)}" }
                     pre { "{format_json_value(&suggestion.arguments)}" }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn TransactionEffectiveDateEditor(
+    transaction: Transaction,
+    oneffectivedatesave: EventHandler<SetTransactionEffectiveDateInput>,
+) -> Element {
+    let current_effective = transaction
+        .annotation
+        .as_ref()
+        .and_then(|annotation| annotation.effective_date.clone());
+    let display_date = transaction_date(&transaction);
+    let posted_date = transaction
+        .timestamp
+        .get(..10)
+        .unwrap_or(&transaction.timestamp)
+        .to_string();
+    let initial_date = current_effective
+        .clone()
+        .unwrap_or_else(|| posted_date.clone());
+    let mut draft_date = use_signal(move || initial_date.clone());
+    let draft = draft_date();
+    let trimmed = draft.trim().to_string();
+    let has_effective_date = current_effective.is_some();
+    let valid_date = trimmed.is_empty() || is_date_input_value(&trimmed);
+    let changed = if trimmed.is_empty() {
+        has_effective_date
+    } else {
+        trimmed != display_date
+    };
+    let can_save = valid_date && changed;
+    let effective_label = if has_effective_date {
+        format!("Posted {posted_date}")
+    } else {
+        "Synced date".to_string()
+    };
+    let save_account_id = transaction.account_id.clone();
+    let save_transaction_id = transaction.id.clone();
+    let clear_account_id = transaction.account_id.clone();
+    let clear_transaction_id = transaction.id.clone();
+
+    rsx! {
+        div { class: "effective-date-editor",
+            input {
+                class: "effective-date-input",
+                r#type: "date",
+                value: "{draft}",
+                title: "Reporting date",
+                oninput: move |event| draft_date.set(event.value())
+            }
+            small { "{effective_label}" }
+            div { class: "effective-date-actions",
+                button {
+                    class: "tag-editor-button",
+                    title: "Save reporting date",
+                    disabled: !can_save,
+                    onclick: move |_| {
+                        let value = draft_date().trim().to_string();
+                        let clear_effective_date = value.is_empty();
+                        oneffectivedatesave.call(SetTransactionEffectiveDateInput {
+                            account_id: save_account_id.clone(),
+                            transaction_id: save_transaction_id.clone(),
+                            effective_date: if clear_effective_date { None } else { Some(value) },
+                            clear_effective_date,
+                        });
+                    },
+                    "Save"
+                }
+                button {
+                    class: "tag-editor-button",
+                    title: "Clear reporting date",
+                    disabled: !has_effective_date,
+                    onclick: move |_| {
+                        draft_date.set(posted_date.clone());
+                        oneffectivedatesave.call(SetTransactionEffectiveDateInput {
+                            account_id: clear_account_id.clone(),
+                            transaction_id: clear_transaction_id.clone(),
+                            effective_date: None,
+                            clear_effective_date: true,
+                        });
+                    },
+                    "Clear"
                 }
             }
         }

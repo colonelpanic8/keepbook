@@ -1526,18 +1526,61 @@ button.stacked-legend-item {
 .transaction-table .table-row {
   grid-template-columns:
     34px
-    96px
+    150px
     minmax(220px, 1.1fr)
     minmax(180px, 0.8fr)
     minmax(150px, 0.75fr)
     120px;
-  min-width: 900px;
+  min-width: 960px;
 }
 
 .transaction-select-cell {
   align-items: center;
   display: flex;
   justify-content: center;
+}
+
+.transaction-date-cell {
+  min-width: 0;
+}
+
+.effective-date-editor {
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.effective-date-input {
+  background: #f7faf9;
+  border: 1px solid #d8e1de;
+  border-radius: 6px;
+  color: #17202a;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 800;
+  min-width: 0;
+  padding: 5px 7px;
+  width: 100%;
+}
+
+.effective-date-editor small {
+  color: #7b8790;
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.effective-date-actions {
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+}
+
+.effective-date-actions .tag-editor-button {
+  min-height: 26px;
+  padding-inline: 7px;
 }
 
 .transaction-table .table-row strong:last-child {

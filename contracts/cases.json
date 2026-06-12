@@ -340,5 +340,104 @@
       "acct-1",
       "--include-empty"
     ]
+  },
+  {
+    "name": "list_transactions_uses_effective_date",
+    "reporting_currency": "USD",
+    "seed": {
+      "connections": [
+        {
+          "id": "conn-1",
+          "name": "Bank",
+          "synchronizer": "manual",
+          "status": "active",
+          "account_ids": ["acct-1"]
+        }
+      ],
+      "accounts": [
+        {
+          "id": "acct-1",
+          "name": "Checking",
+          "connection_id": "conn-1",
+          "tags": [],
+          "active": true
+        }
+      ],
+      "transactions": [
+        {
+          "account_id": "acct-1",
+          "id": "tx-rent-early",
+          "timestamp": "2026-01-29T12:00:00Z",
+          "amount": "-1200",
+          "asset": { "type": "currency", "iso_code": "USD" },
+          "description": "Rent"
+        }
+      ],
+      "transaction_annotation_patches": [
+        {
+          "account_id": "acct-1",
+          "transaction_id": "tx-rent-early",
+          "timestamp": "2026-01-29T13:00:00Z",
+          "effective_date": "2026-02-01"
+        }
+      ]
+    },
+    "command": ["list", "transactions", "--start", "2026-02-01", "--end", "2026-02-28"]
+  },
+  {
+    "name": "spending_uses_effective_date_for_month",
+    "reporting_currency": "USD",
+    "seed": {
+      "connections": [
+        {
+          "id": "conn-1",
+          "name": "Bank",
+          "synchronizer": "manual",
+          "status": "active",
+          "account_ids": ["acct-1"]
+        }
+      ],
+      "accounts": [
+        {
+          "id": "acct-1",
+          "name": "Checking",
+          "connection_id": "conn-1",
+          "tags": [],
+          "active": true
+        }
+      ],
+      "transactions": [
+        {
+          "account_id": "acct-1",
+          "id": "tx-rent-early",
+          "timestamp": "2026-01-29T12:00:00Z",
+          "amount": "-1200",
+          "asset": { "type": "currency", "iso_code": "USD" },
+          "description": "Rent"
+        }
+      ],
+      "transaction_annotation_patches": [
+        {
+          "account_id": "acct-1",
+          "transaction_id": "tx-rent-early",
+          "timestamp": "2026-01-29T13:00:00Z",
+          "effective_date": "2026-02-01"
+        }
+      ]
+    },
+    "command": [
+      "spending",
+      "--period",
+      "monthly",
+      "--start",
+      "2026-02-01",
+      "--end",
+      "2026-02-28",
+      "--tz",
+      "UTC",
+      "--account",
+      "acct-1",
+      "--include-empty"
+    ]
   }
 ]

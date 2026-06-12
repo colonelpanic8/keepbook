@@ -1407,6 +1407,17 @@ pub(crate) fn transaction_date(transaction: &Transaction) -> String {
         })
 }
 
+pub(crate) fn is_date_input_value(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 10
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes
+            .iter()
+            .enumerate()
+            .all(|(index, byte)| index == 4 || index == 7 || byte.is_ascii_digit())
+}
+
 pub(crate) fn transaction_description(transaction: &Transaction) -> String {
     transaction
         .annotation

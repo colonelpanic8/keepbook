@@ -810,6 +810,16 @@ fn money_formatting_keeps_unknown_currency_code() {
 }
 
 #[test]
+fn date_input_value_accepts_yyyy_mm_dd_shape() {
+    assert!(is_date_input_value("2026-02-01"));
+    assert!(!is_date_input_value(""));
+    assert!(!is_date_input_value("2026-2-01"));
+    assert!(!is_date_input_value("2026/02/01"));
+    assert!(!is_date_input_value("2026-02-01T00:00:00Z"));
+    assert!(!is_date_input_value("2026-0x-01"));
+}
+
+#[test]
 fn portfolio_snapshot_deserializes_virtual_accounts() {
     let snapshot: PortfolioSnapshot = serde_json::from_value(serde_json::json!({
         "as_of_date": "2026-04-26",

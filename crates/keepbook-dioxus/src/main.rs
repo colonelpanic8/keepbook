@@ -539,6 +539,14 @@ struct SetTransactionTagsInput {
     clear_tags: bool,
 }
 
+#[derive(Clone, Debug, Serialize, PartialEq)]
+struct SetTransactionEffectiveDateInput {
+    account_id: String,
+    transaction_id: String,
+    effective_date: Option<String>,
+    clear_effective_date: bool,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 struct NetWorthDataPoint {
     date: String,
@@ -763,7 +771,7 @@ fn configure_linux_desktop_environment() {
     gtk::Window::set_default_icon_name(APP_ID);
 }
 
-#[cfg(not(all(feature = "desktop", target_os = "linux")))]
+#[cfg(all(feature = "desktop", not(target_os = "linux")))]
 fn configure_linux_desktop_environment() {}
 
 #[cfg(feature = "desktop")]

@@ -589,6 +589,32 @@ impl ApiState {
         .await
     }
 
+    pub async fn set_transaction_effective_date(
+        &self,
+        input: TransactionEffectiveDateInput,
+    ) -> Result<serde_json::Value> {
+        let state = self.snapshot().await;
+        keepbook::app::set_transaction_annotation(
+            state.storage.as_ref(),
+            &state.config,
+            &input.account_id,
+            &input.transaction_id,
+            None,
+            false,
+            None,
+            false,
+            Vec::new(),
+            false,
+            false,
+            Vec::new(),
+            false,
+            false,
+            input.effective_date,
+            input.clear_effective_date,
+        )
+        .await
+    }
+
     pub async fn proposed_transaction_edits(
         &self,
         query: ProposedTransactionEditsQuery,
@@ -1279,6 +1305,16 @@ pub struct TransactionSubtagsBatchInput {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct TransactionEffectiveDateInput {
+    pub account_id: String,
+    pub transaction_id: String,
+    #[serde(default)]
+    pub effective_date: Option<String>,
+    #[serde(default)]
+    pub clear_effective_date: bool,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct SpendingQuery {
     pub currency: Option<String>,
     pub start: Option<String>,
@@ -1746,6 +1782,10 @@ pub fn router(state: ApiState) -> Router {
             "/api/transactions/subtags/batch",
             post(set_transaction_subtags),
         )
+        .route(
+            "/api/transactions/effective-date",
+            post(set_transaction_effective_date),
+        )
         .route("/api/spending", get(spending))
         .route("/api/tray", get(tray))
         .route(
@@ -1870,6 +1910,14 @@ async fn set_transaction_subtags(
     Json(input): Json<TransactionSubtagsBatchInput>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     Ok(Json(state.set_transaction_subtags(input).await?))
+}
+
+#[cfg(feature = "http")]
+async fn set_transaction_effective_date(
+    State(state): State<ApiState>,
+    Json(input): Json<TransactionEffectiveDateInput>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    Ok(Json(state.set_transaction_effective_date(input).await?))
 }
 
 #[cfg(feature = "http")]

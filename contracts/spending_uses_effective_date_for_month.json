@@ -1,0 +1,25 @@
+{
+  "scope": { "type": "account", "id": "acct-1", "name": "Checking" },
+  "currency": "USD",
+  "tz": "UTC",
+  "start_date": "2026-02-01",
+  "end_date": "2026-02-28",
+  "period": "monthly",
+  "period_alignment": "calendar",
+  "direction": "outflow",
+  "status": "posted",
+  "group_by": "none",
+  "total": "1200",
+  "transaction_count": 1,
+  "periods": [
+    {
+      "start_date": "2026-02-01",
+      "end_date": "2026-02-28",
+      "total": "1200",
+      "transaction_count": 1
+    }
+  ],
+  "skipped_transaction_count": 0,
+  "missing_price_transaction_count": 0,
+  "missing_fx_transaction_count": 0
+}
