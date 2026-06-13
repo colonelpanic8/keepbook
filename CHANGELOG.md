@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.11 - 2026-06-12
+
+### Fixed
+
+- Fixed the Nix flake package version and OpenSSL inputs for clean keepbook builds from downstream flakes.
+- Simplified Marketstack single-date close fetching to avoid a Rust 1.95 release-build compiler ICE.
+
 ## 0.4.10 - 2026-06-12
 
 ### Added

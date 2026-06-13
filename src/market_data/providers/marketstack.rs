@@ -133,55 +133,8 @@ impl EquityPriceSource for MarketstackPriceSource {
         asset_id: &AssetId,
         date: NaiveDate,
     ) -> Result<Option<PricePoint>> {
-        let (ticker, exchange) = match asset {
-            Asset::Equity { ticker, exchange } => (ticker.as_str(), exchange.as_deref()),
-            _ => return Ok(None),
-        };
-
-        let symbol = Self::format_symbol(ticker, exchange);
-        let date_str = date.format("%Y-%m-%d").to_string();
-
-        let url = format!(
-            "{}/eod?access_key={}&symbols={}&date_from={}&date_to={}",
-            MARKETSTACK_BASE_URL, self.api_key, symbol, date_str, date_str
-        );
-
-        let response = self.client.get(&url).send().await?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            // Return None for 404 or similar "not found" responses
-            if status.as_u16() == 404 {
-                return Ok(None);
-            }
-            return Err(anyhow!("Marketstack API error: {status} - {body}"));
-        }
-
-        let eod_response: EodResponse = response.json().await?;
-
-        // Find the data point for the requested date
-        let data_point = eod_response.data.into_iter().find(|d| {
-            Self::parse_date(&d.date)
-                .map(|parsed| parsed == date)
-                .unwrap_or(false)
-        });
-
-        match data_point {
-            Some(data) => {
-                let parsed_date = Self::parse_date(&data.date)?;
-                Ok(Some(PricePoint {
-                    asset_id: asset_id.clone(),
-                    as_of_date: parsed_date,
-                    timestamp: Utc::now(),
-                    price: data.close.to_string(),
-                    quote_currency: "USD".to_string(), // Marketstack returns USD for US stocks
-                    kind: PriceKind::Close,
-                    source: self.name().to_string(),
-                }))
-            }
-            None => Ok(None),
-        }
+        let mut prices = self.fetch_closes(asset, asset_id, date, date).await?;
+        Ok(prices.pop())
     }
 
     async fn fetch_closes(
