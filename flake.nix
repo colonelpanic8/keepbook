@@ -25,8 +25,8 @@
         };
         fenixPkgs = fenix.packages.${system};
         lib = pkgs.lib;
-        appVersion = "0.4.11";
-        androidVersionCode = "411";
+        appVersion = "0.4.12";
+        androidVersionCode = "412";
         keepbookDioxusAppId = "org.colonelpanic.keepbook.dioxus";
         keepbookDioxusDesktopAlias = "keepbook-dioxus";
         sourceRoot = ./.;
@@ -697,9 +697,19 @@
           extraNativeBuildInputs ? [],
           checkLibraryPathInputs ? [],
           postInstall ? "",
-        }:
+        }: let
+          runtimeLibraryPathInputs = [pkgs.openssl] ++ checkLibraryPathInputs;
+          linuxRuntimeWrapper = lib.optionalString isLinux ''
+            for program in "$out"/bin/*; do
+              if [ -f "$program" ] && [ -x "$program" ]; then
+                wrapProgram "$program" \
+                  --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath runtimeLibraryPathInputs}
+              fi
+            done
+          '';
+        in
           rustPlatform.buildRustPackage {
-            inherit pname buildFeatures buildNoDefaultFeatures postInstall;
+            inherit pname buildFeatures buildNoDefaultFeatures;
             version = appVersion;
             src = cleanSrc;
             cargoLock = {
@@ -713,11 +723,15 @@
               "--skip"
               "contracts_match_rust_cli"
             ];
-            nativeBuildInputs = [pkgs.pkg-config] ++ extraNativeBuildInputs;
+            nativeBuildInputs =
+              [pkgs.pkg-config]
+              ++ lib.optionals isLinux [pkgs.makeWrapper]
+              ++ extraNativeBuildInputs;
             buildInputs = [pkgs.openssl] ++ extraBuildInputs;
-            LD_LIBRARY_PATH = lib.makeLibraryPath ([pkgs.openssl] ++ checkLibraryPathInputs);
+            LD_LIBRARY_PATH = lib.makeLibraryPath runtimeLibraryPathInputs;
             OPENSSL_NO_VENDOR = "1";
             RUST_MIN_STACK = "33554432";
+            postInstall = postInstall + linuxRuntimeWrapper;
           };
         keepbookDioxusDesktop = mkKeepbookPackage {
           pname = "keepbook-dioxus";

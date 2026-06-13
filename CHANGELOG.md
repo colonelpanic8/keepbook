@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.12 - 2026-06-12
+
+### Fixed
+
+- Wrapped Linux keepbook package executables with the OpenSSL runtime library path.
+
 ## 0.4.11 - 2026-06-12
 
 ### Fixed
