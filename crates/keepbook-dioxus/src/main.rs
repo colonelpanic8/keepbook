@@ -341,6 +341,8 @@ struct SpendingBreakdownEntry {
 struct SpendingDashboardData {
     spending: SpendingOutput,
     spending_over_time: SpendingOutput,
+    exact_match_spending: SpendingOutput,
+    close_match_spending: SpendingOutput,
     transactions: Vec<Transaction>,
 }
 
@@ -762,6 +764,7 @@ fn configure_linux_desktop_environment() {
         std::env::set_var("GDK_BACKEND", "wayland,x11");
     }
 
+    glib::set_prgname(Some(APP_ID));
     glib::set_application_name("Keepbook");
     if let Err(error) = gtk::init() {
         eprintln!("Failed to initialize GTK before configuring Keepbook desktop identity: {error}");

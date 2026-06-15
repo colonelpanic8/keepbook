@@ -81,6 +81,7 @@ enum GroupBy {
     None,
     Subtag,
     Merchant,
+    MerchantFuzzy,
     Account,
     Tag,
 }
@@ -211,9 +212,15 @@ fn parse_group_by(s: &str) -> Result<(GroupBy, String)> {
         "none" => Ok((GroupBy::None, "none".to_string())),
         "tag" => Ok((GroupBy::Tag, "tag".to_string())),
         "subtag" => Ok((GroupBy::Subtag, "subtag".to_string())),
-        "merchant" => Ok((GroupBy::Merchant, "merchant".to_string())),
+        "merchant" | "description" => Ok((GroupBy::Merchant, "merchant".to_string())),
+        "merchant_fuzzy" | "merchant-fuzzy" | "description_fuzzy" | "description-fuzzy"
+        | "close_merchant" | "close-merchant" => {
+            Ok((GroupBy::MerchantFuzzy, "merchant_fuzzy".to_string()))
+        }
         "account" => Ok((GroupBy::Account, "account".to_string())),
-        _ => anyhow::bail!("Invalid group_by: {s}. Use: none, tag, subtag, merchant, account"),
+        _ => anyhow::bail!(
+            "Invalid group_by: {s}. Use: none, tag, subtag, merchant, merchant_fuzzy, account"
+        ),
     }
 }
 
@@ -452,6 +459,52 @@ fn normalized_rule(s: &str) -> Option<String> {
         None
     } else {
         Some(trimmed.to_lowercase())
+    }
+}
+
+fn close_merchant_key(description: &str) -> String {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    for ch in description.chars() {
+        if ch.is_ascii_alphanumeric() {
+            current.push(ch.to_ascii_lowercase());
+        } else if !current.is_empty() {
+            tokens.push(std::mem::take(&mut current));
+        }
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+
+    let normalized = tokens
+        .into_iter()
+        .filter(|token| !token.chars().all(|ch| ch.is_ascii_digit()))
+        .filter(|token| token.len() > 1)
+        .filter(|token| {
+            !matches!(
+                token.as_str(),
+                "ach"
+                    | "auth"
+                    | "card"
+                    | "debit"
+                    | "online"
+                    | "payment"
+                    | "pending"
+                    | "pos"
+                    | "purchase"
+                    | "transaction"
+                    | "visa"
+                    | "web"
+            )
+        })
+        .take(8)
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    if normalized.is_empty() {
+        description.trim().to_lowercase()
+    } else {
+        normalized
     }
 }
 
@@ -802,6 +855,14 @@ async fn spending_report_with_store(
                     .as_ref()
                     .and_then(|a| a.description.clone())
                     .unwrap_or_else(|| row.raw_description.clone())],
+                GroupBy::MerchantFuzzy => {
+                    let description = row
+                        .annotation
+                        .as_ref()
+                        .and_then(|a| a.description.clone())
+                        .unwrap_or_else(|| row.raw_description.clone());
+                    vec![close_merchant_key(&description)]
+                }
                 GroupBy::Account => vec![row.account_id.to_string()],
                 GroupBy::Tag => effective_transaction_tags(
                     row.annotation.as_ref(),

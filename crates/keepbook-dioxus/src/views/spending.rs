@@ -49,6 +49,24 @@ pub(super) fn SpendingView(currency: String) -> Element {
                         &currency,
                         selected_bucket,
                     ),
+                    spending_description_query_string(
+                        selected_range,
+                        &start_text,
+                        &end_text,
+                        &today,
+                        &currency,
+                        "merchant",
+                        12,
+                    ),
+                    spending_description_query_string(
+                        selected_range,
+                        &start_text,
+                        &end_text,
+                        &today,
+                        &currency,
+                        "merchant_fuzzy",
+                        12,
+                    ),
                 )
                 .await
             }
@@ -403,6 +421,11 @@ pub(super) fn SpendingView(currency: String) -> Element {
                                 }
                             }
                         }
+                    }
+                    SpendingMatchLists {
+                        exact_entries: spending_breakdown_entries(&data.exact_match_spending),
+                        close_entries: spending_breakdown_entries(&data.close_match_spending),
+                        currency: data.spending.currency.clone(),
                     }
                     TransactionList {
                         transactions: page_transactions.clone(),
@@ -1006,6 +1029,67 @@ fn TagRow(
                 aria_hidden: "true",
             }
             span { class: "tag-name", "{entry.key}" }
+            strong { "{format_full_money(total, &currency)}" }
+            small { "{entry.transaction_count} tx" }
+        }
+    }
+}
+
+#[component]
+fn SpendingMatchLists(
+    exact_entries: Vec<SpendingBreakdownEntry>,
+    close_entries: Vec<SpendingBreakdownEntry>,
+    currency: String,
+) -> Element {
+    rsx! {
+        div { class: "spending-match-layout",
+            SpendingMatchList {
+                title: "Exact String Match",
+                entries: exact_entries,
+                currency: currency.clone(),
+            }
+            SpendingMatchList {
+                title: "Close String Match",
+                entries: close_entries,
+                currency,
+            }
+        }
+    }
+}
+
+#[component]
+fn SpendingMatchList(
+    title: &'static str,
+    entries: Vec<SpendingBreakdownEntry>,
+    currency: String,
+) -> Element {
+    rsx! {
+        section { class: "spending-match-list",
+            div { class: "spending-match-header",
+                h3 { "{title}" }
+                span { "Top {entries.len()}" }
+            }
+            if entries.is_empty() {
+                p { class: "range-summary", "No spending in range" }
+            } else {
+                for entry in entries {
+                    SpendingMatchRow {
+                        entry,
+                        currency: currency.clone(),
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn SpendingMatchRow(entry: SpendingBreakdownEntry, currency: String) -> Element {
+    let total = parse_money_input(&entry.total).unwrap_or_default();
+
+    rsx! {
+        div { class: "spending-match-row",
+            span { class: "spending-match-name", "{entry.key}" }
             strong { "{format_full_money(total, &currency)}" }
             small { "{entry.transaction_count} tx" }
         }

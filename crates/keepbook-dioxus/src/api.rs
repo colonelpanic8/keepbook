@@ -72,9 +72,13 @@ pub(crate) async fn fetch_stacked_history(query: String) -> Result<StackedHistor
 pub(crate) async fn fetch_spending_dashboard(
     query: String,
     over_time_query: String,
+    exact_match_query: String,
+    close_match_query: String,
 ) -> Result<SpendingDashboardData, String> {
     let spending = fetch_spending_impl(query).await?;
     let spending_over_time = fetch_spending_impl(over_time_query).await?;
+    let exact_match_spending = fetch_spending_impl(exact_match_query).await?;
+    let close_match_spending = fetch_spending_impl(close_match_query).await?;
     let tx_query = transaction_query_string(
         &spending.start_date,
         &spending.end_date,
@@ -95,6 +99,8 @@ pub(crate) async fn fetch_spending_dashboard(
     Ok(SpendingDashboardData {
         spending,
         spending_over_time,
+        exact_match_spending,
+        close_match_spending,
         transactions,
     })
 }

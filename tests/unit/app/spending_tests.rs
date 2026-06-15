@@ -418,6 +418,119 @@ async fn spending_report_tag_uses_annotation_then_metadata_then_untagged() -> Re
 }
 
 #[tokio::test]
+async fn spending_report_supports_exact_and_close_merchant_grouping() -> Result<()> {
+    let storage = MemoryStorage::new();
+    let conn_id = Id::from_string("conn-1");
+    let acct_id = Id::from_string("acct-1");
+    let account = Account::new_with(acct_id.clone(), Utc::now(), "Checking", conn_id);
+    storage.save_account(&account).await?;
+
+    let ids = FixedIdGenerator::new([
+        Id::from_string("tx-coffee-100"),
+        Id::from_string("tx-coffee-200"),
+        Id::from_string("tx-grocery"),
+    ]);
+    let clock = FixedClock::new(Utc.with_ymd_and_hms(2026, 2, 5, 12, 0, 0).unwrap());
+    let tx = |amount: &str, description: &str| {
+        Transaction::new_with_generator(&ids, &clock, amount, Asset::currency("USD"), description)
+            .with_timestamp(clock.now())
+    };
+    storage
+        .append_transactions(
+            &acct_id,
+            &[
+                tx("-10", "Coffee Shop #100"),
+                tx("-15", "Coffee Shop #200"),
+                tx("-20", "Grocery Market #9"),
+            ],
+        )
+        .await?;
+
+    let cfg = ResolvedConfig {
+        data_dir: std::path::PathBuf::from("/tmp"),
+        reporting_currency: "USD".to_string(),
+        display: crate::config::DisplayConfig::default(),
+        refresh: crate::config::RefreshConfig::default(),
+        history: crate::config::HistoryConfig::default(),
+        tray: crate::config::TrayConfig::default(),
+        spending: crate::config::SpendingConfig::default(),
+        tags: Default::default(),
+        portfolio: crate::config::PortfolioConfig::default(),
+        ignore: crate::config::IgnoreConfig::default(),
+        ai: crate::config::AiConfig::default(),
+        git: crate::config::GitConfig::default(),
+    };
+
+    let exact = spending_report_with_store(
+        &storage,
+        &cfg,
+        SpendingReportOptions {
+            currency: None,
+            start: Some("2026-02-01".to_string()),
+            end: Some("2026-02-28".to_string()),
+            period: "range".to_string(),
+            period_alignment: None,
+            tz: Some("UTC".to_string()),
+            week_start: None,
+            bucket: None,
+            account: Some("acct-1".to_string()),
+            connection: None,
+            status: "posted".to_string(),
+            direction: "outflow".to_string(),
+            group_by: "merchant".to_string(),
+            top: None,
+            lookback_days: 7,
+            include_noncurrency: false,
+            include_empty: false,
+        },
+        Arc::new(MemoryMarketDataStore::default()),
+    )
+    .await?;
+    assert_eq!(exact.periods[0].breakdown.len(), 3);
+    assert!(exact.periods[0]
+        .breakdown
+        .iter()
+        .any(|entry| entry.key == "Coffee Shop #100" && entry.total == "10"));
+    assert!(exact.periods[0]
+        .breakdown
+        .iter()
+        .any(|entry| entry.key == "Coffee Shop #200" && entry.total == "15"));
+
+    let close = spending_report_with_store(
+        &storage,
+        &cfg,
+        SpendingReportOptions {
+            currency: None,
+            start: Some("2026-02-01".to_string()),
+            end: Some("2026-02-28".to_string()),
+            period: "range".to_string(),
+            period_alignment: None,
+            tz: Some("UTC".to_string()),
+            week_start: None,
+            bucket: None,
+            account: Some("acct-1".to_string()),
+            connection: None,
+            status: "posted".to_string(),
+            direction: "outflow".to_string(),
+            group_by: "merchant_fuzzy".to_string(),
+            top: None,
+            lookback_days: 7,
+            include_noncurrency: false,
+            include_empty: false,
+        },
+        Arc::new(MemoryMarketDataStore::default()),
+    )
+    .await?;
+    assert_eq!(close.periods[0].breakdown.len(), 2);
+    assert_eq!(close.periods[0].breakdown[0].key, "coffee shop");
+    assert_eq!(close.periods[0].breakdown[0].total, "25");
+    assert_eq!(close.periods[0].breakdown[0].transaction_count, 2);
+    assert_eq!(close.periods[0].breakdown[1].key, "grocery market");
+    assert_eq!(close.periods[0].breakdown[1].total, "20");
+    Ok(())
+}
+
+#[tokio::test]
 async fn spending_report_ignores_accounts_by_configured_tags() -> Result<()> {
     let storage = MemoryStorage::new();
     let conn_id = Id::from_string("conn-1");

@@ -239,7 +239,7 @@ enum Command {
         #[arg(long, default_value = "outflow")]
         direction: String,
 
-        /// Grouping: none, tag, subtag, merchant, account
+        /// Grouping: none, tag, subtag, merchant, merchant_fuzzy, account
         #[arg(long, default_value = "none")]
         group_by: String,
 

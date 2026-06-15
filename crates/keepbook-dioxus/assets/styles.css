@@ -1381,6 +1381,68 @@ button.stacked-legend-item {
   text-align: right;
 }
 
+.spending-match-layout {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 18px;
+}
+
+.spending-match-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.spending-match-header {
+  align-items: baseline;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.spending-match-header h3 {
+  font-size: 0.95rem;
+  margin: 0;
+}
+
+.spending-match-header span {
+  color: #62727f;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.spending-match-row {
+  align-items: center;
+  border-bottom: 1px solid #eef2f1;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto 54px;
+  min-height: 36px;
+  padding: 6px 0;
+}
+
+.spending-match-name {
+  font-weight: 750;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spending-match-row strong {
+  justify-self: end;
+  white-space: nowrap;
+}
+
+.spending-match-row small {
+  color: #62727f;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-align: right;
+}
+
 .transaction-panel {
   border-top: 1px solid #eef2f1;
   margin-top: 16px;
@@ -2400,6 +2462,10 @@ button.stacked-legend-item {
   }
 
   .spending-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .spending-match-layout {
     grid-template-columns: 1fr;
   }
 

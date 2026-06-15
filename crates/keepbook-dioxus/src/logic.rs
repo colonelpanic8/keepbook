@@ -348,13 +348,56 @@ pub(crate) fn spending_query_string(
     today: &str,
     currency: &str,
 ) -> String {
+    spending_group_query_string(
+        preset,
+        start_override,
+        end_override,
+        today,
+        currency,
+        "tag",
+        None,
+    )
+}
+
+pub(crate) fn spending_description_query_string(
+    preset: RangePreset,
+    start_override: &str,
+    end_override: &str,
+    today: &str,
+    currency: &str,
+    group_by: &str,
+    top: usize,
+) -> String {
+    spending_group_query_string(
+        preset,
+        start_override,
+        end_override,
+        today,
+        currency,
+        group_by,
+        Some(top),
+    )
+}
+
+fn spending_group_query_string(
+    preset: RangePreset,
+    start_override: &str,
+    end_override: &str,
+    today: &str,
+    currency: &str,
+    group_by: &str,
+    top: Option<usize>,
+) -> String {
     let (start, end) = requested_history_date_range(preset, start_override, end_override, today);
     let mut params = vec![
         "period=range".to_string(),
-        "group_by=tag".to_string(),
+        format!("group_by={}", query_encode_component(group_by)),
         "direction=outflow".to_string(),
         "status=posted".to_string(),
     ];
+    if let Some(top) = top {
+        params.push(format!("top={top}"));
+    }
     push_query_param(&mut params, "currency", currency);
     if let Some(start) = start {
         push_query_param(&mut params, "start", &start);
@@ -993,6 +1036,39 @@ pub(crate) fn spending_tags(spending: &SpendingOutput) -> Vec<SpendingBreakdownE
             .partial_cmp(&left)
             .unwrap_or(std::cmp::Ordering::Equal)
             .then_with(|| a.key.cmp(&b.key))
+    });
+    totals
+}
+
+pub(crate) fn spending_breakdown_entries(spending: &SpendingOutput) -> Vec<SpendingBreakdownEntry> {
+    let mut totals: Vec<SpendingBreakdownEntry> = Vec::new();
+    for period in &spending.periods {
+        for entry in &period.breakdown {
+            let key = entry.key.trim();
+            if key.is_empty() {
+                continue;
+            }
+            if let Some(existing) = totals.iter_mut().find(|item| item.key == key) {
+                let current = parse_money_input(&existing.total).unwrap_or_default();
+                let next = parse_money_input(&entry.total).unwrap_or_default();
+                existing.total = format_number(current + next, 2);
+                existing.transaction_count += entry.transaction_count;
+            } else {
+                totals.push(SpendingBreakdownEntry {
+                    key: key.to_string(),
+                    total: entry.total.clone(),
+                    transaction_count: entry.transaction_count,
+                });
+            }
+        }
+    }
+    totals.sort_by(|a, b| {
+        let left = parse_money_input(&a.total).unwrap_or_default();
+        let right = parse_money_input(&b.total).unwrap_or_default();
+        right
+            .partial_cmp(&left)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| compare_case_insensitive(&a.key, &b.key))
     });
     totals
 }

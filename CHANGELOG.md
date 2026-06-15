@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.4.15 - 2026-06-15
+
+### Added
+
+- Added exact and close string-match spending rankings to the Dioxus spending view, backed by headless spending report grouping.
+
+## 0.4.14 - 2026-06-13
+
+### Fixed
+
+- Set the Linux desktop window class before GTK initialization so taskbars can match the Keepbook icon.
+
+## 0.4.13 - 2026-06-13
+
+### Fixed
+
+- Added app-id desktop metadata and icon aliases to Dioxus Linux release bundles.
+
 ## 0.4.12 - 2026-06-12
 
 ### Fixed

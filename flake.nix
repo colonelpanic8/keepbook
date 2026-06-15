@@ -25,8 +25,8 @@
         };
         fenixPkgs = fenix.packages.${system};
         lib = pkgs.lib;
-        appVersion = "0.4.12";
-        androidVersionCode = "412";
+        appVersion = "0.4.15";
+        androidVersionCode = "415";
         keepbookDioxusAppId = "org.colonelpanic.keepbook.dioxus";
         keepbookDioxusDesktopAlias = "keepbook-dioxus";
         sourceRoot = ./.;
@@ -431,16 +431,90 @@
           };
         dioxusDesktopBuildScript = pkgs.writeShellApplication {
           name = "keepbook-dioxus-desktop-release";
-          runtimeInputs = [
-            pkgs.coreutils
-            pkgs.findutils
-            pkgs.nix
-          ];
+          runtimeInputs =
+            [
+              pkgs.coreutils
+              pkgs.findutils
+              pkgs.nix
+            ]
+            ++ lib.optionals isLinux [
+              pkgs.dpkg
+            ];
           text = ''
             set -euo pipefail
 
             repo="''${KEEPBOOK_ROOT:-$PWD}"
             out_dir="''${KEEPBOOK_DIOXUS_DESKTOP_OUT_DIR:-$repo/target/release-artifacts/desktop}"
+
+            patch_linux_deb_bundles() {
+              if ! ${if isLinux then "true" else "false"}; then
+                return
+              fi
+
+              find "$out_dir" -type f -name '*.deb' -print0 |
+                while IFS= read -r -d $'\0' deb; do
+                  work_dir="$(mktemp -d)"
+                  package_dir="$work_dir/package"
+
+                  dpkg-deb -R "$deb" "$package_dir"
+
+                  install_icon_set() {
+                    icon_name="$1"
+                    install -Dm644 "$repo/assets/keepbook-icon.svg" \
+                      "$package_dir/usr/share/icons/hicolor/scalable/apps/$icon_name.svg"
+                    install -Dm644 "$repo/assets/keepbook-icon-32.png" \
+                      "$package_dir/usr/share/icons/hicolor/32x32/apps/$icon_name.png"
+                    install -Dm644 "$repo/assets/keepbook-icon-48.png" \
+                      "$package_dir/usr/share/icons/hicolor/48x48/apps/$icon_name.png"
+                    install -Dm644 "$repo/assets/keepbook-icon-64.png" \
+                      "$package_dir/usr/share/icons/hicolor/64x64/apps/$icon_name.png"
+                  }
+
+                  write_desktop_entry() {
+                    desktop_path="$1"
+                    icon_name="$2"
+                    startup_wm_class="$3"
+                    install -Dm644 /dev/null "$desktop_path"
+                    cat > "$desktop_path" <<EOF
+[Desktop Entry]
+Categories=Office;Finance
+Comment=Local-first personal finance toolkit
+Exec=keepbook-dioxus
+GenericName=Personal finance toolkit
+Icon=$icon_name
+Name=Keepbook
+StartupNotify=true
+StartupWMClass=$startup_wm_class
+Terminal=false
+Type=Application
+EOF
+                  }
+
+                  install_icon_set "${keepbookDioxusAppId}"
+                  install_icon_set "${keepbookDioxusDesktopAlias}"
+                  install_icon_set "keepbook"
+
+                  write_desktop_entry \
+                    "$package_dir/usr/share/applications/${keepbookDioxusAppId}.desktop" \
+                    "${keepbookDioxusAppId}" \
+                    "${keepbookDioxusAppId}"
+                  write_desktop_entry \
+                    "$package_dir/usr/share/applications/${keepbookDioxusDesktopAlias}.desktop" \
+                    "${keepbookDioxusDesktopAlias}" \
+                    "${keepbookDioxusDesktopAlias}"
+
+                  (
+                    cd "$package_dir"
+                    find usr -type f ! -path 'usr/share/doc/*' -print0 |
+                      sort -z |
+                      xargs -0 md5sum > DEBIAN/md5sums
+                  )
+
+                  rm -f "$deb"
+                  dpkg-deb --root-owner-group -b "$package_dir" "$deb"
+                  rm -rf "$work_dir"
+                done
+            }
 
             cd "$repo"
             rm -rf "$out_dir"
@@ -456,6 +530,8 @@
               --release \
               --locked \
               "$@"
+
+            patch_linux_deb_bundles
 
             find "$out_dir" -type f -print
           '';
