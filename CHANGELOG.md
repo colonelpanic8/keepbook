@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.16 - 2026-06-18
+
+### Fixed
+
+- Made `[git].ssh_key_path` the canonical SSH identity for all libgit2 fetch,
+  pull, push, and auto-push operations.
+- Updated Dioxus Git settings to persist selected SSH keys into the shared git
+  configuration instead of a Git Sync-only path.
+
 ## 0.4.15 - 2026-06-15
 
 ### Added
