@@ -519,6 +519,10 @@ pub struct GitConfig {
 
     /// Merge `origin/master` before running commands.
     pub merge_master_before_command: bool,
+
+    /// SSH private key path used by libgit2 git operations.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ssh_key_path: Option<PathBuf>,
 }
 
 impl<'de> Deserialize<'de> for GitConfig {
@@ -534,6 +538,7 @@ impl<'de> Deserialize<'de> for GitConfig {
             pull_before_edit: bool,
             push_after_sync: bool,
             merge_master_before_command: bool,
+            ssh_key_path: Option<PathBuf>,
         }
 
         let raw = RawGitConfig::deserialize(deserializer)?;
@@ -544,7 +549,17 @@ impl<'de> Deserialize<'de> for GitConfig {
             pull_before_edit: raw.pull_before_edit,
             push_after_sync: raw.push_after_sync,
             merge_master_before_command: raw.merge_master_before_command,
+            ssh_key_path: raw.ssh_key_path,
         })
+    }
+}
+
+impl GitConfig {
+    fn resolve_paths(mut self, config_dir: &Path) -> Self {
+        self.ssh_key_path = self
+            .ssh_key_path
+            .map(|path| resolve_config_path(config_dir, path));
+        self
     }
 }
 
@@ -746,6 +761,15 @@ fn expand_tilde_path(path: &Path) -> PathBuf {
     components.fold(home_dir, |acc, component| acc.join(component.as_os_str()))
 }
 
+fn resolve_config_path(config_dir: &Path, path: PathBuf) -> PathBuf {
+    let path = expand_tilde_path(&path);
+    if path.is_absolute() {
+        normalize_path_components(path)
+    } else {
+        normalize_path_components(config_dir.join(path))
+    }
+}
+
 fn normalize_path_components(path: PathBuf) -> PathBuf {
     let mut normalized = PathBuf::new();
 
@@ -777,8 +801,9 @@ impl ResolvedConfig {
             .parent()
             .context("Config file has no parent directory")?;
 
-        let config = Config::load(&config_path)?;
+        let mut config = Config::load(&config_path)?;
         let data_dir = config.resolve_data_dir(config_dir);
+        config.git = config.git.resolve_paths(config_dir);
 
         Ok(Self {
             data_dir,

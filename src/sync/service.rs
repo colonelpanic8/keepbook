@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::clock::{Clock, SystemClock};
-use crate::config::RefreshConfig;
+use crate::config::{GitConfig, RefreshConfig};
 use crate::git::{try_auto_commit, AutoCommitOutcome};
 use crate::market_data::MarketDataService;
 use crate::models::Connection;
@@ -56,31 +56,25 @@ impl AutoCommitter for NoopAutoCommitter {
 #[derive(Debug, Clone)]
 pub struct GitAutoCommitter {
     data_dir: std::path::PathBuf,
-    auto_commit: bool,
-    auto_push: bool,
+    git_config: GitConfig,
 }
 
 impl GitAutoCommitter {
-    pub fn new(
-        data_dir: impl Into<std::path::PathBuf>,
-        auto_commit: bool,
-        auto_push: bool,
-    ) -> Self {
+    pub fn new(data_dir: impl Into<std::path::PathBuf>, git_config: GitConfig) -> Self {
         Self {
             data_dir: data_dir.into(),
-            auto_commit,
-            auto_push,
+            git_config,
         }
     }
 }
 
 impl AutoCommitter for GitAutoCommitter {
     fn maybe_commit(&self, action: &str) -> Result<()> {
-        if !self.auto_commit {
+        if !self.git_config.auto_commit {
             return Ok(());
         }
 
-        match try_auto_commit(&self.data_dir, action, self.auto_push) {
+        match try_auto_commit(&self.data_dir, action, &self.git_config) {
             Ok(AutoCommitOutcome::Committed) => {
                 tracing::info!("Auto-committed keepbook data");
                 Ok(())

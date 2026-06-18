@@ -95,6 +95,9 @@ auto_commit = false
 # When omitted, auto_push defaults to auto_commit.
 # Set auto_push = false to auto-commit without pushing.
 auto_push = false
+# Optional SSH private key used by git fetch/pull/push/auto-push.
+# Relative paths resolve from keepbook.toml.
+# ssh_key_path = "~/.ssh/id_ed25519"
 merge_master_before_command = false
 #+END_SRC
 
@@ -148,7 +151,7 @@ backend = "age"
 path = "credentials/coinbase.age"
 
 # Optional. If omitted in the Dioxus/server path, keepbook uses the saved
-# [git_sync].ssh_key_path from keepbook.toml as the age identity.
+# [git].ssh_key_path from keepbook.toml as the age identity.
 # identity_path = ".ssh/keepbook_sync_key"
 #+END_SRC
 

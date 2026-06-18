@@ -68,14 +68,15 @@ async fn build_sync_service_with_quote_staleness(
     } else {
         Arc::new(StdinPrompter)
     };
-    let auto_commit = config.git.auto_commit && !env_disabled("KEEPBOOK_DISABLE_AUTO_COMMIT");
-    let auto_push = config.git.auto_push && !env_disabled("KEEPBOOK_DISABLE_AUTO_PUSH");
+    let mut git_config = config.git.clone();
+    git_config.auto_commit =
+        config.git.auto_commit && !env_disabled("KEEPBOOK_DISABLE_AUTO_COMMIT");
+    git_config.auto_push = config.git.auto_push && !env_disabled("KEEPBOOK_DISABLE_AUTO_PUSH");
     let context = SyncContext::new(storage, market_data, config.reporting_currency.clone())
         .with_auth_prompter(auth_prompter)
         .with_auto_committer(Arc::new(GitAutoCommitter::new(
             config.data_dir.clone(),
-            auto_commit,
-            auto_push,
+            git_config,
         )))
         .with_factory(Arc::new(DefaultSynchronizerFactory::new(Some(
             config.data_dir.clone(),

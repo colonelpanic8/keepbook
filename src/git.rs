@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use crate::config::GitConfig;
 use anyhow::{Context, Result};
 use git2::build::CheckoutBuilder;
 use git2::{
@@ -8,6 +9,13 @@ use git2::{
 };
 
 const AUTO_COMMIT_EXCLUDED_PATH: &str = "keepbook.toml";
+const DEFAULT_SSH_IDENTITY_FILES: &[&str] = &[
+    "id_ed25519",
+    "id_rsa",
+    "id_ecdsa",
+    "id_ecdsa_sk",
+    "id_ed25519_sk",
+];
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum AutoCommitOutcome {
@@ -42,7 +50,7 @@ pub enum PushRemoteOutcome {
 pub fn try_auto_commit(
     data_dir: &Path,
     action: &str,
-    auto_push: bool,
+    git_config: &GitConfig,
 ) -> Result<AutoCommitOutcome> {
     let repo = match open_data_repo(data_dir)? {
         DataRepo::Found(repo) => repo,
@@ -85,14 +93,17 @@ pub fn try_auto_commit(
     )
     .context("git commit failed")?;
 
-    if auto_push {
-        push_current_branch(&repo).context("git push failed")?;
+    if git_config.auto_push {
+        push_current_branch(&repo, git_config).context("git push failed")?;
     }
 
     Ok(AutoCommitOutcome::Committed)
 }
 
-pub fn try_merge_origin_master(data_dir: &Path) -> Result<MergeOriginMasterOutcome> {
+pub fn try_merge_origin_master(
+    data_dir: &Path,
+    git_config: &GitConfig,
+) -> Result<MergeOriginMasterOutcome> {
     let repo = match open_data_repo(data_dir)? {
         DataRepo::Found(repo) => repo,
         DataRepo::Skipped { reason } => {
@@ -101,7 +112,8 @@ pub fn try_merge_origin_master(data_dir: &Path) -> Result<MergeOriginMasterOutco
     };
 
     ensure_clean_worktree(&repo, "cannot merge origin/master")?;
-    fetch_remote(&repo, "origin", &["master"]).context("git fetch origin master failed")?;
+    fetch_remote(&repo, "origin", &["master"], git_config)
+        .context("git fetch origin master failed")?;
 
     match merge_ref(&repo, "refs/remotes/origin/master", "origin/master")? {
         MergeResult::UpToDate => Ok(MergeOriginMasterOutcome::UpToDate),
@@ -110,7 +122,7 @@ pub fn try_merge_origin_master(data_dir: &Path) -> Result<MergeOriginMasterOutco
     }
 }
 
-pub fn try_pull_remote(data_dir: &Path) -> Result<PullRemoteOutcome> {
+pub fn try_pull_remote(data_dir: &Path, git_config: &GitConfig) -> Result<PullRemoteOutcome> {
     let repo = match open_data_repo(data_dir)? {
         DataRepo::Found(repo) => repo,
         DataRepo::Skipped { reason } => return Ok(PullRemoteOutcome::SkippedNotRepo { reason }),
@@ -129,7 +141,7 @@ pub fn try_pull_remote(data_dir: &Path) -> Result<PullRemoteOutcome> {
         });
     };
 
-    fetch_remote(&repo, &remote, &[&branch]).context("git fetch failed")?;
+    fetch_remote(&repo, &remote, &[&branch], git_config).context("git fetch failed")?;
 
     match merge_ref(&repo, &upstream, &upstream)? {
         MergeResult::UpToDate => Ok(PullRemoteOutcome::UpToDate),
@@ -138,13 +150,13 @@ pub fn try_pull_remote(data_dir: &Path) -> Result<PullRemoteOutcome> {
     }
 }
 
-pub fn try_push_remote(data_dir: &Path) -> Result<PushRemoteOutcome> {
+pub fn try_push_remote(data_dir: &Path, git_config: &GitConfig) -> Result<PushRemoteOutcome> {
     let repo = match open_data_repo(data_dir)? {
         DataRepo::Found(repo) => repo,
         DataRepo::Skipped { reason } => return Ok(PushRemoteOutcome::SkippedNotRepo { reason }),
     };
 
-    push_current_branch(&repo).context("git push failed")?;
+    push_current_branch(&repo, git_config).context("git push failed")?;
     Ok(PushRemoteOutcome::Pushed)
 }
 
@@ -246,14 +258,27 @@ fn signature(repo: &Repository) -> Result<Signature<'_>> {
         .context("failed to create git signature")
 }
 
-fn callbacks(repo: &Repository) -> Result<RemoteCallbacks<'static>> {
+fn callbacks(repo: &Repository, git_config: &GitConfig) -> Result<RemoteCallbacks<'static>> {
     let config = repo.config().context("failed to read git config")?;
+    let configured_ssh_key_path = git_config.ssh_key_path.clone();
     let mut callbacks = RemoteCallbacks::new();
     callbacks.credentials(move |url, username, allowed| {
         if allowed.contains(CredentialType::SSH_KEY) {
             if let Some(username) = username {
+                if let Some(path) = configured_ssh_key_path.as_deref() {
+                    if let Ok(cred) = Cred::ssh_key(username, None, path, None) {
+                        return Ok(cred);
+                    }
+                }
+
                 if let Ok(cred) = Cred::ssh_key_from_agent(username) {
                     return Ok(cred);
+                }
+
+                for path in default_ssh_identity_paths() {
+                    if let Ok(cred) = Cred::ssh_key(username, None, &path, None) {
+                        return Ok(cred);
+                    }
                 }
             }
         }
@@ -273,8 +298,13 @@ fn callbacks(repo: &Repository) -> Result<RemoteCallbacks<'static>> {
     Ok(callbacks)
 }
 
-fn fetch_remote(repo: &Repository, remote_name: &str, branches: &[&str]) -> Result<()> {
-    let callbacks = callbacks(repo)?;
+fn fetch_remote(
+    repo: &Repository,
+    remote_name: &str,
+    branches: &[&str],
+    git_config: &GitConfig,
+) -> Result<()> {
+    let callbacks = callbacks(repo, git_config)?;
     let mut options = FetchOptions::new();
     options.remote_callbacks(callbacks);
 
@@ -414,7 +444,7 @@ fn parse_remote_tracking_ref(ref_name: &str) -> Option<(String, String)> {
     Some((remote.to_string(), branch.to_string()))
 }
 
-fn push_current_branch(repo: &Repository) -> Result<()> {
+fn push_current_branch(repo: &Repository, git_config: &GitConfig) -> Result<()> {
     let head = repo.head().context("failed to read HEAD")?;
     let branch_name = head
         .shorthand()
@@ -425,7 +455,7 @@ fn push_current_branch(repo: &Repository) -> Result<()> {
         .and_then(parse_remote_tracking_ref)
         .unwrap_or_else(|| ("origin".to_string(), branch_name.to_string()));
 
-    let callbacks = callbacks(repo)?;
+    let callbacks = callbacks(repo, git_config)?;
     let mut options = PushOptions::new();
     options.remote_callbacks(callbacks);
     let mut remote = repo
@@ -436,6 +466,18 @@ fn push_current_branch(repo: &Repository) -> Result<()> {
         .push(&[refspec.as_str()], Some(&mut options))
         .with_context(|| format!("failed to push git refspec {refspec}"))?;
     Ok(())
+}
+
+fn default_ssh_identity_paths() -> Vec<std::path::PathBuf> {
+    let Some(home_dir) = dirs::home_dir() else {
+        return Vec::new();
+    };
+    let ssh_dir = home_dir.join(".ssh");
+    DEFAULT_SSH_IDENTITY_FILES
+        .iter()
+        .map(|name| ssh_dir.join(name))
+        .filter(|path| path.is_file())
+        .collect()
 }
 
 #[cfg(test)]

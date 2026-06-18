@@ -832,9 +832,14 @@ impl ApiState {
         )?;
 
         if input.save_settings {
-            if !input.private_key_pem.trim().is_empty() {
-                persist_git_private_key(&snapshot.config_path, &input.private_key_pem)?;
-            }
+            let saved_ssh_key_path = if !input.private_key_pem.trim().is_empty() {
+                Some(persist_git_private_key(
+                    &snapshot.config_path,
+                    &input.private_key_pem,
+                )?)
+            } else {
+                auth_git.ssh_key_path.clone()
+            };
             write_git_settings(
                 &snapshot.config_path,
                 &GitSettingsInput {
@@ -843,7 +848,7 @@ impl ApiState {
                     repo: input.repo.clone(),
                     branch: input.branch.clone(),
                     ssh_user: input.ssh_user.clone(),
-                    ssh_key_path: None,
+                    ssh_key_path: saved_ssh_key_path,
                 },
             )?;
         }
@@ -2053,12 +2058,13 @@ fn load_git_remote_settings(config_path: &Path) -> Result<GitRemoteSettings> {
     let doc = load_config_doc(config_path)?;
     let defaults = GitRemoteSettings::default();
     let git_sync = doc.get("git_sync");
+    let git = doc.get("git");
     Ok(GitRemoteSettings {
         host: table_string(git_sync, "host").unwrap_or(defaults.host),
         repo: table_string(git_sync, "repo").unwrap_or(defaults.repo),
         branch: table_string(git_sync, "branch").unwrap_or(defaults.branch),
         ssh_user: table_string(git_sync, "ssh_user").unwrap_or(defaults.ssh_user),
-        ssh_key_path: None,
+        ssh_key_path: table_string(git, "ssh_key_path"),
     })
 }
 
@@ -2066,12 +2072,17 @@ fn with_default_desktop_ssh_key_path(
     config_path: &Path,
     mut settings: GitRemoteSettings,
 ) -> GitRemoteSettings {
-    if settings
+    if let Some(path) = settings
         .ssh_key_path
         .as_deref()
         .map(str::trim)
-        .is_some_and(|path| !path.is_empty())
+        .filter(|path| !path.is_empty())
     {
+        settings.ssh_key_path = Some(
+            resolve_config_relative_path(config_path, path)
+                .display()
+                .to_string(),
+        );
         return settings;
     }
 
@@ -2134,6 +2145,22 @@ fn write_git_settings(config_path: &Path, input: &GitSettingsInput) -> Result<()
     doc["git_sync"]["ssh_user"] = value(non_empty(input.ssh_user.trim(), "git"));
     if let Some(git_sync) = doc["git_sync"].as_table_like_mut() {
         git_sync.remove("ssh_key_path");
+    }
+    if doc
+        .get("git")
+        .is_none_or(|item| item.as_table_like().is_none())
+    {
+        doc.insert("git", Item::Table(Table::new()));
+    }
+    if let Some(path) = input
+        .ssh_key_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+    {
+        doc["git"]["ssh_key_path"] = value(path);
+    } else if let Some(git) = doc["git"].as_table_like_mut() {
+        git.remove("ssh_key_path");
     }
 
     std::fs::write(config_path, doc.to_string())

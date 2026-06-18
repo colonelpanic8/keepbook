@@ -73,7 +73,7 @@ fn test_auto_commit_skips_when_not_repo() -> Result<()> {
     }
 
     let dir = TempDir::new()?;
-    let outcome = try_auto_commit(dir.path(), "test", false)?;
+    let outcome = try_auto_commit(dir.path(), "test", &GitConfig::default())?;
     assert_eq!(
         outcome,
         AutoCommitOutcome::SkippedNotRepo {
@@ -94,7 +94,7 @@ fn test_auto_commit_skips_when_repo_root_mismatch() -> Result<()> {
     let data_dir = dir.path().join("data");
     fs::create_dir_all(&data_dir)?;
 
-    let outcome = try_auto_commit(&data_dir, "test", false)?;
+    let outcome = try_auto_commit(&data_dir, "test", &GitConfig::default())?;
     match outcome {
         AutoCommitOutcome::SkippedNotRepo { .. } => Ok(()),
         other => anyhow::bail!("unexpected outcome: {other:?}"),
@@ -112,7 +112,7 @@ fn test_auto_commit_commits_changes() -> Result<()> {
 
     fs::write(dir.path().join("sample.txt"), "hello")?;
 
-    let outcome = try_auto_commit(dir.path(), "sync mock", false)?;
+    let outcome = try_auto_commit(dir.path(), "sync mock", &GitConfig::default())?;
     assert_eq!(outcome, AutoCommitOutcome::Committed);
 
     let log = run_git(dir.path(), &["log", "-1", "--pretty=%s"])?;
@@ -145,7 +145,7 @@ fn test_auto_commit_skips_when_no_changes() -> Result<()> {
         anyhow::bail!("git commit failed");
     }
 
-    let outcome = try_auto_commit(dir.path(), "sync mock", false)?;
+    let outcome = try_auto_commit(dir.path(), "sync mock", &GitConfig::default())?;
     assert_eq!(outcome, AutoCommitOutcome::SkippedNoChanges);
 
     Ok(())
@@ -168,7 +168,7 @@ fn test_auto_commit_ignores_keepbook_config_changes() -> Result<()> {
         "data_dir = \"/Users/kat/Library/Application Support/keepbook\"\n",
     )?;
 
-    let outcome = try_auto_commit(dir.path(), "sync mock", false)?;
+    let outcome = try_auto_commit(dir.path(), "sync mock", &GitConfig::default())?;
     assert_eq!(outcome, AutoCommitOutcome::SkippedNoChanges);
 
     let status = run_git(dir.path(), &["status", "--porcelain"])?;
@@ -196,7 +196,7 @@ fn test_auto_commit_commits_data_but_leaves_keepbook_config_unstaged() -> Result
     )?;
     fs::write(dir.path().join("balances.json"), "[]\n")?;
 
-    let outcome = try_auto_commit(dir.path(), "sync mock", false)?;
+    let outcome = try_auto_commit(dir.path(), "sync mock", &GitConfig::default())?;
     assert_eq!(outcome, AutoCommitOutcome::Committed);
 
     let show = run_git(dir.path(), &["show", "--name-only", "--pretty=", "HEAD"])?;
@@ -256,7 +256,14 @@ fn test_auto_commit_pushes_when_enabled() -> Result<()> {
 
     fs::write(dir.path().join("sample.txt"), "hello")?;
 
-    let outcome = try_auto_commit(dir.path(), "sync mock", true)?;
+    let outcome = try_auto_commit(
+        dir.path(),
+        "sync mock",
+        &GitConfig {
+            auto_push: true,
+            ..GitConfig::default()
+        },
+    )?;
     assert_eq!(outcome, AutoCommitOutcome::Committed);
 
     let remote_log = run_git(remote.path(), &["log", "-1", "--pretty=%s"])?;
@@ -278,7 +285,7 @@ fn test_merge_origin_master_skips_when_not_repo() -> Result<()> {
     }
 
     let dir = TempDir::new()?;
-    let outcome = try_merge_origin_master(dir.path())?;
+    let outcome = try_merge_origin_master(dir.path(), &GitConfig::default())?;
     assert_eq!(
         outcome,
         MergeOriginMasterOutcome::SkippedNotRepo {
@@ -332,7 +339,7 @@ fn test_merge_origin_master_merges_remote_master() -> Result<()> {
         anyhow::bail!("git push failed");
     }
 
-    let outcome = try_merge_origin_master(local.path())?;
+    let outcome = try_merge_origin_master(local.path(), &GitConfig::default())?;
     assert_eq!(outcome, MergeOriginMasterOutcome::Merged);
 
     let local_content = fs::read_to_string(local.path().join("sample.txt"))?;
@@ -393,7 +400,7 @@ fn test_merge_origin_master_aborts_on_conflicts() -> Result<()> {
         anyhow::bail!("git push failed");
     }
 
-    let outcome = try_merge_origin_master(local.path())?;
+    let outcome = try_merge_origin_master(local.path(), &GitConfig::default())?;
     assert_eq!(outcome, MergeOriginMasterOutcome::ConflictAborted);
     assert!(!merge_in_progress(local.path())?);
 

@@ -78,7 +78,7 @@ fn maybe_auto_commit(config: &ResolvedConfig, action: &str) {
     }
 
     #[cfg(feature = "git")]
-    match crate::git::try_auto_commit(&config.data_dir, action, config.git.auto_push) {
+    match crate::git::try_auto_commit(&config.data_dir, action, &config.git) {
         Ok(crate::git::AutoCommitOutcome::Committed) => {
             tracing::info!("Git auto-commit completed");
         }
@@ -106,7 +106,7 @@ pub fn maybe_push_after_sync(config: &ResolvedConfig, enabled: bool) -> anyhow::
     }
 
     #[cfg(feature = "git")]
-    match crate::git::try_push_remote(&config.data_dir) {
+    match crate::git::try_push_remote(&config.data_dir, &config.git) {
         Ok(crate::git::PushRemoteOutcome::Pushed) => {
             tracing::info!("Git push after sync completed");
             Ok(())

@@ -17,7 +17,7 @@ pub struct PreflightOptions {
 /// when and whether to enable specific preflight steps.
 pub fn run_preflight(config: &ResolvedConfig, opts: PreflightOptions) -> Result<()> {
     if opts.merge_origin_master {
-        match try_merge_origin_master(&config.data_dir)? {
+        match try_merge_origin_master(&config.data_dir, &config.git)? {
             MergeOriginMasterOutcome::SkippedNotRepo { reason } => {
                 anyhow::bail!("Preflight git merge required but skipped: {reason}");
             }
@@ -34,7 +34,7 @@ pub fn run_preflight(config: &ResolvedConfig, opts: PreflightOptions) -> Result<
     }
 
     if opts.pull_remote {
-        match try_pull_remote(&config.data_dir)? {
+        match try_pull_remote(&config.data_dir, &config.git)? {
             PullRemoteOutcome::SkippedNotRepo { reason } => {
                 anyhow::bail!("Preflight git pull required but skipped: {reason}");
             }

@@ -52,16 +52,20 @@ fn write_git_settings_creates_missing_git_sync_table() -> Result<()> {
     assert_eq!(settings.repo, "colonelpanic8/keepbook-data");
     assert_eq!(settings.branch, "master");
     assert_eq!(settings.ssh_user, "git");
-    assert_eq!(settings.ssh_key_path, None);
+    assert_eq!(
+        settings.ssh_key_path.as_deref(),
+        Some(".ssh/keepbook_sync_key")
+    );
     let content = std::fs::read_to_string(&config_path)?;
     assert!(content.contains("[git_sync]"));
-    assert!(!content.contains("ssh_key_path"));
+    assert!(content.contains("[git]"));
+    assert!(content.contains("ssh_key_path = \".ssh/keepbook_sync_key\""));
     remove_test_config(config_path);
     Ok(())
 }
 
 #[test]
-fn write_git_settings_keeps_data_dir_portable_and_removes_ssh_key_path() -> Result<()> {
+fn write_git_settings_keeps_data_dir_portable_and_writes_git_ssh_key_path() -> Result<()> {
     let config_path = unique_test_config_path("write-git-portable-paths");
     let config_dir = config_path
         .parent()
@@ -91,7 +95,9 @@ fn write_git_settings_keeps_data_dir_portable_and_removes_ssh_key_path() -> Resu
 
     let content = std::fs::read_to_string(&config_path)?;
     assert!(content.contains("data_dir = \".\""));
-    assert!(!content.contains("ssh_key_path"));
+    assert!(content.contains("[git]"));
+    assert!(content.contains(&format!("ssh_key_path = \"{}\"", ssh_key_path.display())));
+    assert!(!content.contains("[git_sync]\nssh_key_path"));
     remove_test_config(config_path);
     Ok(())
 }
@@ -147,6 +153,10 @@ fn default_ssh_key_path_prefers_ed25519_then_rsa() -> Result<()> {
 #[test]
 fn configured_ssh_key_path_wins_over_default() {
     let config_path = unique_test_config_path("configured-ssh-key-wins");
+    let expected = config_path
+        .parent()
+        .expect("test config should have parent")
+        .join(".ssh/keepbook_sync_key");
     let settings = with_default_desktop_ssh_key_path(
         &config_path,
         GitRemoteSettings {
@@ -157,7 +167,7 @@ fn configured_ssh_key_path_wins_over_default() {
 
     assert_eq!(
         settings.ssh_key_path.as_deref(),
-        Some(".ssh/keepbook_sync_key")
+        Some(expected.to_str().expect("test path should be UTF-8"))
     );
 }
 

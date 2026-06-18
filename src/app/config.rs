@@ -12,7 +12,8 @@ pub fn config_output(config_path: &Path, config: &ResolvedConfig) -> serde_json:
             "auto_push": config.git.auto_push,
             "pull_before_edit": config.git.pull_before_edit,
             "push_after_sync": config.git.push_after_sync,
-            "merge_master_before_command": config.git.merge_master_before_command
+            "merge_master_before_command": config.git.merge_master_before_command,
+            "ssh_key_path": config.git.ssh_key_path.as_ref().map(|path| path.display().to_string())
         }
     })
 }

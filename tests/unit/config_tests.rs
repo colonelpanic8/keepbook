@@ -134,6 +134,7 @@ fn test_load_git_config() -> Result<()> {
     writeln!(file, "pull_before_edit = true")?;
     writeln!(file, "push_after_sync = true")?;
     writeln!(file, "merge_master_before_command = true")?;
+    writeln!(file, "ssh_key_path = \".ssh/keepbook_sync_key\"")?;
 
     let config = Config::load(&config_path)?;
     assert!(config.git.auto_commit);
@@ -141,6 +142,28 @@ fn test_load_git_config() -> Result<()> {
     assert!(config.git.pull_before_edit);
     assert!(config.git.push_after_sync);
     assert!(config.git.merge_master_before_command);
+    assert_eq!(
+        config.git.ssh_key_path.as_deref(),
+        Some(std::path::Path::new(".ssh/keepbook_sync_key"))
+    );
+
+    Ok(())
+}
+
+#[test]
+fn test_resolved_git_ssh_key_path_is_config_relative() -> Result<()> {
+    let dir = TempDir::new()?;
+    let config_path = dir.path().join("keepbook.toml");
+
+    let mut file = std::fs::File::create(&config_path)?;
+    writeln!(file, "[git]")?;
+    writeln!(file, "ssh_key_path = \".ssh/keepbook_sync_key\"")?;
+
+    let config = ResolvedConfig::load(&config_path)?;
+    assert_eq!(
+        config.git.ssh_key_path.as_deref(),
+        Some(dir.path().join(".ssh/keepbook_sync_key").as_path())
+    );
 
     Ok(())
 }
