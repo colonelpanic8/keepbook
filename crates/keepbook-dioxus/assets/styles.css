@@ -678,6 +678,12 @@ small,
   padding-top: 10px;
 }
 
+.app-build-meta code {
+  color: #31424e;
+  font-family: ui-monospace, "SFMono-Regular", "SF Mono", Consolas, "Liberation Mono", monospace;
+  font-size: 0.78rem;
+}
+
 .settings-status {
   background: #f7faf9;
   border: 1px solid #d7dfdd;

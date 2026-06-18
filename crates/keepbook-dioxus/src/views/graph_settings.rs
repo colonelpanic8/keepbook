@@ -122,6 +122,28 @@ fn PortfolioSettingsPanel(
 }
 
 #[component]
+fn ApplicationSettingsPanel() -> Element {
+    let app_version = env!("CARGO_PKG_VERSION");
+    let app_commit = short_commit(env!("GIT_COMMIT_HASH"));
+
+    rsx! {
+        section { class: "panel settings-panel",
+            div { class: "panel-header",
+                h2 { "Application" }
+                span { "Build" }
+            }
+            div { class: "settings-meta settings-meta-grid app-build-meta",
+                span { "Version {app_version}" }
+                span {
+                    "Commit "
+                    code { "{app_commit}" }
+                }
+            }
+        }
+    }
+}
+
+#[component]
 pub(super) fn SettingsView(
     filtering: FilteringSettings,
     filter_overrides: FilterOverrides,
@@ -188,6 +210,7 @@ pub(super) fn SettingsView(
             data_dir,
             onfilterchange,
         }
+        ApplicationSettingsPanel {}
         section { class: "panel settings-panel",
             div { class: "panel-header",
                 div { class: "panel-title",

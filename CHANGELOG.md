@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.17 - 2026-06-18
+
+### Added
+
+- Added application version and git commit metadata to the Dioxus settings view.
+
 ## 0.4.16 - 2026-06-18
 
 ### Fixed

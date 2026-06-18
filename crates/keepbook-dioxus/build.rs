@@ -11,7 +11,6 @@ fn main() {
         .unwrap_or_else(|| get_git_commit().unwrap_or_else(|_| "unknown".to_string()));
     println!("cargo:rustc-env=GIT_COMMIT_HASH={commit}");
 
-    // Rebuild when HEAD or refs move, including worktree setups.
     if let Ok(git_dir) = get_git_dir() {
         emit_rerun_if_git_head_changes(&git_dir);
     }
@@ -54,7 +53,7 @@ fn get_git_dir() -> Result<PathBuf, String> {
         Ok(git_dir)
     } else {
         let manifest_dir =
-            PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").map_err(|e| e.to_string())?);
+            PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").map_err(|err| err.to_string())?);
         Ok(manifest_dir.join(git_dir))
     }
 }

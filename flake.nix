@@ -25,8 +25,9 @@
         };
         fenixPkgs = fenix.packages.${system};
         lib = pkgs.lib;
-        appVersion = "0.4.16";
-        androidVersionCode = "416";
+        appVersion = "0.4.17";
+        androidVersionCode = "417";
+        appCommit = self.rev or self.dirtyRev or "unknown";
         keepbookDioxusAppId = "org.colonelpanic.keepbook.dioxus";
         keepbookDioxusDesktopAlias = "keepbook-dioxus";
         sourceRoot = ./.;
@@ -806,6 +807,7 @@ EOF
             buildInputs = [pkgs.openssl] ++ extraBuildInputs;
             LD_LIBRARY_PATH = lib.makeLibraryPath runtimeLibraryPathInputs;
             OPENSSL_NO_VENDOR = "1";
+            KEEPBOOK_GIT_COMMIT_HASH = appCommit;
             RUST_MIN_STACK = "33554432";
             postInstall = postInstall + linuxRuntimeWrapper;
           };
