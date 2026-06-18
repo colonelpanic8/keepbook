@@ -363,6 +363,7 @@ small,
 
 .preset-row,
 .sampling-row,
+.spending-tab-row,
 .range-summary {
   align-items: center;
   display: flex;
@@ -370,7 +371,8 @@ small,
   gap: 8px;
 }
 
-.sampling-row {
+.sampling-row,
+.spending-tab-row {
   border-top: 1px solid #eef2f1;
   padding-top: 10px;
 }

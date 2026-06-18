@@ -5,12 +5,28 @@ use crate::api::{
 };
 use std::collections::{HashMap, HashSet};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SpendingTab {
+    Tags,
+    StringMatches,
+}
+
+impl SpendingTab {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Tags => "Tags",
+            Self::StringMatches => "String Matches",
+        }
+    }
+}
+
 #[component]
 pub(super) fn SpendingView(currency: String) -> Element {
     let mut range_preset = use_signal(|| DEFAULT_SPENDING_RANGE_PRESET);
     let mut start_override = use_signal(String::new);
     let mut end_override = use_signal(String::new);
     let mut spending_bucket = use_signal(|| DEFAULT_SPENDING_BUCKET);
+    let mut active_tab = use_signal(|| SpendingTab::Tags);
     let mut selected_tag = use_signal(|| None::<String>);
     let mut selected_period = use_signal(|| None::<SpendingPeriodSelection>);
     let mut transaction_page = use_signal(|| 0usize);
@@ -75,6 +91,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
 
     let selected_range = range_preset();
     let selected_bucket = spending_bucket();
+    let selected_tab = active_tab();
     let start_text = start_override();
     let end_text = end_override();
     let selected = selected_tag();
@@ -191,6 +208,14 @@ pub(super) fn SpendingView(currency: String) -> Element {
         format!("{first}-{last} of {}", filtered_transactions.len())
     };
     let selected_label = selected.as_deref().unwrap_or("All tags");
+    let panel_title = match selected_tab {
+        SpendingTab::Tags => "Spending Tags",
+        SpendingTab::StringMatches => "Spending Matches",
+    };
+    let panel_subtitle = match selected_tab {
+        SpendingTab::Tags => selected_label,
+        SpendingTab::StringMatches => "Exact and close strings",
+    };
     let transaction_scope = selected_period_value
         .as_ref()
         .map(|period| format!("{} / {}", period.label, transaction_range))
@@ -200,8 +225,8 @@ pub(super) fn SpendingView(currency: String) -> Element {
         section { class: "panel spending-panel",
             div { class: "panel-header",
                 div { class: "panel-title",
-                    h2 { "Spending Tags" }
-                    span { "{selected_label}" }
+                    h2 { "{panel_title}" }
+                    span { "{panel_subtitle}" }
                 }
                 span { "{currency}" }
             }
@@ -313,16 +338,36 @@ pub(super) fn SpendingView(currency: String) -> Element {
                         }
                     }
                 }
-                div { class: "sampling-row",
-                    span { class: "control-label", "Bucket" }
-                    for option in SpendingBucket::OPTIONS {
-                        GraphPresetButton {
-                            label: option.label(),
-                            selected: selected_bucket == option,
-                            onclick: move |_| {
-                                spending_bucket.set(option);
-                                selected_period.set(None);
-                                transaction_page.set(0);
+                div { class: "spending-tab-row",
+                    span { class: "control-label", "View" }
+                    SpendingTabButton {
+                        label: SpendingTab::Tags.label(),
+                        selected: selected_tab == SpendingTab::Tags,
+                        onclick: move |_| active_tab.set(SpendingTab::Tags),
+                    }
+                    SpendingTabButton {
+                        label: SpendingTab::StringMatches.label(),
+                        selected: selected_tab == SpendingTab::StringMatches,
+                        onclick: move |_| {
+                            active_tab.set(SpendingTab::StringMatches);
+                            selected_tag.set(None);
+                            selected_period.set(None);
+                            transaction_page.set(0);
+                        },
+                    }
+                }
+                if selected_tab == SpendingTab::Tags {
+                    div { class: "sampling-row",
+                        span { class: "control-label", "Bucket" }
+                        for option in SpendingBucket::OPTIONS {
+                            GraphPresetButton {
+                                label: option.label(),
+                                selected: selected_bucket == option,
+                                onclick: move |_| {
+                                    spending_bucket.set(option);
+                                    selected_period.set(None);
+                                    transaction_page.set(0);
+                                }
                             }
                         }
                     }
@@ -332,14 +377,15 @@ pub(super) fn SpendingView(currency: String) -> Element {
                 None => rsx! {
                     GraphLoadingPanel {
                         range: range_summary_text(&resolved_start, &resolved_end),
-                        sampling: "Tags"
+                        sampling: selected_tab.label()
                     }
                 },
                 Some(Err(error)) => rsx! {
-                    InlineStatus { title: "Spending Tags", message: error }
+                    InlineStatus { title: panel_title, message: error }
                 },
                 Some(Ok(data)) => rsx! {
-                    SpendingOverTimeChart {
+                    if selected_tab == SpendingTab::Tags {
+                        SpendingOverTimeChart {
                         spending: data.spending_over_time.clone(),
                         selected: selected.clone(),
                         selected_period: selected_period_value.clone(),
@@ -422,10 +468,12 @@ pub(super) fn SpendingView(currency: String) -> Element {
                             }
                         }
                     }
-                    SpendingMatchLists {
-                        exact_entries: spending_breakdown_entries(&data.exact_match_spending),
-                        close_entries: spending_breakdown_entries(&data.close_match_spending),
-                        currency: data.spending.currency.clone(),
+                    } else {
+                        SpendingMatchLists {
+                            exact_entries: spending_breakdown_entries(&data.exact_match_spending),
+                            close_entries: spending_breakdown_entries(&data.close_match_spending),
+                            currency: data.spending.currency.clone(),
+                        }
                     }
                     TransactionList {
                         transactions: page_transactions.clone(),
@@ -609,6 +657,27 @@ fn SpendingPresetButton(
             label: label,
             selected: selected,
             onclick: move |event| onclick.call(event),
+        }
+    }
+}
+
+#[component]
+fn SpendingTabButton(
+    label: &'static str,
+    selected: bool,
+    onclick: EventHandler<MouseEvent>,
+) -> Element {
+    let class = if selected {
+        "control-button selected"
+    } else {
+        "control-button"
+    };
+
+    rsx! {
+        button {
+            class: "{class}",
+            onclick: move |event| onclick.call(event),
+            "{label}"
         }
     }
 }
