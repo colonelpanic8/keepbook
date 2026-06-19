@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.18 - 2026-06-19
+
+### Fixed
+
+- Pointed Android Git SSH known-hosts lookup at app-private storage so mobile
+  Git sync can initialize libgit2 without a conventional user home directory.
+
 ## 0.4.17 - 2026-06-18
 
 ### Added

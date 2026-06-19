@@ -2236,6 +2236,8 @@ fn prepare_git_ssh_environment(config_path: &Path) -> Result<()> {
         return Ok(());
     };
 
+    configure_git_ssh_home(&state_dir)?;
+
     let ssh_dir = state_dir.join(".ssh");
     std::fs::create_dir_all(&ssh_dir)
         .with_context(|| format!("failed to create {}", ssh_dir.display()))?;
@@ -2246,10 +2248,38 @@ fn prepare_git_ssh_environment(config_path: &Path) -> Result<()> {
             .with_context(|| format!("failed to create {}", known_hosts.display()))?;
     }
 
+    Ok(())
+}
+
+fn configure_git_ssh_home(state_dir: &Path) -> Result<()> {
     if cfg!(target_os = "android") || std::env::var_os("HOME").is_none() {
         std::env::set_var("HOME", state_dir);
     }
 
+    set_libgit2_homedir(state_dir)
+}
+
+#[cfg(target_os = "android")]
+fn set_libgit2_homedir(state_dir: &Path) -> Result<()> {
+    use std::ffi::CString;
+
+    let path = CString::new(state_dir.to_string_lossy().as_bytes())
+        .with_context(|| format!("failed to encode libgit2 home {}", state_dir.display()))?;
+    unsafe {
+        libgit2_sys::git_libgit2_init();
+        let status = libgit2_sys::git_libgit2_opts(
+            libgit2_sys::GIT_OPT_SET_HOMEDIR as std::os::raw::c_int,
+            path.as_ptr(),
+        );
+        if status < 0 {
+            anyhow::bail!("failed to set libgit2 home to {}", state_dir.display());
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "android"))]
+fn set_libgit2_homedir(_state_dir: &Path) -> Result<()> {
     Ok(())
 }
 

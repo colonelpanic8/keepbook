@@ -151,6 +151,47 @@ fn default_ssh_key_path_prefers_ed25519_then_rsa() -> Result<()> {
 }
 
 #[test]
+fn prepare_git_ssh_environment_creates_known_hosts_and_home_when_missing() -> Result<()> {
+    let config_path = unique_test_config_path("prepare-git-ssh-env");
+    write_test_config(&config_path, "data_dir = \".\"\n")?;
+
+    let state_home = config_path
+        .parent()
+        .expect("test config should have parent")
+        .join("state");
+    let expected_state_dir = state_home.join("keepbook");
+    let old_home = std::env::var_os("HOME");
+    let old_state_home = std::env::var_os("XDG_STATE_HOME");
+    std::env::remove_var("HOME");
+    std::env::set_var("XDG_STATE_HOME", &state_home);
+
+    let result = prepare_git_ssh_environment(&config_path);
+    let home_after_prepare = std::env::var_os("HOME");
+
+    match old_home {
+        Some(value) => std::env::set_var("HOME", value),
+        None => std::env::remove_var("HOME"),
+    }
+    match old_state_home {
+        Some(value) => std::env::set_var("XDG_STATE_HOME", value),
+        None => std::env::remove_var("XDG_STATE_HOME"),
+    }
+
+    result?;
+    assert_eq!(
+        home_after_prepare.as_deref(),
+        Some(expected_state_dir.as_os_str())
+    );
+    assert!(expected_state_dir
+        .join(".ssh")
+        .join("known_hosts")
+        .is_file());
+
+    remove_test_config(config_path);
+    Ok(())
+}
+
+#[test]
 fn configured_ssh_key_path_wins_over_default() {
     let config_path = unique_test_config_path("configured-ssh-key-wins");
     let expected = config_path
