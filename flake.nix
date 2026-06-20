@@ -25,8 +25,8 @@
         };
         fenixPkgs = fenix.packages.${system};
         lib = pkgs.lib;
-        appVersion = "0.4.18";
-        androidVersionCode = "418";
+        appVersion = "0.4.19";
+        androidVersionCode = "419";
         appCommit = self.rev or self.dirtyRev or "unknown";
         keepbookDioxusAppId = "org.colonelpanic.keepbook.dioxus";
         keepbookDioxusDesktopAlias = "keepbook-dioxus";
@@ -308,14 +308,15 @@
                   for density in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
                     local qualifier="''${density%%:*}"
                     local size="''${density##*:}"
-                    local icon_inner_size="$((size * 90 / 100))"
+                    local icon_inner_size="$((size * 94 / 100))"
                     local dir="$res/mipmap-$qualifier"
                     mkdir -p "$dir"
                     rm -f "$dir/ic_launcher.webp"
                     magick -background none "$repo/assets/keepbook-icon.svg" \
                       -alpha set -trim +repage \
                       -resize "''${icon_inner_size}x''${icon_inner_size}" \
-                      -gravity center -extent "''${size}x''${size}" \
+                      -gravity center -background black -extent "''${size}x''${size}" \
+                      -alpha off \
                       "$dir/ic_launcher.png"
                   done
                 fi

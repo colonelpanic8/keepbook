@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.19 - 2026-06-19
+
+### Changed
+
+- Rendered Android launcher icons on a black background with slightly larger
+  Keepbook artwork.
+
 ## 0.4.18 - 2026-06-19
 
 ### Fixed
