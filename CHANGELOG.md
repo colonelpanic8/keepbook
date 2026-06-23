@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0 - 2026-06-23
+
+### Changed
+
+- Released the current Keepbook application line as minor version 0.5.0.
+
 ## 0.4.19 - 2026-06-19
 
 ### Changed
