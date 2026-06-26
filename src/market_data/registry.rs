@@ -13,6 +13,7 @@ use super::providers::cryptocompare::CryptoCompareConfig;
 use super::providers::{
     AlphaVantagePriceSource, CoinCapPriceSource, CoinGeckoPriceSource, CryptoComparePriceSource,
     EodhdPriceSource, FrankfurterRateSource, MarketstackPriceSource, TwelveDataPriceSource,
+    YahooPriceSource,
 };
 use super::source_config::{LoadedPriceSource, PriceSourceConfig, PriceSourceType};
 use super::sources::{CryptoPriceSource, EquityPriceSource, FxRateSource};
@@ -145,6 +146,9 @@ impl PriceSourceRegistry {
                     let store = credentials.build_with_base_dir(Some(&loaded.base_dir));
                     let source = MarketstackPriceSource::from_credentials(store.as_ref()).await?;
                     Arc::new(source) as Arc<dyn EquityPriceSource>
+                }
+                PriceSourceType::Yahoo => {
+                    Arc::new(YahooPriceSource::new()) as Arc<dyn EquityPriceSource>
                 }
                 // Skip non-equity sources
                 PriceSourceType::Coingecko
