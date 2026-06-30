@@ -38,6 +38,28 @@ pub struct SchwabSynchronizer {
 }
 
 impl SchwabSynchronizer {
+    fn normalized_account_number(raw: &str) -> Option<String> {
+        let digits: String = raw.chars().filter(|c| c.is_ascii_digit()).collect();
+        if !digits.is_empty() {
+            return Some(digits);
+        }
+
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    }
+
+    fn stored_account_number(account: &Account) -> Option<String> {
+        account
+            .synchronizer_data
+            .get("account_number")
+            .and_then(serde_json::Value::as_str)
+            .and_then(Self::normalized_account_number)
+    }
+
     fn banking_selected_account_id(
         account_number_display_full: &str,
         fallback_account_id: &str,
@@ -141,12 +163,29 @@ impl SchwabSynchronizer {
             .context("No session found. Run login first.")?;
 
         // Load existing accounts to preserve created_at
-        let existing_accounts = storage.list_accounts().await?;
-        let existing_by_id: HashMap<String, Account> = existing_accounts
+        let connection_accounts: Vec<Account> = storage
+            .list_accounts()
+            .await?
             .into_iter()
             .filter(|a| a.connection_id == *connection.id())
+            .collect();
+        let existing_by_id: HashMap<String, Account> = connection_accounts
+            .iter()
+            .cloned()
             .map(|a| (a.id.to_string(), a))
             .collect();
+        let mut existing_by_account_number: HashMap<String, Account> = HashMap::new();
+        for account in &connection_accounts {
+            let Some(account_number) = Self::stored_account_number(account) else {
+                continue;
+            };
+            match existing_by_account_number.get(&account_number) {
+                Some(existing) if existing.active || !account.active => {}
+                _ => {
+                    existing_by_account_number.insert(account_number, account.clone());
+                }
+            }
+        }
 
         // Create client and fetch data
         let client = SchwabClient::new(session)?;
@@ -194,12 +233,22 @@ impl SchwabSynchronizer {
         let mut transactions: Vec<(Id, Vec<crate::models::Transaction>)> = Vec::new();
 
         for schwab_account in accounts_resp.accounts {
-            // Use Schwab's account_id to generate a stable, filesystem-safe ID
-            let account_id = Id::from_external(&schwab_account.account_id);
+            // Prefer the real Schwab account number when reconnecting to existing
+            // keepbook accounts. Schwab's API AccountId can rotate for the same
+            // underlying account, but AccountNumberDisplayFull stays stable.
+            let external_account_id = Id::from_external(&schwab_account.account_id);
+            let account_number =
+                Self::normalized_account_number(&schwab_account.account_number_display_full);
+            let existing_account = account_number
+                .as_ref()
+                .and_then(|number| existing_by_account_number.get(number))
+                .or_else(|| existing_by_id.get(&external_account_id.to_string()));
+            let account_id = existing_account
+                .map(|account| account.id.clone())
+                .unwrap_or(external_account_id);
 
             // Preserve created_at from existing account if it exists
-            let created_at = existing_by_id
-                .get(&account_id.to_string())
+            let created_at = existing_account
                 .map(|a| a.created_at)
                 .unwrap_or_else(Utc::now);
 
