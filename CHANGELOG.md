@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.1 - 2026-07-02
+
+### Changed
+
+- Made generated Android launcher icons slightly larger and rendered their
+  background with the Keepbook foreground green.
+
 ## 0.5.0 - 2026-06-23
 
 ### Changed
