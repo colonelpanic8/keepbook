@@ -25,8 +25,8 @@
         };
         fenixPkgs = fenix.packages.${system};
         lib = pkgs.lib;
-        appVersion = "0.5.1";
-        androidVersionCode = "501";
+        appVersion = "0.5.2";
+        androidVersionCode = "502";
         appCommit = self.rev or self.dirtyRev or "unknown";
         keepbookDioxusAppId = "org.colonelpanic.keepbook.dioxus";
         keepbookDioxusDesktopAlias = "keepbook-dioxus";
@@ -304,18 +304,60 @@
                 fi
 
                 if [[ -d "$res" && -f "$repo/assets/keepbook-icon.svg" ]]; then
-                  rm -f "$res/mipmap-anydpi-v26/ic_launcher.xml"
+                  # Adaptive launcher icon (API 26+): a solid brand-green background
+                  # with the logo as a separate foreground layer. This replaces the
+                  # bare legacy bitmap, which modern launchers auto-shrink into a
+                  # small masked badge; the adaptive foreground lets the logo fill
+                  # more of the tile so it reads noticeably larger.
+                  mkdir -p "$res/mipmap-anydpi-v26" "$res/values"
+                  printf '%s\n' \
+                    '<?xml version="1.0" encoding="utf-8"?>' \
+                    '<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">' \
+                    '    <background android:drawable="@color/ic_launcher_background" />' \
+                    '    <foreground android:drawable="@mipmap/ic_launcher_foreground" />' \
+                    '</adaptive-icon>' \
+                    > "$res/mipmap-anydpi-v26/ic_launcher.xml"
+
+                  # Background color = the logo's brighter accent green.
+                  if [[ ! -f "$res/values/colors.xml" ]]; then
+                    printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>' '<resources>' '</resources>' \
+                      > "$res/values/colors.xml"
+                  fi
+                  if grep -q 'ic_launcher_background' "$res/values/colors.xml"; then
+                    sed -i 's|<color name="ic_launcher_background">[^<]*</color>|<color name="ic_launcher_background">#638A68</color>|' "$res/values/colors.xml"
+                  else
+                    sed -i 's|</resources>|    <color name="ic_launcher_background">#638A68</color>\n</resources>|' "$res/values/colors.xml"
+                  fi
+
+                  # Adaptive foreground: transparent 108dp canvas per density with the
+                  # logo occupying ~72% of the tile (a touch beyond the 66% safe zone)
+                  # so it looks slightly larger while staying clear of the mask edge.
+                  for density in mdpi:108 hdpi:162 xhdpi:216 xxhdpi:324 xxxhdpi:432; do
+                    local qualifier="''${density%%:*}"
+                    local canvas="''${density##*:}"
+                    local logo_size="$((canvas * 72 / 100))"
+                    local dir="$res/mipmap-$qualifier"
+                    mkdir -p "$dir"
+                    magick -background none "$repo/assets/keepbook-icon.svg" \
+                      -alpha set -trim +repage \
+                      -resize "''${logo_size}x''${logo_size}" \
+                      -gravity center -background none -extent "''${canvas}x''${canvas}" \
+                      "$dir/ic_launcher_foreground.png"
+                  done
+
+                  # Legacy square icon for pre-API-26 launchers (unmasked): the logo
+                  # on the same brand-green background, near full-bleed.
                   for density in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
                     local qualifier="''${density%%:*}"
                     local size="''${density##*:}"
-                    local icon_inner_size="$((size * 98 / 100))"
+                    local icon_inner_size="$((size * 92 / 100))"
                     local dir="$res/mipmap-$qualifier"
                     mkdir -p "$dir"
                     rm -f "$dir/ic_launcher.webp"
                     magick -background none "$repo/assets/keepbook-icon.svg" \
                       -alpha set -trim +repage \
                       -resize "''${icon_inner_size}x''${icon_inner_size}" \
-                      -gravity center -background '#557B58' -extent "''${size}x''${size}" \
+                      -gravity center -background '#638A68' -extent "''${size}x''${size}" \
                       -alpha off \
                       "$dir/ic_launcher.png"
                   done
