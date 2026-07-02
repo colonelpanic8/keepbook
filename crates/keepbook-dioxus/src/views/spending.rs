@@ -709,6 +709,15 @@ struct SpendingBarHitZone {
     tooltip_y: f64,
 }
 
+/// Identifies a single category subsection (segment) within one time period.
+/// Used to "pin" the tooltip to that category when the segment is clicked.
+#[derive(Clone, Debug, PartialEq)]
+struct SpendingSegmentKey {
+    key: String,
+    start_date: String,
+    end_date: String,
+}
+
 #[component]
 fn SpendingOverTimeChart(
     spending: SpendingOutput,
@@ -720,6 +729,7 @@ fn SpendingOverTimeChart(
     onselecttag: EventHandler<String>,
 ) -> Element {
     let mut hovered_period = use_signal(|| None::<SpendingPeriodSelection>);
+    let mut pinned_segment = use_signal(|| None::<SpendingSegmentKey>);
     let points = spending_over_time_points(&spending);
     let series = spending_over_time_series(&points);
     let narrowed_points = selected
@@ -827,16 +837,56 @@ fn SpendingOverTimeChart(
             }
         }
     }
-    let tooltip_period = hovered_period().or_else(|| selected_period.clone());
-    let tooltip = tooltip_period.as_ref().and_then(|period| {
-        bar_hit_zones
-            .iter()
-            .find(|zone| {
-                zone.selection.start_date == period.start_date
-                    && zone.selection.end_date == period.end_date
+    // A clicked (pinned) segment takes precedence and narrows the tooltip to a
+    // single category within one period; otherwise fall back to the hovered or
+    // externally-selected period, which shows the period totals.
+    let pinned = pinned_segment();
+    let tooltip = pinned
+        .as_ref()
+        .and_then(|pin| {
+            bar_rects
+                .iter()
+                .find(|rect| {
+                    rect.key == pin.key
+                        && rect.start_date == pin.start_date
+                        && rect.end_date == pin.end_date
+                })
+                .map(|rect| {
+                    (
+                        format!("{} · {}", rect.label, rect.key),
+                        format!(
+                            "{} / {} tx",
+                            format_full_money(rect.value, &spending.currency),
+                            rect.transaction_count
+                        ),
+                        rect.x + rect.width / 2.0,
+                        padding_top + 14.0,
+                    )
+                })
+        })
+        .or_else(|| {
+            let tooltip_period = hovered_period().or_else(|| selected_period.clone());
+            tooltip_period.as_ref().and_then(|period| {
+                bar_hit_zones
+                    .iter()
+                    .find(|zone| {
+                        zone.selection.start_date == period.start_date
+                            && zone.selection.end_date == period.end_date
+                    })
+                    .map(|zone| {
+                        (
+                            period.label.clone(),
+                            format!(
+                                "{} / {} tx",
+                                format_full_money(period.total, &spending.currency),
+                                period.transaction_count
+                            ),
+                            zone.tooltip_x,
+                            zone.tooltip_y,
+                        )
+                    })
             })
-            .map(|zone| (period.clone(), zone.tooltip_x, zone.tooltip_y))
-    });
+        });
 
     rsx! {
         div { class: "chart-card spending-over-time-card",
@@ -905,52 +955,9 @@ fn SpendingOverTimeChart(
                     y: "{height - 10.0}",
                     "{last_label}"
                 }
-                for rect in bar_rects {
-                    {
-                        let key = rect.key.clone();
-                        let label = rect.label.clone();
-                        let start_date = rect.start_date.clone();
-                        let end_date = rect.end_date.clone();
-                        let total = rect.total;
-                        let value = rect.value;
-                        let transaction_count = rect.transaction_count;
-                        let x = rect.x;
-                        let y = rect.y;
-                        let width = rect.width;
-                        let height = rect.height;
-                        let color = rect.color;
-                        let selection = SpendingPeriodSelection {
-                            label: label.clone(),
-                            start_date: start_date.clone(),
-                            end_date: end_date.clone(),
-                            total,
-                            transaction_count,
-                        };
-                        let selected_class = if selected_period
-                            .as_ref()
-                            .is_some_and(|period| period.start_date == start_date && period.end_date == end_date)
-                        {
-                            " selected"
-                        } else {
-                            ""
-                        };
-                        let class = format!("spending-bar-segment{selected_class}");
-                        rsx! {
-                            rect {
-                                class: "{class}",
-                                x: "{x}",
-                                y: "{y}",
-                                width: "{width}",
-                                height: "{height}",
-                                style: "fill: {color};",
-                                onclick: move |_| onclick.call(selection.clone()),
-                                title {
-                                    "{label}: {format_full_money(total, &spending.currency)} total / {key}: {format_full_money(value, &spending.currency)} ({transaction_count} tx)"
-                                }
-                            }
-                        }
-                    }
-                }
+                // Period-wide hit zones render first (behind the bars) so they only
+                // catch hover/click in the empty column space above each bar; the
+                // segment rects above handle per-category interaction.
                 g { class: "spending-bar-hit-layer",
                     for hit in bar_hit_zones {
                         {
@@ -980,7 +987,85 @@ fn SpendingOverTimeChart(
                         }
                     }
                 }
-                if let Some((period, tooltip_x, tooltip_y)) = tooltip {
+                for rect in bar_rects {
+                    {
+                        let key = rect.key.clone();
+                        let label = rect.label.clone();
+                        let start_date = rect.start_date.clone();
+                        let end_date = rect.end_date.clone();
+                        let total = rect.total;
+                        let value = rect.value;
+                        let transaction_count = rect.transaction_count;
+                        let x = rect.x;
+                        let y = rect.y;
+                        let width = rect.width;
+                        let height = rect.height;
+                        let color = rect.color;
+                        let selection = SpendingPeriodSelection {
+                            label: label.clone(),
+                            start_date: start_date.clone(),
+                            end_date: end_date.clone(),
+                            total,
+                            transaction_count,
+                        };
+                        let is_pinned = pinned_segment().is_some_and(|pin| {
+                            pin.key == key
+                                && pin.start_date == start_date
+                                && pin.end_date == end_date
+                        });
+                        let selected_class = if selected_period
+                            .as_ref()
+                            .is_some_and(|period| period.start_date == start_date && period.end_date == end_date)
+                        {
+                            " selected"
+                        } else {
+                            ""
+                        };
+                        let pinned_class = if is_pinned { " pinned" } else { "" };
+                        let class = format!("spending-bar-segment{selected_class}{pinned_class}");
+                        // Clones for the individual event closures.
+                        let selection_for_click = selection.clone();
+                        let selection_for_enter = selection.clone();
+                        let pin_key = key.clone();
+                        let pin_start = start_date.clone();
+                        let pin_end = end_date.clone();
+                        rsx! {
+                            rect {
+                                class: "{class}",
+                                x: "{x}",
+                                y: "{y}",
+                                width: "{width}",
+                                height: "{height}",
+                                style: "fill: {color};",
+                                onmouseenter: move |_| hovered_period.set(Some(selection_for_enter.clone())),
+                                onmouseleave: move |_| hovered_period.set(None),
+                                onclick: move |_| {
+                                    // Toggle this category's pinned tooltip, and keep the
+                                    // existing behavior of selecting the period.
+                                    let already_pinned = pinned_segment().is_some_and(|pin| {
+                                        pin.key == pin_key
+                                            && pin.start_date == pin_start
+                                            && pin.end_date == pin_end
+                                    });
+                                    pinned_segment.set(if already_pinned {
+                                        None
+                                    } else {
+                                        Some(SpendingSegmentKey {
+                                            key: pin_key.clone(),
+                                            start_date: pin_start.clone(),
+                                            end_date: pin_end.clone(),
+                                        })
+                                    });
+                                    onclick.call(selection_for_click.clone());
+                                },
+                                title {
+                                    "{label}: {format_full_money(total, &spending.currency)} total / {key}: {format_full_money(value, &spending.currency)} ({transaction_count} tx)"
+                                }
+                            }
+                        }
+                    }
+                }
+                if let Some((tooltip_title, tooltip_detail, tooltip_x, tooltip_y)) = tooltip {
                     g { class: "spending-chart-tooltip",
                         transform: "translate({tooltip_x}, {tooltip_y})",
                         rect {
@@ -994,13 +1079,13 @@ fn SpendingOverTimeChart(
                             class: "spending-tooltip-title",
                             x: "0",
                             y: "3",
-                            "{period.label}"
+                            "{tooltip_title}"
                         }
                         text {
                             class: "spending-tooltip-detail",
                             x: "0",
                             y: "19",
-                            "{format_full_money(period.total, &spending.currency)} / {period.transaction_count} tx"
+                            "{tooltip_detail}"
                         }
                     }
                 }

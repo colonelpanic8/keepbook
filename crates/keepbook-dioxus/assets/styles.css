@@ -1028,6 +1028,13 @@ small,
   opacity: 0.32;
 }
 
+.spending-bar-segment.pinned {
+  filter: brightness(1.12);
+  opacity: 1;
+  stroke: #172a3a;
+  stroke-width: 1.5;
+}
+
 .spending-bar-hit-zone {
   cursor: pointer;
   fill: transparent;
