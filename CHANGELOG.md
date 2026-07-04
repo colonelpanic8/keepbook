@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.3 - 2026-07-04
+
+### Changed
+
+- Reduced the generated Android launcher icon scale so the adaptive icon uses
+  the standard safe-zone size and the legacy square icon has more padding.
+
 ## 0.5.2 - 2026-07-02
 
 ### Added

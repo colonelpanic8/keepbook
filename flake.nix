@@ -25,8 +25,8 @@
         };
         fenixPkgs = fenix.packages.${system};
         lib = pkgs.lib;
-        appVersion = "0.5.2";
-        androidVersionCode = "502";
+        appVersion = "0.5.3";
+        androidVersionCode = "503";
         appCommit = self.rev or self.dirtyRev or "unknown";
         keepbookDioxusAppId = "org.colonelpanic.keepbook.dioxus";
         keepbookDioxusDesktopAlias = "keepbook-dioxus";
@@ -330,12 +330,12 @@
                   fi
 
                   # Adaptive foreground: transparent 108dp canvas per density with the
-                  # logo occupying ~72% of the tile (a touch beyond the 66% safe zone)
-                  # so it looks slightly larger while staying clear of the mask edge.
+                  # logo inside the standard 66% safe zone so modern launchers do not
+                  # make the mark feel oversized inside their masks.
                   for density in mdpi:108 hdpi:162 xhdpi:216 xxhdpi:324 xxxhdpi:432; do
                     local qualifier="''${density%%:*}"
                     local canvas="''${density##*:}"
-                    local logo_size="$((canvas * 72 / 100))"
+                    local logo_size="$((canvas * 66 / 100))"
                     local dir="$res/mipmap-$qualifier"
                     mkdir -p "$dir"
                     magick -background none "$repo/assets/keepbook-icon.svg" \
@@ -346,11 +346,11 @@
                   done
 
                   # Legacy square icon for pre-API-26 launchers (unmasked): the logo
-                  # on the same brand-green background, near full-bleed.
+                  # on the same brand-green background with modest edge padding.
                   for density in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
                     local qualifier="''${density%%:*}"
                     local size="''${density##*:}"
-                    local icon_inner_size="$((size * 92 / 100))"
+                    local icon_inner_size="$((size * 88 / 100))"
                     local dir="$res/mipmap-$qualifier"
                     mkdir -p "$dir"
                     rm -f "$dir/ic_launcher.webp"
