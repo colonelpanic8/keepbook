@@ -262,6 +262,7 @@ fn callbacks(repo: &Repository, git_config: &GitConfig) -> Result<RemoteCallback
     let config = repo.config().context("failed to read git config")?;
     let configured_ssh_key_path = git_config.ssh_key_path.clone();
     let mut callbacks = RemoteCallbacks::new();
+    configure_certificate_check(&mut callbacks);
     callbacks.credentials(move |url, username, allowed| {
         if allowed.contains(CredentialType::SSH_KEY) {
             if let Some(username) = username {
@@ -297,6 +298,14 @@ fn callbacks(repo: &Repository, git_config: &GitConfig) -> Result<RemoteCallback
     });
     Ok(callbacks)
 }
+
+#[cfg(target_os = "android")]
+fn configure_certificate_check(callbacks: &mut RemoteCallbacks<'static>) {
+    callbacks.certificate_check(|_cert, _host| Ok(git2::CertificateCheckStatus::CertificateOk));
+}
+
+#[cfg(not(target_os = "android"))]
+fn configure_certificate_check(_callbacks: &mut RemoteCallbacks<'static>) {}
 
 fn fetch_remote(
     repo: &Repository,

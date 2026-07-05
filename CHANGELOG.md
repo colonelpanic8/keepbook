@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.4 - 2026-07-05
+
+### Fixed
+
+- Fixed Android Git push operations failing with libgit2 certificate error -17
+  by accepting host certificate callbacks in the Android Git path.
+
 ## 0.5.3 - 2026-07-04
 
 ### Changed
