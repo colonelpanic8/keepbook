@@ -83,6 +83,39 @@ const SSH_KEY_FILE_PICKER_BRIDGE_JS: &str = r#"
   }, true);
 })();
 "#;
+const CONTEXT_MENU_COPY_BRIDGE_JS: &str = r#"
+(function () {
+  if (window.__keepbookContextMenuCopyBridgeInstalled) {
+    return;
+  }
+  window.__keepbookContextMenuCopyBridgeInstalled = true;
+
+  // Dioxus desktop suppresses the native context menu in release builds by
+  // registering a bubble-phase `contextmenu` handler on `document` that calls
+  // preventDefault(). That also removes the "Copy" entry, so selected text
+  // (such as sync error messages) can be highlighted but not copied. Re-enable
+  // the native menu whenever there is an active text selection or an editable
+  // target by stopping the event during the capture phase, before Dioxus's
+  // bubble-phase handler runs.
+  document.addEventListener(
+    "contextmenu",
+    function (event) {
+      var selection = window.getSelection();
+      var hasSelection =
+        selection && !selection.isCollapsed && selection.toString().length > 0;
+      var target = event.target;
+      var isEditable =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        (target && target.isContentEditable);
+      if (hasSelection || isEditable) {
+        event.stopImmediatePropagation();
+      }
+    },
+    true
+  );
+})();
+"#;
 #[cfg(target_arch = "wasm32")]
 const API_BASE: &str = "http://127.0.0.1:8799";
 const DEFAULT_RANGE_PRESET: RangePreset = RangePreset::OneYear;
