@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.5.7 - 2026-07-07
+
+### Fixed
+
+- The net worth chart's last data point now matches the total on the accounts
+  page. History requests no longer send a local-timezone end date, which had
+  trimmed freshly synced points stamped with the next day's UTC date off the
+  end of the chart.
+
+### Added
+
+- Added a "Resync data" action to the accounts view that reloads all data from
+  disk (via a new `POST /api/reload` endpoint / native reload) without
+  restarting the app.
+- Charts now refetch whenever data is refreshed (pull-to-refresh, price
+  refresh, or tray sync), so graphs no longer show stale pre-refresh data.
+- The CLI honors `KEEPBOOK_DISABLE_AUTO_COMMIT` to suppress git auto-commit
+  even when it is enabled in config.
+
 ## 0.5.6 - 2026-07-06
 
 ### Changed
