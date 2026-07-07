@@ -207,6 +207,10 @@ pub(super) fn SpendingView(currency: String) -> Element {
         let last = (page_start + page_transactions.len()).min(filtered_transactions.len());
         format!("{first}-{last} of {}", filtered_transactions.len())
     };
+    let focus_label = match (selected.as_ref(), selected_period_value.as_ref()) {
+        (Some(tag), Some(period)) => Some(format!("Focused: {tag} · {}", period.label)),
+        _ => None,
+    };
     let selected_label = selected.as_deref().unwrap_or("All tags");
     let panel_title = match selected_tab {
         SpendingTab::Tags => "Spending Tags",
@@ -309,6 +313,18 @@ pub(super) fn SpendingView(currency: String) -> Element {
                         },
                         "All"
                     }
+                    if let Some(label) = focus_label.clone() {
+                        button {
+                            class: "control-button focus-chip",
+                            title: "Clear segment focus",
+                            onclick: move |_| {
+                                selected_tag.set(None);
+                                selected_period.set(None);
+                                transaction_page.set(0);
+                            },
+                            "{label} ✕"
+                        }
+                    }
                 }
                 div { class: "control-grid spending-date-grid",
                     DateInput {
@@ -397,6 +413,21 @@ pub(super) fn SpendingView(currency: String) -> Element {
                                     && current.end_date == period.end_date
                             });
                             selected_period.set(if same_period { None } else { Some(period) });
+                            transaction_page.set(0);
+                        },
+                        onfocussegment: move |sel: SpendingSegmentSelection| {
+                            let already_focused = selected_tag() == Some(sel.key.clone())
+                                && selected_period().is_some_and(|current| {
+                                    current.start_date == sel.period.start_date
+                                        && current.end_date == sel.period.end_date
+                                });
+                            if already_focused {
+                                selected_tag.set(None);
+                                selected_period.set(None);
+                            } else {
+                                selected_tag.set(Some(sel.key));
+                                selected_period.set(Some(sel.period));
+                            }
                             transaction_page.set(0);
                         },
                         onselecttag: move |tag: String| {
@@ -718,6 +749,14 @@ struct SpendingSegmentKey {
     end_date: String,
 }
 
+/// Payload emitted when a segment is clicked to focus the view on a single
+/// category within a single time period.
+#[derive(Clone, Debug, PartialEq)]
+struct SpendingSegmentSelection {
+    key: String,
+    period: SpendingPeriodSelection,
+}
+
 #[component]
 fn SpendingOverTimeChart(
     spending: SpendingOutput,
@@ -726,6 +765,7 @@ fn SpendingOverTimeChart(
     bucket_label: String,
     colors: HashMap<String, &'static str>,
     onclick: EventHandler<SpendingPeriodSelection>,
+    onfocussegment: EventHandler<SpendingSegmentSelection>,
     onselecttag: EventHandler<String>,
 ) -> Element {
     let mut hovered_period = use_signal(|| None::<SpendingPeriodSelection>);
@@ -1040,8 +1080,8 @@ fn SpendingOverTimeChart(
                                 onmouseenter: move |_| hovered_period.set(Some(selection_for_enter.clone())),
                                 onmouseleave: move |_| hovered_period.set(None),
                                 onclick: move |_| {
-                                    // Toggle this category's pinned tooltip, and keep the
-                                    // existing behavior of selecting the period.
+                                    // Toggle this category's pinned tooltip, and focus the
+                                    // view on this category + period.
                                     let already_pinned = pinned_segment().is_some_and(|pin| {
                                         pin.key == pin_key
                                             && pin.start_date == pin_start
@@ -1056,7 +1096,10 @@ fn SpendingOverTimeChart(
                                             end_date: pin_end.clone(),
                                         })
                                     });
-                                    onclick.call(selection_for_click.clone());
+                                    onfocussegment.call(SpendingSegmentSelection {
+                                        key: pin_key.clone(),
+                                        period: selection_for_click.clone(),
+                                    });
                                 },
                                 title {
                                     "{label}: {format_full_money(total, &spending.currency)} total / {key}: {format_full_money(value, &spending.currency)} ({transaction_count} tx)"

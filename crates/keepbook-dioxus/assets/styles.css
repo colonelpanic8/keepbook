@@ -427,6 +427,12 @@ small,
   color: #ffffff;
 }
 
+.control-button.focus-chip {
+  background: #e8f2f6;
+  border-color: #1f6f8b;
+  color: #1f6f8b;
+}
+
 .control-button.danger-button {
   background: #f8eeee;
   border-color: #e4c6c6;
