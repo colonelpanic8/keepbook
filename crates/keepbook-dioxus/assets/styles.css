@@ -70,10 +70,33 @@ body {
 }
 
 .nav-title {
+  align-items: center;
+  display: flex;
+  flex-direction: row;
+  gap: 10px;
+  min-width: 0;
+}
+
+.nav-title-text {
   display: flex;
   flex-direction: column;
   gap: 4px;
   min-width: 0;
+}
+
+.nav-logo {
+  align-items: center;
+  display: flex;
+  flex: none;
+  height: 32px;
+  justify-content: center;
+  width: 32px;
+}
+
+.nav-logo svg {
+  display: block;
+  height: 100%;
+  width: 100%;
 }
 
 .nav-title strong {

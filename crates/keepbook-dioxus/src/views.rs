@@ -21,6 +21,8 @@ use recurring::RecurringView;
 use shared::*;
 use spending::SpendingView;
 
+const NAV_LOGO_SVG: &str = include_str!("../../../assets/keepbook-icon.svg");
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ActiveView {
     Spending,
@@ -261,8 +263,11 @@ fn Dashboard(
             aside { class: "{nav_class}",
                 div { class: "nav-header",
                     div { class: "nav-title",
-                        strong { "Keepbook" }
-                        small { "{overview.reporting_currency}" }
+                        div { class: "nav-logo", dangerous_inner_html: NAV_LOGO_SVG }
+                        div { class: "nav-title-text",
+                            strong { "Keepbook" }
+                            small { "{overview.reporting_currency}" }
+                        }
                     }
                     button {
                         class: "mobile-nav-toggle",

@@ -330,12 +330,12 @@
                   fi
 
                   # Adaptive foreground: transparent 108dp canvas per density with the
-                  # logo inside the standard 66% safe zone so modern launchers do not
-                  # make the mark feel oversized inside their masks.
+                  # logo sized to 55% of the canvas — comfortably inside the safe zone so
+                  # modern launchers do not make the mark feel oversized inside their masks.
                   for density in mdpi:108 hdpi:162 xhdpi:216 xxhdpi:324 xxxhdpi:432; do
                     local qualifier="''${density%%:*}"
                     local canvas="''${density##*:}"
-                    local logo_size="$((canvas * 66 / 100))"
+                    local logo_size="$((canvas * 55 / 100))"
                     local dir="$res/mipmap-$qualifier"
                     mkdir -p "$dir"
                     magick -background none "$repo/assets/keepbook-icon.svg" \
