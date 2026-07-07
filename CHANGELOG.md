@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.6 - 2026-07-06
+
+### Changed
+
+- Show the keepbook logo next to the title in the Dioxus app's navigation
+  header so the brand mark is visible in-app.
+- Reduced the Android adaptive launcher icon's foreground from 66% to 55% of
+  the canvas so it no longer feels oversized inside launcher masks.
+
 ## 0.5.5 - 2026-07-06
 
 ### Fixed
