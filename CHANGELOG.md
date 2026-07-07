@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.8 - 2026-07-07
+
+### Added
+
+- Clicking a segment of a bar in the spending view now focuses that category
+  within that period: the transaction list and totals are limited to the
+  selected category and time bucket. A "Focused" chip (and re-clicking the same
+  segment) clears the focus.
+
 ## 0.5.7 - 2026-07-07
 
 ### Fixed
