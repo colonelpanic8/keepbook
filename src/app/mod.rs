@@ -72,8 +72,15 @@ pub use types::{
     TransactionOutput,
 };
 
+fn env_disabled(key: &str) -> bool {
+    match std::env::var(key) {
+        Ok(v) => v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes"),
+        Err(_) => false,
+    }
+}
+
 fn maybe_auto_commit(config: &ResolvedConfig, action: &str) {
-    if !config.git.auto_commit {
+    if !config.git.auto_commit || env_disabled("KEEPBOOK_DISABLE_AUTO_COMMIT") {
         return;
     }
 
