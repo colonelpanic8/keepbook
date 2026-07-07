@@ -152,6 +152,10 @@ pub(crate) async fn sync_prices(input: SyncPricesInput) -> Result<serde_json::Va
     sync_prices_impl(input).await
 }
 
+pub(crate) async fn reload_data() -> Result<serde_json::Value, String> {
+    reload_data_impl().await
+}
+
 pub(crate) async fn suggest_ai_rules(
     input: AiRuleSuggestionInput,
 ) -> Result<AiRuleSuggestionsOutput, String> {
@@ -464,6 +468,25 @@ pub(crate) async fn sync_prices_impl(input: SyncPricesInput) -> Result<serde_jso
         .json::<serde_json::Value>()
         .await
         .map_err(|error| format!("Could not decode price refresh result: {error}"))
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn reload_data_impl() -> Result<serde_json::Value, String> {
+    let response = Request::post(&format!("{API_BASE}/api/reload"))
+        .send()
+        .await
+        .map_err(|error| format!("Could not reach keepbook-server at {API_BASE}: {error}"))?;
+
+    if !response.ok() {
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+        return Err(format!("keepbook-server returned HTTP {status}: {text}"));
+    }
+
+    response
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|error| format!("Could not decode reload result: {error}"))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -788,6 +811,15 @@ pub(crate) async fn sync_prices_impl(input: SyncPricesInput) -> Result<serde_jso
         })
         .await
         .map_err(|error| format!("Price refresh failed: {error:#}"))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn reload_data_impl() -> Result<serde_json::Value, String> {
+    native_api_state()?
+        .reload()
+        .await
+        .map_err(|error| format!("Data resync failed: {error:#}"))?;
+    Ok(serde_json::json!({ "status": "ok" }))
 }
 
 #[cfg(not(target_arch = "wasm32"))]

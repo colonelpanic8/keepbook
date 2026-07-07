@@ -45,6 +45,8 @@ pub(super) fn AccountsView(
     let mut price_busy = use_signal(|| false);
     let mut force_prices = use_signal(|| false);
     let mut price_status = use_signal(String::new);
+    let mut resync_busy = use_signal(|| false);
+    let mut resync_status = use_signal(String::new);
     let mut pull_start = use_signal(|| None::<PullStart>);
     let mut pull_distance = use_signal(|| 0.0);
     let mut selected_graph = use_signal(|| None::<AccountGraphSelection>);
@@ -56,6 +58,8 @@ pub(super) fn AccountsView(
     let _ = balances;
     let is_price_busy = price_busy();
     let price_status_text = price_status();
+    let is_resync_busy = resync_busy();
+    let resync_status_text = resync_status();
     let pull_distance_value = pull_distance();
     let pull_offset = pull_refresh_offset(pull_distance_value);
     let pull_ready = pull_distance_value >= PULL_REFRESH_TRIGGER_PX;
@@ -207,10 +211,34 @@ pub(super) fn AccountsView(
                                 },
                                 if is_price_busy { "Refreshing" } else { "Refresh prices" }
                             }
+                            button {
+                                class: "control-button",
+                                disabled: is_resync_busy,
+                                onclick: move |_| {
+                                    resync_busy.set(true);
+                                    resync_status.set("Resyncing data from disk...".to_string());
+                                    spawn(async move {
+                                        match reload_data().await {
+                                            Ok(_) => {
+                                                resync_status.set("Data resynced.".to_string());
+                                                onrefresh.call(());
+                                            }
+                                            Err(error) => {
+                                                resync_status.set(format!("Resync failed: {error}"));
+                                            }
+                                        }
+                                        resync_busy.set(false);
+                                    });
+                                },
+                                if is_resync_busy { "Resyncing" } else { "Resync data" }
+                            }
                         }
                     }
                     if !price_status_text.is_empty() {
                         p { class: "settings-status", "{price_status_text}" }
+                    }
+                    if !resync_status_text.is_empty() {
+                        p { class: "settings-status", "{resync_status_text}" }
                     }
                     div { class: "group-list",
                         if !virtual_accounts.is_empty() {
