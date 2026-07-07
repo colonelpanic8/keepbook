@@ -15,6 +15,7 @@ const DEFAULT_SSH_IDENTITY_FILES: &[&str] = &[
     "id_ecdsa",
     "id_ecdsa_sk",
     "id_ed25519_sk",
+    "keepbook_sync_key",
 ];
 
 #[derive(Debug, PartialEq, Eq)]
@@ -260,7 +261,7 @@ fn signature(repo: &Repository) -> Result<Signature<'_>> {
 
 fn callbacks(repo: &Repository, git_config: &GitConfig) -> Result<RemoteCallbacks<'static>> {
     let config = repo.config().context("failed to read git config")?;
-    let configured_ssh_key_path = git_config.ssh_key_path.clone();
+    let configured_ssh_key_path = configured_ssh_key_path_for_credentials(git_config);
     let mut callbacks = RemoteCallbacks::new();
     configure_certificate_check(&mut callbacks);
     callbacks.credentials(move |url, username, allowed| {
@@ -297,6 +298,14 @@ fn callbacks(repo: &Repository, git_config: &GitConfig) -> Result<RemoteCallback
         Cred::credential_helper(&config, url, username)
     });
     Ok(callbacks)
+}
+
+fn configured_ssh_key_path_for_credentials(git_config: &GitConfig) -> Option<std::path::PathBuf> {
+    git_config
+        .ssh_key_path
+        .as_ref()
+        .filter(|path| path.is_file())
+        .cloned()
 }
 
 #[cfg(target_os = "android")]
@@ -481,6 +490,10 @@ fn default_ssh_identity_paths() -> Vec<std::path::PathBuf> {
     let Some(home_dir) = dirs::home_dir() else {
         return Vec::new();
     };
+    default_ssh_identity_paths_in_home(&home_dir)
+}
+
+fn default_ssh_identity_paths_in_home(home_dir: &Path) -> Vec<std::path::PathBuf> {
     let ssh_dir = home_dir.join(".ssh");
     DEFAULT_SSH_IDENTITY_FILES
         .iter()

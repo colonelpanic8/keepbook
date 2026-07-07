@@ -198,6 +198,9 @@ fn configured_ssh_key_path_wins_over_default() {
         .parent()
         .expect("test config should have parent")
         .join(".ssh/keepbook_sync_key");
+    std::fs::create_dir_all(expected.parent().expect("test key should have parent"))
+        .expect("test key parent should be created");
+    std::fs::write(&expected, "test key").expect("test key should be written");
     let settings = with_default_desktop_ssh_key_path(
         &config_path,
         GitRemoteSettings {
@@ -210,6 +213,30 @@ fn configured_ssh_key_path_wins_over_default() {
         settings.ssh_key_path.as_deref(),
         Some(expected.to_str().expect("test path should be UTF-8"))
     );
+    remove_test_config(config_path);
+}
+
+#[test]
+fn missing_configured_ssh_key_path_is_not_returned() {
+    let config_path = unique_test_config_path("missing-configured-ssh-key");
+    let missing = config_path
+        .parent()
+        .expect("test config should have parent")
+        .join(".ssh/missing_key");
+    let missing = missing
+        .to_str()
+        .expect("test path should be UTF-8")
+        .to_string();
+    let settings = with_default_desktop_ssh_key_path(
+        &config_path,
+        GitRemoteSettings {
+            ssh_key_path: Some(missing.clone()),
+            ..GitRemoteSettings::default()
+        },
+    );
+
+    assert_ne!(settings.ssh_key_path.as_deref(), Some(missing.as_str()));
+    remove_test_config(config_path);
 }
 
 #[test]

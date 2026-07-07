@@ -43,6 +43,7 @@ const DEFAULT_SSH_IDENTITY_FILES: &[&str] = &[
     "id_ecdsa",
     "id_ecdsa_sk",
     "id_ed25519_sk",
+    "keepbook_sync_key",
 ];
 
 pub use ai_rules::{
@@ -862,6 +863,7 @@ impl ApiState {
 
     pub async fn sync_connections(&self, input: SyncConnectionsInput) -> Result<serde_json::Value> {
         let snapshot = self.snapshot().await;
+        prepare_git_ssh_environment(&snapshot.config_path)?;
         activate_age_identity_from_git_settings(&snapshot.config_path)?;
         std::env::set_var("KEEPBOOK_NONINTERACTIVE", "1");
         let transactions = if input.full_transactions {
@@ -912,6 +914,7 @@ impl ApiState {
 
     pub async fn sync_prices(&self, input: SyncPricesInput) -> Result<serde_json::Value> {
         let snapshot = self.snapshot().await;
+        prepare_git_ssh_environment(&snapshot.config_path)?;
         activate_age_identity_from_git_settings(&snapshot.config_path)?;
         let target = input
             .target
@@ -2085,12 +2088,12 @@ fn with_default_desktop_ssh_key_path(
         .map(str::trim)
         .filter(|path| !path.is_empty())
     {
-        settings.ssh_key_path = Some(
-            resolve_config_relative_path(config_path, path)
-                .display()
-                .to_string(),
-        );
-        return settings;
+        let resolved = resolve_config_relative_path(config_path, path);
+        if resolved.is_file() {
+            settings.ssh_key_path = Some(resolved.display().to_string());
+            return settings;
+        }
+        settings.ssh_key_path = None;
     }
 
     if let Some(path) = default_desktop_ssh_key_path(config_path) {

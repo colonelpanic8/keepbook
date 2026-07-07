@@ -11,6 +11,50 @@ fn git_available() -> bool {
         .unwrap_or(false)
 }
 
+#[test]
+fn configured_ssh_key_path_for_credentials_skips_missing_file() {
+    let dir = TempDir::new().expect("temp dir should be created");
+    let missing_key = dir.path().join(".ssh").join("missing_key");
+    let git_config = GitConfig {
+        ssh_key_path: Some(missing_key),
+        ..GitConfig::default()
+    };
+
+    assert_eq!(configured_ssh_key_path_for_credentials(&git_config), None);
+}
+
+#[test]
+fn configured_ssh_key_path_for_credentials_keeps_existing_file() -> Result<()> {
+    let dir = TempDir::new()?;
+    let key_path = dir.path().join(".ssh").join("keepbook_sync_key");
+    fs::create_dir_all(key_path.parent().expect("test key should have parent"))?;
+    fs::write(&key_path, "test key")?;
+    let git_config = GitConfig {
+        ssh_key_path: Some(key_path.clone()),
+        ..GitConfig::default()
+    };
+
+    assert_eq!(
+        configured_ssh_key_path_for_credentials(&git_config).as_deref(),
+        Some(key_path.as_path())
+    );
+    Ok(())
+}
+
+#[test]
+fn default_ssh_identity_paths_include_keepbook_sync_key() -> Result<()> {
+    let dir = TempDir::new()?;
+    let key_path = dir.path().join(".ssh").join("keepbook_sync_key");
+    fs::create_dir_all(key_path.parent().expect("test key should have parent"))?;
+    fs::write(&key_path, "test key")?;
+
+    assert_eq!(
+        default_ssh_identity_paths_in_home(dir.path()),
+        vec![key_path]
+    );
+    Ok(())
+}
+
 fn run_git(dir: &Path, args: &[&str]) -> Result<std::process::Output> {
     let output = Command::new("git").arg("-C").arg(dir).args(args).output()?;
     Ok(output)

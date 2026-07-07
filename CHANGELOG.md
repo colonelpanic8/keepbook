@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.9 - 2026-07-07
+
+### Fixed
+
+- Fixed mobile Git auto-commit pushes after price refresh when `[git].ssh_key_path`
+  points at a stale or desktop-only private key path. Git credential setup now
+  ignores missing key files and falls back to the app-private
+  `keepbook_sync_key` identity.
+
 ## 0.5.8 - 2026-07-07
 
 ### Added
