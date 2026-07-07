@@ -1,5 +1,7 @@
 use super::*;
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
 use tempfile::TempDir;
 
@@ -12,7 +14,7 @@ fn git_available() -> bool {
 }
 
 #[test]
-fn configured_ssh_key_path_for_credentials_skips_missing_file() {
+fn configured_ssh_private_key_for_credentials_skips_missing_file() {
     let dir = TempDir::new().expect("temp dir should be created");
     let missing_key = dir.path().join(".ssh").join("missing_key");
     let git_config = GitConfig {
@@ -20,24 +22,56 @@ fn configured_ssh_key_path_for_credentials_skips_missing_file() {
         ..GitConfig::default()
     };
 
-    assert_eq!(configured_ssh_key_path_for_credentials(&git_config), None);
+    assert_eq!(
+        configured_ssh_private_key_for_credentials(&git_config),
+        None
+    );
 }
 
 #[test]
-fn configured_ssh_key_path_for_credentials_keeps_existing_file() -> Result<()> {
+fn configured_ssh_private_key_for_credentials_loads_existing_file() -> Result<()> {
     let dir = TempDir::new()?;
     let key_path = dir.path().join(".ssh").join("keepbook_sync_key");
+    let key_contents = "test key\n";
     fs::create_dir_all(key_path.parent().expect("test key should have parent"))?;
-    fs::write(&key_path, "test key")?;
+    fs::write(&key_path, key_contents)?;
     let git_config = GitConfig {
         ssh_key_path: Some(key_path.clone()),
         ..GitConfig::default()
     };
 
     assert_eq!(
-        configured_ssh_key_path_for_credentials(&git_config).as_deref(),
-        Some(key_path.as_path())
+        configured_ssh_private_key_for_credentials(&git_config),
+        Some(SshPrivateKey {
+            path: key_path,
+            private_key: key_contents.to_string()
+        })
     );
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn configured_ssh_private_key_for_credentials_skips_unreadable_file() -> Result<()> {
+    let dir = TempDir::new()?;
+    let key_path = dir.path().join(".ssh").join("keepbook_sync_key");
+    fs::create_dir_all(key_path.parent().expect("test key should have parent"))?;
+    fs::write(&key_path, "test key\n")?;
+    let original_permissions = fs::metadata(&key_path)?.permissions();
+    let mut unreadable_permissions = original_permissions.clone();
+    unreadable_permissions.set_mode(0o000);
+    fs::set_permissions(&key_path, unreadable_permissions)?;
+
+    let git_config = GitConfig {
+        ssh_key_path: Some(key_path.clone()),
+        ..GitConfig::default()
+    };
+
+    let loaded_key = configured_ssh_private_key_for_credentials(&git_config);
+
+    fs::set_permissions(&key_path, original_permissions)?;
+
+    assert_eq!(loaded_key, None);
     Ok(())
 }
 
@@ -51,6 +85,24 @@ fn default_ssh_identity_paths_include_keepbook_sync_key() -> Result<()> {
     assert_eq!(
         default_ssh_identity_paths_in_home(dir.path()),
         vec![key_path]
+    );
+    Ok(())
+}
+
+#[test]
+fn default_ssh_private_keys_for_credentials_loads_existing_files() -> Result<()> {
+    let dir = TempDir::new()?;
+    let key_path = dir.path().join(".ssh").join("keepbook_sync_key");
+    let key_contents = "test key\n";
+    fs::create_dir_all(key_path.parent().expect("test key should have parent"))?;
+    fs::write(&key_path, key_contents)?;
+
+    assert_eq!(
+        default_ssh_private_keys_for_credentials_in_home(dir.path()),
+        vec![SshPrivateKey {
+            path: key_path,
+            private_key: key_contents.to_string()
+        }]
     );
     Ok(())
 }

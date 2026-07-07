@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.10 - 2026-07-07
+
+### Fixed
+
+- Fixed Android/mobile Git SSH auth during auto-push by loading configured and
+  default private key files into memory before creating libgit2 credentials.
+  This avoids libssh2 private-key path handling failures during price refresh
+  auto-commit pushes.
+
 ## 0.5.9 - 2026-07-07
 
 ### Fixed

@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::config::GitConfig;
 use anyhow::{Context, Result};
@@ -261,14 +261,17 @@ fn signature(repo: &Repository) -> Result<Signature<'_>> {
 
 fn callbacks(repo: &Repository, git_config: &GitConfig) -> Result<RemoteCallbacks<'static>> {
     let config = repo.config().context("failed to read git config")?;
-    let configured_ssh_key_path = configured_ssh_key_path_for_credentials(git_config);
+    let configured_ssh_key = configured_ssh_private_key_for_credentials(git_config);
+    let default_ssh_keys = default_ssh_private_keys_for_credentials();
     let mut callbacks = RemoteCallbacks::new();
     configure_certificate_check(&mut callbacks);
     callbacks.credentials(move |url, username, allowed| {
         if allowed.contains(CredentialType::SSH_KEY) {
             if let Some(username) = username {
-                if let Some(path) = configured_ssh_key_path.as_deref() {
-                    if let Ok(cred) = Cred::ssh_key(username, None, path, None) {
+                if let Some(key) = configured_ssh_key.as_ref() {
+                    if let Ok(cred) =
+                        Cred::ssh_key_from_memory(username, None, &key.private_key, None)
+                    {
                         return Ok(cred);
                     }
                 }
@@ -277,8 +280,10 @@ fn callbacks(repo: &Repository, git_config: &GitConfig) -> Result<RemoteCallback
                     return Ok(cred);
                 }
 
-                for path in default_ssh_identity_paths() {
-                    if let Ok(cred) = Cred::ssh_key(username, None, &path, None) {
+                for key in &default_ssh_keys {
+                    if let Ok(cred) =
+                        Cred::ssh_key_from_memory(username, None, &key.private_key, None)
+                    {
                         return Ok(cred);
                     }
                 }
@@ -300,12 +305,43 @@ fn callbacks(repo: &Repository, git_config: &GitConfig) -> Result<RemoteCallback
     Ok(callbacks)
 }
 
-fn configured_ssh_key_path_for_credentials(git_config: &GitConfig) -> Option<std::path::PathBuf> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SshPrivateKey {
+    path: PathBuf,
+    private_key: String,
+}
+
+fn configured_ssh_private_key_for_credentials(git_config: &GitConfig) -> Option<SshPrivateKey> {
     git_config
         .ssh_key_path
         .as_ref()
-        .filter(|path| path.is_file())
-        .cloned()
+        .and_then(|path| ssh_private_key_from_file(path))
+}
+
+fn default_ssh_private_keys_for_credentials() -> Vec<SshPrivateKey> {
+    let Some(home_dir) = dirs::home_dir() else {
+        return Vec::new();
+    };
+    default_ssh_private_keys_for_credentials_in_home(&home_dir)
+}
+
+fn default_ssh_private_keys_for_credentials_in_home(home_dir: &Path) -> Vec<SshPrivateKey> {
+    default_ssh_identity_paths_in_home(home_dir)
+        .into_iter()
+        .filter_map(|path| ssh_private_key_from_file(&path))
+        .collect()
+}
+
+fn ssh_private_key_from_file(path: &Path) -> Option<SshPrivateKey> {
+    if !path.is_file() {
+        return None;
+    }
+
+    let private_key = std::fs::read_to_string(path).ok()?;
+    Some(SshPrivateKey {
+        path: path.to_path_buf(),
+        private_key,
+    })
 }
 
 #[cfg(target_os = "android")]
@@ -486,14 +522,7 @@ fn push_current_branch(repo: &Repository, git_config: &GitConfig) -> Result<()> 
     Ok(())
 }
 
-fn default_ssh_identity_paths() -> Vec<std::path::PathBuf> {
-    let Some(home_dir) = dirs::home_dir() else {
-        return Vec::new();
-    };
-    default_ssh_identity_paths_in_home(&home_dir)
-}
-
-fn default_ssh_identity_paths_in_home(home_dir: &Path) -> Vec<std::path::PathBuf> {
+fn default_ssh_identity_paths_in_home(home_dir: &Path) -> Vec<PathBuf> {
     let ssh_dir = home_dir.join(".ssh");
     DEFAULT_SSH_IDENTITY_FILES
         .iter()
