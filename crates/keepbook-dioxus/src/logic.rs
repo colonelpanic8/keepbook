@@ -320,8 +320,14 @@ pub(crate) fn history_query_string(
     account: Option<&str>,
 ) -> String {
     let (start, end) = requested_history_date_range(preset, start_override, end_override, today);
-    let granularity =
-        history_request_granularity(selected_sampling, start.as_deref(), end.as_deref());
+    // The request itself omits the end bound so the server never trims freshly
+    // synced change points on local/UTC date mismatches, but auto-granularity
+    // selection still assumes the range runs through today.
+    let granularity = history_request_granularity(
+        selected_sampling,
+        start.as_deref(),
+        end.as_deref().or(Some(today)),
+    );
     let mut params = vec![format!(
         "granularity={}",
         query_encode_component(granularity)
@@ -388,7 +394,7 @@ fn spending_group_query_string(
     group_by: &str,
     top: Option<usize>,
 ) -> String {
-    let (start, end) = requested_history_date_range(preset, start_override, end_override, today);
+    let (start, end) = requested_spending_date_range(preset, start_override, end_override, today);
     let mut params = vec![
         "period=range".to_string(),
         format!("group_by={}", query_encode_component(group_by)),
@@ -416,7 +422,7 @@ pub(crate) fn spending_over_time_query_string(
     currency: &str,
     bucket: SpendingBucket,
 ) -> String {
-    let (start, end) = requested_history_date_range(preset, start_override, end_override, today);
+    let (start, end) = requested_spending_date_range(preset, start_override, end_override, today);
     let mut params = vec![
         format!("period={}", bucket.query_value()),
         "period_alignment=calendar".to_string(),
@@ -493,11 +499,13 @@ pub(crate) fn requested_history_date_range(
     if preset == RangePreset::Custom {
         return (
             non_empty_string(start_override),
-            non_empty_string(end_override).or_else(|| Some(today.to_string())),
+            non_empty_string(end_override),
         );
     }
 
-    let end = Some(today.to_string());
+    // Presets mean "from the computed start until now", so no end bound is
+    // sent. Sending `today` computed from the local timezone used to trim
+    // change points stamped with tomorrow's UTC date off the end of charts.
     let start = match preset {
         RangePreset::OneMonth => Some(offset_months(today, 1)),
         RangePreset::NinetyDays => Some(offset_days(today, 90)),
@@ -507,10 +515,22 @@ pub(crate) fn requested_history_date_range(
         RangePreset::Max | RangePreset::Custom => None,
     };
 
+    (start, None)
+}
+
+pub(crate) fn requested_spending_date_range(
+    preset: RangePreset,
+    start_override: &str,
+    end_override: &str,
+    today: &str,
+) -> (Option<String>, Option<String>) {
+    let (start, end) = requested_history_date_range(preset, start_override, end_override, today);
+    // Spending queries keep their explicit end bound (today for presets, and a
+    // today fallback for custom ranges); only Max stays unbounded.
     if preset == RangePreset::Max {
-        (None, None)
-    } else {
         (start, end)
+    } else {
+        (start, end.or_else(|| Some(today.to_string())))
     }
 }
 

@@ -95,7 +95,55 @@ fn default_graph_query_requests_one_year_weekly_history() {
             FilterOverrides::default(),
             None,
         ),
-        "granularity=weekly&start=2025-04-25&end=2026-04-25"
+        "granularity=weekly&start=2025-04-25"
+    );
+}
+
+#[test]
+fn preset_graph_queries_omit_end_bound() {
+    // Presets mean "until now"; sending a local-timezone end date used to trim
+    // change points stamped with tomorrow's UTC date off the end of charts.
+    assert_eq!(
+        requested_history_date_range(RangePreset::OneYear, "", "", "2026-04-25"),
+        (Some("2025-04-25".to_string()), None)
+    );
+    assert_eq!(
+        requested_history_date_range(RangePreset::Custom, "2026-01-01", "", "2026-04-25"),
+        (Some("2026-01-01".to_string()), None)
+    );
+    assert_eq!(
+        requested_history_date_range(
+            RangePreset::Custom,
+            "2026-01-01",
+            "2026-02-01",
+            "2026-04-25"
+        ),
+        (
+            Some("2026-01-01".to_string()),
+            Some("2026-02-01".to_string())
+        )
+    );
+}
+
+#[test]
+fn spending_date_range_keeps_end_bound() {
+    assert_eq!(
+        requested_spending_date_range(RangePreset::OneYear, "", "", "2026-04-25"),
+        (
+            Some("2025-04-25".to_string()),
+            Some("2026-04-25".to_string())
+        )
+    );
+    assert_eq!(
+        requested_spending_date_range(RangePreset::Custom, "2026-01-01", "", "2026-04-25"),
+        (
+            Some("2026-01-01".to_string()),
+            Some("2026-04-25".to_string())
+        )
+    );
+    assert_eq!(
+        requested_spending_date_range(RangePreset::Max, "", "", "2026-04-25"),
+        (None, None)
     );
 }
 
@@ -125,7 +173,7 @@ fn auto_graph_query_uses_daily_under_three_months() {
             FilterOverrides::default(),
             None,
         ),
-        "granularity=daily&start=2026-01-25&end=2026-04-25"
+        "granularity=daily&start=2026-01-25"
     );
 }
 
