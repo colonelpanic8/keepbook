@@ -78,6 +78,7 @@ pub(crate) fn App() -> Element {
         window().set_close_behavior(WindowCloseBehaviour::WindowHides);
     });
 
+    let mut refresh_epoch = use_context_provider(|| Signal::new(0u64));
     let mut filter_overrides = use_signal(FilterOverrides::default);
     let mut overview = use_resource(move || {
         let overrides = filter_overrides();
@@ -126,6 +127,7 @@ pub(crate) fn App() -> Element {
                     });
                     tray_last_cycle_text.set("Last price refresh: just now".to_string());
                     tray_last_summary.set(summary);
+                    refresh_epoch.set(refresh_epoch().wrapping_add(1));
                     overview.restart();
                     tray_snapshot.restart();
                 });
@@ -151,6 +153,7 @@ pub(crate) fn App() -> Element {
                         onrefresh: move |_| {
                             overview.restart();
                             tray_snapshot.restart();
+                            refresh_epoch.set(refresh_epoch().wrapping_add(1));
                         }
                     }
                 },

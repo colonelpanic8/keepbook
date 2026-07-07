@@ -118,7 +118,9 @@ pub(super) fn StackedHistoryGraphPanel(
     let mut expanded_accounts = use_signal(HashSet::<String>::new);
     let mut group_minor_series = use_signal(|| false);
     let mut minor_series_threshold = use_signal(|| "2".to_string());
+    let refresh_epoch = use_context::<Signal<u64>>();
     let history = use_resource(move || {
+        let _refresh_epoch = refresh_epoch();
         let selected_range = range_preset();
         let start_text = start_override();
         let end_text = end_override();
@@ -404,7 +406,9 @@ pub(super) fn HistoryGraphPanel(
     let mut y_min_input = use_signal(String::new);
     let mut y_max_input = use_signal(String::new);
     let mut sampling_granularity = use_signal(move || initial_sampling_granularity);
+    let refresh_epoch = use_context::<Signal<u64>>();
     let history = use_resource(move || {
+        let _refresh_epoch = refresh_epoch();
         let selected_range = range_preset();
         let start_text = start_override();
         let end_text = end_override();
