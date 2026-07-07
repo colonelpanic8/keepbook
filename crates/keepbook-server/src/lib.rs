@@ -265,7 +265,7 @@ impl ApiState {
         }
     }
 
-    async fn reload(&self) -> Result<()> {
+    pub async fn reload(&self) -> Result<()> {
         let config_path = {
             let inner = self.inner.read().await;
             inner.config_path.clone()
@@ -1822,6 +1822,7 @@ pub fn router(state: ApiState) -> Router {
         .route("/api/git/sync", post(sync_git_repo))
         .route("/api/sync/connections", post(sync_connections))
         .route("/api/sync/prices", post(sync_prices))
+        .route("/api/reload", post(reload_data))
         .route("/api/ai/rules/suggest", post(suggest_ai_rules))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
@@ -1991,6 +1992,12 @@ async fn merge_origin_master(
     State(state): State<ApiState>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     Ok(Json(state.merge_origin_master().await?))
+}
+
+#[cfg(feature = "http")]
+async fn reload_data(State(state): State<ApiState>) -> Result<Json<serde_json::Value>, ApiError> {
+    state.reload().await?;
+    Ok(Json(serde_json::json!({ "status": "ok" })))
 }
 
 #[cfg(feature = "http")]
