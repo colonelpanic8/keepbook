@@ -1787,14 +1787,10 @@ fn stacked_hover_points(
             };
             let previous_x = if index == 0 {
                 padding_left
-            } else if count <= 1 {
-                padding_left
             } else {
                 padding_left + ((index as f64 - 0.5) / (count - 1) as f64) * plot_width
             };
             let next_x = if index + 1 == count {
-                chart_width - padding_right
-            } else if count <= 1 {
                 chart_width - padding_right
             } else {
                 padding_left + ((index as f64 + 0.5) / (count - 1) as f64) * plot_width

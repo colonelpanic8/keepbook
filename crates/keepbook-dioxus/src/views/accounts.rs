@@ -47,6 +47,8 @@ pub(super) fn AccountsView(
     let mut price_status = use_signal(String::new);
     let mut resync_busy = use_signal(|| false);
     let mut resync_status = use_signal(String::new);
+    let mut git_sync_busy = use_signal(|| false);
+    let mut git_sync_status = use_signal(String::new);
     let mut pull_start = use_signal(|| None::<PullStart>);
     let mut pull_distance = use_signal(|| 0.0);
     let mut selected_graph = use_signal(|| None::<AccountGraphSelection>);
@@ -60,6 +62,8 @@ pub(super) fn AccountsView(
     let price_status_text = price_status();
     let is_resync_busy = resync_busy();
     let resync_status_text = resync_status();
+    let is_git_sync_busy = git_sync_busy();
+    let git_sync_status_text = git_sync_status();
     let pull_distance_value = pull_distance();
     let pull_offset = pull_refresh_offset(pull_distance_value);
     let pull_ready = pull_distance_value >= PULL_REFRESH_TRIGGER_PX;
@@ -171,6 +175,49 @@ pub(super) fn AccountsView(
                             span { "{account_count}" }
                         }
                         div { class: "settings-actions inline-actions",
+                            button {
+                                class: "control-button",
+                                disabled: is_git_sync_busy,
+                                onclick: move |_| {
+                                    git_sync_busy.set(true);
+                                    git_sync_status.set("Syncing Git repository...".to_string());
+                                    spawn(async move {
+                                        let result = async {
+                                            let settings = fetch_git_settings().await?;
+                                            let input = GitSyncInput {
+                                                data_dir: normalize_git_data_dir_for_client(settings.data_dir),
+                                                host: settings.git.host,
+                                                repo: settings.git.repo,
+                                                branch: settings.git.branch,
+                                                ssh_user: settings.git.ssh_user,
+                                                private_key_pem: String::new(),
+                                                save_settings: false,
+                                            };
+                                            sync_git_repo_cancelable(
+                                                input,
+                                                new_git_sync_cancel_handle(),
+                                            )
+                                            .await
+                                        }
+                                        .await;
+
+                                        match result {
+                                            Ok(result) => {
+                                                git_sync_status.set(format!(
+                                                    "Git sync complete: {} {}.",
+                                                    result.remote_url, result.branch
+                                                ));
+                                                onrefresh.call(());
+                                            }
+                                            Err(error) => {
+                                                git_sync_status.set(format!("Git sync failed: {error}"));
+                                            }
+                                        }
+                                        git_sync_busy.set(false);
+                                    });
+                                },
+                                if is_git_sync_busy { "Syncing Git" } else { "Git sync" }
+                            }
                             label { class: "compact-check",
                                 input {
                                     r#type: "checkbox",
@@ -239,6 +286,9 @@ pub(super) fn AccountsView(
                     }
                     if !resync_status_text.is_empty() {
                         p { class: "settings-status", "{resync_status_text}" }
+                    }
+                    if !git_sync_status_text.is_empty() {
+                        p { class: "settings-status", "{git_sync_status_text}" }
                     }
                     div { class: "group-list",
                         if !virtual_accounts.is_empty() {

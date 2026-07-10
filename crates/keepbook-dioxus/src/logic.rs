@@ -155,7 +155,7 @@ pub(crate) fn coalesce_minor_stacked_series(
     for item in series {
         let max_share = data
             .iter()
-            .filter_map(|point| {
+            .map(|point| {
                 let value = point
                     .components
                     .iter()
@@ -166,12 +166,12 @@ pub(crate) fn coalesce_minor_stacked_series(
                 let total = point.total.abs();
                 if total <= f64::EPSILON {
                     if value <= f64::EPSILON {
-                        Some(0.0)
+                        0.0
                     } else {
-                        Some(f64::INFINITY)
+                        f64::INFINITY
                     }
                 } else {
-                    Some(value / total)
+                    value / total
                 }
             })
             .fold(0.0_f64, f64::max);
