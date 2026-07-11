@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.6.0 - 2026-07-10
+
+### Added
+
+- Added recurring-cost estimates for the fitted interval, typical charge, and
+  annualized cost to the recurring transaction API and Dioxus app.
+- Added annual-cost and confidence sorting to the Dioxus recurring-cost view,
+  with highest annual cost shown first by default.
+- Made the Dioxus web API origin configurable at build time with
+  `KEEPBOOK_API_BASE` for remote and Tailscale previews.
+
+### Changed
+
+- Reworked recurring-cost detection to keep only active outflows with stable
+  amounts and predictable weekly-through-yearly schedules. Irregular purchases,
+  income, expired patterns, and two-occurrence coincidences are excluded.
+- Recurring estimates now use only the latest uninterrupted schedule run so
+  stale price history does not distort the current cost projection.
+- Redesigned recurring cards to foreground interval, per-charge cost, observed
+  range, annual cost, next expected date, and supporting transactions.
+
 ## 0.5.10 - 2026-07-07
 
 ### Fixed
