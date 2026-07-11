@@ -3,9 +3,10 @@ use crate::api::{fetch_recurring_transactions, review_recurring_transaction};
 
 #[component]
 pub(super) fn RecurringView() -> Element {
-    let mut include_possible = use_signal(|| true);
+    let mut include_possible = use_signal(|| false);
     let mut include_dismissed = use_signal(|| false);
     let mut min_confidence = use_signal(|| "0.70".to_string());
+    let mut sort_order = use_signal(|| "annual_desc".to_string());
     let mut busy_key = use_signal(String::new);
     let mut status = use_signal(String::new);
     let mut recurring = use_resource(move || {
@@ -13,7 +14,11 @@ pub(super) fn RecurringView() -> Element {
             recurring_query_string(include_possible(), include_dismissed(), min_confidence());
         async move { fetch_recurring_transactions(query).await }
     });
-    let current = recurring.cloned();
+    let mut current = recurring.cloned();
+    let sort_order_value = sort_order();
+    if let Some(Ok(items)) = current.as_mut() {
+        sort_recurring_items(items, &sort_order_value);
+    }
     let busy = busy_key();
     let status_text = status();
 
@@ -21,8 +26,8 @@ pub(super) fn RecurringView() -> Element {
         section { class: "panel recurring-panel",
             div { class: "panel-header",
                 div {
-                    h2 { "Recurring transactions" }
-                    span { "Detected candidates with review state" }
+                    h2 { "Predictable recurring costs" }
+                    span { "Active, regular outflows with stable amounts" }
                 }
                 button {
                     class: "control-button",
@@ -41,7 +46,7 @@ pub(super) fn RecurringView() -> Element {
                             recurring.restart();
                         }
                     }
-                    span { "Possible" }
+                    span { "Borderline" }
                 }
                 label { class: "toggle-field",
                     input {
@@ -67,6 +72,17 @@ pub(super) fn RecurringView() -> Element {
                         onblur: move |_| recurring.restart(),
                     }
                 }
+                label { class: "control-field compact-control-field",
+                    span { "Sort" }
+                    select {
+                        class: "control-input",
+                        value: "{sort_order()}",
+                        onchange: move |event| sort_order.set(event.value()),
+                        option { value: "annual_desc", "Annual cost: high to low" }
+                        option { value: "annual_asc", "Annual cost: low to high" }
+                        option { value: "confidence", "Confidence" }
+                    }
+                }
             }
             if !status_text.is_empty() {
                 p { class: "settings-status", "{status_text}" }
@@ -77,8 +93,8 @@ pub(super) fn RecurringView() -> Element {
                 Some(Ok(items)) => rsx! {
                     if items.is_empty() {
                         div { class: "chart-empty proposal-empty",
-                            strong { "No recurring candidates" }
-                            small { "Adjust confidence or include possible candidates to widen the scan." }
+                            strong { "No predictable recurring costs" }
+                            small { "Include borderline patterns or lower confidence to widen the scan." }
                         }
                     } else {
                         div { class: "recurring-list",
@@ -120,11 +136,6 @@ fn RecurringCandidateCard(
     busy: String,
     onreview: EventHandler<(RecurringTransaction, &'static str)>,
 ) -> Element {
-    let amount_class = if item.amount.typical.trim_start().starts_with('-') {
-        "change-negative"
-    } else {
-        "change-positive"
-    };
     let review_class = format!("review-badge review-{}", item.review_status);
     let candidate_for_verify = item.clone();
     let candidate_for_dismiss = item.clone();
@@ -134,6 +145,11 @@ fn RecurringCandidateCard(
         .next_expected
         .clone()
         .unwrap_or_else(|| "unscheduled".to_string());
+    let interval = cadence_display(&item.cadence);
+    let interval_days = format!("≈{} days", item.estimated_interval_days);
+    let recurring_cost = format_recurring_money(&item.estimated_recurring_cost, &item.amount.asset);
+    let annual_cost = format_recurring_money(&item.estimated_annual_cost, &item.amount.asset);
+    let observed_range = format_observed_cost_range(&item.amount);
 
     rsx! {
         article { class: "recurring-card",
@@ -143,7 +159,6 @@ fn RecurringCandidateCard(
                     span { class: "{review_class}", "{item.review_status}" }
                 }
                 div { class: "recurring-meta",
-                    span { "{item.cadence}" }
                     span { "{item.status}" }
                     span { "confidence {item.confidence}" }
                     span { "next {next}" }
@@ -155,9 +170,20 @@ fn RecurringCandidateCard(
                 }
             }
             div { class: "recurring-amount-cell",
-                strong { class: "{amount_class}", "{item.amount.typical}" }
-                small { "{item.first_seen} to {item.last_seen}" }
-                small { "{item.occurrence_count} occurrences" }
+                div { class: "recurring-estimate",
+                    small { "Estimated interval" }
+                    strong { "{interval}" }
+                    small { "{interval_days}" }
+                }
+                div { class: "recurring-estimate",
+                    small { "Recurring cost" }
+                    strong { class: "change-negative", "{recurring_cost}" }
+                    small { "{observed_range}" }
+                }
+                div { class: "recurring-estimate recurring-estimate-annual",
+                    small { "Estimated annual cost" }
+                    strong { class: "change-negative", "{annual_cost}" }
+                }
             }
             div { class: "recurring-actions",
                 button {
@@ -174,7 +200,7 @@ fn RecurringCandidateCard(
                 }
             }
             details { class: "recurring-occurrences",
-                summary { "Transactions" }
+                summary { "{item.occurrence_count} transactions · {item.first_seen} to {item.last_seen}" }
                 div { class: "data-table recurring-occurrence-table",
                     div { class: "table-head",
                         span { "Date" }
@@ -193,6 +219,85 @@ fn RecurringCandidateCard(
                 }
             }
         }
+    }
+}
+
+fn sort_recurring_items(items: &mut [RecurringTransaction], sort_order: &str) {
+    items.sort_by(|left, right| {
+        let left_annual = left
+            .estimated_annual_cost
+            .parse::<f64>()
+            .unwrap_or_default();
+        let right_annual = right
+            .estimated_annual_cost
+            .parse::<f64>()
+            .unwrap_or_default();
+        let left_confidence = left.confidence.parse::<f64>().unwrap_or_default();
+        let right_confidence = right.confidence.parse::<f64>().unwrap_or_default();
+
+        let primary = match sort_order {
+            "annual_asc" => left_annual.total_cmp(&right_annual),
+            "confidence" => right_confidence.total_cmp(&left_confidence),
+            _ => right_annual.total_cmp(&left_annual),
+        };
+        primary.then_with(|| left.name.cmp(&right.name))
+    });
+}
+
+fn cadence_display(cadence: &str) -> String {
+    match cadence {
+        "weekly" => "Every week".to_string(),
+        "biweekly" => "Every 2 weeks".to_string(),
+        "every_4_weeks" => "Every 4 weeks".to_string(),
+        "monthly" => "Every month".to_string(),
+        "every_2_months" => "Every 2 months".to_string(),
+        "quarterly" => "Every 3 months".to_string(),
+        "semiannual" => "Every 6 months".to_string(),
+        "yearly" => "Every year".to_string(),
+        other => other.replace('_', " "),
+    }
+}
+
+fn format_recurring_money(raw: &str, asset: &serde_json::Value) -> String {
+    let currency = asset
+        .get("iso_code")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    raw.parse::<f64>()
+        .map(|amount| format_full_money(amount, currency))
+        .unwrap_or_else(|_| {
+            if currency.is_empty() {
+                raw.to_string()
+            } else {
+                format!("{raw} {currency}")
+            }
+        })
+}
+
+fn format_observed_cost_range(amount: &RecurringTransactionAmount) -> String {
+    let parsed = amount
+        .min
+        .parse::<f64>()
+        .ok()
+        .zip(amount.max.parse::<f64>().ok());
+    let Some((left, right)) = parsed else {
+        return "Observed amount unavailable".to_string();
+    };
+    let low = left.abs().min(right.abs());
+    let high = left.abs().max(right.abs());
+    let currency = amount
+        .asset
+        .get("iso_code")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    if (high - low).abs() < 0.005 {
+        format!("Observed {}", format_full_money(low, currency))
+    } else {
+        format!(
+            "Observed {}–{}",
+            format_full_money(low, currency),
+            format_full_money(high, currency)
+        )
     }
 }
 

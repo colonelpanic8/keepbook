@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 
 use anyhow::{Context, Result};
-use chrono::{Datelike, Months, NaiveDate};
+use chrono::{Months, NaiveDate, Utc};
 use rust_decimal::Decimal;
 
 use crate::config::ResolvedConfig;
@@ -45,7 +45,10 @@ struct CandidateTransaction {
 struct CadenceFit {
     cadence: &'static str,
     score: f64,
-    interval_count: u32,
+    estimated_interval_days: Decimal,
+    occurrences_per_year: Decimal,
+    grace_days: i64,
+    confirmed_occurrences: usize,
 }
 
 struct CandidateEvaluation {
@@ -76,8 +79,13 @@ pub async fn list_recurring_transactions(
     )
     .await?;
 
+    let as_of = options
+        .end
+        .as_deref()
+        .and_then(parse_ymd_prefix)
+        .unwrap_or_else(|| Utc::now().date_naive());
     let candidates = transaction_candidates(transactions)?;
-    let mut evaluations = evaluate_recurring_candidates(&candidates);
+    let mut evaluations = evaluate_recurring_candidates(&candidates, as_of);
     evaluations.retain(|candidate| {
         candidate.confidence >= options.min_confidence
             && (options.include_possible || candidate.output.status == "confirmed")
@@ -190,7 +198,9 @@ fn transaction_candidates(
 
         let amount = Decimal::from_str(&tx.amount)
             .with_context(|| format!("Invalid transaction amount: {}", tx.amount))?;
-        if amount.is_zero() {
+        // Recurring costs are outflows. Deposits, refunds, and transfers may be
+        // periodic, but they are not predictable recurring costs.
+        if !amount.is_sign_negative() || amount.is_zero() {
             continue;
         }
 
@@ -250,6 +260,7 @@ fn transaction_candidates(
 
 fn evaluate_recurring_candidates(
     transactions: &[CandidateTransaction],
+    as_of: NaiveDate,
 ) -> Vec<CandidateEvaluation> {
     let merchant_groups = cluster_by_similar_name(transactions);
     let mut evaluations = Vec::new();
@@ -261,7 +272,7 @@ fn evaluate_recurring_candidates(
         candidate_groups.extend(amount_bucket_groups(&group_transactions));
 
         for candidate_group in candidate_groups {
-            if let Some(evaluation) = evaluate_group(&candidate_group) {
+            if let Some(evaluation) = evaluate_group(&candidate_group, as_of) {
                 evaluations.push(evaluation);
             }
         }
@@ -336,11 +347,10 @@ fn amount_bucket_groups<'a>(
 ) -> Vec<Vec<&'a CandidateTransaction>> {
     let mut buckets: HashMap<String, Vec<&CandidateTransaction>> = HashMap::new();
     for tx in transactions {
-        let rounded = if tx.amount_abs < Decimal::new(1000, 2) {
-            tx.amount_abs.round_dp(2)
-        } else {
-            tx.amount_abs.round_dp(0)
-        };
+        // Exact-cent buckets separate multiple subscriptions billed by a
+        // single payment processor without grouping unrelated purchases that
+        // merely round to the same whole-dollar amount.
+        let rounded = tx.amount_abs.round_dp(2);
         buckets
             .entry(rounded.normalize().to_string())
             .or_default()
@@ -352,29 +362,51 @@ fn amount_bucket_groups<'a>(
         .collect()
 }
 
-fn evaluate_group(transactions: &[&CandidateTransaction]) -> Option<CandidateEvaluation> {
-    if transactions.len() < 2 {
+fn evaluate_group(
+    transactions: &[&CandidateTransaction],
+    as_of: NaiveDate,
+) -> Option<CandidateEvaluation> {
+    if transactions.len() < 3 {
         return None;
     }
 
     let mut sorted = transactions.to_vec();
     sorted.sort_by_key(|tx| (tx.date, tx.id.clone()));
     sorted.dedup_by(|a, b| a.id == b.id);
-    if sorted.len() < 2 {
+    if sorted.len() < 3 {
+        return None;
+    }
+
+    let dates = sorted.iter().map(|tx| tx.date).collect::<Vec<_>>();
+    let preliminary_cadence = best_cadence_fit(&dates)?;
+    let run_start = recent_schedule_run_start(&dates, &preliminary_cadence);
+    if run_start > 0 {
+        sorted = sorted[run_start..].to_vec();
+    }
+    if sorted.len() < 3 {
         return None;
     }
 
     let dates = sorted.iter().map(|tx| tx.date).collect::<Vec<_>>();
     let cadence = best_cadence_fit(&dates)?;
-    if cadence.score < 0.50 {
+    if cadence.score < 0.75 {
         return None;
     }
 
     let amount_score = amount_stability_score(&sorted);
+    if amount_score < 0.82 {
+        return None;
+    }
+    let last_seen = sorted.last()?.date;
+    let next_expected = next_expected_date(last_seen, &cadence)?;
+    if as_of > next_expected + chrono::Duration::days(cadence.grace_days) {
+        return None;
+    }
+
     let occurrence_score = ((sorted.len() as f64 - 1.0) / 5.0).min(1.0);
     let name_score = clustered_name_score(&sorted);
     let confidence =
-        0.45 * cadence.score + 0.25 * amount_score + 0.20 * occurrence_score + 0.10 * name_score;
+        0.50 * cadence.score + 0.30 * amount_score + 0.15 * occurrence_score + 0.05 * name_score;
 
     let status = if is_confirmed_recurring(&cadence, amount_score, confidence, sorted.len()) {
         "confirmed"
@@ -384,9 +416,10 @@ fn evaluate_group(transactions: &[&CandidateTransaction]) -> Option<CandidateEva
     let name = representative_name(&sorted);
     let normalized_name = representative_normalized_name(&sorted);
     let first_seen = sorted.first()?.date;
-    let last_seen = sorted.last()?.date;
-    let next_expected = next_expected_date(last_seen, &cadence).map(|date| date.to_string());
     let amount = amount_summary(&sorted);
+    let estimated_recurring_cost = estimated_recurring_cost(&sorted);
+    let estimated_annual_cost =
+        (estimated_recurring_cost * cadence.occurrences_per_year).round_dp(2);
     let reason_codes = reason_codes(&cadence, amount_score, sorted.len(), status);
     let transaction_ids = sorted
         .iter()
@@ -409,13 +442,16 @@ fn evaluate_group(transactions: &[&CandidateTransaction]) -> Option<CandidateEva
             name,
             normalized_name,
             status: status.to_string(),
-            cadence: cadence_label(&cadence),
+            cadence: cadence.cadence.to_string(),
+            estimated_interval_days: decimal_string(cadence.estimated_interval_days),
+            estimated_recurring_cost: decimal_string(estimated_recurring_cost),
+            estimated_annual_cost: decimal_string(estimated_annual_cost),
             confidence: score_string(confidence),
             cadence_score: score_string(cadence.score),
             occurrence_count: sorted.len(),
             first_seen: first_seen.to_string(),
             last_seen: last_seen.to_string(),
-            next_expected,
+            next_expected: Some(next_expected.to_string()),
             amount,
             reason_codes,
             transactions: occurrences,
@@ -431,24 +467,10 @@ fn is_confirmed_recurring(
     confidence: f64,
     occurrence_count: usize,
 ) -> bool {
-    let enough_history_for_interval = match cadence.cadence {
-        "weekly" => {
-            (cadence.interval_count == 1 && occurrence_count >= 6)
-                || (cadence.interval_count == 4 && occurrence_count >= 6 && amount_score >= 0.90)
-        }
-        "biweekly" => cadence.interval_count == 1 && occurrence_count >= 6,
-        "monthly" => {
-            cadence.interval_count == 1 || (cadence.interval_count <= 3 && occurrence_count >= 5)
-        }
-        "quarterly" | "yearly" => cadence.interval_count == 1,
-        _ => false,
-    };
-
-    occurrence_count >= 3
-        && confidence >= 0.80
-        && cadence.score >= 0.80
-        && amount_score >= 0.75
-        && enough_history_for_interval
+    occurrence_count >= cadence.confirmed_occurrences
+        && confidence >= 0.88
+        && cadence.score >= 0.85
+        && amount_score >= 0.82
 }
 
 fn best_cadence_fit(dates: &[NaiveDate]) -> Option<CadenceFit> {
@@ -457,11 +479,14 @@ fn best_cadence_fit(dates: &[NaiveDate]) -> Option<CadenceFit> {
     }
 
     [
-        fixed_day_cadence("weekly", dates, 7.0, 2.0),
-        fixed_day_cadence("biweekly", dates, 14.0, 3.0),
-        monthly_cadence("monthly", dates, 1, 5),
-        monthly_cadence("quarterly", dates, 3, 10),
-        monthly_cadence("yearly", dates, 12, 20),
+        fixed_day_cadence("weekly", dates, 7, 2, 8),
+        fixed_day_cadence("biweekly", dates, 14, 3, 6),
+        fixed_day_cadence("every_4_weeks", dates, 28, 4, 5),
+        monthly_cadence("monthly", dates, 1, 5, 4),
+        monthly_cadence("every_2_months", dates, 2, 7, 4),
+        monthly_cadence("quarterly", dates, 3, 10, 3),
+        monthly_cadence("semiannual", dates, 6, 15, 3),
+        monthly_cadence("yearly", dates, 12, 20, 3),
     ]
     .into_iter()
     .flatten()
@@ -476,32 +501,30 @@ fn best_cadence_fit(dates: &[NaiveDate]) -> Option<CadenceFit> {
 fn fixed_day_cadence(
     cadence: &'static str,
     dates: &[NaiveDate],
-    base_days: f64,
-    tolerance_days: f64,
+    interval_days: i64,
+    tolerance_days: i64,
+    confirmed_occurrences: usize,
 ) -> Option<CadenceFit> {
-    let mut matched = 0usize;
-    let mut multipliers = Vec::new();
+    let mut quality = 0.0;
     for pair in dates.windows(2) {
         let gap = (pair[1] - pair[0]).num_days();
         if gap <= 0 {
             continue;
         }
-        let multiplier = ((gap as f64) / base_days).round().max(1.0);
-        let expected = multiplier * base_days;
-        let tolerance = tolerance_days + (multiplier - 1.0) * 1.5;
-        if ((gap as f64) - expected).abs() <= tolerance {
-            matched += 1;
-            multipliers.push(multiplier as u32);
+        let deviation = (gap - interval_days).abs();
+        if deviation <= tolerance_days {
+            quality += 1.0 - (deviation as f64 / (tolerance_days as f64 * 4.0 + 1.0));
         }
     }
 
-    if dates.len() < 2 {
-        return None;
-    }
+    let interval = Decimal::from(interval_days);
     Some(CadenceFit {
         cadence,
-        score: matched as f64 / (dates.len() - 1) as f64,
-        interval_count: median_u32(&multipliers).unwrap_or(1),
+        score: quality / (dates.len() - 1) as f64,
+        estimated_interval_days: interval,
+        occurrences_per_year: Decimal::new(36525, 2) / interval,
+        grace_days: (interval_days / 4).max(7),
+        confirmed_occurrences,
     })
 }
 
@@ -510,79 +533,95 @@ fn monthly_cadence(
     dates: &[NaiveDate],
     base_months: u32,
     tolerance_days: i64,
+    confirmed_occurrences: usize,
 ) -> Option<CadenceFit> {
-    let mut matched = 0usize;
-    let mut multipliers = Vec::new();
+    let mut quality = 0.0;
 
     for pair in dates.windows(2) {
-        let months = months_between(pair[0], pair[1]);
-        if months < base_months {
-            continue;
-        }
-        let multiplier = ((months as f64) / (base_months as f64)).round().max(1.0) as u32;
-        let expected_months = base_months * multiplier;
-        let Some(expected_date) = pair[0].checked_add_months(Months::new(expected_months)) else {
+        let Some(expected_date) = pair[0].checked_add_months(Months::new(base_months)) else {
             continue;
         };
         let deviation = (pair[1] - expected_date).num_days().abs();
-        if deviation <= tolerance_days + (multiplier as i64 - 1) * 2 {
-            matched += 1;
-            multipliers.push(multiplier);
+        if deviation <= tolerance_days {
+            quality += 1.0 - (deviation as f64 / (tolerance_days as f64 * 4.0 + 1.0));
         }
     }
 
+    let interval_days =
+        (Decimal::new(36525, 2) * Decimal::from(base_months) / Decimal::from(12u32)).round_dp(2);
     Some(CadenceFit {
         cadence,
-        score: matched as f64 / (dates.len() - 1) as f64,
-        interval_count: median_u32(&multipliers).unwrap_or(1),
+        score: quality / (dates.len() - 1) as f64,
+        estimated_interval_days: interval_days,
+        occurrences_per_year: Decimal::from(12u32) / Decimal::from(base_months),
+        grace_days: (tolerance_days * 2).max(10),
+        confirmed_occurrences,
     })
 }
 
-fn months_between(start: NaiveDate, end: NaiveDate) -> u32 {
-    if end <= start {
-        return 0;
+fn recent_schedule_run_start(dates: &[NaiveDate], cadence: &CadenceFit) -> usize {
+    dates
+        .windows(2)
+        .enumerate()
+        .rev()
+        .find_map(|(index, pair)| {
+            (!cadence_gap_matches(pair[0], pair[1], cadence.cadence)).then_some(index + 1)
+        })
+        .unwrap_or(0)
+}
+
+fn cadence_gap_matches(start: NaiveDate, end: NaiveDate, cadence: &str) -> bool {
+    let fixed = match cadence {
+        "weekly" => Some((7, 2)),
+        "biweekly" => Some((14, 3)),
+        "every_4_weeks" => Some((28, 4)),
+        _ => None,
+    };
+    if let Some((interval, tolerance)) = fixed {
+        return ((end - start).num_days() - interval).abs() <= tolerance;
     }
-    let mut months =
-        (end.year() - start.year()) * 12 + (end.month() as i32) - (start.month() as i32);
-    if end.day() + 5 < start.day() {
-        months -= 1;
-    }
-    months.max(0) as u32
+
+    let calendar = match cadence {
+        "monthly" => Some((1, 5)),
+        "every_2_months" => Some((2, 7)),
+        "quarterly" => Some((3, 10)),
+        "semiannual" => Some((6, 15)),
+        "yearly" => Some((12, 20)),
+        _ => None,
+    };
+    let Some((months, tolerance)) = calendar else {
+        return false;
+    };
+    start
+        .checked_add_months(Months::new(months))
+        .is_some_and(|expected| (end - expected).num_days().abs() <= tolerance)
 }
 
 fn next_expected_date(last_seen: NaiveDate, cadence: &CadenceFit) -> Option<NaiveDate> {
     match cadence.cadence {
-        "weekly" => Some(last_seen + chrono::Duration::days(7 * cadence.interval_count as i64)),
-        "biweekly" => Some(last_seen + chrono::Duration::days(14 * cadence.interval_count as i64)),
-        "monthly" => last_seen.checked_add_months(Months::new(cadence.interval_count)),
-        "quarterly" => last_seen.checked_add_months(Months::new(3 * cadence.interval_count)),
-        "yearly" => last_seen.checked_add_months(Months::new(12 * cadence.interval_count)),
+        "weekly" => Some(last_seen + chrono::Duration::days(7)),
+        "biweekly" => Some(last_seen + chrono::Duration::days(14)),
+        "every_4_weeks" => Some(last_seen + chrono::Duration::days(28)),
+        "monthly" => last_seen.checked_add_months(Months::new(1)),
+        "every_2_months" => last_seen.checked_add_months(Months::new(2)),
+        "quarterly" => last_seen.checked_add_months(Months::new(3)),
+        "semiannual" => last_seen.checked_add_months(Months::new(6)),
+        "yearly" => last_seen.checked_add_months(Months::new(12)),
         _ => None,
-    }
-}
-
-fn cadence_label(cadence: &CadenceFit) -> String {
-    if cadence.interval_count <= 1 {
-        return cadence.cadence.to_string();
-    }
-    match cadence.cadence {
-        "weekly" => format!("every_{}_weeks", cadence.interval_count),
-        "biweekly" => format!("every_{}_biweekly_periods", cadence.interval_count),
-        "monthly" => format!("every_{}_months", cadence.interval_count),
-        "quarterly" => format!("every_{}_quarters", cadence.interval_count),
-        "yearly" => format!("every_{}_years", cadence.interval_count),
-        other => other.to_string(),
     }
 }
 
 fn cadence_rank(cadence: &str) -> u8 {
     match cadence {
         "monthly" => 0,
-        "weekly" => 1,
+        "every_4_weeks" => 1,
         "biweekly" => 2,
-        "quarterly" => 3,
-        "yearly" => 4,
-        _ => 5,
+        "weekly" => 3,
+        "every_2_months" => 4,
+        "quarterly" => 5,
+        "semiannual" => 6,
+        "yearly" => 7,
+        _ => 8,
     }
 }
 
@@ -596,22 +635,31 @@ fn amount_stability_score(transactions: &[&CandidateTransaction]) -> f64 {
     let max = *amounts.last().unwrap_or(&Decimal::ZERO);
     let median = amounts[amounts.len() / 2].max(Decimal::new(1, 0));
     let range = max - min;
-    if range <= Decimal::new(1, 2) {
+    if range <= Decimal::new(10, 2) {
         1.0
-    } else if range <= Decimal::new(200, 2) {
-        0.95
     } else {
         let ratio = range / median;
-        if ratio <= Decimal::new(5, 2) {
-            0.90
+        if ratio <= Decimal::new(2, 2) {
+            0.98
+        } else if ratio <= Decimal::new(5, 2) {
+            0.92
+        } else if ratio <= Decimal::new(10, 2) {
+            0.82
         } else if ratio <= Decimal::new(15, 2) {
-            0.75
-        } else if ratio <= Decimal::new(50, 2) {
-            0.45
+            0.70
         } else {
-            0.20
+            0.30
         }
     }
+}
+
+fn estimated_recurring_cost(transactions: &[&CandidateTransaction]) -> Decimal {
+    let mut amounts = transactions
+        .iter()
+        .map(|tx| tx.amount_abs)
+        .collect::<Vec<_>>();
+    amounts.sort();
+    amounts[amounts.len() / 2].round_dp(2)
 }
 
 fn clustered_name_score(transactions: &[&CandidateTransaction]) -> f64 {
@@ -694,8 +742,9 @@ fn reason_codes(
     if occurrence_count >= 4 {
         reasons.push("multiple_occurrences".to_string());
     }
+    reasons.push("active_pattern".to_string());
     if status == "possible" {
-        reasons.push("needs_more_history".to_string());
+        reasons.push("limited_history".to_string());
     }
     reasons
 }
@@ -798,17 +847,14 @@ fn levenshtein(left: &str, right: &str) -> usize {
     *costs.last().unwrap_or(&0)
 }
 
-fn median_u32(values: &[u32]) -> Option<u32> {
-    if values.is_empty() {
-        return None;
-    }
-    let mut sorted = values.to_vec();
-    sorted.sort();
-    Some(sorted[sorted.len() / 2])
-}
-
 fn decimal_string(value: Decimal) -> String {
     value.normalize().to_string()
+}
+
+fn parse_ymd_prefix(value: &str) -> Option<NaiveDate> {
+    value
+        .get(..10)
+        .and_then(|date| NaiveDate::parse_from_str(date, "%Y-%m-%d").ok())
 }
 
 fn score_string(value: f64) -> String {

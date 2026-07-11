@@ -2310,7 +2310,30 @@ button.stacked-legend-item {
 
 .recurring-amount-cell {
   align-items: flex-end;
+  gap: 10px;
   text-align: right;
+}
+
+.recurring-estimate {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.recurring-estimate small:first-child {
+  color: #62727f;
+  font-size: 0.7rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.recurring-estimate strong {
+  font-size: 1rem;
+}
+
+.recurring-estimate-annual strong {
+  font-size: 1.15rem;
 }
 
 .recurring-actions {

@@ -470,18 +470,27 @@ impl ApiState {
             &state.config,
         )
         .await?;
-        let reviews = keepbook::app::list_recurring_transaction_reviews(state.storage.as_ref())
-            .await?
-            .into_iter()
-            .map(|review| (review.candidate_key, review.status))
-            .collect::<HashMap<_, _>>();
+        let reviews =
+            keepbook::app::list_recurring_transaction_reviews(state.storage.as_ref()).await?;
 
         let mut out = Vec::new();
         for candidate in candidates {
             let candidate_key = keepbook::app::recurring_transaction_candidate_key(&candidate);
-            let review_status = reviews
-                .get(&candidate_key)
-                .cloned()
+            // Cadence can become more accurate as history accumulates. Preserve
+            // the user's latest decision when the merchant, amount, and asset
+            // still identify the same cost even if the candidate key changed.
+            let exact_review = reviews
+                .iter()
+                .rev()
+                .find(|review| review.candidate_key == candidate_key);
+            let compatible_review = reviews.iter().rev().find(|review| {
+                review.normalized_name == candidate.normalized_name
+                    && review.amount_typical == candidate.amount.typical
+                    && review.asset == candidate.amount.asset
+            });
+            let review_status = exact_review
+                .or(compatible_review)
+                .map(|review| review.status.clone())
                 .unwrap_or_else(|| "proposed".to_string());
             if review_status == "dismissed" && !query.include_dismissed {
                 continue;
@@ -1190,6 +1199,12 @@ pub struct ReviewedRecurringTransactionOutput {
     pub normalized_name: String,
     pub status: String,
     pub cadence: String,
+    #[serde(default)]
+    pub estimated_interval_days: String,
+    #[serde(default)]
+    pub estimated_recurring_cost: String,
+    #[serde(default)]
+    pub estimated_annual_cost: String,
     pub confidence: String,
     pub cadence_score: String,
     pub occurrence_count: usize,
@@ -1215,6 +1230,9 @@ impl ReviewedRecurringTransactionOutput {
             normalized_name: candidate.normalized_name,
             status: candidate.status,
             cadence: candidate.cadence,
+            estimated_interval_days: candidate.estimated_interval_days,
+            estimated_recurring_cost: candidate.estimated_recurring_cost,
+            estimated_annual_cost: candidate.estimated_annual_cost,
             confidence: candidate.confidence,
             cadence_score: candidate.cadence_score,
             occurrence_count: candidate.occurrence_count,
@@ -1249,6 +1267,9 @@ impl ReviewedRecurringTransactionOutput {
             normalized_name: self.normalized_name.clone(),
             status: self.status.clone(),
             cadence: self.cadence.clone(),
+            estimated_interval_days: self.estimated_interval_days.clone(),
+            estimated_recurring_cost: self.estimated_recurring_cost.clone(),
+            estimated_annual_cost: self.estimated_annual_cost.clone(),
             confidence: self.confidence.clone(),
             cadence_score: self.cadence_score.clone(),
             occurrence_count: self.occurrence_count,

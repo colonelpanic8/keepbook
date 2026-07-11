@@ -112,6 +112,12 @@ pub struct RecurringTransactionOutput {
     pub normalized_name: String,
     pub status: String,
     pub cadence: String,
+    /// Canonical interval length used for projections, in days.
+    pub estimated_interval_days: String,
+    /// Positive estimated cost for one occurrence.
+    pub estimated_recurring_cost: String,
+    /// Positive projected cost over one year.
+    pub estimated_annual_cost: String,
     pub confidence: String,
     pub cadence_score: String,
     pub occurrence_count: usize,

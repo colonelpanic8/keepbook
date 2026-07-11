@@ -117,7 +117,10 @@ const CONTEXT_MENU_COPY_BRIDGE_JS: &str = r#"
 })();
 "#;
 #[cfg(target_arch = "wasm32")]
-const API_BASE: &str = "http://127.0.0.1:8799";
+const API_BASE: &str = match option_env!("KEEPBOOK_API_BASE") {
+    Some(value) => value,
+    None => "http://127.0.0.1:8799",
+};
 const DEFAULT_RANGE_PRESET: RangePreset = RangePreset::OneYear;
 const DEFAULT_SAMPLING_GRANULARITY: SamplingGranularity = SamplingGranularity::Weekly;
 const DEFAULT_SPENDING_RANGE_PRESET: RangePreset = RangePreset::OneYear;
@@ -247,6 +250,12 @@ struct RecurringTransaction {
     normalized_name: String,
     status: String,
     cadence: String,
+    #[serde(default)]
+    estimated_interval_days: String,
+    #[serde(default)]
+    estimated_recurring_cost: String,
+    #[serde(default)]
+    estimated_annual_cost: String,
     confidence: String,
     cadence_score: String,
     occurrence_count: usize,
