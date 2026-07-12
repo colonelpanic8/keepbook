@@ -93,7 +93,7 @@ async fn set_transaction_ignore_false_clears_flag_and_strips_magic_tags() -> Res
 
     let wire = Transaction::new("-30000", Asset::currency("USD"), "Wire");
     storage
-        .append_transactions(&account.id, &[wire.clone()])
+        .append_transactions(&account.id, std::slice::from_ref(&wire))
         .await?;
 
     // Legacy-tagged transaction: magic tag plus a regular tag.
