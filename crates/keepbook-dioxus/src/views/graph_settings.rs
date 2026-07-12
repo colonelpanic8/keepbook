@@ -225,7 +225,7 @@ fn ApplicationSettingsPanel() -> Element {
                                         let next = event.checked();
                                         start_minimized.set(next);
                                         busy.set(true);
-                                        status.set(String::new());
+                                        status.set("Saving application settings...".to_string());
                                         spawn(async move {
                                             match save_application_settings(ApplicationSettingsInput {
                                                 start_minimized_to_tray: next,
@@ -252,7 +252,7 @@ fn ApplicationSettingsPanel() -> Element {
                         }
                     }
                     if !status_text.is_empty() {
-                        p { class: "settings-status", "{status_text}" }
+                        OperationStatus { message: status_text, busy: is_busy }
                     }
                     div { class: "settings-source",
                         small { "{current.config_path}" }
@@ -360,22 +360,7 @@ pub(super) fn SettingsView(
                         span { "Config {current.config_path}" }
                     }
                     if !status_text.is_empty() {
-                        p { class: "settings-status", "{status_text}" }
-                    }
-                    if is_busy {
-                        div {
-                            class: "git-sync-working",
-                            role: "status",
-                            aria_live: "polite",
-                            span { class: "activity-spinner" }
-                            span {
-                                if is_canceling {
-                                    "Canceling Git operation..."
-                                } else {
-                                    "Git operation in progress..."
-                                }
-                            }
-                        }
+                        OperationStatus { message: status_text, busy: is_busy }
                     }
                     GitLocationList {
                         current: current.clone(),

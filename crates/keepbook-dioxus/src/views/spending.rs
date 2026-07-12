@@ -39,6 +39,8 @@ pub(super) fn SpendingView(currency: String) -> Element {
     let mut ai_result = use_signal(|| None::<AiRuleSuggestionsOutput>);
     let mut ai_status = use_signal(|| None::<String>);
     let mut tag_update_status = use_signal(|| None::<String>);
+    let mut ai_busy = use_signal(|| false);
+    let mut mutation_busy = use_signal(|| false);
     let spending = use_resource({
         let currency = currency.clone();
         move || {
@@ -237,7 +239,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
                 BackendActivity { message: "Waiting on backend spending data" }
             }
             if let Some(message) = tag_update_status() {
-                div { class: "inline-notice", "{message}" }
+                OperationStatus { message, busy: mutation_busy() }
             }
             div { class: "chart-controls",
                 div { class: "preset-row",
@@ -563,6 +565,8 @@ pub(super) fn SpendingView(currency: String) -> Element {
                         },
                         ai_prompt: ai_prompt(),
                         ai_status: ai_status(),
+                        ai_busy: ai_busy(),
+                        mutation_busy: mutation_busy(),
                         ai_result: ai_result(),
                         tag_targets: selected_tag_targets.clone(),
                         onpromptchange: move |value| ai_prompt.set(value),
@@ -580,9 +584,11 @@ pub(super) fn SpendingView(currency: String) -> Element {
                                 return;
                             }
                             ai_status.set(Some("Requesting AI rule suggestions...".to_string()));
+                            ai_busy.set(true);
                             spawn({
                                 let mut ai_status = ai_status;
                                 let mut ai_result = ai_result;
+                                let mut ai_busy = ai_busy;
                                 async move {
                                     match suggest_ai_rules(AiRuleSuggestionInput {
                                         prompt,
@@ -599,14 +605,20 @@ pub(super) fn SpendingView(currency: String) -> Element {
                                         }
                                         Err(error) => ai_status.set(Some(error)),
                                     }
+                                    ai_busy.set(false);
                                 }
                             });
                         },
                         ontagssave: move |input: SetTransactionTagsInput| {
+                            if mutation_busy() {
+                                return;
+                            }
+                            mutation_busy.set(true);
                             tag_update_status.set(Some("Saving tags...".to_string()));
                             spawn({
                                 let mut spending = spending;
                                 let mut tag_update_status = tag_update_status;
+                                let mut mutation_busy = mutation_busy;
                                 async move {
                                     match set_transaction_tags(input).await {
                                         Ok(()) => {
@@ -617,10 +629,15 @@ pub(super) fn SpendingView(currency: String) -> Element {
                                             tag_update_status.set(Some(error));
                                         }
                                     }
+                                    mutation_busy.set(false);
                                 }
                             });
                         },
                         ontagsbulksave: move |input: SetTransactionTagsInput| {
+                            if mutation_busy() {
+                                return;
+                            }
+                            mutation_busy.set(true);
                             let updated_count = input.transactions.len();
                             tag_update_status.set(Some(format!(
                                 "Saving tags for {updated_count} transaction(s)..."
@@ -629,6 +646,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
                                 let mut spending = spending;
                                 let mut tag_update_status = tag_update_status;
                                 let mut selected_transaction_keys = selected_transaction_keys;
+                                let mut mutation_busy = mutation_busy;
                                 async move {
                                     match set_transaction_tags(input).await {
                                         Ok(()) => {
@@ -642,14 +660,20 @@ pub(super) fn SpendingView(currency: String) -> Element {
                                             tag_update_status.set(Some(error));
                                         }
                                     }
+                                    mutation_busy.set(false);
                                 }
                             });
                         },
                         oneffectivedatesave: move |input: SetTransactionEffectiveDateInput| {
+                            if mutation_busy() {
+                                return;
+                            }
+                            mutation_busy.set(true);
                             tag_update_status.set(Some("Saving date...".to_string()));
                             spawn({
                                 let mut spending = spending;
                                 let mut tag_update_status = tag_update_status;
+                                let mut mutation_busy = mutation_busy;
                                 async move {
                                     match set_transaction_effective_date(input).await {
                                         Ok(()) => {
@@ -660,10 +684,15 @@ pub(super) fn SpendingView(currency: String) -> Element {
                                             tag_update_status.set(Some(error));
                                         }
                                     }
+                                    mutation_busy.set(false);
                                 }
                             });
                         },
                         onignoresave: move |input: SetTransactionIgnoreInput| {
+                            if mutation_busy() {
+                                return;
+                            }
+                            mutation_busy.set(true);
                             let count = input.transactions.len();
                             let clear_selection = count > 1;
                             tag_update_status.set(Some("Updating spending exclusion...".to_string()));
@@ -671,6 +700,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
                                 let mut spending = spending;
                                 let mut tag_update_status = tag_update_status;
                                 let mut selected_transaction_keys = selected_transaction_keys;
+                                let mut mutation_busy = mutation_busy;
                                 async move {
                                     match set_transaction_ignore(input).await {
                                         Ok(()) => {
@@ -688,6 +718,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
                                             tag_update_status.set(Some(error));
                                         }
                                     }
+                                    mutation_busy.set(false);
                                 }
                             });
                         }
@@ -1345,6 +1376,8 @@ fn TransactionList(
     onnext: EventHandler<MouseEvent>,
     ai_prompt: String,
     ai_status: Option<String>,
+    ai_busy: bool,
+    mutation_busy: bool,
     ai_result: Option<AiRuleSuggestionsOutput>,
     tag_targets: Vec<TransactionTagTargetInput>,
     onpromptchange: EventHandler<String>,
@@ -1420,12 +1453,14 @@ fn TransactionList(
                 if has_visible_selection {
                     ControlButton {
                         selected: true,
+                        disabled: mutation_busy,
                         onclick: move |_| group_editor_open.set(true),
                         "Edit Tags"
                     }
                     button {
                         class: "control-button",
                         title: "Exclude selected transactions from spending totals",
+                        disabled: mutation_busy,
                         onclick: {
                             let targets = tag_targets.clone();
                             move |_| onignoresave.call(SetTransactionIgnoreInput {
@@ -1438,6 +1473,7 @@ fn TransactionList(
                     button {
                         class: "control-button",
                         title: "Include selected transactions in spending totals",
+                        disabled: mutation_busy,
                         onclick: {
                             let targets = tag_targets.clone();
                             move |_| onignoresave.call(SetTransactionIgnoreInput {
@@ -1458,17 +1494,19 @@ fn TransactionList(
                     class: "ai-rule-prompt",
                     value: "{ai_prompt}",
                     placeholder: "Ask for a tag, ignore, or rename rule for the selected transactions.",
+                    disabled: ai_busy,
                     oninput: move |event| onpromptchange.call(event.value())
                 }
                 div { class: "ai-rule-actions",
                     ControlButton {
                         selected: true,
+                        busy: ai_busy,
                         onclick: move |event| onairulesubmit.call(event),
-                        disabled: selected_count == 0 || ai_prompt.trim().is_empty(),
-                        "Ask AI"
+                        disabled: selected_count == 0 || ai_prompt.trim().is_empty() || ai_busy,
+                        if ai_busy { "Asking AI" } else { "Ask AI" }
                     }
                     if let Some(status) = ai_status.clone() {
-                        span { class: "ai-rule-status", "{status}" }
+                        OperationStatus { message: status, busy: ai_busy }
                     }
                 }
                 if let Some(result) = ai_result.clone() {
@@ -1491,6 +1529,7 @@ fn TransactionList(
                         selected_count,
                         tag_targets: tag_targets.clone(),
                         tag_options: tag_options.clone(),
+                        disabled: mutation_busy,
                         onclose: move |_| group_editor_open.set(false),
                         ontagsbulksave,
                     }
@@ -1643,6 +1682,7 @@ fn TransactionList(
                                     TransactionEditorPanel {
                                         transaction: tx.clone(),
                                         tag_options: tag_options.clone(),
+                                        disabled: mutation_busy,
                                         ontagssave,
                                         oneffectivedatesave,
                                         onignoresave,
@@ -1676,13 +1716,14 @@ fn GroupTagsEditor(
     selected_count: usize,
     tag_targets: Vec<TransactionTagTargetInput>,
     tag_options: Vec<String>,
+    disabled: bool,
     onclose: EventHandler<()>,
     ontagsbulksave: EventHandler<SetTransactionTagsInput>,
 ) -> Element {
     let mut selected_tags = use_signal(Vec::<String>::new);
     let mut draft_tag = use_signal(String::new);
     let draft = draft_tag();
-    let has_selection = selected_count > 0 && !tag_targets.is_empty();
+    let has_selection = selected_count > 0 && !tag_targets.is_empty() && !disabled;
     let apply_targets = tag_targets.clone();
     let clear_targets = tag_targets.clone();
     let tags = selected_tags();
@@ -1833,6 +1874,7 @@ fn transaction_tags_input(
 fn TransactionEditorPanel(
     transaction: Transaction,
     tag_options: Vec<String>,
+    disabled: bool,
     ontagssave: EventHandler<SetTransactionTagsInput>,
     oneffectivedatesave: EventHandler<SetTransactionEffectiveDateInput>,
     onignoresave: EventHandler<SetTransactionIgnoreInput>,
@@ -1842,7 +1884,7 @@ fn TransactionEditorPanel(
     let current_tags = transaction_tags(&transaction);
     let mut draft_tag = use_signal(String::new);
     let draft = draft_tag();
-    let can_add = !draft.trim().is_empty();
+    let can_add = !disabled && !draft.trim().is_empty();
     let suggestions = tag_editor_suggestions(&tag_options, &current_tags);
     let list_id = format!("tag-options-{account_id}-{transaction_id}");
 
@@ -1876,6 +1918,7 @@ fn TransactionEditorPanel(
                                 button {
                                     class: "tag-pill removable",
                                     title: "Remove tag",
+                                    disabled,
                                     onclick: {
                                         let account_id = account_id.clone();
                                         let transaction_id = transaction_id.clone();
@@ -1901,6 +1944,7 @@ fn TransactionEditorPanel(
                                     list: "{list_id}",
                                     value: "{draft}",
                                     placeholder: "Add tag",
+                                    disabled,
                                     oninput: move |event| draft_tag.set(event.value()),
                                     onkeydown: {
                                         let account_id = account_id.clone();
@@ -1960,6 +2004,7 @@ fn TransactionEditorPanel(
                                 for tag in suggestions.clone() {
                                     button {
                                         class: "tag-suggestion-pill",
+                                        disabled,
                                         onclick: {
                                             let account_id = account_id.clone();
                                             let transaction_id = transaction_id.clone();
@@ -1989,6 +2034,7 @@ fn TransactionEditorPanel(
                             r#type: "date",
                             value: "{date_value}",
                             title: "Reporting date",
+                            disabled,
                             onchange: {
                                 let account_id = account_id.clone();
                                 let transaction_id = transaction_id.clone();
@@ -2014,6 +2060,7 @@ fn TransactionEditorPanel(
                             button {
                                 class: "tag-editor-button",
                                 title: "Reset to posted date",
+                                disabled,
                                 onclick: {
                                     let account_id = account_id.clone();
                                     let transaction_id = transaction_id.clone();
@@ -2037,7 +2084,7 @@ fn TransactionEditorPanel(
                         input {
                             r#type: "checkbox",
                             checked: exclude_checked,
-                            disabled: rule_ignored,
+                            disabled: rule_ignored || disabled,
                             onchange: {
                                 let account_id = account_id.clone();
                                 let transaction_id = transaction_id.clone();

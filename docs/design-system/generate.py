@@ -322,6 +322,14 @@ def panels_inner():
   <span class="activity-spinner"></span>
   <span>Syncing Chase connection</span>
 </div>
+<div class="ds-group-title">operation-status</div>
+<div class="operation-status busy" role="status" aria-live="polite" aria-busy="true">
+  <span class="activity-spinner"></span>
+  <span>Refreshing stale prices...</span>
+</div>
+<div class="operation-status" role="status" aria-live="polite" aria-busy="false">
+  <span>Updated 14 prices.</span>
+</div>
 <section class="status-panel" style="margin-bottom:16px;">
   <h2>Connection</h2>
   <p>Loading local finance data...</p>
@@ -364,7 +372,7 @@ def panels_inner():
 panels_body = (
     '<div class="ds-h1">Panels &amp; cards</div>\n'
     '<p class="ds-sub">Panel/header/title composition, metric cards, status &amp; inline-status blocks, the '
-    "backend-activity notice, and settings setting-row switches (checked + unchecked). Markup mirrors "
+    "backend and user-triggered operation notices, and settings setting-row switches (checked + unchecked). Markup mirrors "
     "<code>views/shared.rs</code> and <code>views/graph_settings.rs</code>.</p>\n"
     + two_themes(panels_inner)
 )

@@ -64,6 +64,7 @@ pub(super) fn AccountsView(
     let resync_status_text = resync_status();
     let is_git_sync_busy = git_sync_busy();
     let git_sync_status_text = git_sync_status();
+    let any_account_operation_busy = is_git_sync_busy || is_price_busy || is_resync_busy;
     let pull_distance_value = pull_distance();
     let pull_offset = pull_refresh_offset(pull_distance_value);
     let pull_ready = pull_distance_value >= PULL_REFRESH_TRIGGER_PX;
@@ -173,9 +174,12 @@ pub(super) fn AccountsView(
                     actions: rsx! {
                         div { class: "settings-actions inline-actions",
                             ControlButton {
-                                disabled: is_git_sync_busy,
+                                disabled: any_account_operation_busy,
+                                busy: is_git_sync_busy,
                                 onclick: move |_| {
                                     git_sync_busy.set(true);
+                                    price_status.set(String::new());
+                                    resync_status.set(String::new());
                                     git_sync_status.set("Syncing Git repository...".to_string());
                                     spawn(async move {
                                         let result = async {
@@ -218,15 +222,18 @@ pub(super) fn AccountsView(
                                 input {
                                     r#type: "checkbox",
                                     checked: force_prices(),
-                                    disabled: is_price_busy,
+                                    disabled: any_account_operation_busy,
                                     onchange: move |event| force_prices.set(event.checked())
                                 }
                                 span { "Force prices" }
                             }
                             ControlButton {
-                                disabled: is_price_busy,
+                                disabled: any_account_operation_busy,
+                                busy: is_price_busy,
                                 onclick: move |_| {
                                     price_busy.set(true);
+                                    git_sync_status.set(String::new());
+                                    resync_status.set(String::new());
                                     let input = SyncPricesInput {
                                         scope: "all".to_string(),
                                         target: None,
@@ -254,9 +261,12 @@ pub(super) fn AccountsView(
                                 if is_price_busy { "Refreshing" } else { "Refresh prices" }
                             }
                             ControlButton {
-                                disabled: is_resync_busy,
+                                disabled: any_account_operation_busy,
+                                busy: is_resync_busy,
                                 onclick: move |_| {
                                     resync_busy.set(true);
+                                    git_sync_status.set(String::new());
+                                    price_status.set(String::new());
                                     resync_status.set("Resyncing data from disk...".to_string());
                                     spawn(async move {
                                         match reload_data().await {
@@ -276,13 +286,13 @@ pub(super) fn AccountsView(
                         }
                     },
                     if !price_status_text.is_empty() {
-                        p { class: "settings-status", "{price_status_text}" }
+                        OperationStatus { message: price_status_text, busy: is_price_busy }
                     }
                     if !resync_status_text.is_empty() {
-                        p { class: "settings-status", "{resync_status_text}" }
+                        OperationStatus { message: resync_status_text, busy: is_resync_busy }
                     }
                     if !git_sync_status_text.is_empty() {
-                        p { class: "settings-status", "{git_sync_status_text}" }
+                        OperationStatus { message: git_sync_status_text, busy: is_git_sync_busy }
                     }
                     div { class: "group-list",
                         if !virtual_accounts.is_empty() {

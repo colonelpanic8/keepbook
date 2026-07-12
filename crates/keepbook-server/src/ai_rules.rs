@@ -66,7 +66,10 @@ pub async fn suggest_rules(
     let api_key = resolve_openai_api_key(config_path, config).await?;
     let model = normalized_model(config);
     let request_body = openai_request_body(config, &model, prompt, &input)?;
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(90))
+        .build()
+        .context("failed to configure OpenAI client")?;
     let response = client
         .post("https://api.openai.com/v1/responses")
         .bearer_auth(api_key.expose_secret())

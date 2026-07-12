@@ -1,6 +1,23 @@
 use super::logic::*;
 use super::*;
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn native_worker_completes_off_the_ui_thread() {
+    let ui_thread = std::thread::current().id();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime should start");
+    let worker_thread = runtime
+        .block_on(crate::api::run_native_blocking(|| {
+            Ok(std::thread::current().id())
+        }))
+        .expect("worker should return its result");
+
+    assert_ne!(worker_thread, ui_thread);
+}
+
 fn point(date: &str, value: f64) -> NetWorthDataPoint {
     NetWorthDataPoint {
         date: date.to_string(),

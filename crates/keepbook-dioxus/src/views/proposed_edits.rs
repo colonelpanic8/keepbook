@@ -5,6 +5,7 @@ use crate::api::{decide_proposed_transaction_edit, fetch_proposed_transaction_ed
 pub(super) fn ProposedEditsView(onrefresh: EventHandler<()>) -> Element {
     let mut proposals = use_resource(fetch_proposed_transaction_edits);
     let mut busy_id = use_signal(String::new);
+    let mut busy_action = use_signal(String::new);
     let mut status = use_signal(String::new);
     let current = proposals.cloned();
     let busy = busy_id();
@@ -21,7 +22,7 @@ pub(super) fn ProposedEditsView(onrefresh: EventHandler<()>) -> Element {
                 }
             }
             if !status_text.is_empty() {
-                p { class: "settings-status", "{status_text}" }
+                OperationStatus { message: status_text, busy: !busy.is_empty() }
             }
             match current {
                 None => rsx! { BackendActivity { message: "Loading proposed edits" } },
@@ -45,8 +46,10 @@ pub(super) fn ProposedEditsView(onrefresh: EventHandler<()>) -> Element {
                                 ProposedEditRow {
                                     edit: edit.clone(),
                                     busy: busy.clone(),
+                                    busy_action: busy_action(),
                                     ondecide: move |(id, action): (String, &'static str)| {
                                         busy_id.set(id.clone());
+                                        busy_action.set(action.to_string());
                                         status.set(format!("{action} {id}..."));
                                         spawn(async move {
                                             match decide_proposed_transaction_edit(id.clone(), action).await {
@@ -58,6 +61,7 @@ pub(super) fn ProposedEditsView(onrefresh: EventHandler<()>) -> Element {
                                                 Err(error) => status.set(error),
                                             }
                                             busy_id.set(String::new());
+                                            busy_action.set(String::new());
                                         });
                                     }
                                 }
@@ -74,6 +78,7 @@ pub(super) fn ProposedEditsView(onrefresh: EventHandler<()>) -> Element {
 fn ProposedEditRow(
     edit: ProposedTransactionEdit,
     busy: String,
+    busy_action: String,
     ondecide: EventHandler<(String, &'static str)>,
 ) -> Element {
     let is_busy = busy == edit.id;
@@ -102,19 +107,22 @@ fn ProposedEditRow(
                 ControlButton {
                     selected: true,
                     disabled: any_busy,
+                    busy: is_busy && busy_action == "approve",
                     onclick: move |_| ondecide.call((approve_id.clone(), "approve")),
-                    if is_busy { "Working" } else { "Approve" }
+                    if is_busy && busy_action == "approve" { "Approving" } else { "Approve" }
                 }
                 ControlButton {
                     disabled: any_busy,
+                    busy: is_busy && busy_action == "reject",
                     onclick: move |_| ondecide.call((reject_id.clone(), "reject")),
-                    "Reject"
+                    if is_busy && busy_action == "reject" { "Rejecting" } else { "Reject" }
                 }
                 ControlButton {
                     class: "danger-button",
                     disabled: any_busy,
+                    busy: is_busy && busy_action == "remove",
                     onclick: move |_| ondecide.call((remove_id.clone(), "remove")),
-                    "Remove"
+                    if is_busy && busy_action == "remove" { "Removing" } else { "Remove" }
                 }
             }
         }

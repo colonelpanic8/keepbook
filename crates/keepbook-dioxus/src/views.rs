@@ -88,6 +88,8 @@ pub(crate) fn App() -> Element {
     let mut tray_last_cycle_text = use_signal(|| "Last price refresh: never".to_string());
     let mut tray_last_summary = use_signal(|| "No price refresh has run yet".to_string());
     let mut tray_snapshot = use_resource(fetch_tray_snapshot);
+    let overview_refreshing =
+        overview.state().cloned() == UseResourceState::Pending && overview.cloned().is_some();
 
     rsx! {
         DesktopTrayBridge {
@@ -149,6 +151,7 @@ pub(crate) fn App() -> Element {
                 Some(Ok(data)) => rsx! {
                     Dashboard {
                         overview: data,
+                        overview_refreshing,
                         filter_overrides: filter_overrides(),
                         onfilterchange: move |overrides| filter_overrides.set(overrides),
                         onrefresh: move |_| {
@@ -159,7 +162,10 @@ pub(crate) fn App() -> Element {
                     }
                 },
                 Some(Err(error)) => rsx! {
-                    StatusPanel { state: LoadState::Failed(error) }
+                    StatusPanel {
+                        state: LoadState::Failed(error),
+                        onretry: move |_| overview.restart(),
+                    }
                 },
             }
         }
@@ -220,7 +226,8 @@ fn DesktopTrayBridge(
 }
 
 #[component]
-fn StatusPanel(state: LoadState) -> Element {
+fn StatusPanel(state: LoadState, onretry: Option<EventHandler<()>>) -> Element {
+    let failed = matches!(state, LoadState::Failed(_));
     let message = match state {
         LoadState::Loading => "Loading local finance data...".to_string(),
         LoadState::Failed(error) => error,
@@ -230,6 +237,15 @@ fn StatusPanel(state: LoadState) -> Element {
         section { class: "status-panel",
             h2 { "Connection" }
             p { "{message}" }
+            if failed {
+                if let Some(onretry) = onretry {
+                    ControlButton {
+                        selected: true,
+                        onclick: move |_| onretry.call(()),
+                        "Retry"
+                    }
+                }
+            }
         }
     }
 }
@@ -246,6 +262,7 @@ fn price_sync_result_has_failures(result: &serde_json::Value) -> bool {
 #[component]
 fn Dashboard(
     overview: Overview,
+    overview_refreshing: bool,
     filter_overrides: FilterOverrides,
     onfilterchange: EventHandler<FilterOverrides>,
     onrefresh: EventHandler<()>,
@@ -306,6 +323,12 @@ fn Dashboard(
                 }
             }
             div { class: "workspace",
+                if overview_refreshing {
+                    OperationStatus {
+                        message: "Refreshing app data…".to_string(),
+                        busy: true,
+                    }
+                }
                 match active {
                     ActiveView::Spending => rsx! {
                         SpendingView {

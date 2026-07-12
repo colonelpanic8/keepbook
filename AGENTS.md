@@ -40,6 +40,15 @@ Examples:
 This applies to all UI surfaces, including Dioxus, Expo/React Native, web
 components, tray/menu views, and any future frontend.
 
+## UI Design System
+
+Before planning, implementing, or reviewing UI changes, read
+`docs/design-system/README.md` and the design documents it links. Treat those
+documents and `crates/keepbook-dioxus/assets/styles.css` as the source of truth
+for interaction states, components, and tokens. Update the relevant design
+document in the same change whenever a new UI pattern is introduced or an
+existing pattern changes.
+
 ## Development Environment
 
 - Run repository commands in the direnv-provided environment.

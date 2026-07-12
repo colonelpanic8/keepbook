@@ -16,7 +16,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 image = { version = "0.25", optional = true, default-features = false, features = ["png"] }
 ksni = { version = "0.3", optional = true, features = ["blocking"] }
-futures-util = { version = "0.3", optional = true }
+futures-util = "0.3"
 gdk = { version = "0.18", optional = true }
 glib = { version = "0.18", optional = true }
 gtk = { version = "0.18", optional = true }
@@ -24,7 +24,7 @@ gtk = { version = "0.18", optional = true }
 [features]
 default = ["web"]
 web = ["dioxus/web", "dep:gloo-net"]
-desktop = ["dioxus/desktop", "dep:image", "dep:ksni", "dep:futures-util", "dep:gdk", "dep:glib", "dep:gtk"]
+desktop = ["dioxus/desktop", "dep:image", "dep:ksni", "dep:gdk", "dep:glib", "dep:gtk"]
 mobile = ["dioxus/mobile"]
 android = ["mobile"]
 
@@ -32,6 +32,7 @@ android = ["mobile"]
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 keepbook-server = { path = "../keepbook-server", default-features = false }
 serde_urlencoded = "0.7"
+tokio = { version = "1", features = ["net", "rt", "sync", "time"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = "=0.3.95"

@@ -478,7 +478,8 @@ small,
   margin: 0;
 }
 
-.backend-activity {
+.backend-activity,
+.operation-status {
   align-items: center;
   background: var(--color-accent-bg);
   border: 1px solid var(--color-accent-border);
@@ -493,19 +494,16 @@ small,
   width: fit-content;
 }
 
-.git-sync-working {
-  align-items: center;
-  background: var(--color-accent-bg);
-  border: 1px solid var(--color-accent-border);
-  border-radius: var(--radius-sm);
-  color: var(--color-accent-fg);
-  display: inline-flex;
-  font-size: var(--fs-small);
-  font-weight: var(--fw-bold);
-  gap: var(--sp-8);
-  margin-bottom: var(--sp-12);
-  padding: 8px 10px;
-  width: fit-content;
+.operation-status {
+  margin: 0 0 var(--sp-12);
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.operation-status:not(.busy) {
+  background: var(--color-surface-subtle);
+  border-color: var(--color-border);
+  color: var(--color-text-secondary);
 }
 
 .inline-notice {
@@ -532,6 +530,12 @@ small,
 .activity-spinner.large {
   height: 24px;
   width: 24px;
+}
+
+.activity-spinner.control-spinner {
+  flex: 0 0 auto;
+  height: 12px;
+  width: 12px;
 }
 
 @keyframes activity-spin {
@@ -1083,6 +1087,17 @@ small,
 
   100% {
     left: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .activity-spinner {
+    animation-duration: 2.4s;
+  }
+
+  .indeterminate-progress span {
+    animation: none;
+    left: 29%;
   }
 }
 

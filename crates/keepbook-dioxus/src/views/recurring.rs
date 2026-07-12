@@ -8,6 +8,7 @@ pub(super) fn RecurringView() -> Element {
     let mut min_confidence = use_signal(|| "0.70".to_string());
     let mut sort_order = use_signal(|| "annual_desc".to_string());
     let mut busy_key = use_signal(String::new);
+    let mut busy_action = use_signal(String::new);
     let mut status = use_signal(String::new);
     let mut recurring = use_resource(move || {
         let query =
@@ -84,7 +85,7 @@ pub(super) fn RecurringView() -> Element {
                 }
             }
             if !status_text.is_empty() {
-                p { class: "settings-status", "{status_text}" }
+                OperationStatus { message: status_text, busy: !busy.is_empty() }
             }
             match current {
                 None => rsx! { BackendActivity { message: "Loading recurring transactions" } },
@@ -101,8 +102,10 @@ pub(super) fn RecurringView() -> Element {
                                 RecurringCandidateCard {
                                     item: item.clone(),
                                     busy: busy.clone(),
+                                    busy_action: busy_action(),
                                     onreview: move |(candidate, review_status): (RecurringTransaction, &'static str)| {
                                         busy_key.set(candidate.candidate_key.clone());
+                                        busy_action.set(review_status.to_string());
                                         status.set(format!("Marking {} as {review_status}...", candidate.name));
                                         spawn(async move {
                                             let input = RecurringTransactionReviewInput {
@@ -117,6 +120,7 @@ pub(super) fn RecurringView() -> Element {
                                                 Err(error) => status.set(error),
                                             }
                                             busy_key.set(String::new());
+                                            busy_action.set(String::new());
                                         });
                                     }
                                 }
@@ -133,6 +137,7 @@ pub(super) fn RecurringView() -> Element {
 fn RecurringCandidateCard(
     item: RecurringTransaction,
     busy: String,
+    busy_action: String,
     onreview: EventHandler<(RecurringTransaction, &'static str)>,
 ) -> Element {
     let review_class = format!("review-badge review-{}", item.review_status);
@@ -188,14 +193,16 @@ fn RecurringCandidateCard(
                 ControlButton {
                     selected: true,
                     disabled: any_busy || item.review_status == "verified",
+                    busy: is_busy && busy_action == "verified",
                     onclick: move |_| onreview.call((candidate_for_verify.clone(), "verified")),
-                    if is_busy { "Working" } else { "Verify" }
+                    if is_busy && busy_action == "verified" { "Verifying" } else { "Verify" }
                 }
                 ControlButton {
                     class: "danger-button",
                     disabled: any_busy || item.review_status == "dismissed",
+                    busy: is_busy && busy_action == "dismissed",
                     onclick: move |_| onreview.call((candidate_for_dismiss.clone(), "dismissed")),
-                    "Dismiss"
+                    if is_busy && busy_action == "dismissed" { "Dismissing" } else { "Dismiss" }
                 }
             }
             details { class: "recurring-occurrences",

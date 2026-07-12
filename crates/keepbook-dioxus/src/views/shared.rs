@@ -34,6 +34,33 @@ pub(super) fn BackendActivity(message: &'static str) -> Element {
     }
 }
 
+/// Persistent, non-modal feedback for an operation the user started.
+///
+/// Keep this near the controls that started the work. Busy operations get an
+/// indeterminate spinner and `aria-busy`; completed and failed messages remain
+/// readable without blocking navigation or replacing already-loaded content.
+#[component]
+pub(super) fn OperationStatus(message: String, busy: bool) -> Element {
+    let class = if busy {
+        "operation-status busy"
+    } else {
+        "operation-status"
+    };
+
+    rsx! {
+        div {
+            class: "{class}",
+            role: "status",
+            aria_live: "polite",
+            aria_busy: busy,
+            if busy {
+                span { class: "activity-spinner", aria_hidden: "true" }
+            }
+            span { "{message}" }
+        }
+    }
+}
+
 #[component]
 pub(super) fn GraphLoadingPanel(range: String, sampling: &'static str) -> Element {
     rsx! {
@@ -84,6 +111,7 @@ pub(super) fn ControlButton(
     danger: Option<bool>,
     class: Option<String>,
     disabled: Option<bool>,
+    busy: Option<bool>,
     onclick: EventHandler<MouseEvent>,
 ) -> Element {
     let mut class_name = String::from("control-button");
@@ -98,11 +126,17 @@ pub(super) fn ControlButton(
         class_name.push_str(&extra);
     }
 
+    let is_busy = busy.unwrap_or(false);
+
     rsx! {
         button {
             class: "{class_name}",
-            disabled: disabled.unwrap_or(false),
+            disabled: disabled.unwrap_or(false) || is_busy,
+            aria_busy: is_busy,
             onclick: move |event| onclick.call(event),
+            if is_busy {
+                span { class: "activity-spinner control-spinner", aria_hidden: "true" }
+            }
             {children}
         }
     }

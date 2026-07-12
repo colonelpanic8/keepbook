@@ -19,3 +19,11 @@ regenerate it whenever `styles.css` changes. Each file's first line is a
 importer. Pages: `colors.html`, `typography.html` (Foundations);
 `buttons.html`, `panels.html`, `badges.html`, `forms.html` (Components);
 `charts.html` (Charts).
+
+## Design documents
+
+- [Interaction states](interaction-states.md) defines loading, in-flight,
+  success, failure, cancellation, and control-locking behavior for every app
+  surface.
+- [Design tokens](../design-tokens.md) defines the semantic visual tokens used
+  by the app and preview bundle.

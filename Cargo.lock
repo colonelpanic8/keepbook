@@ -3942,6 +3942,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_urlencoded",
+ "tokio",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",

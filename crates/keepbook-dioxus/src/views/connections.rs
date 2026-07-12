@@ -51,6 +51,7 @@ pub(super) fn ConnectionsView(
                     }
                     ControlButton {
                         disabled: is_busy,
+                        busy: busy == "all",
                         onclick: move |_| {
                             busy_target.set("all".to_string());
                             let input = SyncConnectionsInput {
@@ -79,6 +80,7 @@ pub(super) fn ConnectionsView(
                     ControlButton {
                         selected: true,
                         disabled: is_busy,
+                        busy: busy == "prices:all",
                         onclick: move |_| {
                             busy_target.set("prices:all".to_string());
                             let input = SyncPricesInput {
@@ -108,7 +110,7 @@ pub(super) fn ConnectionsView(
                 }
             },
             if !status_text.is_empty() {
-                p { class: "settings-status", "{status_text}" }
+                OperationStatus { message: status_text, busy: is_busy }
             }
             div { class: "data-table connection-table",
                 div { class: "table-head",
@@ -139,6 +141,7 @@ pub(super) fn ConnectionsView(
                         div { class: "connection-actions",
                             ControlButton {
                                 disabled: is_busy,
+                                busy: row_busy,
                                 onclick: move |_| {
                                     let target = sync_target.clone();
                                     busy_target.set(target.clone());
@@ -163,6 +166,7 @@ pub(super) fn ConnectionsView(
                             }
                             ControlButton {
                                 disabled: is_busy,
+                                busy: price_busy,
                                 onclick: move |_| {
                                     let target = prices_target.clone();
                                     let price_target = format!("prices:{target}");
