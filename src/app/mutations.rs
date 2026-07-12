@@ -6,10 +6,10 @@ use anyhow::{Context, Result};
 use crate::clock::{Clock, SystemClock};
 use crate::config::ResolvedConfig;
 use crate::models::{
-    Account, AccountConfig, Asset, AssetBalance, BalanceBackfillPolicy, BalanceSnapshot,
-    Connection, ConnectionConfig, ConnectionState, Id, IdGenerator, ProposedTransactionEdit,
-    ProposedTransactionEditStatus, TransactionAnnotation, TransactionAnnotationPatch,
-    UuidIdGenerator,
+    tag_ignores_spending, Account, AccountConfig, Asset, AssetBalance, BalanceBackfillPolicy,
+    BalanceSnapshot, Connection, ConnectionConfig, ConnectionState, Id, IdGenerator,
+    ProposedTransactionEdit, ProposedTransactionEditStatus, TransactionAnnotation,
+    TransactionAnnotationPatch, UuidIdGenerator,
 };
 use crate::storage::{find_account, Storage};
 
@@ -425,6 +425,7 @@ pub async fn set_transaction_annotation(
         tags: None,
         subtags: None,
         effective_date: None,
+        ignore_spending: None,
     };
 
     if clear_description {
@@ -550,6 +551,9 @@ pub async fn set_transaction_annotation(
                 serde_json::json!(v.to_string()),
             );
         }
+        if let Some(v) = ann.ignore_spending {
+            m.insert("ignore_spending".to_string(), serde_json::json!(v));
+        }
         serde_json::Value::Object(m)
     };
 
@@ -646,6 +650,7 @@ async fn set_transaction_label_list(
                     None
                 },
                 effective_date: None,
+                ignore_spending: None,
             })
             .collect::<Vec<_>>();
         updated_count += patches.len();
@@ -682,6 +687,124 @@ pub async fn set_transaction_tags(
     clear_tags: bool,
 ) -> Result<serde_json::Value> {
     set_transaction_label_list(storage, config, targets, "tags", tags, clear_tags).await
+}
+
+/// Set or clear the per-transaction "ignored from spending" annotation.
+///
+/// When `ignore` is true, writes a patch setting `ignore_spending` to true.
+/// When `ignore` is false, writes a patch clearing the `ignore_spending` field
+/// and strips any legacy magic ignore tags (`ignore_spending`, `ignore-spending`,
+/// `ignore:spending`) from the annotation's tags so un-ignoring also works for
+/// legacy-tagged transactions.
+pub async fn set_transaction_ignore(
+    storage: &dyn Storage,
+    config: &ResolvedConfig,
+    targets: Vec<(String, String)>,
+    ignore: bool,
+) -> Result<serde_json::Value> {
+    if targets.is_empty() {
+        anyhow::bail!("No transactions specified");
+    }
+
+    let mut by_account: HashMap<Id, Vec<Id>> = HashMap::new();
+    let mut seen = HashSet::new();
+    for (account_id, transaction_id) in targets {
+        let account_id = Id::from_string_checked(&account_id)
+            .with_context(|| format!("Invalid account id: {account_id}"))?;
+        let transaction_id = Id::from_string_checked(&transaction_id)
+            .with_context(|| format!("Invalid transaction id: {transaction_id}"))?;
+        if seen.insert((account_id.clone(), transaction_id.clone())) {
+            by_account
+                .entry(account_id)
+                .or_default()
+                .push(transaction_id);
+        }
+    }
+
+    let timestamp = chrono::Utc::now();
+    let mut updated_count = 0usize;
+    for (account_id, transaction_ids) in by_account {
+        storage
+            .get_account(&account_id)
+            .await?
+            .context("Account not found")?;
+
+        let txns = storage.get_transactions(&account_id).await?;
+        let valid_transaction_ids = txns
+            .iter()
+            .map(|transaction| transaction.id.clone())
+            .collect::<HashSet<_>>();
+        for transaction_id in &transaction_ids {
+            if !valid_transaction_ids.contains(transaction_id) {
+                anyhow::bail!("Transaction not found for account: {transaction_id}");
+            }
+        }
+
+        // When un-ignoring, materialize current annotation state so legacy
+        // magic ignore tags can be stripped from the tags list.
+        let mut annotations_by_tx: HashMap<Id, TransactionAnnotation> = HashMap::new();
+        if !ignore {
+            for patch in storage
+                .get_transaction_annotation_patches(&account_id)
+                .await?
+            {
+                let tx_id = patch.transaction_id.clone();
+                let ann = annotations_by_tx
+                    .entry(tx_id.clone())
+                    .or_insert_with(|| TransactionAnnotation::new(tx_id));
+                patch.apply_to(ann);
+            }
+        }
+
+        let patches = transaction_ids
+            .into_iter()
+            .map(|transaction_id| {
+                let mut patch = TransactionAnnotationPatch {
+                    transaction_id: transaction_id.clone(),
+                    timestamp,
+                    description: None,
+                    note: None,
+                    tags: None,
+                    subtags: None,
+                    effective_date: None,
+                    ignore_spending: Some(if ignore { Some(true) } else { None }),
+                };
+                if !ignore {
+                    if let Some(tags) = annotations_by_tx
+                        .get(&transaction_id)
+                        .and_then(|ann| ann.tags.as_ref())
+                    {
+                        if tags.iter().any(|tag| tag_ignores_spending(tag)) {
+                            patch.tags = Some(Some(
+                                tags.iter()
+                                    .filter(|tag| !tag_ignores_spending(tag))
+                                    .cloned()
+                                    .collect(),
+                            ));
+                        }
+                    }
+                }
+                patch
+            })
+            .collect::<Vec<_>>();
+        updated_count += patches.len();
+        storage
+            .append_transaction_annotation_patches(&account_id, &patches)
+            .await?;
+    }
+
+    let result = serde_json::json!({
+        "success": true,
+        "updated_count": updated_count,
+        "ignore": ignore,
+    });
+
+    maybe_auto_commit(
+        config,
+        &format!("set transaction ignore for {updated_count} transactions"),
+    );
+
+    Ok(result)
 }
 
 pub async fn set_transaction_subtags(
@@ -986,6 +1109,7 @@ fn build_transaction_annotation_patch(
         tags: None,
         subtags: None,
         effective_date: None,
+        ignore_spending: None,
     };
     if clear_description {
         patch.description = Some(None);

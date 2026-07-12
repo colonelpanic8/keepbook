@@ -1,7 +1,7 @@
 use super::*;
 use crate::api::{
-    fetch_spending_dashboard, set_transaction_effective_date, set_transaction_tags,
-    suggest_ai_rules,
+    fetch_spending_dashboard, set_transaction_effective_date, set_transaction_ignore,
+    set_transaction_tags, suggest_ai_rules,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -656,6 +656,34 @@ pub(super) fn SpendingView(currency: String) -> Element {
                                     match set_transaction_effective_date(input).await {
                                         Ok(()) => {
                                             tag_update_status.set(Some("Date saved.".to_string()));
+                                            spending.restart();
+                                        }
+                                        Err(error) => {
+                                            tag_update_status.set(Some(error));
+                                        }
+                                    }
+                                }
+                            });
+                        },
+                        onignoresave: move |input: SetTransactionIgnoreInput| {
+                            let count = input.transactions.len();
+                            let clear_selection = count > 1;
+                            tag_update_status.set(Some("Updating spending exclusion...".to_string()));
+                            spawn({
+                                let mut spending = spending;
+                                let mut tag_update_status = tag_update_status;
+                                let mut selected_transaction_keys = selected_transaction_keys;
+                                async move {
+                                    match set_transaction_ignore(input).await {
+                                        Ok(()) => {
+                                            tag_update_status.set(Some(if count > 1 {
+                                                format!("Updated {count} transaction(s).")
+                                            } else {
+                                                "Updated.".to_string()
+                                            }));
+                                            if clear_selection {
+                                                selected_transaction_keys.set(HashSet::new());
+                                            }
                                             spending.restart();
                                         }
                                         Err(error) => {
@@ -1326,11 +1354,13 @@ fn TransactionList(
     ontagssave: EventHandler<SetTransactionTagsInput>,
     ontagsbulksave: EventHandler<SetTransactionTagsInput>,
     oneffectivedatesave: EventHandler<SetTransactionEffectiveDateInput>,
+    onignoresave: EventHandler<SetTransactionIgnoreInput>,
 ) -> Element {
     let has_any_selection = !selected_keys.is_empty();
     let has_visible_selection = selected_count > 0 && !tag_targets.is_empty();
     let has_transactions = !transactions.is_empty();
     let mut group_editor_open = use_signal(|| false);
+    let mut expanded_transaction_key = use_signal(|| None::<String>);
     rsx! {
         div { class: "transaction-panel",
             div { class: "panel-header transaction-header",
@@ -1396,6 +1426,30 @@ fn TransactionList(
                         class: "control-button selected",
                         onclick: move |_| group_editor_open.set(true),
                         "Edit Tags"
+                    }
+                    button {
+                        class: "control-button",
+                        title: "Exclude selected transactions from spending totals",
+                        onclick: {
+                            let targets = tag_targets.clone();
+                            move |_| onignoresave.call(SetTransactionIgnoreInput {
+                                transactions: targets.clone(),
+                                ignore: true,
+                            })
+                        },
+                        "Exclude from spending"
+                    }
+                    button {
+                        class: "control-button",
+                        title: "Include selected transactions in spending totals",
+                        onclick: {
+                            let targets = tag_targets.clone();
+                            move |_| onignoresave.call(SetTransactionIgnoreInput {
+                                transactions: targets.clone(),
+                                ignore: false,
+                            })
+                        },
+                        "Include in spending"
                     }
                 }
             }
@@ -1496,40 +1550,110 @@ fn TransactionList(
                             onsortfieldchange,
                             onsortdirectionchange,
                         }
+                        span { "" }
                     }
                     for tx in transactions.clone() {
-                        div {
-                            key: "{transaction_key(&tx)}",
-                            class: "{transaction_row_class(&tx)}",
-                            title: if tx.ignored_from_spending { "Not counted in spending totals" } else { "" },
-                            label { class: "transaction-select-cell",
-                                input {
-                                    r#type: "checkbox",
-                                    checked: selected_keys.contains(&transaction_key(&tx)),
-                                    onchange: move |_| ontoggleselection.call(transaction_key(&tx))
+                        {
+                            let key = transaction_key(&tx);
+                            let is_expanded = expanded_transaction_key().as_deref() == Some(key.as_str());
+                            let checkbox_key = key.clone();
+                            let row_toggle_key = key.clone();
+                            let chevron_toggle_key = key.clone();
+                            let is_selected = selected_keys.contains(&key);
+                            let has_effective_date = tx
+                                .annotation
+                                .as_ref()
+                                .and_then(|annotation| annotation.effective_date.as_ref())
+                                .is_some();
+                            let posted_date = tx
+                                .timestamp
+                                .get(..10)
+                                .unwrap_or(&tx.timestamp)
+                                .to_string();
+                            let row_tags = visible_transaction_tags(&tx);
+                            let row_class = if is_expanded {
+                                format!("{} expanded", transaction_row_class(&tx))
+                            } else {
+                                transaction_row_class(&tx).to_string()
+                            };
+                            rsx! {
+                                div {
+                                    key: "{key}",
+                                    class: "{row_class}",
+                                    title: if tx.ignored_from_spending { "Not counted in spending totals" } else { "" },
+                                    onclick: move |_| {
+                                        let next = if expanded_transaction_key().as_deref()
+                                            == Some(row_toggle_key.as_str())
+                                        {
+                                            None
+                                        } else {
+                                            Some(row_toggle_key.clone())
+                                        };
+                                        expanded_transaction_key.set(next);
+                                    },
+                                    label {
+                                        class: "transaction-select-cell",
+                                        onclick: move |event| event.stop_propagation(),
+                                        input {
+                                            r#type: "checkbox",
+                                            checked: is_selected,
+                                            onchange: move |_| ontoggleselection.call(checkbox_key.clone())
+                                        }
+                                    }
+                                    span { class: "transaction-date-cell",
+                                        span { class: "transaction-date-text", "{transaction_date(&tx)}" }
+                                        if has_effective_date {
+                                            span {
+                                                class: "effective-date-indicator",
+                                                title: "Posted {posted_date}",
+                                                "*"
+                                            }
+                                        }
+                                    }
+                                    strong { class: "transaction-description-cell", "{transaction_description(&tx)}" }
+                                    span { class: "transaction-tag-cell",
+                                        div { class: "transaction-tag-readonly",
+                                            if row_tags.is_empty() {
+                                                span { class: "tag-empty", "Untagged" }
+                                            }
+                                            for tag in row_tags.clone() {
+                                                span { class: "tag-pill readonly", "{tag}" }
+                                            }
+                                        }
+                                        if tx.ignored_from_spending {
+                                            small { class: "ignored-badge", "Not counted" }
+                                        }
+                                    }
+                                    span { class: "transaction-account-cell", "{tx.account_name}" }
+                                    strong { class: "transaction-amount-cell", "{format_transaction_amount(&tx, &currency)}" }
+                                    button {
+                                        class: "transaction-expand-toggle",
+                                        r#type: "button",
+                                        title: if is_expanded { "Collapse editor" } else { "Expand to edit" },
+                                        onclick: move |event| {
+                                            event.stop_propagation();
+                                            let next = if expanded_transaction_key().as_deref()
+                                                == Some(chevron_toggle_key.as_str())
+                                            {
+                                                None
+                                            } else {
+                                                Some(chevron_toggle_key.clone())
+                                            };
+                                            expanded_transaction_key.set(next);
+                                        },
+                                        if is_expanded { "\u{2304}" } else { "\u{203A}" }
+                                    }
                                 }
-                            }
-                            span { class: "transaction-date-cell",
-                                TransactionEffectiveDateEditor {
-                                    transaction: tx.clone(),
-                                    oneffectivedatesave,
-                                }
-                            }
-                            strong { "{transaction_description(&tx)}" }
-                            span { class: "transaction-tag-cell",
-                                div { class: "transaction-tag-stack",
-                                    TransactionTagsEditor {
+                                if is_expanded {
+                                    TransactionEditorPanel {
                                         transaction: tx.clone(),
                                         tag_options: tag_options.clone(),
                                         ontagssave,
+                                        oneffectivedatesave,
+                                        onignoresave,
                                     }
                                 }
-                                if tx.ignored_from_spending {
-                                    small { class: "ignored-badge", "Not counted" }
-                                }
                             }
-                            span { "{tx.account_name}" }
-                            strong { "{format_transaction_amount(&tx, &currency)}" }
                         }
                     }
                 }
@@ -1687,165 +1811,264 @@ fn AiRuleSuggestions(result: AiRuleSuggestionsOutput) -> Element {
     }
 }
 
+fn single_transaction_target(
+    account_id: &str,
+    transaction_id: &str,
+) -> Vec<TransactionTagTargetInput> {
+    vec![TransactionTagTargetInput {
+        account_id: account_id.to_string(),
+        transaction_id: transaction_id.to_string(),
+    }]
+}
+
+fn transaction_tags_input(
+    account_id: &str,
+    transaction_id: &str,
+    tags: Vec<String>,
+) -> SetTransactionTagsInput {
+    SetTransactionTagsInput {
+        transactions: single_transaction_target(account_id, transaction_id),
+        clear_tags: tags.is_empty(),
+        tags,
+    }
+}
+
+/// Full-width editor rendered directly beneath an expanded transaction row.
+/// Tag edits and the spending toggle commit immediately; the reporting date
+/// commits on change.
 #[component]
-fn TransactionEffectiveDateEditor(
+fn TransactionEditorPanel(
     transaction: Transaction,
+    tag_options: Vec<String>,
+    ontagssave: EventHandler<SetTransactionTagsInput>,
     oneffectivedatesave: EventHandler<SetTransactionEffectiveDateInput>,
+    onignoresave: EventHandler<SetTransactionIgnoreInput>,
 ) -> Element {
-    let current_effective = transaction
-        .annotation
-        .as_ref()
-        .and_then(|annotation| annotation.effective_date.clone());
-    let display_date = transaction_date(&transaction);
+    let account_id = transaction.account_id.clone();
+    let transaction_id = transaction.id.clone();
+    let current_tags = transaction_tags(&transaction);
+    let mut draft_tag = use_signal(String::new);
+    let draft = draft_tag();
+    let can_add = !draft.trim().is_empty();
+    let suggestions = tag_editor_suggestions(&tag_options, &current_tags);
+    let list_id = format!("tag-options-{account_id}-{transaction_id}");
+
     let posted_date = transaction
         .timestamp
         .get(..10)
         .unwrap_or(&transaction.timestamp)
         .to_string();
-    let initial_date = current_effective
-        .clone()
-        .unwrap_or_else(|| posted_date.clone());
-    let mut draft_date = use_signal(move || initial_date.clone());
-    let draft = draft_date();
-    let trimmed = draft.trim().to_string();
+    let current_effective = transaction
+        .annotation
+        .as_ref()
+        .and_then(|annotation| annotation.effective_date.clone());
     let has_effective_date = current_effective.is_some();
-    let valid_date = trimmed.is_empty() || is_date_input_value(&trimmed);
-    let changed = if trimmed.is_empty() {
-        has_effective_date
-    } else {
-        trimmed != display_date
-    };
-    let can_save = valid_date && changed;
-    let effective_label = if has_effective_date {
-        format!("Posted {posted_date}")
-    } else {
-        "Synced date".to_string()
-    };
-    let save_account_id = transaction.account_id.clone();
-    let save_transaction_id = transaction.id.clone();
-    let clear_account_id = transaction.account_id.clone();
-    let clear_transaction_id = transaction.id.clone();
+    let date_value = current_effective.unwrap_or_else(|| posted_date.clone());
+
+    let rule_ignored = rule_ignores_spending(&transaction);
+    let not_spending_shaped = !is_spending_transaction(&transaction);
+    let exclude_checked = rule_ignored || annotation_ignores_spending(&transaction);
 
     rsx! {
-        div { class: "effective-date-editor",
-            input {
-                class: "effective-date-input",
-                r#type: "date",
-                value: "{draft}",
-                title: "Reporting date",
-                oninput: move |event| draft_date.set(event.value())
-            }
-            small { "{effective_label}" }
-            div { class: "effective-date-actions",
-                button {
-                    class: "tag-editor-button",
-                    title: "Save reporting date",
-                    disabled: !can_save,
-                    onclick: move |_| {
-                        let value = draft_date().trim().to_string();
-                        let clear_effective_date = value.is_empty();
-                        oneffectivedatesave.call(SetTransactionEffectiveDateInput {
-                            account_id: save_account_id.clone(),
-                            transaction_id: save_transaction_id.clone(),
-                            effective_date: if clear_effective_date { None } else { Some(value) },
-                            clear_effective_date,
-                        });
-                    },
-                    "Save"
-                }
-                button {
-                    class: "tag-editor-button",
-                    title: "Clear reporting date",
-                    disabled: !has_effective_date,
-                    onclick: move |_| {
-                        draft_date.set(posted_date.clone());
-                        oneffectivedatesave.call(SetTransactionEffectiveDateInput {
-                            account_id: clear_account_id.clone(),
-                            transaction_id: clear_transaction_id.clone(),
-                            effective_date: None,
-                            clear_effective_date: true,
-                        });
-                    },
-                    "Clear"
-                }
-            }
-        }
-    }
-}
-
-#[component]
-fn TransactionTagsEditor(
-    transaction: Transaction,
-    tag_options: Vec<String>,
-    ontagssave: EventHandler<SetTransactionTagsInput>,
-) -> Element {
-    let current_tags = transaction_tags(&transaction);
-    let initial_tags = current_tags.clone();
-    let mut selected_tags = use_signal(move || initial_tags.clone());
-    let mut draft_tag = use_signal(String::new);
-    let tags = selected_tags();
-    let draft = draft_tag();
-    let changed = tags != current_tags;
-    let can_add = !draft.trim().is_empty();
-    let list_id = format!("tag-options-{}-{}", transaction.account_id, transaction.id);
-
-    rsx! {
-        div { class: "tag-editor transaction-tag-editor",
-            div { class: "tag-pill-list",
-                if tags.is_empty() {
-                    span { class: "tag-empty", "Untagged" }
-                }
-                for tag in tags.clone() {
-                    button {
-                        class: "tag-pill removable",
-                        title: "Remove tag",
-                        onclick: move |_| selected_tags.set(remove_tag_from_list(&selected_tags(), &tag)),
-                        span { "{tag}" }
-                        span { class: "tag-pill-remove", "x" }
-                    }
-                }
-                div { class: "tag-entry-row",
-                    input {
-                        class: "tag-editor-input tag-entry-input",
-                        r#type: "text",
-                        list: "{list_id}",
-                        value: "{draft}",
-                        placeholder: "Add tag",
-                        oninput: move |event| draft_tag.set(event.value())
-                    }
-                    datalist { id: "{list_id}",
-                        for tag in tag_options.clone() {
-                            option { value: "{tag}" }
+        div { class: "transaction-editor-panel",
+            div { class: "transaction-editor-grid",
+                div { class: "transaction-editor-section",
+                    span { class: "transaction-editor-label", "Tags" }
+                    div { class: "tag-editor transaction-tag-editor",
+                        div { class: "tag-pill-list",
+                            if current_tags.is_empty() {
+                                span { class: "tag-empty", "Untagged" }
+                            }
+                            for tag in current_tags.clone() {
+                                button {
+                                    class: "tag-pill removable",
+                                    title: "Remove tag",
+                                    onclick: {
+                                        let account_id = account_id.clone();
+                                        let transaction_id = transaction_id.clone();
+                                        let current_tags = current_tags.clone();
+                                        let tag = tag.clone();
+                                        move |_| {
+                                            let next = remove_tag_from_list(&current_tags, &tag);
+                                            ontagssave.call(transaction_tags_input(
+                                                &account_id,
+                                                &transaction_id,
+                                                next,
+                                            ));
+                                        }
+                                    },
+                                    span { "{tag}" }
+                                    span { class: "tag-pill-remove", "x" }
+                                }
+                            }
+                            div { class: "tag-entry-row",
+                                input {
+                                    class: "tag-editor-input tag-entry-input",
+                                    r#type: "text",
+                                    list: "{list_id}",
+                                    value: "{draft}",
+                                    placeholder: "Add tag",
+                                    oninput: move |event| draft_tag.set(event.value()),
+                                    onkeydown: {
+                                        let account_id = account_id.clone();
+                                        let transaction_id = transaction_id.clone();
+                                        let current_tags = current_tags.clone();
+                                        move |event: KeyboardEvent| {
+                                            if event.key() != Key::Enter {
+                                                return;
+                                            }
+                                            let value = draft_tag();
+                                            if value.trim().is_empty() {
+                                                return;
+                                            }
+                                            let next = add_tag_to_list(current_tags.clone(), &value);
+                                            draft_tag.set(String::new());
+                                            ontagssave.call(transaction_tags_input(
+                                                &account_id,
+                                                &transaction_id,
+                                                next,
+                                            ));
+                                        }
+                                    }
+                                }
+                                datalist { id: "{list_id}",
+                                    for tag in tag_options.clone() {
+                                        option { value: "{tag}" }
+                                    }
+                                }
+                                button {
+                                    class: "tag-editor-button",
+                                    title: "Add tag",
+                                    disabled: !can_add,
+                                    onclick: {
+                                        let account_id = account_id.clone();
+                                        let transaction_id = transaction_id.clone();
+                                        let current_tags = current_tags.clone();
+                                        move |_| {
+                                            let value = draft_tag();
+                                            if value.trim().is_empty() {
+                                                return;
+                                            }
+                                            let next = add_tag_to_list(current_tags.clone(), &value);
+                                            draft_tag.set(String::new());
+                                            ontagssave.call(transaction_tags_input(
+                                                &account_id,
+                                                &transaction_id,
+                                                next,
+                                            ));
+                                        }
+                                    },
+                                    "+"
+                                }
+                            }
+                        }
+                        if !suggestions.is_empty() {
+                            div { class: "tag-suggestion-list",
+                                for tag in suggestions.clone() {
+                                    button {
+                                        class: "tag-suggestion-pill",
+                                        onclick: {
+                                            let account_id = account_id.clone();
+                                            let transaction_id = transaction_id.clone();
+                                            let current_tags = current_tags.clone();
+                                            let tag = tag.clone();
+                                            move |_| {
+                                                let next = add_tag_to_list(current_tags.clone(), &tag);
+                                                ontagssave.call(transaction_tags_input(
+                                                    &account_id,
+                                                    &transaction_id,
+                                                    next,
+                                                ));
+                                            }
+                                        },
+                                        "{tag}"
+                                    }
+                                }
+                            }
                         }
                     }
-                    button {
-                        class: "tag-editor-button",
-                        title: "Add tag",
-                        disabled: !can_add,
-                        onclick: move |_| {
-                            selected_tags.set(add_tag_to_list(selected_tags(), &draft_tag()));
-                            draft_tag.set(String::new());
-                        },
-                        "+"
+                }
+                div { class: "transaction-editor-section",
+                    span { class: "transaction-editor-label", "Reporting date" }
+                    div { class: "effective-date-editor",
+                        input {
+                            class: "effective-date-input",
+                            r#type: "date",
+                            value: "{date_value}",
+                            title: "Reporting date",
+                            onchange: {
+                                let account_id = account_id.clone();
+                                let transaction_id = transaction_id.clone();
+                                move |event: FormEvent| {
+                                    let value = event.value().trim().to_string();
+                                    let clear_effective_date =
+                                        value.is_empty() || value == posted_date;
+                                    oneffectivedatesave.call(SetTransactionEffectiveDateInput {
+                                        account_id: account_id.clone(),
+                                        transaction_id: transaction_id.clone(),
+                                        effective_date: if clear_effective_date {
+                                            None
+                                        } else {
+                                            Some(value)
+                                        },
+                                        clear_effective_date,
+                                    });
+                                }
+                            }
+                        }
+                        small { "Posted {posted_date}" }
+                        if has_effective_date {
+                            button {
+                                class: "tag-editor-button",
+                                title: "Reset to posted date",
+                                onclick: {
+                                    let account_id = account_id.clone();
+                                    let transaction_id = transaction_id.clone();
+                                    move |_| {
+                                        oneffectivedatesave.call(SetTransactionEffectiveDateInput {
+                                            account_id: account_id.clone(),
+                                            transaction_id: transaction_id.clone(),
+                                            effective_date: None,
+                                            clear_effective_date: true,
+                                        });
+                                    }
+                                },
+                                "Reset to posted"
+                            }
+                        }
                     }
                 }
-            }
-            button {
-                class: "tag-editor-button tag-save-button",
-                title: "Save tags",
-                disabled: !changed,
-                onclick: move |_| {
-                    let tags = selected_tags();
-                    ontagssave.call(SetTransactionTagsInput {
-                        transactions: vec![TransactionTagTargetInput {
-                            account_id: transaction.account_id.clone(),
-                            transaction_id: transaction.id.clone(),
-                        }],
-                        clear_tags: tags.is_empty(),
-                        tags,
-                    });
-                },
-                "Save"
+                div { class: "transaction-editor-section",
+                    span { class: "transaction-editor-label", "Spending" }
+                    label { class: "compact-check transaction-exclude-toggle",
+                        input {
+                            r#type: "checkbox",
+                            checked: exclude_checked,
+                            disabled: rule_ignored,
+                            onchange: {
+                                let account_id = account_id.clone();
+                                let transaction_id = transaction_id.clone();
+                                move |event: FormEvent| {
+                                    onignoresave.call(SetTransactionIgnoreInput {
+                                        transactions: single_transaction_target(
+                                            &account_id,
+                                            &transaction_id,
+                                        ),
+                                        ignore: event.checked(),
+                                    });
+                                }
+                            }
+                        }
+                        span { "Exclude from spending" }
+                    }
+                    if rule_ignored {
+                        small { class: "transaction-exclude-note", "Excluded by an ignore rule" }
+                    } else if not_spending_shaped {
+                        small { class: "transaction-exclude-note",
+                            "Never counted: only posted charges count toward spending"
+                        }
+                    }
+                }
             }
         }
     }

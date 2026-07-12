@@ -163,6 +163,8 @@ pub struct TransactionAnnotationOutput {
     pub subtags: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effective_date: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ignore_spending: Option<bool>,
 }
 
 #[derive(Serialize)]

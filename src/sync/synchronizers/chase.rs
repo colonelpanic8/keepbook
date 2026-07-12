@@ -1147,7 +1147,17 @@ async fn ensure_logged_in_with_timeout(
 
     let deadline = std::time::Instant::now() + timeout;
     loop {
-        let v: serde_json::Value = page.evaluate(check_js).await?.into_value()?;
+        let v: serde_json::Value = match page.evaluate(check_js).await {
+            Ok(value) => value.into_value()?,
+            Err(err) if is_transient_execution_context_error(&err.to_string()) => {
+                if std::time::Instant::now() > deadline {
+                    return Err(err.into());
+                }
+                tokio::time::sleep(Duration::from_millis(250)).await;
+                continue;
+            }
+            Err(err) => return Err(err.into()),
+        };
         let url = v
             .get("url")
             .and_then(|x| x.as_str())
@@ -1272,7 +1282,17 @@ async fn autofill_login_iframe(
 
     let deadline = std::time::Instant::now() + Duration::from_secs(20);
     loop {
-        let v: serde_json::Value = page.evaluate(js.clone()).await?.into_value()?;
+        let v: serde_json::Value = match page.evaluate(js.clone()).await {
+            Ok(value) => value.into_value()?,
+            Err(err) if is_transient_execution_context_error(&err.to_string()) => {
+                if std::time::Instant::now() >= deadline {
+                    return Err(err.into());
+                }
+                tokio::time::sleep(Duration::from_millis(250)).await;
+                continue;
+            }
+            Err(err) => return Err(err.into()),
+        };
         let ok = v.get("ok").and_then(|x| x.as_bool()).unwrap_or(false);
         if ok {
             if let Some(by) = v.get("submittedBy").and_then(|x| x.as_str()) {
@@ -1310,6 +1330,12 @@ async fn autofill_login_iframe(
             .unwrap_or_default();
         anyhow::bail!("Chase autofill JS failed: {err} (iframes={iframe_names})");
     }
+}
+
+fn is_transient_execution_context_error(message: &str) -> bool {
+    message.contains("Cannot find context with specified id")
+        || message.contains("Execution context was destroyed")
+        || message.contains("Inspected target navigated or closed")
 }
 
 async fn maybe_prompt_and_fill_sms_code(page: &chromiumoxide::Page) -> Result<()> {

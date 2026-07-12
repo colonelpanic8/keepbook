@@ -190,6 +190,7 @@ async fn recompact_all_jsonl_compacts_and_sorts_logs() -> anyhow::Result<()> {
         tags: None,
         subtags: None,
         effective_date: None,
+        ignore_spending: None,
     };
     let patch_category = TransactionAnnotationPatch {
         transaction_id: Id::from_string("tx-anno"),
@@ -199,6 +200,7 @@ async fn recompact_all_jsonl_compacts_and_sorts_logs() -> anyhow::Result<()> {
         tags: Some(Some(vec!["food".to_string()])),
         subtags: Some(Some(vec!["coffee".to_string()])),
         effective_date: None,
+        ignore_spending: None,
     };
     let patch_set_then_clear_a = TransactionAnnotationPatch {
         transaction_id: Id::from_string("tx-clear"),
@@ -208,6 +210,7 @@ async fn recompact_all_jsonl_compacts_and_sorts_logs() -> anyhow::Result<()> {
         tags: None,
         subtags: None,
         effective_date: None,
+        ignore_spending: None,
     };
     let patch_set_then_clear_b = TransactionAnnotationPatch {
         transaction_id: Id::from_string("tx-clear"),
@@ -217,6 +220,7 @@ async fn recompact_all_jsonl_compacts_and_sorts_logs() -> anyhow::Result<()> {
         tags: None,
         subtags: None,
         effective_date: None,
+        ignore_spending: None,
     };
     storage
         .append_transaction_annotation_patches(

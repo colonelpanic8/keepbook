@@ -92,6 +92,7 @@ impl ProposedTransactionEdit {
             tags: self.tags.clone(),
             subtags: self.subtags.clone(),
             effective_date: self.effective_date,
+            ignore_spending: None,
         }
     }
 }

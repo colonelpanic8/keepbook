@@ -328,6 +328,7 @@ async fn spending_report_tag_uses_annotation_then_metadata_then_untagged() -> Re
                 tags: Some(Some(vec!["Dining".to_string()])),
                 subtags: Some(Some(vec!["Restaurants".to_string()])),
                 effective_date: None,
+                ignore_spending: None,
             }],
         )
         .await?;
@@ -838,6 +839,7 @@ async fn spending_report_ignores_transactions_marked_ignore_spending_tag() -> Re
                 tags: Some(Some(vec!["ignore_spending".to_string()])),
                 subtags: None,
                 effective_date: None,
+                ignore_spending: None,
             }],
         )
         .await?;

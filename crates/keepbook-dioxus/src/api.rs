@@ -176,6 +176,10 @@ pub(crate) async fn set_transaction_tags(input: SetTransactionTagsInput) -> Resu
     set_transaction_tags_impl(input).await
 }
 
+pub(crate) async fn set_transaction_ignore(input: SetTransactionIgnoreInput) -> Result<(), String> {
+    set_transaction_ignore_impl(input).await
+}
+
 pub(crate) async fn set_transaction_effective_date(
     input: SetTransactionEffectiveDateInput,
 ) -> Result<(), String> {
@@ -589,6 +593,26 @@ pub(crate) async fn set_transaction_tags_impl(
 }
 
 #[cfg(target_arch = "wasm32")]
+pub(crate) async fn set_transaction_ignore_impl(
+    input: SetTransactionIgnoreInput,
+) -> Result<(), String> {
+    let response = Request::post(&format!("{API_BASE}/api/transactions/ignore/batch"))
+        .json(&input)
+        .map_err(|error| format!("Could not encode ignore update: {error}"))?
+        .send()
+        .await
+        .map_err(|error| format!("Could not reach keepbook-server at {API_BASE}: {error}"))?;
+
+    if !response.ok() {
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+        return Err(format!("keepbook-server returned HTTP {status}: {text}"));
+    }
+
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
 pub(crate) async fn set_transaction_effective_date_impl(
     input: SetTransactionEffectiveDateInput,
 ) -> Result<(), String> {
@@ -952,6 +976,27 @@ pub(crate) async fn set_transaction_tags_impl(
         })
         .await
         .map_err(|error| format!("Tag update failed: {error:#}"))?;
+    Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn set_transaction_ignore_impl(
+    input: SetTransactionIgnoreInput,
+) -> Result<(), String> {
+    native_api_state()?
+        .set_transaction_ignore(keepbook_server::TransactionIgnoreBatchInput {
+            transactions: input
+                .transactions
+                .into_iter()
+                .map(|transaction| keepbook_server::TransactionTagTargetInput {
+                    account_id: transaction.account_id,
+                    transaction_id: transaction.transaction_id,
+                })
+                .collect(),
+            ignore: input.ignore,
+        })
+        .await
+        .map_err(|error| format!("Ignore update failed: {error:#}"))?;
     Ok(())
 }
 

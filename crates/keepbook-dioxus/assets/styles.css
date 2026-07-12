@@ -1633,11 +1633,27 @@ button.stacked-legend-item {
   grid-template-columns:
     34px
     150px
-    minmax(220px, 1.1fr)
-    minmax(180px, 0.8fr)
-    minmax(150px, 0.75fr)
-    120px;
+    minmax(200px, 1.1fr)
+    minmax(160px, 0.8fr)
+    minmax(140px, 0.7fr)
+    120px
+    32px;
   min-width: 960px;
+}
+
+/* Read-only transaction rows read as a clickable list; the editor panel below
+   an expanded row is a distinct card. */
+.transaction-table .table-row {
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.transaction-table .table-row:hover {
+  background: #f2f7f5;
+}
+
+.transaction-table .table-row.expanded {
+  background: #eef6f2;
 }
 
 .transaction-select-cell {
@@ -1647,19 +1663,110 @@ button.stacked-legend-item {
 }
 
 .transaction-date-cell {
+  align-items: baseline;
+  display: flex;
+  gap: 4px;
   min-width: 0;
+}
+
+.transaction-date-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.effective-date-indicator {
+  color: #1f6f8b;
+  cursor: help;
+  flex: 0 0 auto;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.transaction-tag-readonly {
+  align-items: center;
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+
+.tag-pill.readonly {
+  cursor: default;
+  flex: 0 0 auto;
+  overflow: visible;
+  white-space: nowrap;
+}
+
+.transaction-amount-cell {
+  text-align: right;
+}
+
+.transaction-expand-toggle {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: #62727f;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 1.1rem;
+  font-weight: 800;
+  justify-content: center;
+  line-height: 1;
+  min-height: 28px;
+  padding: 0;
+  width: 28px;
+}
+
+.transaction-expand-toggle:hover {
+  background: #e4efeb;
+  border-color: #cddbd7;
+  color: #24443d;
+}
+
+/* Editor panel revealed beneath an expanded row. */
+.transaction-editor-panel {
+  background: #f7faf9;
+  border: 1px solid #d7e2de;
+  border-radius: 8px;
+  margin: 4px 12px 12px;
+  min-width: 0;
+  padding: 14px;
+}
+
+.transaction-editor-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.transaction-editor-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.transaction-editor-label {
+  color: #62727f;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .effective-date-editor {
   align-items: flex-start;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   min-width: 0;
 }
 
 .effective-date-input {
-  background: #f7faf9;
+  background: #ffffff;
   border: 1px solid #d8e1de;
   border-radius: 6px;
   color: #17202a;
@@ -1678,19 +1785,15 @@ button.stacked-legend-item {
   line-height: 1.1;
 }
 
-.effective-date-actions {
-  display: flex;
-  gap: 4px;
-  min-width: 0;
+.transaction-exclude-toggle {
+  min-height: 32px;
 }
 
-.effective-date-actions .tag-editor-button {
-  min-height: 26px;
-  padding-inline: 7px;
-}
-
-.transaction-table .table-row strong:last-child {
-  text-align: right;
+.transaction-exclude-note {
+  color: #7b8790;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.2;
 }
 
 .sort-header-button {
@@ -1757,15 +1860,8 @@ button.stacked-legend-item {
 .transaction-tag-cell {
   align-items: start;
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
-  min-width: 0;
-}
-
-.transaction-tag-stack {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 4px;
   min-width: 0;
 }
 
@@ -1903,10 +1999,6 @@ button.stacked-legend-item {
 .tag-editor-button:disabled {
   cursor: default;
   opacity: 0.45;
-}
-
-.tag-save-button {
-  align-self: flex-end;
 }
 
 .ignored-badge {
@@ -2101,6 +2193,20 @@ button.stacked-legend-item {
 .data-table small {
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The transaction editor panel needs normal text flow despite the
+   .data-table ellipsis defaults above. */
+.data-table .transaction-editor-panel span,
+.data-table .transaction-editor-panel small {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.data-table .transaction-editor-panel .tag-pill,
+.data-table .transaction-editor-panel .tag-pill span:first-child {
   white-space: nowrap;
 }
 
@@ -2626,8 +2732,17 @@ button.stacked-legend-item {
     justify-content: flex-start;
   }
 
-  .transaction-table .table-row strong:last-child {
+  .transaction-table .table-row strong:last-child,
+  .transaction-amount-cell {
     text-align: left;
+  }
+
+  .transaction-editor-panel {
+    margin: 4px 0 0;
+  }
+
+  .transaction-editor-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .transaction-tag-cell,

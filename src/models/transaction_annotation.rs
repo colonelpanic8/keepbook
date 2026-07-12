@@ -3,6 +3,15 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use super::Id;
 
+/// Legacy magic tags that mark a transaction as ignored from spending.
+pub const SPENDING_IGNORE_TAGS: [&str; 3] = ["ignore_spending", "ignore-spending", "ignore:spending"];
+
+/// Whether a tag is one of the legacy magic spending-ignore tags.
+pub fn tag_ignores_spending(tag: &str) -> bool {
+    let normalized = tag.trim().to_lowercase();
+    SPENDING_IGNORE_TAGS.contains(&normalized.as_str())
+}
+
 /// Current (materialized) annotation state for a transaction.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TransactionAnnotation {
@@ -17,6 +26,8 @@ pub struct TransactionAnnotation {
     pub subtags: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effective_date: Option<NaiveDate>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ignore_spending: Option<bool>,
 }
 
 impl TransactionAnnotation {
@@ -28,6 +39,7 @@ impl TransactionAnnotation {
             tags: None,
             subtags: None,
             effective_date: None,
+            ignore_spending: None,
         }
     }
 
@@ -37,6 +49,17 @@ impl TransactionAnnotation {
             && self.tags.is_none()
             && self.subtags.is_none()
             && self.effective_date.is_none()
+            && self.ignore_spending.is_none()
+    }
+
+    /// Whether this annotation marks the transaction as ignored from spending,
+    /// either via the explicit `ignore_spending` flag or a legacy magic tag.
+    pub fn ignores_spending(&self) -> bool {
+        self.ignore_spending == Some(true)
+            || self
+                .tags
+                .as_ref()
+                .is_some_and(|tags| tags.iter().any(|tag| tag_ignores_spending(tag)))
     }
 }
 
@@ -81,6 +104,12 @@ pub struct TransactionAnnotationPatch {
         deserialize_with = "deserialize_patch_field"
     )]
     pub effective_date: Option<Option<NaiveDate>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_patch_field"
+    )]
+    pub ignore_spending: Option<Option<bool>>,
 }
 
 fn deserialize_patch_field<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
@@ -107,6 +136,9 @@ impl TransactionAnnotationPatch {
         }
         if let Some(v) = &self.effective_date {
             ann.effective_date = *v;
+        }
+        if let Some(v) = &self.ignore_spending {
+            ann.ignore_spending = *v;
         }
     }
 }

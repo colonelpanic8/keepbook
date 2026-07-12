@@ -899,6 +899,7 @@ fn compact_transaction_annotation_patches(
             tags: ann.tags.map(Some),
             subtags: ann.subtags.map(Some),
             effective_date: ann.effective_date.map(Some),
+            ignore_spending: ann.ignore_spending.map(Some),
         });
     }
 

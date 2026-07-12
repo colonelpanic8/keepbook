@@ -480,6 +480,21 @@ enum SetCommand {
         #[arg(long)]
         clear_effective_date: bool,
     },
+
+    /// Set or clear the ignored-from-spending flag for transactions (append-only patch)
+    TransactionIgnore {
+        /// Account ID
+        #[arg(long)]
+        account: String,
+
+        /// Transaction ID (repeatable)
+        #[arg(long, required = true)]
+        transaction: Vec<String>,
+
+        /// Clear the ignore flag (also strips legacy ignore tags)
+        #[arg(long)]
+        clear: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1188,6 +1203,20 @@ async fn main() -> Result<()> {
                     clear_effective_date,
                 )
                 .await?;
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
+            SetCommand::TransactionIgnore {
+                account,
+                transaction,
+                clear,
+            } => {
+                let targets = transaction
+                    .into_iter()
+                    .map(|transaction_id| (account.clone(), transaction_id))
+                    .collect::<Vec<_>>();
+                let result =
+                    app::set_transaction_ignore(storage_arc.as_ref(), &config, targets, !clear)
+                        .await?;
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
         },

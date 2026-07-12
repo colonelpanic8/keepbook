@@ -36,6 +36,22 @@ fn liability_balance_amount_negates_amount_owed_and_preserves_overpayments() {
 }
 
 #[test]
+fn transient_execution_context_errors_are_retryable() {
+    assert!(is_transient_execution_context_error(
+        "Error -32000: Cannot find context with specified id"
+    ));
+    assert!(is_transient_execution_context_error(
+        "Execution context was destroyed, most likely because of a navigation"
+    ));
+    assert!(is_transient_execution_context_error(
+        "Inspected target navigated or closed"
+    ));
+    assert!(!is_transient_execution_context_error(
+        "Error -32601: Method not found"
+    ));
+}
+
+#[test]
 fn chase_activity_to_transaction_persists_extended_metadata() {
     let activity = ChaseActivity {
         transaction_status_code: "Posted".to_string(),

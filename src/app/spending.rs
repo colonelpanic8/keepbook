@@ -22,8 +22,6 @@ use super::types::{
 };
 use super::value::{value_in_reporting_currency_detailed, MissingMarketData};
 
-const SPENDING_IGNORE_TAGS: [&str; 3] = ["ignore_spending", "ignore-spending", "ignore:spending"];
-
 #[derive(Debug, Clone)]
 pub struct SpendingReportOptions {
     pub currency: Option<String>,
@@ -509,15 +507,7 @@ fn close_merchant_key(description: &str) -> String {
 }
 
 fn annotation_ignores_spending(annotation: Option<&TransactionAnnotation>) -> bool {
-    annotation
-        .and_then(|ann| ann.tags.as_ref())
-        .map(|tags| {
-            tags.iter().any(|tag| {
-                let normalized = tag.trim().to_lowercase();
-                SPENDING_IGNORE_TAGS.contains(&normalized.as_str())
-            })
-        })
-        .unwrap_or(false)
+    annotation.is_some_and(|ann| ann.ignores_spending())
 }
 
 async fn ignored_account_ids_for_portfolio_spending(

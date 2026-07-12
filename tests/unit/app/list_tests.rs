@@ -61,6 +61,7 @@ async fn list_transactions_includes_annotation_when_present() -> Result<()> {
         tags: Some(Some(vec!["food".to_string()])),
         subtags: Some(Some(vec!["coffee".to_string()])),
         effective_date: None,
+        ignore_spending: None,
     };
     storage
         .append_transaction_annotation_patches(&account_id, &[patch])
@@ -194,6 +195,7 @@ async fn list_transactions_filters_by_annotation_effective_date() -> Result<()> 
                 tags: None,
                 subtags: None,
                 effective_date: Some(Some(chrono::NaiveDate::from_ymd_opt(2026, 1, 31).unwrap())),
+                ignore_spending: None,
             }],
         )
         .await?;
@@ -331,6 +333,7 @@ async fn list_transactions_skips_annotation_ignore_spending_tags() -> Result<()>
                 tags: Some(Some(vec!["ignore_spending".to_string()])),
                 subtags: None,
                 effective_date: None,
+                ignore_spending: None,
             }],
         )
         .await?;
@@ -385,6 +388,91 @@ async fn list_transactions_skips_annotation_ignore_spending_tags() -> Result<()>
     .await?;
     assert_eq!(included.len(), 1);
     assert!(included[0].annotation.is_some());
+    Ok(())
+}
+
+#[tokio::test]
+async fn list_transactions_skips_annotation_ignore_spending_flag() -> Result<()> {
+    let storage = MemoryStorage::new();
+    let clock = FixedClock::new(Utc.with_ymd_and_hms(2026, 2, 5, 12, 0, 0).unwrap());
+
+    let account_id = Id::from_string("acct-1");
+    let account = Account::new_with(
+        account_id.clone(),
+        clock.now(),
+        "Checking",
+        Id::from_string("conn-1"),
+    );
+    storage.save_account(&account).await?;
+
+    let ids = FixedIdGenerator::new([Id::from_string("tx-1")]);
+    let tx = Transaction::new_with_generator(
+        &ids,
+        &clock,
+        "-30000",
+        Asset::currency("USD"),
+        "WIRE Outgoing Wire",
+    );
+    storage.append_transactions(&account_id, &[tx]).await?;
+
+    storage
+        .append_transaction_annotation_patches(
+            &account_id,
+            &[TransactionAnnotationPatch {
+                transaction_id: Id::from_string("tx-1"),
+                timestamp: clock.now(),
+                description: None,
+                note: None,
+                tags: None,
+                subtags: None,
+                effective_date: None,
+                ignore_spending: Some(Some(true)),
+            }],
+        )
+        .await?;
+
+    let config = ResolvedConfig {
+        data_dir: std::path::PathBuf::from("/tmp"),
+        reporting_currency: "USD".to_string(),
+        display: crate::config::DisplayConfig::default(),
+        refresh: crate::config::RefreshConfig::default(),
+        history: crate::config::HistoryConfig::default(),
+        tray: crate::config::TrayConfig::default(),
+        spending: crate::config::SpendingConfig::default(),
+        tags: Default::default(),
+        portfolio: crate::config::PortfolioConfig::default(),
+        ignore: crate::config::IgnoreConfig::default(),
+        ai: crate::config::AiConfig::default(),
+        git: crate::config::GitConfig::default(),
+    };
+
+    let skipped = list_transactions(
+        &storage,
+        Some("2000-01-01".to_string()),
+        Some("2099-12-31".to_string()),
+        None,
+        false,
+        true,
+        &config,
+    )
+    .await?;
+    assert!(skipped.is_empty());
+
+    let included = list_transactions(
+        &storage,
+        Some("2000-01-01".to_string()),
+        Some("2099-12-31".to_string()),
+        None,
+        false,
+        false,
+        &config,
+    )
+    .await?;
+    assert_eq!(included.len(), 1);
+    assert_eq!(
+        included[0].annotation.as_ref().unwrap().ignore_spending,
+        Some(true)
+    );
     Ok(())
 }
 

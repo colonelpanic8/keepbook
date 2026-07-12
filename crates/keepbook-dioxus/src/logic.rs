@@ -1224,7 +1224,7 @@ pub(crate) fn transaction_tag_options(
         .iter()
         .map(|entry| entry.key.clone())
         .chain(transactions.iter().flat_map(transaction_tags))
-        .filter(|tag| tag != "Untagged")
+        .filter(|tag| tag != "Untagged" && !is_ignore_spending_tag(tag))
         .collect::<Vec<_>>();
     options.sort_by(|a, b| compare_case_insensitive(a, b));
     options.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
@@ -1398,6 +1398,53 @@ pub(crate) fn is_spending_transaction(transaction: &Transaction) -> bool {
             .unwrap_or(false)
 }
 
+/// Tag spellings that mark a transaction as ignored-from-spending when present
+/// on its annotation tag list.
+const IGNORE_SPENDING_TAGS: [&str; 3] = ["ignore_spending", "ignore-spending", "ignore:spending"];
+
+pub(crate) fn is_ignore_spending_tag(tag: &str) -> bool {
+    IGNORE_SPENDING_TAGS
+        .iter()
+        .any(|candidate| tag.trim().eq_ignore_ascii_case(candidate))
+}
+
+/// True when a transaction is excluded from spending because of a per-transaction
+/// annotation (either the explicit `ignore_spending` flag or an ignore-spending
+/// annotation tag). Distinguished from rule-level ignores, which are driven by
+/// config and are not editable per-transaction. A transaction whose
+/// [`Transaction::ignored_from_spending`] is set but for which this returns
+/// `false` is ignored by a config rule.
+pub(crate) fn annotation_ignores_spending(transaction: &Transaction) -> bool {
+    transaction.annotation.as_ref().is_some_and(|annotation| {
+        annotation.ignore_spending == Some(true)
+            || annotation
+                .tags
+                .as_ref()
+                .is_some_and(|tags| tags.iter().any(|tag| is_ignore_spending_tag(tag)))
+    })
+}
+
+/// Tags to display for a transaction row, hiding the legacy ignore-spending
+/// control tags (the "Not counted" badge communicates that state instead).
+/// Editing surfaces should keep using [`transaction_tags`] so saves round-trip
+/// the full list.
+pub(crate) fn visible_transaction_tags(transaction: &Transaction) -> Vec<String> {
+    transaction_tags(transaction)
+        .into_iter()
+        .filter(|tag| !is_ignore_spending_tag(tag))
+        .collect()
+}
+
+/// True when a transaction is excluded from spending by a config-level ignore
+/// rule rather than a per-transaction annotation, meaning the per-row toggle
+/// cannot change it. Transactions that are merely not spending-shaped
+/// (credits/income, pending) do not count as rule-ignored.
+pub(crate) fn rule_ignores_spending(transaction: &Transaction) -> bool {
+    transaction.ignored_from_spending
+        && is_spending_transaction(transaction)
+        && !annotation_ignores_spending(transaction)
+}
+
 pub(crate) fn normalize_spending_tag_key(tag: &str) -> String {
     let trimmed = tag.trim();
     if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("untagged") {
@@ -1501,17 +1548,6 @@ pub(crate) fn transaction_date(transaction: &Transaction) -> String {
                 .unwrap_or(&transaction.timestamp)
                 .to_string()
         })
-}
-
-pub(crate) fn is_date_input_value(value: &str) -> bool {
-    let bytes = value.as_bytes();
-    bytes.len() == 10
-        && bytes[4] == b'-'
-        && bytes[7] == b'-'
-        && bytes
-            .iter()
-            .enumerate()
-            .all(|(index, byte)| index == 4 || index == 7 || byte.is_ascii_digit())
 }
 
 pub(crate) fn transaction_description(transaction: &Transaction) -> String {

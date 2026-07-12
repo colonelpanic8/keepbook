@@ -23,8 +23,6 @@ use super::{
     TransactionAnnotationOutput, TransactionOutput,
 };
 
-const SPENDING_IGNORE_TAGS: [&str; 3] = ["ignore_spending", "ignore-spending", "ignore:spending"];
-
 #[derive(Debug, Clone)]
 enum TransactionDateTz {
     Utc,
@@ -60,16 +58,7 @@ impl TransactionDateTz {
 }
 
 fn annotation_ignores_spending(annotation: &TransactionAnnotation) -> bool {
-    annotation
-        .tags
-        .as_ref()
-        .map(|tags| {
-            tags.iter().any(|tag| {
-                let normalized = tag.trim().to_lowercase();
-                SPENDING_IGNORE_TAGS.contains(&normalized.as_str())
-            })
-        })
-        .unwrap_or(false)
+    annotation.ignores_spending()
 }
 
 pub async fn list_connections(storage: &dyn Storage) -> Result<Vec<ConnectionOutput>> {
@@ -432,6 +421,7 @@ pub async fn list_transactions(
                         tags: ann.tags.clone(),
                         subtags: ann.subtags.clone(),
                         effective_date: ann.effective_date.map(|d| d.to_string()),
+                        ignore_spending: ann.ignore_spending,
                     })
                 }
             });

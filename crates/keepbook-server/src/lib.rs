@@ -579,6 +579,25 @@ impl ApiState {
         .await
     }
 
+    pub async fn set_transaction_ignore(
+        &self,
+        input: TransactionIgnoreBatchInput,
+    ) -> Result<serde_json::Value> {
+        let state = self.snapshot().await;
+        let targets = input
+            .transactions
+            .into_iter()
+            .map(|transaction| (transaction.account_id, transaction.transaction_id))
+            .collect::<Vec<_>>();
+        keepbook::app::set_transaction_ignore(
+            state.storage.as_ref(),
+            &state.config,
+            targets,
+            input.ignore,
+        )
+        .await
+    }
+
     pub async fn set_transaction_subtags(
         &self,
         input: TransactionSubtagsBatchInput,
@@ -1353,6 +1372,14 @@ pub struct TransactionTagsBatchInput {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct TransactionIgnoreBatchInput {
+    #[serde(default)]
+    pub transactions: Vec<TransactionTagTargetInput>,
+    #[serde(default)]
+    pub ignore: bool,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct TransactionSubtagsBatchInput {
     #[serde(default)]
     pub transactions: Vec<TransactionTagTargetInput>,
@@ -1837,6 +1864,10 @@ pub fn router(state: ApiState) -> Router {
         )
         .route("/api/transactions/tags/batch", post(set_transaction_tags))
         .route(
+            "/api/transactions/ignore/batch",
+            post(set_transaction_ignore),
+        )
+        .route(
             "/api/transactions/subtags/batch",
             post(set_transaction_subtags),
         )
@@ -1965,6 +1996,14 @@ async fn set_transaction_tags(
     Json(input): Json<TransactionTagsBatchInput>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     Ok(Json(state.set_transaction_tags(input).await?))
+}
+
+#[cfg(feature = "http")]
+async fn set_transaction_ignore(
+    State(state): State<ApiState>,
+    Json(input): Json<TransactionIgnoreBatchInput>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    Ok(Json(state.set_transaction_ignore(input).await?))
 }
 
 #[cfg(feature = "http")]

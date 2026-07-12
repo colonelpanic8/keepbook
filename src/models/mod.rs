@@ -23,4 +23,6 @@ pub use recurring_transaction_review::{
     RecurringTransactionReviewStatus,
 };
 pub use transaction::{Transaction, TransactionStandardizedMetadata, TransactionStatus};
-pub use transaction_annotation::{TransactionAnnotation, TransactionAnnotationPatch};
+pub use transaction_annotation::{
+    tag_ignores_spending, TransactionAnnotation, TransactionAnnotationPatch, SPENDING_IGNORE_TAGS,
+};

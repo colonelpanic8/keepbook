@@ -37,7 +37,6 @@ const OPENAI_REGEX_SUGGESTION_MODEL_ENV: &str = "KEEPBOOK_REGEX_LLM_MODEL";
 const OPENAI_REGEX_SUGGESTION_MODEL_DEFAULT: &str = "gpt-4o-mini";
 const OPENAI_CHAT_COMPLETIONS_URL: &str = "https://api.openai.com/v1/chat/completions";
 const OPENAI_TIMEOUT_SECS: u64 = 12;
-const SPENDING_IGNORE_TAGS: [&str; 3] = ["ignore_spending", "ignore-spending", "ignore:spending"];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct TransactionTagRule {
@@ -2009,15 +2008,13 @@ fn summarize_spending_windows(
 fn transaction_annotation_ignores_spending(
     annotation: Option<&crate::app::TransactionAnnotationOutput>,
 ) -> bool {
-    annotation
-        .and_then(|ann| ann.tags.as_ref())
-        .map(|tags| {
-            tags.iter().any(|tag| {
-                let normalized = tag.trim().to_lowercase();
-                SPENDING_IGNORE_TAGS.contains(&normalized.as_str())
+    annotation.is_some_and(|ann| {
+        ann.ignore_spending == Some(true)
+            || ann.tags.as_ref().is_some_and(|tags| {
+                tags.iter()
+                    .any(|tag| crate::models::tag_ignores_spending(tag))
             })
-        })
-        .unwrap_or(false)
+    })
 }
 
 fn transaction_spending_summary_line(app_state: &AppState, config: &ResolvedConfig) -> String {

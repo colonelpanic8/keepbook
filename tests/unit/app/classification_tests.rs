@@ -91,6 +91,7 @@ fn explicit_child_tag_implies_configured_parent_tag() {
         tags: Some(vec!["Groceries".to_string()]),
         subtags: None,
         effective_date: None,
+        ignore_spending: None,
     };
     let provider = VirtualTagHierarchy::default();
     let config = tags_config();
@@ -114,6 +115,7 @@ fn explicit_tags_suppress_provider_virtual_subtags() {
         tags: Some(vec!["Personal".to_string()]),
         subtags: None,
         effective_date: None,
+        ignore_spending: None,
     };
     let provider = VirtualTagHierarchy {
         tags: vec!["Food".to_string()],

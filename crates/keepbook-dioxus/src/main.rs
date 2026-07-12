@@ -417,6 +417,10 @@ struct TransactionAnnotation {
     subtags: Option<Vec<String>>,
     #[serde(default)]
     effective_date: Option<String>,
+    /// Explicit per-transaction ignore-from-spending annotation. Lets the UI
+    /// distinguish "ignored via annotation" from "ignored via rule".
+    #[serde(default)]
+    ignore_spending: Option<bool>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -592,6 +596,12 @@ struct SetTransactionTagsInput {
     transactions: Vec<TransactionTagTargetInput>,
     tags: Vec<String>,
     clear_tags: bool,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq)]
+struct SetTransactionIgnoreInput {
+    transactions: Vec<TransactionTagTargetInput>,
+    ignore: bool,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq)]

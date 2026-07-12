@@ -98,6 +98,8 @@ struct SeedTransactionAnnotationPatch {
     subtags: Option<Vec<String>>,
     #[serde(default)]
     effective_date: Option<String>,
+    #[serde(default)]
+    ignore_spending: Option<bool>,
 }
 
 fn default_true() -> bool {
@@ -250,6 +252,7 @@ async fn seed_storage(storage: &dyn Storage, seed: &Seed) -> Result<()> {
             tags: p.tags.clone().map(Some),
             subtags: p.subtags.clone().map(Some),
             effective_date: effective_date.map(Some),
+            ignore_spending: p.ignore_spending.map(Some),
         };
         storage
             .append_transaction_annotation_patches(&account_id, &[patch])

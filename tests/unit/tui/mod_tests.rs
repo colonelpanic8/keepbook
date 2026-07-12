@@ -83,6 +83,7 @@ fn display_uses_annotation_description_when_present() {
         tags: None,
         subtags: None,
         effective_date: None,
+        ignore_spending: None,
     });
     let description = t
         .annotation
@@ -107,6 +108,7 @@ fn display_uses_annotation_tag_when_present() {
         tags: Some(vec!["food".to_string()]),
         subtags: None,
         effective_date: None,
+        ignore_spending: None,
     });
     assert_eq!(transaction_tag_string(&t, &matcher), "food");
 }
@@ -285,6 +287,7 @@ fn spending_window_summary_uses_reporting_currency_outflows() {
         tags: Some(vec!["ignore_spending".to_string()]),
         subtags: None,
         effective_date: None,
+        ignore_spending: None,
     });
 
     let summaries = summarize_spending_windows(

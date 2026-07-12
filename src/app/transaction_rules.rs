@@ -489,6 +489,7 @@ async fn apply_transaction_rules_with_auto_commit(
                 tags: tags_update.map(Some),
                 subtags: subtags_update.map(Some),
                 effective_date: None,
+                ignore_spending: None,
             });
         }
 

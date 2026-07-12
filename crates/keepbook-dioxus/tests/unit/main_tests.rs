@@ -675,6 +675,78 @@ fn spending_transactions_sort_by_each_visible_text_field() {
     );
 }
 
+fn annotation(tags: Option<Vec<&str>>, ignore_spending: Option<bool>) -> TransactionAnnotation {
+    TransactionAnnotation {
+        description: None,
+        tags: tags.map(|tags| tags.into_iter().map(str::to_string).collect()),
+        subtags: None,
+        effective_date: None,
+        ignore_spending,
+    }
+}
+
+#[test]
+fn annotation_ignore_detects_explicit_flag() {
+    let mut row = transaction("flagged", "-12.50", "posted");
+    row.annotation = Some(annotation(None, Some(true)));
+    assert!(annotation_ignores_spending(&row));
+
+    row.annotation = Some(annotation(None, Some(false)));
+    assert!(!annotation_ignores_spending(&row));
+}
+
+#[test]
+fn annotation_ignore_detects_ignore_spending_tags() {
+    for tag in ["ignore_spending", "ignore-spending", "ignore:spending", "IGNORE_SPENDING"] {
+        let mut row = transaction("tagged", "-12.50", "posted");
+        row.annotation = Some(annotation(Some(vec![tag]), None));
+        assert!(annotation_ignores_spending(&row), "tag {tag} should ignore");
+    }
+
+    let mut row = transaction("dining", "-12.50", "posted");
+    row.annotation = Some(annotation(Some(vec!["Dining"]), None));
+    assert!(!annotation_ignores_spending(&row));
+}
+
+#[test]
+fn visible_tags_hide_ignore_spending_control_tags() {
+    let mut row = transaction("tagged", "-12.50", "posted");
+    row.annotation = Some(annotation(Some(vec!["Dining", "ignore_spending"]), None));
+    assert_eq!(visible_transaction_tags(&row), vec!["Dining".to_string()]);
+}
+
+#[test]
+fn annotation_ignore_false_without_annotation() {
+    let row = transaction("plain", "-12.50", "posted");
+    assert!(!annotation_ignores_spending(&row));
+    assert!(!rule_ignores_spending(&row));
+}
+
+#[test]
+fn rule_ignore_distinguishes_config_level_exclusions() {
+    // Excluded overall, but not via annotation -> config rule.
+    let mut rule = transaction("rule", "-12.50", "posted");
+    rule.ignored_from_spending = true;
+    assert!(rule_ignores_spending(&rule));
+    assert!(!annotation_ignores_spending(&rule));
+
+    // Excluded overall AND via annotation -> not a rule-level exclusion.
+    let mut annotated = transaction("annotated", "-12.50", "posted");
+    annotated.ignored_from_spending = true;
+    annotated.annotation = Some(annotation(None, Some(true)));
+    assert!(!rule_ignores_spending(&annotated));
+    assert!(annotation_ignores_spending(&annotated));
+
+    // Excluded only because it is not spending-shaped -> not a rule-level exclusion.
+    let mut credit = transaction("credit", "12.50", "posted");
+    credit.ignored_from_spending = true;
+    assert!(!rule_ignores_spending(&credit));
+
+    let mut pending = transaction("pending", "-12.50", "pending");
+    pending.ignored_from_spending = true;
+    assert!(!rule_ignores_spending(&pending));
+}
+
 #[test]
 fn transaction_subtag_prefers_annotation_value() {
     let mut row = transaction("annotated", "-12.50", "posted");
@@ -684,6 +756,7 @@ fn transaction_subtag_prefers_annotation_value() {
         tags: None,
         subtags: Some(vec!["Coffee".to_string()]),
         effective_date: None,
+        ignore_spending: None,
     });
 
     assert_eq!(
@@ -855,16 +928,6 @@ fn money_formatting_uses_usd_symbol() {
 #[test]
 fn money_formatting_keeps_unknown_currency_code() {
     assert_eq!(format_full_money(1571.17, "CHF"), "CHF 1,571.17");
-}
-
-#[test]
-fn date_input_value_accepts_yyyy_mm_dd_shape() {
-    assert!(is_date_input_value("2026-02-01"));
-    assert!(!is_date_input_value(""));
-    assert!(!is_date_input_value("2026-2-01"));
-    assert!(!is_date_input_value("2026/02/01"));
-    assert!(!is_date_input_value("2026-02-01T00:00:00Z"));
-    assert!(!is_date_input_value("2026-0x-01"));
 }
 
 #[test]
