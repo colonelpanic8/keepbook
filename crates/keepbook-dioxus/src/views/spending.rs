@@ -1189,7 +1189,7 @@ fn SpendingPieChart(
                 path {
                     class: if selected.as_ref() == Some(&slice.key) { "pie-slice selected" } else { "pie-slice" },
                     d: "{slice.path}",
-                    fill: "{slice.color}",
+                    style: "fill: {slice.color};",
                     onclick: move |_| onclick.call(slice.key.clone()),
                     title { "{slice.key}: {format_full_money(slice.total, &currency)}" }
                 }

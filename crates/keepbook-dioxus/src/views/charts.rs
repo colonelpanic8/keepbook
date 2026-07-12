@@ -1852,9 +1852,24 @@ fn tooltip_label(label: &str, max_chars: usize) -> String {
 
 fn stacked_chart_color(index: usize) -> &'static str {
     const COLORS: [&str; 18] = [
-        "#1f6f8b", "#c2573f", "#4f7f39", "#7b5cb8", "#b7831f", "#2a9187", "#a83f6f", "#5867c2",
-        "#7a6a2f", "#3d7898", "#d06a2f", "#5f8c54", "#8f4fb0", "#c14d57", "#2f8fbd", "#9a7331",
-        "#516fb0", "#6f7d35",
+        "var(--series-1)",
+        "var(--series-2)",
+        "var(--series-3)",
+        "var(--series-4)",
+        "var(--series-5)",
+        "var(--series-6)",
+        "var(--series-7)",
+        "var(--series-8)",
+        "var(--series-9)",
+        "var(--series-10)",
+        "var(--series-11)",
+        "var(--series-12)",
+        "var(--series-13)",
+        "var(--series-14)",
+        "var(--series-15)",
+        "var(--series-16)",
+        "var(--series-17)",
+        "var(--series-18)",
     ];
     COLORS[index % COLORS.len()]
 }
