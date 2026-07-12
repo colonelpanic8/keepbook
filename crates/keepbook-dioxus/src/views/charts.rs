@@ -206,10 +206,10 @@ pub(super) fn StackedHistoryGraphPanel(
     rsx! {
         Panel {
             class: "graph-panel stacked-graph-panel",
-            title: "Net Worth Contributions",
+            title: "Net Worth Breakdown",
             subtitle: "Zero baseline / stacked by account",
             if is_history_loading {
-                BackendActivity { message: "Waiting on backend contribution data" }
+                BackendActivity { message: "Waiting on backend net worth data" }
             }
             div { class: "chart-controls",
                 div { class: "preset-row",
@@ -312,7 +312,7 @@ pub(super) fn StackedHistoryGraphPanel(
                     }
                 },
                 Some(Err(error)) => rsx! {
-                    InlineStatus { title: "Net Worth Contributions", message: error }
+                    InlineStatus { title: "Net Worth Breakdown", message: error }
                 },
                 Some(Ok(_)) => rsx! {
                     StackedNetWorthChart {
@@ -1019,7 +1019,7 @@ fn StackedNetWorthChart(
     if data.is_empty() || series.is_empty() {
         return rsx! {
             div { class: "chart-empty",
-                strong { "No contribution history" }
+                strong { "No net worth breakdown" }
                 small { "Refresh balances to populate the stacked graph." }
             }
         };
@@ -1199,7 +1199,7 @@ fn StackedNetWorthChart(
                     path {
                         class: "stacked-area-layer",
                         d: "{layer.path}",
-                        style: "fill: {layer.color}; stroke: {layer.color};",
+                        style: "fill: {layer.color};",
                         title { "{layer.series.label}" }
                     }
                 }
