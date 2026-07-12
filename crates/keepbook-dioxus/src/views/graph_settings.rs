@@ -1,7 +1,7 @@
 use super::*;
 use crate::api::{
-    fetch_git_settings, new_git_sync_cancel_handle, save_git_settings, sync_git_repo_cancelable,
-    GitSyncCancelHandle,
+    fetch_application_settings, fetch_git_settings, new_git_sync_cancel_handle,
+    save_application_settings, save_git_settings, sync_git_repo_cancelable, GitSyncCancelHandle,
 };
 use dioxus::core::Task;
 
@@ -125,6 +125,22 @@ fn PortfolioSettingsPanel(
 fn ApplicationSettingsPanel() -> Element {
     let app_version = env!("CARGO_PKG_VERSION");
     let app_commit = short_commit(env!("GIT_COMMIT_HASH"));
+    let mut settings = use_resource(fetch_application_settings);
+    let mut start_minimized = use_signal(|| false);
+    let mut loaded_value = use_signal(|| None::<bool>);
+    let mut status = use_signal(String::new);
+    let mut busy = use_signal(|| false);
+
+    if let Some(Ok(current)) = settings.cloned() {
+        if loaded_value() != Some(current.start_minimized_to_tray) {
+            start_minimized.set(current.start_minimized_to_tray);
+            loaded_value.set(Some(current.start_minimized_to_tray));
+        }
+    }
+
+    let current_settings = settings.cloned();
+    let is_busy = busy();
+    let status_text = status();
 
     rsx! {
         section { class: "panel settings-panel",
@@ -138,6 +154,59 @@ fn ApplicationSettingsPanel() -> Element {
                     "Commit "
                     code { "{app_commit}" }
                 }
+            }
+            match current_settings {
+                None => rsx! { BackendActivity { message: "Loading application settings" } },
+                Some(Err(error)) => rsx! { p { class: "validation", "{error}" } },
+                Some(Ok(current)) => rsx! {
+                    div { class: "settings-list",
+                        article { class: "setting-row",
+                            div { class: "setting-copy",
+                                strong { "Start minimized to tray" }
+                                small { "Launch Keepbook in the background and open it from the tray icon" }
+                            }
+                            label { class: "switch-control",
+                                input {
+                                    r#type: "checkbox",
+                                    checked: start_minimized(),
+                                    disabled: is_busy,
+                                    onchange: move |event| {
+                                        let next = event.checked();
+                                        start_minimized.set(next);
+                                        busy.set(true);
+                                        status.set(String::new());
+                                        spawn(async move {
+                                            match save_application_settings(ApplicationSettingsInput {
+                                                start_minimized_to_tray: next,
+                                            }).await {
+                                                Ok(saved) => {
+                                                    start_minimized.set(saved.start_minimized_to_tray);
+                                                    loaded_value.set(Some(saved.start_minimized_to_tray));
+                                                    status.set("Saved. This takes effect the next time Keepbook starts.".to_string());
+                                                    settings.restart();
+                                                }
+                                                Err(error) => {
+                                                    start_minimized.set(!next);
+                                                    status.set(error);
+                                                }
+                                            }
+                                            busy.set(false);
+                                        });
+                                    }
+                                }
+                                span { class: "switch-track",
+                                    span { class: "switch-thumb" }
+                                }
+                            }
+                        }
+                    }
+                    if !status_text.is_empty() {
+                        p { class: "settings-status", "{status_text}" }
+                    }
+                    div { class: "settings-source",
+                        small { "{current.config_path}" }
+                    }
+                },
             }
         }
     }

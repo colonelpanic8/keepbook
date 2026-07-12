@@ -776,6 +776,24 @@ impl ApiState {
         })
     }
 
+    pub async fn application_settings(&self) -> Result<ApplicationSettingsOutput> {
+        let snapshot = self.snapshot().await;
+        Ok(ApplicationSettingsOutput {
+            config_path: snapshot.config_path.display().to_string(),
+            start_minimized_to_tray: snapshot.config.tray.start_minimized,
+        })
+    }
+
+    pub async fn save_application_settings(
+        &self,
+        input: ApplicationSettingsInput,
+    ) -> Result<ApplicationSettingsOutput> {
+        let snapshot = self.snapshot().await;
+        write_application_settings(&snapshot.config_path, &input)?;
+        self.reload().await?;
+        self.application_settings().await
+    }
+
     pub async fn save_git_settings(&self, input: GitSettingsInput) -> Result<GitSettingsOutput> {
         let snapshot = self.snapshot().await;
         write_git_settings(&snapshot.config_path, &input)?;
@@ -1031,6 +1049,17 @@ pub struct GitSettingsInput {
     pub ssh_user: String,
     #[serde(default)]
     pub ssh_key_path: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ApplicationSettingsOutput {
+    pub config_path: String,
+    pub start_minimized_to_tray: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ApplicationSettingsInput {
+    pub start_minimized_to_tray: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1843,6 +1872,10 @@ pub fn router(state: ApiState) -> Router {
             "/api/git/settings",
             get(git_settings).put(save_git_settings),
         )
+        .route(
+            "/api/application/settings",
+            get(application_settings).put(save_application_settings),
+        )
         .route("/api/git/sync", post(sync_git_repo))
         .route("/api/sync/connections", post(sync_connections))
         .route("/api/sync/prices", post(sync_prices))
@@ -2038,6 +2071,21 @@ async fn save_git_settings(
 }
 
 #[cfg(feature = "http")]
+async fn application_settings(
+    State(state): State<ApiState>,
+) -> Result<Json<ApplicationSettingsOutput>, ApiError> {
+    Ok(Json(state.application_settings().await?))
+}
+
+#[cfg(feature = "http")]
+async fn save_application_settings(
+    State(state): State<ApiState>,
+    Json(input): Json<ApplicationSettingsInput>,
+) -> Result<Json<ApplicationSettingsOutput>, ApiError> {
+    Ok(Json(state.save_application_settings(input).await?))
+}
+
+#[cfg(feature = "http")]
 async fn sync_git_repo(
     State(state): State<ApiState>,
     Json(input): Json<GitSyncInput>,
@@ -2193,6 +2241,25 @@ fn write_git_settings(config_path: &Path, input: &GitSettingsInput) -> Result<()
     } else if let Some(git) = doc["git"].as_table_like_mut() {
         git.remove("ssh_key_path");
     }
+
+    std::fs::write(config_path, doc.to_string())
+        .with_context(|| format!("failed to write {}", config_path.display()))?;
+    Ok(())
+}
+
+fn write_application_settings(config_path: &Path, input: &ApplicationSettingsInput) -> Result<()> {
+    let mut doc = load_config_doc(config_path)?;
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    if doc
+        .get("tray")
+        .is_none_or(|item| item.as_table_like().is_none())
+    {
+        doc.insert("tray", Item::Table(Table::new()));
+    }
+    doc["tray"]["start_minimized"] = value(input.start_minimized_to_tray);
 
     std::fs::write(config_path, doc.to_string())
         .with_context(|| format!("failed to write {}", config_path.display()))?;

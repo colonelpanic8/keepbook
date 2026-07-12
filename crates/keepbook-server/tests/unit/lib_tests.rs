@@ -286,6 +286,30 @@ fn desktop_start_minimized_to_tray_reads_tray_config() -> Result<()> {
 }
 
 #[test]
+fn write_application_settings_updates_tray_config_without_replacing_other_settings() -> Result<()> {
+    let config_path = unique_test_config_path("application-settings");
+    write_test_config(
+        &config_path,
+        "reporting_currency = \"EUR\"\n\n[tray]\nhistory_points = 12\n",
+    )?;
+
+    write_application_settings(
+        &config_path,
+        &ApplicationSettingsInput {
+            start_minimized_to_tray: true,
+        },
+    )?;
+
+    assert!(desktop_start_minimized_to_tray(&config_path)?);
+    let content = std::fs::read_to_string(&config_path)?;
+    assert!(content.contains("reporting_currency = \"EUR\""));
+    assert!(content.contains("history_points = 12"));
+    assert!(content.contains("start_minimized = true"));
+    remove_test_config(config_path);
+    Ok(())
+}
+
+#[test]
 fn account_portfolio_override_query_decodes_json_param() -> Result<()> {
     let encoded_overrides = serde_json::to_string(&serde_json::json!([
         {

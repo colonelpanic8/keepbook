@@ -113,6 +113,16 @@ pub(crate) async fn fetch_git_settings() -> Result<GitSettingsOutput, String> {
     fetch_git_settings_impl().await
 }
 
+pub(crate) async fn fetch_application_settings() -> Result<ApplicationSettingsOutput, String> {
+    fetch_application_settings_impl().await
+}
+
+pub(crate) async fn save_application_settings(
+    input: ApplicationSettingsInput,
+) -> Result<ApplicationSettingsOutput, String> {
+    save_application_settings_impl(input).await
+}
+
 pub(crate) async fn save_git_settings(
     input: GitSettingsInput,
 ) -> Result<GitSettingsOutput, String> {
@@ -395,6 +405,52 @@ pub(crate) async fn save_git_settings_impl(
         .json::<GitSettingsOutput>()
         .await
         .map_err(|error| format!("Could not decode Git settings: {error}"))
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn fetch_application_settings_impl() -> Result<ApplicationSettingsOutput, String> {
+    let response = Request::get(&format!("{API_BASE}/api/application/settings"))
+        .send()
+        .await
+        .map_err(|error| format!("Could not reach application settings: {error}"))?;
+
+    if !response.ok() {
+        return Err(format!(
+            "keepbook-server returned HTTP {} {}",
+            response.status(),
+            response.status_text()
+        ));
+    }
+
+    response
+        .json::<ApplicationSettingsOutput>()
+        .await
+        .map_err(|error| format!("Could not decode application settings: {error}"))
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn save_application_settings_impl(
+    input: ApplicationSettingsInput,
+) -> Result<ApplicationSettingsOutput, String> {
+    let response = Request::put(&format!("{API_BASE}/api/application/settings"))
+        .json(&input)
+        .map_err(|error| format!("Could not encode application settings: {error}"))?
+        .send()
+        .await
+        .map_err(|error| format!("Could not save application settings: {error}"))?;
+
+    if !response.ok() {
+        return Err(format!(
+            "keepbook-server returned HTTP {} {}",
+            response.status(),
+            response.status_text()
+        ));
+    }
+
+    response
+        .json::<ApplicationSettingsOutput>()
+        .await
+        .map_err(|error| format!("Could not decode application settings: {error}"))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -739,6 +795,28 @@ pub(crate) async fn save_git_settings_impl(
         .await
         .map_err(|error| format!("Could not save Git settings: {error:#}"))?;
     from_native_output(output, "Git settings")
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn fetch_application_settings_impl() -> Result<ApplicationSettingsOutput, String> {
+    let output = native_api_state()?
+        .application_settings()
+        .await
+        .map_err(|error| format!("Could not load application settings: {error:#}"))?;
+    from_native_output(output, "application settings")
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn save_application_settings_impl(
+    input: ApplicationSettingsInput,
+) -> Result<ApplicationSettingsOutput, String> {
+    let output = native_api_state()?
+        .save_application_settings(keepbook_server::ApplicationSettingsInput {
+            start_minimized_to_tray: input.start_minimized_to_tray,
+        })
+        .await
+        .map_err(|error| format!("Could not save application settings: {error:#}"))?;
+    from_native_output(output, "application settings")
 }
 
 #[cfg(not(target_arch = "wasm32"))]

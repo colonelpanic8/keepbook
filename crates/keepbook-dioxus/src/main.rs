@@ -493,6 +493,17 @@ struct GitSettingsInput {
     ssh_key_path: Option<String>,
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+struct ApplicationSettingsOutput {
+    config_path: String,
+    start_minimized_to_tray: bool,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq)]
+struct ApplicationSettingsInput {
+    start_minimized_to_tray: bool,
+}
+
 #[derive(Clone, Debug, Serialize, PartialEq)]
 struct GitSyncInput {
     data_dir: String,
