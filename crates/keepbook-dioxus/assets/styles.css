@@ -1866,11 +1866,11 @@ button.stacked-legend-item {
 }
 
 .transaction-table .table-row:hover {
-  background: #f2f7f5;
+  background: var(--color-surface-hover);
 }
 
 .transaction-table .table-row.expanded {
-  background: #eef6f2;
+  background: var(--color-accent-bg);
 }
 
 .transaction-select-cell {
@@ -1893,10 +1893,10 @@ button.stacked-legend-item {
 }
 
 .effective-date-indicator {
-  color: #1f6f8b;
+  color: var(--color-primary);
   cursor: help;
   flex: 0 0 auto;
-  font-weight: 900;
+  font-weight: var(--fw-black);
   line-height: 1;
 }
 
@@ -1924,12 +1924,12 @@ button.stacked-legend-item {
   align-items: center;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 6px;
-  color: #62727f;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
   cursor: pointer;
   display: inline-flex;
-  font-size: 1.1rem;
-  font-weight: 800;
+  font-size: var(--fs-lead);
+  font-weight: var(--fw-bold);
   justify-content: center;
   line-height: 1;
   min-height: 28px;
@@ -1938,38 +1938,38 @@ button.stacked-legend-item {
 }
 
 .transaction-expand-toggle:hover {
-  background: #e4efeb;
-  border-color: #cddbd7;
-  color: #24443d;
+  background: var(--color-accent-tint);
+  border-color: var(--color-accent-border);
+  color: var(--color-accent-fg);
 }
 
 /* Editor panel revealed beneath an expanded row. */
 .transaction-editor-panel {
-  background: #f7faf9;
-  border: 1px solid #d7e2de;
-  border-radius: 8px;
-  margin: 4px 12px 12px;
+  background: var(--color-surface-subtle);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  margin: var(--sp-4) var(--sp-12) var(--sp-12);
   min-width: 0;
-  padding: 14px;
+  padding: var(--sp-14);
 }
 
 .transaction-editor-grid {
   display: grid;
-  gap: 16px;
+  gap: var(--sp-16);
   grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr);
 }
 
 .transaction-editor-section {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--sp-8);
   min-width: 0;
 }
 
 .transaction-editor-label {
-  color: #62727f;
-  font-size: 0.72rem;
-  font-weight: 800;
+  color: var(--color-text-muted);
+  font-size: var(--fs-micro);
+  font-weight: var(--fw-bold);
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
@@ -2007,9 +2007,9 @@ button.stacked-legend-item {
 }
 
 .transaction-exclude-note {
-  color: #7b8790;
-  font-size: 0.72rem;
-  font-weight: 700;
+  color: var(--color-text-faint);
+  font-size: var(--fs-micro);
+  font-weight: var(--fw-semibold);
   line-height: 1.2;
 }
 
