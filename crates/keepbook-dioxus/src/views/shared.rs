@@ -49,22 +49,105 @@ pub(super) fn GraphLoadingPanel(range: String, sampling: &'static str) -> Elemen
 }
 
 #[component]
+pub(super) fn Panel(
+    title: String,
+    subtitle: Option<String>,
+    actions: Option<Element>,
+    class: Option<String>,
+    children: Element,
+) -> Element {
+    let class = match class {
+        Some(extra) => format!("panel {extra}"),
+        None => "panel".to_string(),
+    };
+
+    rsx! {
+        section { class: "{class}",
+            div { class: "panel-header",
+                div { class: "panel-title",
+                    h2 { "{title}" }
+                    if let Some(subtitle) = subtitle {
+                        span { "{subtitle}" }
+                    }
+                }
+                {actions}
+            }
+            {children}
+        }
+    }
+}
+
+#[component]
+pub(super) fn ControlButton(
+    children: Element,
+    selected: Option<bool>,
+    danger: Option<bool>,
+    class: Option<String>,
+    disabled: Option<bool>,
+    onclick: EventHandler<MouseEvent>,
+) -> Element {
+    let mut class_name = String::from("control-button");
+    if selected == Some(true) {
+        class_name.push_str(" selected");
+    }
+    if danger == Some(true) {
+        class_name.push_str(" danger");
+    }
+    if let Some(extra) = class {
+        class_name.push(' ');
+        class_name.push_str(&extra);
+    }
+
+    rsx! {
+        button {
+            class: "{class_name}",
+            disabled: disabled.unwrap_or(false),
+            onclick: move |event| onclick.call(event),
+            {children}
+        }
+    }
+}
+
+#[component]
 pub(super) fn GraphPresetButton(
     label: &'static str,
     selected: bool,
     onclick: EventHandler<MouseEvent>,
 ) -> Element {
-    let class = if selected {
-        "control-button selected"
-    } else {
-        "control-button"
+    rsx! {
+        ControlButton {
+            selected,
+            onclick: move |event| onclick.call(event),
+            "{label}"
+        }
+    }
+}
+
+#[component]
+pub(super) fn Modal(
+    title: String,
+    dialog_class: Option<String>,
+    header_actions: Option<Element>,
+    actions: Option<Element>,
+    children: Element,
+) -> Element {
+    let dialog_class = match dialog_class {
+        Some(extra) => format!("modal-dialog {extra}"),
+        None => "modal-dialog".to_string(),
     };
 
     rsx! {
-        button {
-            class: "{class}",
-            onclick: move |event| onclick.call(event),
-            "{label}"
+        div { class: "modal-backdrop",
+            div { class: "{dialog_class}",
+                div { class: "modal-header",
+                    h3 { "{title}" }
+                    {header_actions}
+                }
+                {children}
+                if let Some(actions) = actions {
+                    div { class: "modal-actions", {actions} }
+                }
+            }
         }
     }
 }

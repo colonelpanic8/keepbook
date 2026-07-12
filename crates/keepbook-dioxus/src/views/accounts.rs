@@ -142,19 +142,18 @@ pub(super) fn AccountsView(
                     }
                 }
                 if let Some(selection) = selected_graph() {
-                    section { class: "panel graph-panel account-detail-graph",
-                        div { class: "panel-header",
-                            div { class: "panel-title",
-                                h2 { "{selection.name}" }
-                                span { "{selection.connection_name}" }
-                            }
+                    Panel {
+                        class: "graph-panel account-detail-graph",
+                        title: selection.name.clone(),
+                        subtitle: selection.connection_name.clone(),
+                        actions: rsx! {
                             button {
                                 class: "icon-button",
                                 title: "Close",
                                 onclick: move |_| selected_graph.set(None),
                                 "x"
                             }
-                        }
+                        },
                         HistoryGraphPanel {
                             title: selection.name.clone(),
                             scope_label: selection.connection_name.clone(),
@@ -168,15 +167,12 @@ pub(super) fn AccountsView(
                         }
                     }
                 }
-                section { class: "panel",
-                    div { class: "panel-header",
-                        div { class: "panel-title",
-                            h2 { "Accounts" }
-                            span { "{account_count}" }
-                        }
+                Panel {
+                    title: "Accounts",
+                    subtitle: account_count.to_string(),
+                    actions: rsx! {
                         div { class: "settings-actions inline-actions",
-                            button {
-                                class: "control-button",
+                            ControlButton {
                                 disabled: is_git_sync_busy,
                                 onclick: move |_| {
                                     git_sync_busy.set(true);
@@ -227,8 +223,7 @@ pub(super) fn AccountsView(
                                 }
                                 span { "Force prices" }
                             }
-                            button {
-                                class: "control-button",
+                            ControlButton {
                                 disabled: is_price_busy,
                                 onclick: move |_| {
                                     price_busy.set(true);
@@ -258,8 +253,7 @@ pub(super) fn AccountsView(
                                 },
                                 if is_price_busy { "Refreshing" } else { "Refresh prices" }
                             }
-                            button {
-                                class: "control-button",
+                            ControlButton {
                                 disabled: is_resync_busy,
                                 onclick: move |_| {
                                     resync_busy.set(true);
@@ -280,7 +274,7 @@ pub(super) fn AccountsView(
                                 if is_resync_busy { "Resyncing" } else { "Resync data" }
                             }
                         }
-                    }
+                    },
                     if !price_status_text.is_empty() {
                         p { class: "settings-status", "{price_status_text}" }
                     }

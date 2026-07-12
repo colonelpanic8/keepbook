@@ -14,14 +14,13 @@ pub(super) fn ConnectionsView(
     let busy = busy_target();
     let is_busy = !busy.is_empty();
     let status_text = status();
+    let connection_count = connections.len();
 
     rsx! {
-        section { class: "panel",
-            div { class: "panel-header",
-                div { class: "panel-title",
-                    h2 { "Connections" }
-                    span { "{connections.len()}" }
-                }
+        Panel {
+            title: "Connections",
+            subtitle: connection_count.to_string(),
+            actions: rsx! {
                 div { class: "settings-actions inline-actions",
                     label { class: "compact-check",
                         input {
@@ -50,8 +49,7 @@ pub(super) fn ConnectionsView(
                         }
                         span { "Force prices" }
                     }
-                    button {
-                        class: "control-button",
+                    ControlButton {
                         disabled: is_busy,
                         onclick: move |_| {
                             busy_target.set("all".to_string());
@@ -78,8 +76,8 @@ pub(super) fn ConnectionsView(
                         },
                         if busy == "all" { "Refreshing" } else { "Refresh balances" }
                     }
-                    button {
-                        class: "control-button selected",
+                    ControlButton {
+                        selected: true,
                         disabled: is_busy,
                         onclick: move |_| {
                             busy_target.set("prices:all".to_string());
@@ -108,7 +106,7 @@ pub(super) fn ConnectionsView(
                         if busy == "prices:all" { "Refreshing" } else { "Refresh prices" }
                     }
                 }
-            }
+            },
             if !status_text.is_empty() {
                 p { class: "settings-status", "{status_text}" }
             }
@@ -139,8 +137,7 @@ pub(super) fn ConnectionsView(
                             "{connection.last_sync.clone().unwrap_or_else(|| \"Never\".to_string())}"
                         }
                         div { class: "connection-actions",
-                            button {
-                                class: "control-button",
+                            ControlButton {
                                 disabled: is_busy,
                                 onclick: move |_| {
                                     let target = sync_target.clone();
@@ -164,8 +161,7 @@ pub(super) fn ConnectionsView(
                                 },
                                 if row_busy { "Refreshing" } else { "Balances" }
                             }
-                            button {
-                                class: "control-button",
+                            ControlButton {
                                 disabled: is_busy,
                                 onclick: move |_| {
                                     let target = prices_target.clone();

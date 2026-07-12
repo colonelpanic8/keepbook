@@ -226,14 +226,13 @@ pub(super) fn SpendingView(currency: String) -> Element {
         .unwrap_or_else(|| transaction_range.clone());
 
     rsx! {
-        section { class: "panel spending-panel",
-            div { class: "panel-header",
-                div { class: "panel-title",
-                    h2 { "{panel_title}" }
-                    span { "{panel_subtitle}" }
-                }
+        Panel {
+            class: "spending-panel",
+            title: "{panel_title}",
+            subtitle: "{panel_subtitle}",
+            actions: rsx! {
                 span { "{currency}" }
-            }
+            },
             if state.is_none() {
                 BackendActivity { message: "Waiting on backend spending data" }
             }
@@ -303,8 +302,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
                             transaction_page.set(0);
                         }
                     }
-                    button {
-                        class: "control-button",
+                    ControlButton {
                         disabled: selected.is_none() && selected_period_value.is_none(),
                         onclick: move |_| {
                             selected_tag.set(None);
@@ -1372,8 +1370,7 @@ fn TransactionList(
                     }
                     span { "Show ignored" }
                 }
-                button {
-                    class: "control-button",
+                ControlButton {
                     onclick: move |event| onselectpage.call(event),
                     disabled: !has_transactions,
                     "Select Page"
@@ -1385,15 +1382,14 @@ fn TransactionList(
                     disabled: !has_transactions,
                     "Select All"
                 }
-                button {
-                    class: "control-button",
+                ControlButton {
                     onclick: move |event| onclearselection.call(event),
                     disabled: !has_any_selection,
                     "Clear"
                 }
                 if has_visible_selection {
-                    button {
-                        class: "control-button selected",
+                    ControlButton {
+                        selected: true,
                         onclick: move |_| group_editor_open.set(true),
                         "Edit Tags"
                     }
@@ -1411,8 +1407,8 @@ fn TransactionList(
                     oninput: move |event| onpromptchange.call(event.value())
                 }
                 div { class: "ai-rule-actions",
-                    button {
-                        class: "control-button selected",
+                    ControlButton {
+                        selected: true,
                         onclick: move |event| onairulesubmit.call(event),
                         disabled: selected_count == 0 || ai_prompt.trim().is_empty(),
                         "Ask AI"
@@ -1426,24 +1422,23 @@ fn TransactionList(
                 }
             }
             if has_visible_selection && group_editor_open() {
-                div { class: "modal-backdrop",
-                    div { class: "modal-dialog group-edit-dialog",
-                        div { class: "modal-header",
-                            h3 { "Group edit" }
-                            button {
-                                class: "icon-button",
-                                title: "Close group edit",
-                                onclick: move |_| group_editor_open.set(false),
-                                "x"
-                            }
+                Modal {
+                    dialog_class: "group-edit-dialog",
+                    title: "Group edit",
+                    header_actions: rsx! {
+                        button {
+                            class: "icon-button",
+                            title: "Close group edit",
+                            onclick: move |_| group_editor_open.set(false),
+                            "x"
                         }
-                        GroupTagsEditor {
-                            selected_count,
-                            tag_targets: tag_targets.clone(),
-                            tag_options: tag_options.clone(),
-                            onclose: move |_| group_editor_open.set(false),
-                            ontagsbulksave,
-                        }
+                    },
+                    GroupTagsEditor {
+                        selected_count,
+                        tag_targets: tag_targets.clone(),
+                        tag_options: tag_options.clone(),
+                        onclose: move |_| group_editor_open.set(false),
+                        ontagsbulksave,
                     }
                 }
             }
@@ -1534,15 +1529,14 @@ fn TransactionList(
                     }
                 }
                 div { class: "pagination-footer",
-                    button {
-                        class: "control-button",
+                    ControlButton {
                         disabled: page == 0,
                         onclick: move |event| onprev.call(event),
                         "Previous"
                     }
                     span { "{page + 1} / {page_count}" }
-                    button {
-                        class: "control-button selected",
+                    ControlButton {
+                        selected: true,
                         disabled: page + 1 >= page_count,
                         onclick: move |event| onnext.call(event),
                         "Next"
@@ -1637,8 +1631,8 @@ fn GroupTagsEditor(
                 }
             }
             div { class: "group-tag-row tag-action-row",
-                button {
-                    class: "control-button selected",
+                ControlButton {
+                    selected: true,
                     disabled: !has_selection || tags.is_empty(),
                     onclick: move |_| {
                         ontagsbulksave.call(SetTransactionTagsInput {
@@ -1650,8 +1644,7 @@ fn GroupTagsEditor(
                     },
                     "Apply Tags"
                 }
-                button {
-                    class: "control-button",
+                ControlButton {
                     disabled: !has_selection,
                     onclick: move |_| {
                         selected_tags.set(Vec::new());

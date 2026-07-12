@@ -47,12 +47,11 @@ pub(super) fn AccountGraphPanel(
         .unwrap_or_else(|| "Unknown connection".to_string());
 
     rsx! {
-        section { class: "panel graph-panel",
-            div { class: "panel-header",
-                div { class: "panel-title",
-                    h2 { "Account Value Over Time" }
-                    span { "{selected_connection}" }
-                }
+        Panel {
+            class: "graph-panel",
+            title: "Account Value Over Time",
+            subtitle: "{selected_connection}",
+            actions: rsx! {
                 if !account_options.is_empty() {
                     label { class: "graph-scope-control",
                         span { "Account" }
@@ -79,7 +78,7 @@ pub(super) fn AccountGraphPanel(
                         }
                     }
                 }
-            }
+            },
             if selected_id.is_empty() {
                 div { class: "chart-empty",
                     strong { "No accounts" }
@@ -205,13 +204,10 @@ pub(super) fn StackedHistoryGraphPanel(
     let has_date_error = !start_date.is_empty() && !end_date.is_empty() && start_date > end_date;
 
     rsx! {
-        section { class: "panel graph-panel stacked-graph-panel",
-            div { class: "panel-header",
-                div { class: "panel-title",
-                    h2 { "Net Worth Contributions" }
-                    span { "Zero baseline / stacked by account" }
-                }
-            }
+        Panel {
+            class: "graph-panel stacked-graph-panel",
+            title: "Net Worth Contributions",
+            subtitle: "Zero baseline / stacked by account",
             if is_history_loading {
                 BackendActivity { message: "Waiting on backend contribution data" }
             }
@@ -572,8 +568,7 @@ pub(super) fn HistoryGraphPanel(
                         end_override.set(String::new());
                     }
                 }
-                button {
-                    class: "control-button",
+                ControlButton {
                     onclick: move |_| {
                         if let Some((min, max)) = visible_value_bounds {
                             y_min_input.set(format_input_number(min));
