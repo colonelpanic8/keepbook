@@ -140,6 +140,7 @@ pub(crate) fn App() -> Element {
         }
         document::Link { rel: "icon", href: "data:," }
         document::Style { "{APP_CSS}" }
+        document::Script { "{THEME_BOOTSTRAP_JS}" }
         document::Script { "{SSH_KEY_FILE_PICKER_BRIDGE_JS}" }
         document::Script { "{CONTEXT_MENU_COPY_BRIDGE_JS}" }
         main { class: "shell",

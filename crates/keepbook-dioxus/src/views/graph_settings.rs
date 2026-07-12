@@ -5,6 +5,10 @@ use crate::api::{
 };
 use dioxus::core::Task;
 
+/// Selectable UI themes. The identifier maps to `data-theme` on the document
+/// element (with "fern" being the `:root` default, so it clears the attribute).
+const THEMES: &[(&str, &str)] = &[("fern", "Fern"), ("dark", "Dark")];
+
 #[component]
 pub(super) fn NetWorthGraphView(
     currency: String,
@@ -141,11 +145,59 @@ fn ApplicationSettingsPanel() -> Element {
     let is_busy = busy();
     let status_text = status();
 
+    // Current theme, seeded from persisted localStorage on mount. Defaults to
+    // "fern" on any error or absence.
+    let mut current_theme = use_signal(|| "fern".to_string());
+    use_future(move || async move {
+        let eval = document::eval(r#"return localStorage.getItem("keepbook-theme");"#);
+        if let Ok(value) = eval.await {
+            if let Some(theme) = value.as_str() {
+                if THEMES.iter().any(|(id, _)| *id == theme) {
+                    current_theme.set(theme.to_string());
+                }
+            }
+        }
+    });
+
     rsx! {
         section { class: "panel settings-panel",
             div { class: "panel-header",
                 h2 { "Application" }
                 span { "Build" }
+            }
+            div { class: "settings-list",
+                article { class: "setting-row",
+                    div { class: "setting-copy",
+                        strong { "Theme" }
+                        small { "Appearance of the app" }
+                    }
+                    div { class: "settings-actions inline-actions",
+                        for (theme_id , theme_label) in THEMES.iter().copied() {
+                            ControlButton {
+                                key: "{theme_id}",
+                                selected: current_theme() == theme_id,
+                                onclick: move |_| {
+                                    current_theme.set(theme_id.to_string());
+                                    // `theme_id` comes only from the THEMES const, so
+                                    // formatting it into the JS string is safe.
+                                    let js = format!(
+                                        r#"
+                                        var theme = "{theme_id}";
+                                        if (theme === "fern") {{
+                                            delete document.documentElement.dataset.theme;
+                                        }} else {{
+                                            document.documentElement.dataset.theme = theme;
+                                        }}
+                                        localStorage.setItem("keepbook-theme", theme);
+                                        "#
+                                    );
+                                    let _ = document::eval(&js);
+                                },
+                                "{theme_label}"
+                            }
+                        }
+                    }
+                }
             }
             div { class: "settings-meta settings-meta-grid app-build-meta",
                 span { "Version {app_version}" }
