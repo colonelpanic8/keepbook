@@ -1,3 +1,11 @@
+<!-- @dsCard group="Foundations" name="Type scale" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Type scale — keepbook design tokens</title>
+<style>
 :root,
 :root[data-theme="fern"] {
   /* Surfaces */
@@ -1850,27 +1858,11 @@ button.stacked-legend-item {
   grid-template-columns:
     34px
     150px
-    minmax(200px, 1.1fr)
-    minmax(160px, 0.8fr)
-    minmax(140px, 0.7fr)
-    120px
-    32px;
+    minmax(220px, 1.1fr)
+    minmax(180px, 0.8fr)
+    minmax(150px, 0.75fr)
+    120px;
   min-width: 960px;
-}
-
-/* Read-only transaction rows read as a clickable list; the editor panel below
-   an expanded row is a distinct card. */
-.transaction-table .table-row {
-  cursor: pointer;
-  transition: background 0.12s ease;
-}
-
-.transaction-table .table-row:hover {
-  background: #f2f7f5;
-}
-
-.transaction-table .table-row.expanded {
-  background: #eef6f2;
 }
 
 .transaction-select-cell {
@@ -1880,110 +1872,19 @@ button.stacked-legend-item {
 }
 
 .transaction-date-cell {
-  align-items: baseline;
-  display: flex;
-  gap: 4px;
   min-width: 0;
-}
-
-.transaction-date-text {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.effective-date-indicator {
-  color: #1f6f8b;
-  cursor: help;
-  flex: 0 0 auto;
-  font-weight: 900;
-  line-height: 1;
-}
-
-.transaction-tag-readonly {
-  align-items: center;
-  display: flex;
-  flex: 1;
-  flex-wrap: wrap;
-  gap: 5px;
-  min-width: 0;
-}
-
-.tag-pill.readonly {
-  cursor: default;
-  flex: 0 0 auto;
-  overflow: visible;
-  white-space: nowrap;
-}
-
-.transaction-amount-cell {
-  text-align: right;
-}
-
-.transaction-expand-toggle {
-  align-items: center;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  color: #62727f;
-  cursor: pointer;
-  display: inline-flex;
-  font-size: 1.1rem;
-  font-weight: 800;
-  justify-content: center;
-  line-height: 1;
-  min-height: 28px;
-  padding: 0;
-  width: 28px;
-}
-
-.transaction-expand-toggle:hover {
-  background: #e4efeb;
-  border-color: #cddbd7;
-  color: #24443d;
-}
-
-/* Editor panel revealed beneath an expanded row. */
-.transaction-editor-panel {
-  background: #f7faf9;
-  border: 1px solid #d7e2de;
-  border-radius: 8px;
-  margin: 4px 12px 12px;
-  min-width: 0;
-  padding: 14px;
-}
-
-.transaction-editor-grid {
-  display: grid;
-  gap: 16px;
-  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr);
-}
-
-.transaction-editor-section {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-}
-
-.transaction-editor-label {
-  color: #62727f;
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
 
 .effective-date-editor {
   align-items: flex-start;
   display: flex;
   flex-direction: column;
-  gap: var(--sp-6);
+  gap: var(--sp-4);
   min-width: 0;
 }
 
 .effective-date-input {
-  background: var(--color-surface);
+  background: var(--color-surface-subtle);
   border: 1px solid var(--color-border-input);
   border-radius: var(--radius-sm);
   color: var(--color-text);
@@ -2002,15 +1903,19 @@ button.stacked-legend-item {
   line-height: 1.1;
 }
 
-.transaction-exclude-toggle {
-  min-height: 32px;
+.effective-date-actions {
+  display: flex;
+  gap: var(--sp-4);
+  min-width: 0;
 }
 
-.transaction-exclude-note {
-  color: #7b8790;
-  font-size: 0.72rem;
-  font-weight: 700;
-  line-height: 1.2;
+.effective-date-actions .tag-editor-button {
+  min-height: 26px;
+  padding-inline: 7px;
+}
+
+.transaction-table .table-row strong:last-child {
+  text-align: right;
 }
 
 .sort-header-button {
@@ -2077,8 +1982,15 @@ button.stacked-legend-item {
 .transaction-tag-cell {
   align-items: start;
   display: flex;
-  flex-wrap: wrap;
   gap: var(--sp-8);
+  min-width: 0;
+}
+
+.transaction-tag-stack {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--sp-4);
   min-width: 0;
 }
 
@@ -2216,6 +2128,10 @@ button.stacked-legend-item {
 .tag-editor-button:disabled {
   cursor: default;
   opacity: 0.45;
+}
+
+.tag-save-button {
+  align-self: flex-end;
 }
 
 .ignored-badge {
@@ -2410,20 +2326,6 @@ button.stacked-legend-item {
 .data-table small {
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* The transaction editor panel needs normal text flow despite the
-   .data-table ellipsis defaults above. */
-.data-table .transaction-editor-panel span,
-.data-table .transaction-editor-panel small {
-  overflow: visible;
-  text-overflow: clip;
-  white-space: normal;
-}
-
-.data-table .transaction-editor-panel .tag-pill,
-.data-table .transaction-editor-panel .tag-pill span:first-child {
   white-space: nowrap;
 }
 
@@ -2949,17 +2851,8 @@ button.stacked-legend-item {
     justify-content: flex-start;
   }
 
-  .transaction-table .table-row strong:last-child,
-  .transaction-amount-cell {
+  .transaction-table .table-row strong:last-child {
     text-align: left;
-  }
-
-  .transaction-editor-panel {
-    margin: 4px 0 0;
-  }
-
-  .transaction-editor-grid {
-    grid-template-columns: minmax(0, 1fr);
   }
 
   .transaction-tag-cell,
@@ -2988,3 +2881,114 @@ button.stacked-legend-item {
     grid-template-columns: 1fr;
   }
 }
+
+</style>
+<style>
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  padding: 24px;
+  font-family: var(--font-sans);
+  background: var(--color-bg);
+  color: var(--color-text);
+  line-height: 1.4;
+}
+.ds-h1 { font-size: var(--fs-heading); font-weight: var(--fw-bold); margin: 0 0 4px; }
+.ds-sub { color: var(--color-text-muted); font-size: var(--fs-small); margin: 0 0 20px; max-width: 70ch; }
+.ds-sub code { font-family: var(--font-mono); }
+.ds-themes { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
+.ds-theme {
+  flex: 1 1 380px;
+  min-width: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+.ds-theme-label {
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+  margin-bottom: 14px;
+}
+.ds-group-title {
+  font-size: var(--fs-label);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: var(--fw-bold);
+  color: var(--color-text-muted);
+  margin: 18px 0 8px;
+}
+.ds-group-title:first-of-type { margin-top: 4px; }
+.ds-swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 10px; }
+.ds-swatch {
+  border: 1px solid var(--color-border-muted);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--color-surface);
+}
+.ds-chip {
+  height: 46px;
+  border-bottom: 1px solid var(--swatch-ring);
+  box-shadow: inset 0 0 0 1px var(--swatch-ring-inner);
+}
+.ds-chip.checker {
+  background-image:
+    linear-gradient(45deg, #999 25%, transparent 25%),
+    linear-gradient(-45deg, #999 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #999 75%),
+    linear-gradient(-45deg, transparent 75%, #999 75%);
+  background-size: 12px 12px;
+  background-position: 0 0, 0 6px, 6px -6px, -6px 0;
+  background-color: #fff;
+}
+.ds-name {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  padding: 6px 7px;
+  color: var(--color-text-secondary);
+  word-break: break-all;
+}
+.ds-val {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--color-text-faint);
+  padding: 0 7px 6px;
+  word-break: break-all;
+}
+.ds-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 14px; }
+.ds-col { display: flex; flex-direction: column; gap: 12px; }
+.ds-caption { font-family: var(--font-mono); font-size: var(--fs-micro); color: var(--color-text-muted); }
+.ds-cell { display: flex; flex-direction: column; gap: 5px; align-items: flex-start; }
+
+</style>
+</head>
+<body>
+<div class="ds-h1">Type scale</div>
+<p class="ds-sub">Font-size and weight tokens rendered at their real values, plus the two font stacks. Values are theme-independent.</p>
+<div class="ds-group-title">Font stacks</div>
+<div class="ds-col" style="margin-bottom:8px;"><div class="ds-cell"><div style="font-family: var(--font-sans); font-size: var(--fs-lead);">Inter / system sans — 1234567890</div><div class="ds-caption">--font-sans &middot; Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif</div></div><div class="ds-cell"><div style="font-family: var(--font-mono); font-size: var(--fs-lead);">ui-monospace — 1234567890</div><div class="ds-caption">--font-mono &middot; ui-monospace, "SFMono-Regular", "SF Mono", Consolas, "Liberation Mono", monospace</div></div></div>
+<div class="ds-group-title">Size scale (--fs-*)</div>
+<div class="ds-cell" style="margin-bottom:16px;"><div style="font-size: var(--fs-micro); font-weight: var(--fw-semibold);">Portfolio net worth $128,400</div><div class="ds-caption">--fs-micro &middot; 0.7rem</div></div>
+<div class="ds-cell" style="margin-bottom:16px;"><div style="font-size: var(--fs-caption); font-weight: var(--fw-semibold);">Portfolio net worth $128,400</div><div class="ds-caption">--fs-caption &middot; 0.75rem</div></div>
+<div class="ds-cell" style="margin-bottom:16px;"><div style="font-size: var(--fs-label); font-weight: var(--fw-semibold);">Portfolio net worth $128,400</div><div class="ds-caption">--fs-label &middot; 0.78rem</div></div>
+<div class="ds-cell" style="margin-bottom:16px;"><div style="font-size: var(--fs-small); font-weight: var(--fw-semibold);">Portfolio net worth $128,400</div><div class="ds-caption">--fs-small &middot; 0.82rem</div></div>
+<div class="ds-cell" style="margin-bottom:16px;"><div style="font-size: var(--fs-control); font-weight: var(--fw-semibold);">Portfolio net worth $128,400</div><div class="ds-caption">--fs-control &middot; 0.85rem</div></div>
+<div class="ds-cell" style="margin-bottom:16px;"><div style="font-size: var(--fs-body); font-weight: var(--fw-semibold);">Portfolio net worth $128,400</div><div class="ds-caption">--fs-body &middot; 0.9rem</div></div>
+<div class="ds-cell" style="margin-bottom:16px;"><div style="font-size: var(--fs-title-sm); font-weight: var(--fw-semibold);">Portfolio net worth $128,400</div><div class="ds-caption">--fs-title-sm &middot; 0.95rem</div></div>
+<div class="ds-cell" style="margin-bottom:16px;"><div style="font-size: var(--fs-title); font-weight: var(--fw-semibold);">Portfolio net worth $128,400</div><div class="ds-caption">--fs-title &middot; 1rem</div></div>
+<div class="ds-cell" style="margin-bottom:16px;"><div style="font-size: var(--fs-lead); font-weight: var(--fw-semibold);">Portfolio net worth $128,400</div><div class="ds-caption">--fs-lead &middot; 1.1rem</div></div>
+<div class="ds-cell" style="margin-bottom:16px;"><div style="font-size: var(--fs-heading); font-weight: var(--fw-semibold);">Portfolio net worth $128,400</div><div class="ds-caption">--fs-heading &middot; 1.2rem</div></div>
+<div class="ds-cell" style="margin-bottom:16px;"><div style="font-size: var(--fs-stat-sm); font-weight: var(--fw-semibold);">Portfolio net worth $128,400</div><div class="ds-caption">--fs-stat-sm &middot; 1.3rem</div></div>
+<div class="ds-cell" style="margin-bottom:16px;"><div style="font-size: var(--fs-stat); font-weight: var(--fw-semibold);">Portfolio net worth $128,400</div><div class="ds-caption">--fs-stat &middot; 1.6rem</div></div>
+<div class="ds-group-title">Weights (--fw-*)</div>
+<div class="ds-cell" style="margin-bottom:12px;"><div style="font-size: var(--fs-lead); font-weight: var(--fw-medium);">The quick brown fox</div><div class="ds-caption">--fw-medium &middot; 600</div></div>
+<div class="ds-cell" style="margin-bottom:12px;"><div style="font-size: var(--fs-lead); font-weight: var(--fw-semibold);">The quick brown fox</div><div class="ds-caption">--fw-semibold &middot; 700</div></div>
+<div class="ds-cell" style="margin-bottom:12px;"><div style="font-size: var(--fs-lead); font-weight: var(--fw-bold);">The quick brown fox</div><div class="ds-caption">--fw-bold &middot; 800</div></div>
+<div class="ds-cell" style="margin-bottom:12px;"><div style="font-size: var(--fs-lead); font-weight: var(--fw-black);">The quick brown fox</div><div class="ds-caption">--fw-black &middot; 900</div></div>
+</body>
+</html>

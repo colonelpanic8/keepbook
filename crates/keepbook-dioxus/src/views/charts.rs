@@ -47,12 +47,11 @@ pub(super) fn AccountGraphPanel(
         .unwrap_or_else(|| "Unknown connection".to_string());
 
     rsx! {
-        section { class: "panel graph-panel",
-            div { class: "panel-header",
-                div { class: "panel-title",
-                    h2 { "Account Value Over Time" }
-                    span { "{selected_connection}" }
-                }
+        Panel {
+            class: "graph-panel",
+            title: "Account Value Over Time",
+            subtitle: "{selected_connection}",
+            actions: rsx! {
                 if !account_options.is_empty() {
                     label { class: "graph-scope-control",
                         span { "Account" }
@@ -79,7 +78,7 @@ pub(super) fn AccountGraphPanel(
                         }
                     }
                 }
-            }
+            },
             if selected_id.is_empty() {
                 div { class: "chart-empty",
                     strong { "No accounts" }
@@ -205,13 +204,10 @@ pub(super) fn StackedHistoryGraphPanel(
     let has_date_error = !start_date.is_empty() && !end_date.is_empty() && start_date > end_date;
 
     rsx! {
-        section { class: "panel graph-panel stacked-graph-panel",
-            div { class: "panel-header",
-                div { class: "panel-title",
-                    h2 { "Net Worth Contributions" }
-                    span { "Zero baseline / stacked by account" }
-                }
-            }
+        Panel {
+            class: "graph-panel stacked-graph-panel",
+            title: "Net Worth Contributions",
+            subtitle: "Zero baseline / stacked by account",
             if is_history_loading {
                 BackendActivity { message: "Waiting on backend contribution data" }
             }
@@ -572,8 +568,7 @@ pub(super) fn HistoryGraphPanel(
                         end_override.set(String::new());
                     }
                 }
-                button {
-                    class: "control-button",
+                ControlButton {
                     onclick: move |_| {
                         if let Some((min, max)) = visible_value_bounds {
                             y_min_input.set(format_input_number(min));
@@ -1852,9 +1847,24 @@ fn tooltip_label(label: &str, max_chars: usize) -> String {
 
 fn stacked_chart_color(index: usize) -> &'static str {
     const COLORS: [&str; 18] = [
-        "#1f6f8b", "#c2573f", "#4f7f39", "#7b5cb8", "#b7831f", "#2a9187", "#a83f6f", "#5867c2",
-        "#7a6a2f", "#3d7898", "#d06a2f", "#5f8c54", "#8f4fb0", "#c14d57", "#2f8fbd", "#9a7331",
-        "#516fb0", "#6f7d35",
+        "var(--series-1)",
+        "var(--series-2)",
+        "var(--series-3)",
+        "var(--series-4)",
+        "var(--series-5)",
+        "var(--series-6)",
+        "var(--series-7)",
+        "var(--series-8)",
+        "var(--series-9)",
+        "var(--series-10)",
+        "var(--series-11)",
+        "var(--series-12)",
+        "var(--series-13)",
+        "var(--series-14)",
+        "var(--series-15)",
+        "var(--series-16)",
+        "var(--series-17)",
+        "var(--series-18)",
     ];
     COLORS[index % COLORS.len()]
 }

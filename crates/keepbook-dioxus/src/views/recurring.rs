@@ -29,8 +29,7 @@ pub(super) fn RecurringView() -> Element {
                     h2 { "Predictable recurring costs" }
                     span { "Active, regular outflows with stable amounts" }
                 }
-                button {
-                    class: "control-button",
+                ControlButton {
                     disabled: !busy.is_empty(),
                     onclick: move |_| recurring.restart(),
                     "Refresh"
@@ -186,14 +185,14 @@ fn RecurringCandidateCard(
                 }
             }
             div { class: "recurring-actions",
-                button {
-                    class: "control-button selected",
+                ControlButton {
+                    selected: true,
                     disabled: any_busy || item.review_status == "verified",
                     onclick: move |_| onreview.call((candidate_for_verify.clone(), "verified")),
                     if is_busy { "Working" } else { "Verify" }
                 }
-                button {
-                    class: "control-button danger-button",
+                ControlButton {
+                    class: "danger-button",
                     disabled: any_busy || item.review_status == "dismissed",
                     onclick: move |_| onreview.call((candidate_for_dismiss.clone(), "dismissed")),
                     "Dismiss"

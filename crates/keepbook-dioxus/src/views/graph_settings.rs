@@ -5,6 +5,10 @@ use crate::api::{
 };
 use dioxus::core::Task;
 
+/// Selectable UI themes. The identifier maps to `data-theme` on the document
+/// element (with "fern" being the `:root` default, so it clears the attribute).
+const THEMES: &[(&str, &str)] = &[("fern", "Fern"), ("dark", "Dark")];
+
 #[component]
 pub(super) fn NetWorthGraphView(
     currency: String,
@@ -102,8 +106,7 @@ fn PortfolioSettingsPanel(
                 span { "Tax rate {rate_state}" }
             }
             div { class: "settings-actions",
-                button {
-                    class: "control-button",
+                ControlButton {
                     disabled: !override_active,
                     onclick: move |_| {
                         let mut next = reset_filter_overrides.clone();
@@ -142,11 +145,59 @@ fn ApplicationSettingsPanel() -> Element {
     let is_busy = busy();
     let status_text = status();
 
+    // Current theme, seeded from persisted localStorage on mount. Defaults to
+    // "fern" on any error or absence.
+    let mut current_theme = use_signal(|| "fern".to_string());
+    use_future(move || async move {
+        let eval = document::eval(r#"return localStorage.getItem("keepbook-theme");"#);
+        if let Ok(value) = eval.await {
+            if let Some(theme) = value.as_str() {
+                if THEMES.iter().any(|(id, _)| *id == theme) {
+                    current_theme.set(theme.to_string());
+                }
+            }
+        }
+    });
+
     rsx! {
         section { class: "panel settings-panel",
             div { class: "panel-header",
                 h2 { "Application" }
                 span { "Build" }
+            }
+            div { class: "settings-list",
+                article { class: "setting-row",
+                    div { class: "setting-copy",
+                        strong { "Theme" }
+                        small { "Appearance of the app" }
+                    }
+                    div { class: "settings-actions inline-actions",
+                        for (theme_id , theme_label) in THEMES.iter().copied() {
+                            ControlButton {
+                                key: "{theme_id}",
+                                selected: current_theme() == theme_id,
+                                onclick: move |_| {
+                                    current_theme.set(theme_id.to_string());
+                                    // `theme_id` comes only from the THEMES const, so
+                                    // formatting it into the JS string is safe.
+                                    let js = format!(
+                                        r#"
+                                        var theme = "{theme_id}";
+                                        if (theme === "fern") {{
+                                            delete document.documentElement.dataset.theme;
+                                        }} else {{
+                                            document.documentElement.dataset.theme = theme;
+                                        }}
+                                        localStorage.setItem("keepbook-theme", theme);
+                                        "#
+                                    );
+                                    let _ = document::eval(&js);
+                                },
+                                "{theme_label}"
+                            }
+                        }
+                    }
+                }
             }
             div { class: "settings-meta settings-meta-grid app-build-meta",
                 span { "Version {app_version}" }
@@ -280,12 +331,11 @@ pub(super) fn SettingsView(
             onfilterchange,
         }
         ApplicationSettingsPanel {}
-        section { class: "panel settings-panel",
-            div { class: "panel-header",
-                div { class: "panel-title",
-                    h2 { "Git Sync" }
-                    span { "Repository only" }
-                }
+        Panel {
+            class: "settings-panel",
+            title: "Git Sync",
+            subtitle: "Repository only",
+            actions: rsx! {
                 div { class: "settings-actions inline-actions",
                     button {
                         class: "icon-button add-location-button",
@@ -301,7 +351,7 @@ pub(super) fn SettingsView(
                         "+"
                     }
                 }
-            }
+            },
             match current_settings {
                 None => rsx! { BackendActivity { message: "Loading Git settings" } },
                 Some(Err(error)) => rsx! { p { class: "validation", "{error}" } },
@@ -464,8 +514,7 @@ pub(super) fn SettingsView(
                                 }
                             }
                             if !private_key().trim().is_empty() {
-                                button {
-                                    class: "control-button",
+                                ControlButton {
                                     disabled: is_busy,
                                     onclick: move |_| {
                                         private_key.set(String::new());
@@ -481,68 +530,27 @@ pub(super) fn SettingsView(
             }
         }
         if add_location_open() {
-            div { class: "modal-backdrop",
-                div { class: "modal-dialog",
-                    div { class: "modal-header",
-                        h3 { "Add location" }
-                        button {
-                            class: "icon-button",
-                            disabled: is_busy,
-                            onclick: move |_| add_location_open.set(false),
-                            "x"
-                        }
+            Modal {
+                title: "Add location",
+                header_actions: rsx! {
+                    button {
+                        class: "icon-button",
+                        disabled: is_busy,
+                        onclick: move |_| add_location_open.set(false),
+                        "x"
                     }
-                    label { class: "control-field",
-                        span { "Remote" }
-                        input {
-                            class: "control-input",
-                            r#type: "text",
-                            value: "{location_remote_input()}",
-                            placeholder: "git@github.com:owner/keepbook-data.git",
-                            autofocus: true,
-                            oninput: move |event| {
-                                location_remote_input.set(event.value());
-                                location_error.set(String::new());
-                            }
-                        }
+                },
+                actions: rsx! {
+                    ControlButton {
+                        disabled: is_busy,
+                        onclick: move |_| add_location_open.set(false),
+                        "Cancel"
                     }
-                    TextInput {
-                        label: "Location",
-                        value: location_path_input(),
-                        placeholder: "/path/to/keepbook-data",
-                        oninput: move |value| location_path_input.set(value)
-                    }
-                    TextInput {
-                        label: "Branch",
-                        value: location_branch_input(),
-                        placeholder: "master",
-                        oninput: move |value| location_branch_input.set(value)
-                    }
-                    if let Some(path) = recommended_data_dir() {
-                        div { class: "settings-actions inline-actions",
-                            button {
-                                class: "control-button",
-                                disabled: is_busy,
-                                onclick: move |_| location_path_input.set(path.clone()),
-                                "Use app data folder"
-                            }
-                        }
-                    }
-                    if !location_error().is_empty() {
-                        p { class: "validation", "{location_error()}" }
-                    }
-                    div { class: "modal-actions",
-                        button {
-                            class: "control-button",
-                            disabled: is_busy,
-                            onclick: move |_| add_location_open.set(false),
-                            "Cancel"
-                        }
-                        button {
-                            class: "control-button selected",
-                            disabled: is_busy,
-                            onclick: move |_| {
-                                match git_settings_from_remote(&location_remote_input()) {
+                    ControlButton {
+                        selected: true,
+                        disabled: is_busy,
+                        onclick: move |_| {
+                            match git_settings_from_remote(&location_remote_input()) {
                                     Ok((next_host, next_repo, next_ssh_user)) => {
                                         let next_data_dir = location_path_input();
                                         if next_data_dir.trim().is_empty() {
@@ -588,64 +596,97 @@ pub(super) fn SettingsView(
                             },
                             "Add"
                         }
+                },
+                label { class: "control-field",
+                    span { "Remote" }
+                    input {
+                        class: "control-input",
+                        r#type: "text",
+                        value: "{location_remote_input()}",
+                        placeholder: "git@github.com:owner/keepbook-data.git",
+                        autofocus: true,
+                        oninput: move |event| {
+                            location_remote_input.set(event.value());
+                            location_error.set(String::new());
+                        }
                     }
+                }
+                TextInput {
+                    label: "Location",
+                    value: location_path_input(),
+                    placeholder: "/path/to/keepbook-data",
+                    oninput: move |value| location_path_input.set(value)
+                }
+                TextInput {
+                    label: "Branch",
+                    value: location_branch_input(),
+                    placeholder: "master",
+                    oninput: move |value| location_branch_input.set(value)
+                }
+                if let Some(path) = recommended_data_dir() {
+                    div { class: "settings-actions inline-actions",
+                        ControlButton {
+                            disabled: is_busy,
+                            onclick: move |_| location_path_input.set(path.clone()),
+                            "Use app data folder"
+                        }
+                    }
+                }
+                if !location_error().is_empty() {
+                    p { class: "validation", "{location_error()}" }
                 }
             }
         }
         if clone_dialog_open() {
-            div { class: "modal-backdrop",
-                div { class: "modal-dialog clone-dialog",
-                    div { class: "modal-header",
-                        h3 { "{clone_dialog_title()}" }
-                        if !is_busy {
-                            button {
-                                class: "icon-button",
-                                onclick: move |_| clone_dialog_open.set(false),
-                                "x"
-                            }
-                        }
-                    }
-                    div { class: "clone-progress",
-                        if is_busy {
-                            span { class: "activity-spinner large" }
-                        }
-                        div { class: "clone-progress-copy",
-                            p { "{clone_dialog_message()}" }
-                            if is_busy {
-                                div { class: "indeterminate-progress",
-                                    span {}
-                                }
-                            }
-                        }
-                    }
-                    if is_busy {
-                        div { class: "modal-actions",
-                            button {
-                                class: "control-button danger",
-                                disabled: is_canceling,
-                                onclick: move |_| {
-                                    if let Some(cancel_handle) = git_sync_cancel() {
-                                        cancel_handle.cancel();
-                                    }
-                                    cancel_requested.set(true);
-                                    clone_dialog_title.set("Canceling Git operation".to_string());
-                                    clone_dialog_message.set("Waiting for the current Git transfer step to stop.".to_string());
-                                    status.set("Canceling Git sync...".to_string());
-                                },
-                                if is_canceling {
-                                    "Canceling"
-                                } else {
-                                    "Cancel"
-                                }
-                            }
-                        }
-                    }
+            Modal {
+                dialog_class: "clone-dialog",
+                title: clone_dialog_title(),
+                header_actions: rsx! {
                     if !is_busy {
-                        div { class: "modal-actions",
-                            button {
-                                class: "control-button selected",
-                                onclick: move |_| clone_dialog_open.set(false),
-                                "Close"
+                        button {
+                            class: "icon-button",
+                            onclick: move |_| clone_dialog_open.set(false),
+                            "x"
+                        }
+                    }
+                },
+                actions: rsx! {
+                    if is_busy {
+                        ControlButton {
+                            danger: true,
+                            disabled: is_canceling,
+                            onclick: move |_| {
+                                if let Some(cancel_handle) = git_sync_cancel() {
+                                    cancel_handle.cancel();
+                                }
+                                cancel_requested.set(true);
+                                clone_dialog_title.set("Canceling Git operation".to_string());
+                                clone_dialog_message.set("Waiting for the current Git transfer step to stop.".to_string());
+                                status.set("Canceling Git sync...".to_string());
+                            },
+                            if is_canceling {
+                                "Canceling"
+                            } else {
+                                "Cancel"
+                            }
+                        }
+                    } else {
+                        ControlButton {
+                            selected: true,
+                            onclick: move |_| clone_dialog_open.set(false),
+                            "Close"
+                        }
+                    }
+                },
+                div { class: "clone-progress",
+                    if is_busy {
+                        span { class: "activity-spinner large" }
+                    }
+                    div { class: "clone-progress-copy",
+                        p { "{clone_dialog_message()}" }
+                        if is_busy {
+                            div { class: "indeterminate-progress",
+                                span {}
                             }
                         }
                     }
@@ -710,8 +751,8 @@ fn GitLocationList(
                     }
                 }
                 div { class: "git-location-actions",
-                    button {
-                        class: "control-button selected",
+                    ControlButton {
+                        selected: true,
                         disabled: clone_disabled,
                         onclick: move |_| onclone.call(()),
                         "{action_label}"

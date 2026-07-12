@@ -1,3 +1,11 @@
+<!-- @dsCard group="Components" name="Buttons" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Buttons — keepbook design tokens</title>
+<style>
 :root,
 :root[data-theme="fern"] {
   /* Surfaces */
@@ -1850,27 +1858,11 @@ button.stacked-legend-item {
   grid-template-columns:
     34px
     150px
-    minmax(200px, 1.1fr)
-    minmax(160px, 0.8fr)
-    minmax(140px, 0.7fr)
-    120px
-    32px;
+    minmax(220px, 1.1fr)
+    minmax(180px, 0.8fr)
+    minmax(150px, 0.75fr)
+    120px;
   min-width: 960px;
-}
-
-/* Read-only transaction rows read as a clickable list; the editor panel below
-   an expanded row is a distinct card. */
-.transaction-table .table-row {
-  cursor: pointer;
-  transition: background 0.12s ease;
-}
-
-.transaction-table .table-row:hover {
-  background: #f2f7f5;
-}
-
-.transaction-table .table-row.expanded {
-  background: #eef6f2;
 }
 
 .transaction-select-cell {
@@ -1880,110 +1872,19 @@ button.stacked-legend-item {
 }
 
 .transaction-date-cell {
-  align-items: baseline;
-  display: flex;
-  gap: 4px;
   min-width: 0;
-}
-
-.transaction-date-text {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.effective-date-indicator {
-  color: #1f6f8b;
-  cursor: help;
-  flex: 0 0 auto;
-  font-weight: 900;
-  line-height: 1;
-}
-
-.transaction-tag-readonly {
-  align-items: center;
-  display: flex;
-  flex: 1;
-  flex-wrap: wrap;
-  gap: 5px;
-  min-width: 0;
-}
-
-.tag-pill.readonly {
-  cursor: default;
-  flex: 0 0 auto;
-  overflow: visible;
-  white-space: nowrap;
-}
-
-.transaction-amount-cell {
-  text-align: right;
-}
-
-.transaction-expand-toggle {
-  align-items: center;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  color: #62727f;
-  cursor: pointer;
-  display: inline-flex;
-  font-size: 1.1rem;
-  font-weight: 800;
-  justify-content: center;
-  line-height: 1;
-  min-height: 28px;
-  padding: 0;
-  width: 28px;
-}
-
-.transaction-expand-toggle:hover {
-  background: #e4efeb;
-  border-color: #cddbd7;
-  color: #24443d;
-}
-
-/* Editor panel revealed beneath an expanded row. */
-.transaction-editor-panel {
-  background: #f7faf9;
-  border: 1px solid #d7e2de;
-  border-radius: 8px;
-  margin: 4px 12px 12px;
-  min-width: 0;
-  padding: 14px;
-}
-
-.transaction-editor-grid {
-  display: grid;
-  gap: 16px;
-  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr);
-}
-
-.transaction-editor-section {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-}
-
-.transaction-editor-label {
-  color: #62727f;
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
 
 .effective-date-editor {
   align-items: flex-start;
   display: flex;
   flex-direction: column;
-  gap: var(--sp-6);
+  gap: var(--sp-4);
   min-width: 0;
 }
 
 .effective-date-input {
-  background: var(--color-surface);
+  background: var(--color-surface-subtle);
   border: 1px solid var(--color-border-input);
   border-radius: var(--radius-sm);
   color: var(--color-text);
@@ -2002,15 +1903,19 @@ button.stacked-legend-item {
   line-height: 1.1;
 }
 
-.transaction-exclude-toggle {
-  min-height: 32px;
+.effective-date-actions {
+  display: flex;
+  gap: var(--sp-4);
+  min-width: 0;
 }
 
-.transaction-exclude-note {
-  color: #7b8790;
-  font-size: 0.72rem;
-  font-weight: 700;
-  line-height: 1.2;
+.effective-date-actions .tag-editor-button {
+  min-height: 26px;
+  padding-inline: 7px;
+}
+
+.transaction-table .table-row strong:last-child {
+  text-align: right;
 }
 
 .sort-header-button {
@@ -2077,8 +1982,15 @@ button.stacked-legend-item {
 .transaction-tag-cell {
   align-items: start;
   display: flex;
-  flex-wrap: wrap;
   gap: var(--sp-8);
+  min-width: 0;
+}
+
+.transaction-tag-stack {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--sp-4);
   min-width: 0;
 }
 
@@ -2216,6 +2128,10 @@ button.stacked-legend-item {
 .tag-editor-button:disabled {
   cursor: default;
   opacity: 0.45;
+}
+
+.tag-save-button {
+  align-self: flex-end;
 }
 
 .ignored-badge {
@@ -2410,20 +2326,6 @@ button.stacked-legend-item {
 .data-table small {
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* The transaction editor panel needs normal text flow despite the
-   .data-table ellipsis defaults above. */
-.data-table .transaction-editor-panel span,
-.data-table .transaction-editor-panel small {
-  overflow: visible;
-  text-overflow: clip;
-  white-space: normal;
-}
-
-.data-table .transaction-editor-panel .tag-pill,
-.data-table .transaction-editor-panel .tag-pill span:first-child {
   white-space: nowrap;
 }
 
@@ -2949,17 +2851,8 @@ button.stacked-legend-item {
     justify-content: flex-start;
   }
 
-  .transaction-table .table-row strong:last-child,
-  .transaction-amount-cell {
+  .transaction-table .table-row strong:last-child {
     text-align: left;
-  }
-
-  .transaction-editor-panel {
-    margin: 4px 0 0;
-  }
-
-  .transaction-editor-grid {
-    grid-template-columns: minmax(0, 1fr);
   }
 
   .transaction-tag-cell,
@@ -2988,3 +2881,376 @@ button.stacked-legend-item {
     grid-template-columns: 1fr;
   }
 }
+
+</style>
+<style>
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  padding: 24px;
+  font-family: var(--font-sans);
+  background: var(--color-bg);
+  color: var(--color-text);
+  line-height: 1.4;
+}
+.ds-h1 { font-size: var(--fs-heading); font-weight: var(--fw-bold); margin: 0 0 4px; }
+.ds-sub { color: var(--color-text-muted); font-size: var(--fs-small); margin: 0 0 20px; max-width: 70ch; }
+.ds-sub code { font-family: var(--font-mono); }
+.ds-themes { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
+.ds-theme {
+  flex: 1 1 380px;
+  min-width: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+.ds-theme-label {
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+  margin-bottom: 14px;
+}
+.ds-group-title {
+  font-size: var(--fs-label);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: var(--fw-bold);
+  color: var(--color-text-muted);
+  margin: 18px 0 8px;
+}
+.ds-group-title:first-of-type { margin-top: 4px; }
+.ds-swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 10px; }
+.ds-swatch {
+  border: 1px solid var(--color-border-muted);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--color-surface);
+}
+.ds-chip {
+  height: 46px;
+  border-bottom: 1px solid var(--swatch-ring);
+  box-shadow: inset 0 0 0 1px var(--swatch-ring-inner);
+}
+.ds-chip.checker {
+  background-image:
+    linear-gradient(45deg, #999 25%, transparent 25%),
+    linear-gradient(-45deg, #999 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #999 75%),
+    linear-gradient(-45deg, transparent 75%, #999 75%);
+  background-size: 12px 12px;
+  background-position: 0 0, 0 6px, 6px -6px, -6px 0;
+  background-color: #fff;
+}
+.ds-name {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  padding: 6px 7px;
+  color: var(--color-text-secondary);
+  word-break: break-all;
+}
+.ds-val {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--color-text-faint);
+  padding: 0 7px 6px;
+  word-break: break-all;
+}
+.ds-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 14px; }
+.ds-col { display: flex; flex-direction: column; gap: 12px; }
+.ds-caption { font-family: var(--font-mono); font-size: var(--fs-micro); color: var(--color-text-muted); }
+.ds-cell { display: flex; flex-direction: column; gap: 5px; align-items: flex-start; }
+
+
+[data-theme-scope="fern"] {
+  /* Surfaces */
+  --color-bg: #f4f7f6;
+  --color-surface: #ffffff;
+  --color-surface-subtle: #f7faf9;
+  --color-surface-inset: #edf4f1;
+  --color-surface-hover: #f2f7f5;
+  --color-surface-muted: #f5f6f6;
+  --color-surface-warm: #fbf8f5;
+  --color-surface-warm-faint: #fffdfb;
+
+  /* Text */
+  --color-text: #17202a;
+  --color-text-secondary: #31424e;
+  --color-text-muted: #62727f;
+  --color-text-faint: #7b8790;
+  --color-on-emphasis: #ffffff;
+
+  /* Borders */
+  --color-border: #d7dfdd;
+  --color-border-muted: #e1e8e6;
+  --color-divider: #eef2f1;
+  --color-border-strong: #c8d4d0;
+  --color-border-input: #cfdad7;
+  --color-border-hover: #b9cfca;
+
+  /* Brand / primary */
+  --color-primary: #1f6f8b;
+  --color-primary-strong: #174f62;
+  --color-primary-tint: #e8f2f6;
+  --color-accent-tint: #e9f1ef;
+  --color-accent-bg: #eef7f4;
+  --color-accent-border: #cfe2dc;
+  --color-accent-fg: #24443d;
+  --color-accent-muted: #7ca99c;
+  --color-spinner-track: #b8d3cb;
+
+  /* Status */
+  --color-positive: #238a57;
+  --color-positive-bg: #eaf6ef;
+  --color-positive-fg: #2d6b44;
+  --color-negative: #bf3d3d;
+  --color-danger-fg: #a33a3a;
+  --color-danger-bg: #fff4f4;
+  --color-danger-border: #e1b5b5;
+  --color-warning-bg: #f4e7dd;
+  --color-warning-fg: #8a4d20;
+  --color-badge-neutral-bg: #eef0f2;
+  --color-badge-neutral-fg: #596670;
+  --color-badge-neutral-border: #d3dbd9;
+
+  /* Charts & overlays */
+  --chart-grid: #e0e8e5;
+  --chart-axis: var(--color-border-strong);
+  --chart-area: #dbeee8;
+  --chart-line: var(--color-primary);
+  --chart-selection-fill: rgba(31, 111, 139, 0.16);
+  --chart-selection-stroke: rgba(31, 111, 139, 0.42);
+  --progress-track: #dbe8e4;
+  --tooltip-bg: #17202a;
+  --tooltip-fg: #ffffff;
+  --tooltip-muted: #d8e4e0;
+  --tooltip-negative: #ffd2ca;
+  --tooltip-border: rgba(255, 255, 255, 0.86);
+  --scrim: rgba(23, 32, 42, 0.42);
+  --scrim-soft: rgba(23, 32, 42, 0.28);
+  --swatch-ring: rgb(23 32 42 / 18%);
+  --swatch-ring-inner: rgb(255 255 255 / 42%);
+  --shadow-modal: 0 18px 48px rgba(23, 32, 42, 0.22);
+  --shadow-drawer: 18px 0 34px rgba(23, 32, 42, 0.18);
+  --shadow-thumb: 0 1px 3px rgb(23 32 42 / 18%);
+
+  /* Categorical series (stacked / net-worth) */
+  --series-1: #1f6f8b;
+  --series-2: #c2573f;
+  --series-3: #4f7f39;
+  --series-4: #7b5cb8;
+  --series-5: #b7831f;
+  --series-6: #2a9187;
+  --series-7: #a83f6f;
+  --series-8: #5867c2;
+  --series-9: #7a6a2f;
+  --series-10: #3d7898;
+  --series-11: #d06a2f;
+  --series-12: #5f8c54;
+  --series-13: #8f4fb0;
+  --series-14: #c14d57;
+  --series-15: #2f8fbd;
+  --series-16: #9a7331;
+  --series-17: #516fb0;
+  --series-18: #6f7d35;
+
+  /* Spending-tag palette */
+  --cat-1: #1f6f8b;
+  --cat-2: #238a57;
+  --cat-3: #8a5cf6;
+  --cat-4: #bf6b21;
+  --cat-5: #b83280;
+  --cat-6: #52677a;
+  --cat-7: #2f9e9e;
+  --cat-8: #9b6a28;
+  --cat-9: #6f7d1f;
+  --cat-10: #bf3d3d;
+
+  /* Radii */
+  --radius-xs: 3px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-pill: 999px;
+
+  /* Typography */
+  --font-sans:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", "SF Mono", Consolas, "Liberation Mono", monospace;
+
+  --fs-micro: 0.7rem;
+  --fs-caption: 0.75rem;
+  --fs-label: 0.78rem;
+  --fs-small: 0.82rem;
+  --fs-control: 0.85rem;
+  --fs-body: 0.9rem;
+  --fs-title-sm: 0.95rem;
+  --fs-title: 1rem;
+  --fs-lead: 1.1rem;
+  --fs-heading: 1.2rem;
+  --fs-stat-sm: 1.3rem;
+  --fs-stat: 1.6rem;
+
+  --fw-medium: 600;
+  --fw-semibold: 700;
+  --fw-bold: 800;
+  --fw-black: 900;
+
+  /* Spacing */
+  --sp-2: 2px;
+  --sp-4: 4px;
+  --sp-6: 6px;
+  --sp-8: 8px;
+  --sp-10: 10px;
+  --sp-12: 12px;
+  --sp-14: 14px;
+  --sp-16: 16px;
+  --sp-20: 20px;
+  --sp-24: 24px;
+}
+
+[data-theme-scope="dark"] {
+  /* Surfaces */
+  --color-bg: #10171d;
+  --color-surface: #1a232b;
+  --color-surface-subtle: #202b33;
+  --color-surface-inset: #26333c;
+  --color-surface-hover: #243039;
+  --color-surface-muted: #1e262c;
+  --color-surface-warm: #2a251f;
+  --color-surface-warm-faint: #221e19;
+
+  /* Text */
+  --color-text: #e8eef2;
+  --color-text-secondary: #c2cfd8;
+  --color-text-muted: #8fa1ac;
+  --color-text-faint: #6e7f8a;
+  --color-on-emphasis: #ffffff;
+
+  /* Borders */
+  --color-border: #2e3b44;
+  --color-border-muted: #29343c;
+  --color-divider: #232e35;
+  --color-border-strong: #3d4c56;
+  --color-border-input: #35434d;
+  --color-border-hover: #4a5e69;
+
+  /* Brand / primary */
+  --color-primary: #4ba3c3;
+  --color-primary-strong: #7cc4dd;
+  --color-primary-tint: #16303c;
+  --color-accent-tint: #1d3230;
+  --color-accent-bg: #172b26;
+  --color-accent-border: #2a463f;
+  --color-accent-fg: #a8cfc2;
+  --color-accent-muted: #55786d;
+  --color-spinner-track: #2f4a42;
+
+  /* Status */
+  --color-positive: #4cc38a;
+  --color-positive-bg: #17301f;
+  --color-positive-fg: #7fd6a4;
+  --color-negative: #e06c6c;
+  --color-danger-fg: #e08585;
+  --color-danger-bg: #351b1b;
+  --color-danger-border: #5c2e2e;
+  --color-warning-bg: #33261a;
+  --color-warning-fg: #d9a878;
+  --color-badge-neutral-bg: #263039;
+  --color-badge-neutral-fg: #9fb0ba;
+  --color-badge-neutral-border: #35424b;
+
+  /* Charts & overlays */
+  --chart-grid: #26313a;
+  --chart-area: #1c333c;
+  --chart-selection-fill: rgba(75, 163, 195, 0.18);
+  --chart-selection-stroke: rgba(75, 163, 195, 0.48);
+  --progress-track: #26333c;
+  --tooltip-bg: #0d141a;
+  --tooltip-muted: #a7b8c0;
+  --tooltip-negative: #ffb3a6;
+  --tooltip-border: rgba(255, 255, 255, 0.25);
+  --scrim: rgba(0, 0, 0, 0.55);
+  --scrim-soft: rgba(0, 0, 0, 0.4);
+  --swatch-ring: rgb(255 255 255 / 22%);
+  --swatch-ring-inner: rgb(0 0 0 / 30%);
+  --shadow-modal: 0 18px 48px rgba(0, 0, 0, 0.5);
+  --shadow-drawer: 18px 0 34px rgba(0, 0, 0, 0.45);
+  --shadow-thumb: 0 1px 3px rgb(0 0 0 / 40%);
+}
+</style>
+</head>
+<body>
+<div class="ds-h1">Buttons</div>
+<p class="ds-sub">Interactive control classes from <code>views/shared.rs</code> and the settings views, in every documented state. Hover states render on pointer devices.</p>
+<div class="ds-themes">
+<section class="ds-theme" data-theme-scope="fern">
+<div class="ds-theme-label">data-theme="fern" (default)</div>
+<div class="ds-group-title">control-button</div>
+<div class="ds-row">
+  <button class="control-button">Default</button>
+  <button class="control-button selected">Selected</button>
+  <button class="control-button" disabled>Disabled</button>
+  <button class="control-button focus-chip">Focus chip</button>
+  <button class="control-button danger">Danger</button>
+  <button class="control-button danger-button">Danger button</button>
+</div>
+<div class="ds-group-title">icon-button</div>
+<div class="ds-row">
+  <button class="icon-button" title="Edit">&#9998;</button>
+  <button class="icon-button" disabled title="Disabled">&#9998;</button>
+  <button class="icon-button add-location-button" title="Add location">+</button>
+</div>
+<div class="ds-caption" style="margin:-6px 0 14px;">icon-button &middot; icon-button (disabled) &middot; add-location-button</div>
+<div class="ds-group-title">file-select-button</div>
+<div class="ds-row">
+  <label class="file-select-wrapper">
+    <input class="file-select-input" type="file" tabindex="-1" aria-hidden="true">
+    <span class="file-select-button">Select key file</span>
+  </label>
+</div>
+<div class="ds-group-title">nav-button</div>
+<div class="ds-col" style="max-width:220px;">
+  <button class="nav-button">Accounts</button>
+  <button class="nav-button selected">Net worth</button>
+  <button class="nav-button">Spending</button>
+</div>
+</section>
+<section class="ds-theme" data-theme-scope="dark">
+<div class="ds-theme-label">data-theme="dark"</div>
+<div class="ds-group-title">control-button</div>
+<div class="ds-row">
+  <button class="control-button">Default</button>
+  <button class="control-button selected">Selected</button>
+  <button class="control-button" disabled>Disabled</button>
+  <button class="control-button focus-chip">Focus chip</button>
+  <button class="control-button danger">Danger</button>
+  <button class="control-button danger-button">Danger button</button>
+</div>
+<div class="ds-group-title">icon-button</div>
+<div class="ds-row">
+  <button class="icon-button" title="Edit">&#9998;</button>
+  <button class="icon-button" disabled title="Disabled">&#9998;</button>
+  <button class="icon-button add-location-button" title="Add location">+</button>
+</div>
+<div class="ds-caption" style="margin:-6px 0 14px;">icon-button &middot; icon-button (disabled) &middot; add-location-button</div>
+<div class="ds-group-title">file-select-button</div>
+<div class="ds-row">
+  <label class="file-select-wrapper">
+    <input class="file-select-input" type="file" tabindex="-1" aria-hidden="true">
+    <span class="file-select-button">Select key file</span>
+  </label>
+</div>
+<div class="ds-group-title">nav-button</div>
+<div class="ds-col" style="max-width:220px;">
+  <button class="nav-button">Accounts</button>
+  <button class="nav-button selected">Net worth</button>
+  <button class="nav-button">Spending</button>
+</div>
+</section>
+</div>
+</body>
+</html>

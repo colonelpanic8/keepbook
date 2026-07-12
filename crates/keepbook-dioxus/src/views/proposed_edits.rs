@@ -14,8 +14,7 @@ pub(super) fn ProposedEditsView(onrefresh: EventHandler<()>) -> Element {
         section { class: "panel",
             div { class: "panel-header",
                 h2 { "Proposed transaction edits" }
-                button {
-                    class: "control-button",
+                ControlButton {
                     disabled: !busy.is_empty(),
                     onclick: move |_| proposals.restart(),
                     "Refresh"
@@ -100,20 +99,19 @@ fn ProposedEditRow(
             small { "{patch}" }
             small { "{edit.created_at}" }
             div { class: "proposal-actions",
-                button {
-                    class: "control-button selected",
+                ControlButton {
+                    selected: true,
                     disabled: any_busy,
                     onclick: move |_| ondecide.call((approve_id.clone(), "approve")),
                     if is_busy { "Working" } else { "Approve" }
                 }
-                button {
-                    class: "control-button",
+                ControlButton {
                     disabled: any_busy,
                     onclick: move |_| ondecide.call((reject_id.clone(), "reject")),
                     "Reject"
                 }
-                button {
-                    class: "control-button danger-button",
+                ControlButton {
+                    class: "danger-button",
                     disabled: any_busy,
                     onclick: move |_| ondecide.call((remove_id.clone(), "remove")),
                     "Remove"

@@ -116,6 +116,24 @@ const CONTEXT_MENU_COPY_BRIDGE_JS: &str = r#"
   );
 })();
 "#;
+const THEME_BOOTSTRAP_JS: &str = r#"
+(function () {
+  if (window.__keepbookThemeBootstrapInstalled) {
+    return;
+  }
+  window.__keepbookThemeBootstrapInstalled = true;
+
+  // Apply the persisted theme as early as possible so the app does not flash the
+  // default "fern" palette before the Rust theme state loads. "fern" is the
+  // `:root` default, so only non-fern themes need an explicit attribute.
+  try {
+    var stored = localStorage.getItem("keepbook-theme");
+    if (stored && stored !== "fern") {
+      document.documentElement.dataset.theme = stored;
+    }
+  } catch (error) {}
+})();
+"#;
 #[cfg(target_arch = "wasm32")]
 const API_BASE: &str = match option_env!("KEEPBOOK_API_BASE") {
     Some(value) => value,
