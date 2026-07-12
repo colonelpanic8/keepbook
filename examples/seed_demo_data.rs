@@ -113,7 +113,12 @@ async fn main() -> Result<()> {
         ));
     }
     for (date, amount) in [("2026-05-18", "-118.63"), ("2026-06-18", "-124.09")] {
-        checking_txs.push(tx(date, amount, "PG&E Utilities", TransactionStatus::Posted));
+        checking_txs.push(tx(
+            date,
+            amount,
+            "PG&E Utilities",
+            TransactionStatus::Posted,
+        ));
     }
     let pending = tx(
         "2026-07-11",

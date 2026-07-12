@@ -4,7 +4,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 use super::Id;
 
 /// Legacy magic tags that mark a transaction as ignored from spending.
-pub const SPENDING_IGNORE_TAGS: [&str; 3] = ["ignore_spending", "ignore-spending", "ignore:spending"];
+pub const SPENDING_IGNORE_TAGS: [&str; 3] =
+    ["ignore_spending", "ignore-spending", "ignore:spending"];
 
 /// Whether a tag is one of the legacy magic spending-ignore tags.
 pub fn tag_ignores_spending(tag: &str) -> bool {

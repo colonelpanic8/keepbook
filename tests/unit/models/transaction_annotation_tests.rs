@@ -96,10 +96,9 @@ fn ignore_spending_patch_serde_round_trip() {
     assert_eq!(json["ignore_spending"], serde_json::Value::Null);
 
     // Unset: absent field -> None, omitted on serialization.
-    let patch: TransactionAnnotationPatch = serde_json::from_str(
-        r#"{"transaction_id":"tx-1","timestamp":"2024-02-01T00:00:00Z"}"#,
-    )
-    .unwrap();
+    let patch: TransactionAnnotationPatch =
+        serde_json::from_str(r#"{"transaction_id":"tx-1","timestamp":"2024-02-01T00:00:00Z"}"#)
+            .unwrap();
     assert_eq!(patch.ignore_spending, None);
     let json = serde_json::to_value(&patch).unwrap();
     assert!(json.get("ignore_spending").is_none());

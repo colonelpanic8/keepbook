@@ -697,7 +697,12 @@ fn annotation_ignore_detects_explicit_flag() {
 
 #[test]
 fn annotation_ignore_detects_ignore_spending_tags() {
-    for tag in ["ignore_spending", "ignore-spending", "ignore:spending", "IGNORE_SPENDING"] {
+    for tag in [
+        "ignore_spending",
+        "ignore-spending",
+        "ignore:spending",
+        "IGNORE_SPENDING",
+    ] {
         let mut row = transaction("tagged", "-12.50", "posted");
         row.annotation = Some(annotation(Some(vec![tag]), None));
         assert!(annotation_ignores_spending(&row), "tag {tag} should ignore");

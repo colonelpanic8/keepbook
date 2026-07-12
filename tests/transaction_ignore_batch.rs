@@ -32,7 +32,10 @@ async fn materialized_annotation(
     transaction_id: &keepbook::models::Id,
 ) -> Result<TransactionAnnotation> {
     let mut ann = TransactionAnnotation::new(transaction_id.clone());
-    for patch in storage.get_transaction_annotation_patches(account_id).await? {
+    for patch in storage
+        .get_transaction_annotation_patches(account_id)
+        .await?
+    {
         if &patch.transaction_id == transaction_id {
             patch.apply_to(&mut ann);
         }
