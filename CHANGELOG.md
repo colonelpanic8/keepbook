@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.1 - 2026-07-12
+
+### Fixed
+
+- Replaced bright spending-chart dividers with subtle dark-theme separators.
+- Removed stacked-area outlines that rendered as vertical artifacts in the net
+  worth breakdown chart.
+
+### Changed
+
+- Renamed the misleading Contributions view to Net Worth Breakdown.
+
 ## 0.7.0 - 2026-07-11
 
 ### Added
