@@ -145,6 +145,76 @@
   --sp-24: 24px;
 }
 
+:root[data-theme="dark"] {
+  /* Surfaces */
+  --color-bg: #10171d;
+  --color-surface: #1a232b;
+  --color-surface-subtle: #202b33;
+  --color-surface-inset: #26333c;
+  --color-surface-hover: #243039;
+  --color-surface-muted: #1e262c;
+  --color-surface-warm: #2a251f;
+  --color-surface-warm-faint: #221e19;
+
+  /* Text */
+  --color-text: #e8eef2;
+  --color-text-secondary: #c2cfd8;
+  --color-text-muted: #8fa1ac;
+  --color-text-faint: #6e7f8a;
+  --color-on-emphasis: #ffffff;
+
+  /* Borders */
+  --color-border: #2e3b44;
+  --color-border-muted: #29343c;
+  --color-divider: #232e35;
+  --color-border-strong: #3d4c56;
+  --color-border-input: #35434d;
+  --color-border-hover: #4a5e69;
+
+  /* Brand / primary */
+  --color-primary: #4ba3c3;
+  --color-primary-strong: #7cc4dd;
+  --color-primary-tint: #16303c;
+  --color-accent-tint: #1d3230;
+  --color-accent-bg: #172b26;
+  --color-accent-border: #2a463f;
+  --color-accent-fg: #a8cfc2;
+  --color-accent-muted: #55786d;
+  --color-spinner-track: #2f4a42;
+
+  /* Status */
+  --color-positive: #4cc38a;
+  --color-positive-bg: #17301f;
+  --color-positive-fg: #7fd6a4;
+  --color-negative: #e06c6c;
+  --color-danger-fg: #e08585;
+  --color-danger-bg: #351b1b;
+  --color-danger-border: #5c2e2e;
+  --color-warning-bg: #33261a;
+  --color-warning-fg: #d9a878;
+  --color-badge-neutral-bg: #263039;
+  --color-badge-neutral-fg: #9fb0ba;
+  --color-badge-neutral-border: #35424b;
+
+  /* Charts & overlays */
+  --chart-grid: #26313a;
+  --chart-area: #1c333c;
+  --chart-selection-fill: rgba(75, 163, 195, 0.18);
+  --chart-selection-stroke: rgba(75, 163, 195, 0.48);
+  --progress-track: #26333c;
+  --tooltip-bg: #0d141a;
+  --tooltip-muted: #a7b8c0;
+  --tooltip-negative: #ffb3a6;
+  --tooltip-border: rgba(255, 255, 255, 0.25);
+  --scrim: rgba(0, 0, 0, 0.55);
+  --scrim-soft: rgba(0, 0, 0, 0.4);
+  --swatch-ring: rgb(255 255 255 / 22%);
+  --swatch-ring-inner: rgb(0 0 0 / 30%);
+  --shadow-modal: 0 18px 48px rgba(0, 0, 0, 0.5);
+  --shadow-drawer: 18px 0 34px rgba(0, 0, 0, 0.45);
+  --shadow-thumb: 0 1px 3px rgb(0 0 0 / 40%);
+}
+
 :root {
   color: var(--color-text);
   background: var(--color-bg);
