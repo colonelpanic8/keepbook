@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.0 - 2026-07-11
+
+### Added
+
+- Added a Settings toggle that starts the desktop app hidden in the system tray.
+  The preference is saved to `[tray].start_minimized` and takes effect on the
+  next launch.
+
 ## 0.6.0 - 2026-07-10
 
 ### Added
