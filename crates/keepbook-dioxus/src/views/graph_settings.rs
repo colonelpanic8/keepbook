@@ -33,7 +33,7 @@ pub(super) fn NetWorthGraphView(
 }
 
 #[component]
-pub(super) fn ContributionsGraphView(
+pub(super) fn NetWorthBreakdownGraphView(
     currency: String,
     defaults: HistoryDefaults,
     filter_overrides: FilterOverrides,

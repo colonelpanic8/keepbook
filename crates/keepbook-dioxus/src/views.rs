@@ -15,7 +15,7 @@ mod spending;
 use accounts::AccountsView;
 use charts::{HistoryGraphPanel, StackedHistoryGraphPanel};
 use connections::ConnectionsView;
-use graph_settings::{ContributionsGraphView, NetWorthGraphView, SettingsView};
+use graph_settings::{NetWorthBreakdownGraphView, NetWorthGraphView, SettingsView};
 use proposed_edits::ProposedEditsView;
 use recurring::RecurringView;
 use shared::*;
@@ -27,7 +27,7 @@ const NAV_LOGO_SVG: &str = include_str!("../../../assets/keepbook-icon.svg");
 enum ActiveView {
     Spending,
     NetWorth,
-    Contributions,
+    NetWorthBreakdown,
     Accounts,
     Connections,
     Recurring,
@@ -41,7 +41,7 @@ impl ActiveView {
         Self::Spending,
         Self::Recurring,
         Self::NetWorth,
-        Self::Contributions,
+        Self::NetWorthBreakdown,
         Self::Connections,
         Self::ProposedEdits,
         Self::Settings,
@@ -51,7 +51,7 @@ impl ActiveView {
         match self {
             Self::Spending => "Spending",
             Self::NetWorth => "Net Worth",
-            Self::Contributions => "Contributions",
+            Self::NetWorthBreakdown => "Net Worth Breakdown",
             Self::Accounts => "Accounts",
             Self::Connections => "Connections",
             Self::Recurring => "Recurring",
@@ -319,8 +319,8 @@ fn Dashboard(
                             filter_overrides,
                         }
                     },
-                    ActiveView::Contributions => rsx! {
-                        ContributionsGraphView {
+                    ActiveView::NetWorthBreakdown => rsx! {
+                        NetWorthBreakdownGraphView {
                             currency: overview.reporting_currency.clone(),
                             defaults: overview.history_defaults.clone(),
                             filter_overrides,
