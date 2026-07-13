@@ -42,6 +42,14 @@ app appear frozen.
 - `ControlButton`'s `busy` state adds the compact spinner, `aria-busy`, and
   duplicate-submission protection.
 
+## Chart hover details
+
+- Hovering a stacked spending segment identifies the category and shows both
+  that segment's amount and the total for its day, week, month, quarter, or
+  year. Hovering empty space in the bucket shows the bucket total alone.
+- Clicking a segment pins the same category-and-bucket detail while the chart
+  and transaction list focus on that selection.
+
 Status treatments use semantic roles from `styles.css`: accent colors for
 in-flight activity, neutral surfaces for settled messages, and the shared
 spinner/progress tokens. Add new state colors only through the token document.

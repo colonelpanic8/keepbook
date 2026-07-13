@@ -798,7 +798,7 @@ struct SpendingBarHitZone {
 }
 
 /// Identifies a single category subsection (segment) within one time period.
-/// Used to "pin" the tooltip to that category when the segment is clicked.
+/// Used to hover or "pin" the tooltip to that category.
 #[derive(Clone, Debug, PartialEq)]
 struct SpendingSegmentKey {
     key: String,
@@ -826,6 +826,7 @@ fn SpendingOverTimeChart(
     onselecttag: EventHandler<String>,
 ) -> Element {
     let mut hovered_period = use_signal(|| None::<SpendingPeriodSelection>);
+    let mut hovered_segment = use_signal(|| None::<SpendingSegmentKey>);
     let mut pinned_segment = use_signal(|| None::<SpendingSegmentKey>);
     let points = spending_over_time_points(&spending);
     let series = spending_over_time_series(&points);
@@ -934,11 +935,11 @@ fn SpendingOverTimeChart(
             }
         }
     }
-    // A clicked (pinned) segment takes precedence and narrows the tooltip to a
-    // single category within one period; otherwise fall back to the hovered or
-    // externally-selected period, which shows the period totals.
-    let pinned = pinned_segment();
-    let tooltip = pinned
+    // A clicked (pinned) segment takes precedence over a hovered segment. Both
+    // show the category amount alongside the full bucket total. Empty column
+    // space and externally-selected periods continue to show period totals.
+    let active_segment = pinned_segment().or_else(|| hovered_segment());
+    let tooltip = active_segment
         .as_ref()
         .and_then(|pin| {
             bar_rects
@@ -951,10 +952,11 @@ fn SpendingOverTimeChart(
                 .map(|rect| {
                     (
                         format!("{} · {}", rect.label, rect.key),
-                        format!(
-                            "{} / {} tx",
-                            format_full_money(rect.value, &spending.currency),
-                            rect.transaction_count
+                        spending_segment_tooltip_detail(
+                            rect.value,
+                            rect.total,
+                            &spending.currency,
+                            &bucket_label,
                         ),
                         rect.x + rect.width / 2.0,
                         padding_top + 14.0,
@@ -1126,6 +1128,9 @@ fn SpendingOverTimeChart(
                         let pin_key = key.clone();
                         let pin_start = start_date.clone();
                         let pin_end = end_date.clone();
+                        let hover_key = key.clone();
+                        let hover_start = start_date.clone();
+                        let hover_end = end_date.clone();
                         rsx! {
                             rect {
                                 class: "{class}",
@@ -1134,8 +1139,18 @@ fn SpendingOverTimeChart(
                                 width: "{width}",
                                 height: "{height}",
                                 style: "fill: {color};",
-                                onmouseenter: move |_| hovered_period.set(Some(selection_for_enter.clone())),
-                                onmouseleave: move |_| hovered_period.set(None),
+                                onmouseenter: move |_| {
+                                    hovered_period.set(Some(selection_for_enter.clone()));
+                                    hovered_segment.set(Some(SpendingSegmentKey {
+                                        key: hover_key.clone(),
+                                        start_date: hover_start.clone(),
+                                        end_date: hover_end.clone(),
+                                    }));
+                                },
+                                onmouseleave: move |_| {
+                                    hovered_period.set(None);
+                                    hovered_segment.set(None);
+                                },
                                 onclick: move |_| {
                                     // Toggle this category's pinned tooltip, and focus the
                                     // view on this category + period.
@@ -1169,9 +1184,9 @@ fn SpendingOverTimeChart(
                     g { class: "spending-chart-tooltip",
                         transform: "translate({tooltip_x}, {tooltip_y})",
                         rect {
-                            x: "-86",
+                            x: "-120",
                             y: "-11",
-                            width: "172",
+                            width: "240",
                             height: "42",
                             rx: "5"
                         }

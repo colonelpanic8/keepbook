@@ -510,6 +510,53 @@ fn annotation_ignores_spending(annotation: Option<&TransactionAnnotation>) -> bo
     annotation.is_some_and(|ann| ann.ignores_spending())
 }
 
+fn split_grouped_amount(
+    amount: Decimal,
+    part_count: usize,
+    currency_decimals: Option<u32>,
+) -> Vec<Decimal> {
+    if part_count == 0 {
+        return Vec::new();
+    }
+
+    if let Some(scale) = currency_decimals {
+        let mut scaled = amount;
+        scaled.rescale(scale);
+        let mantissa = scaled.mantissa();
+        let divisor = part_count as i128;
+        let quotient = mantissa / divisor;
+        let remainder = mantissa % divisor;
+        let remainder_count = remainder.unsigned_abs() as usize;
+        let remainder_sign = remainder.signum();
+
+        return (0..part_count)
+            .map(|index| {
+                let units = quotient
+                    + if index < remainder_count {
+                        remainder_sign
+                    } else {
+                        0
+                    };
+                Decimal::from_i128_with_scale(units, scale)
+            })
+            .collect();
+    }
+
+    let equal_share = amount / Decimal::from(part_count as u64);
+    let mut allocated = Decimal::ZERO;
+    (0..part_count)
+        .map(|index| {
+            let share = if index + 1 == part_count {
+                amount - allocated
+            } else {
+                equal_share
+            };
+            allocated += share;
+            share
+        })
+        .collect()
+}
+
 async fn ignored_account_ids_for_portfolio_spending(
     config: &ResolvedConfig,
     accounts: &[Account],
@@ -869,9 +916,17 @@ async fn spending_report_with_store(
                 keys
             };
 
-            for key in keys {
+            let mut seen = HashSet::new();
+            let keys: Vec<String> = keys
+                .into_iter()
+                .filter(|key| seen.insert(key.to_lowercase()))
+                .collect();
+            let shares =
+                split_grouped_amount(directed, keys.len(), config.display.currency_decimals);
+
+            for (key, share) in keys.into_iter().zip(shares) {
                 let entry = agg.breakdown_total.entry(key).or_insert((Decimal::ZERO, 0));
-                entry.0 += directed;
+                entry.0 += share;
                 entry.1 += 1;
             }
         }

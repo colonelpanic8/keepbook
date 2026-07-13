@@ -1203,6 +1203,27 @@ pub(crate) fn visible_spending_over_time_points(
     }
 }
 
+pub(crate) fn spending_segment_tooltip_detail(
+    value: f64,
+    period_total: f64,
+    currency: &str,
+    bucket_label: &str,
+) -> String {
+    let period_noun = match bucket_label {
+        "Daily" => "day",
+        "Weekly" => "week",
+        "Monthly" => "month",
+        "Quarterly" => "quarter",
+        "Yearly" => "year",
+        _ => "period",
+    };
+    format!(
+        "{} category · {} {period_noun} total",
+        format_full_money(value, currency),
+        format_full_money(period_total, currency),
+    )
+}
+
 fn spending_period_label(start: &str, end: &str) -> String {
     if start == end {
         return start.to_string();

@@ -447,6 +447,18 @@ fn spending_over_time_visible_points_keep_empty_periods() {
 }
 
 #[test]
+fn spending_segment_tooltip_shows_category_and_bucket_totals() {
+    assert_eq!(
+        spending_segment_tooltip_detail(12.5, 80.0, "USD", "Monthly"),
+        "$12.50 category · $80.00 month total"
+    );
+    assert_eq!(
+        spending_segment_tooltip_detail(12.5, 80.0, "USD", "Weekly"),
+        "$12.50 category · $80.00 week total"
+    );
+}
+
+#[test]
 fn narrow_spending_points_to_tag_keeps_only_selected_tag_totals() {
     let spending = SpendingOutput {
         currency: "USD".to_string(),

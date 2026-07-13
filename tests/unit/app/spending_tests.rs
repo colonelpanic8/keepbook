@@ -419,6 +419,162 @@ async fn spending_report_tag_uses_annotation_then_metadata_then_untagged() -> Re
 }
 
 #[tokio::test]
+async fn spending_report_splits_multi_tagged_transactions_without_inflating_totals() -> Result<()> {
+    let storage = MemoryStorage::new();
+    let conn_id = Id::from_string("conn-1");
+    let acct_id = Id::from_string("acct-1");
+    storage
+        .save_account(&Account::new_with(
+            acct_id.clone(),
+            Utc::now(),
+            "Checking",
+            conn_id,
+        ))
+        .await?;
+
+    let ids = FixedIdGenerator::new([Id::from_string("tx-split"), Id::from_string("tx-food")]);
+    let clock = FixedClock::new(Utc.with_ymd_and_hms(2026, 2, 5, 12, 0, 0).unwrap());
+    let split_tx = Transaction::new_with_generator(
+        &ids,
+        &clock,
+        "-10.01",
+        Asset::currency("USD"),
+        "Dinner while traveling",
+    )
+    .with_timestamp(clock.now());
+    let split_tx_id = split_tx.id.clone();
+    let food_tx =
+        Transaction::new_with_generator(&ids, &clock, "-2", Asset::currency("USD"), "Groceries")
+            .with_timestamp(clock.now());
+    let food_tx_id = food_tx.id.clone();
+    storage
+        .append_transactions(&acct_id, &[split_tx, food_tx])
+        .await?;
+    storage
+        .append_transaction_annotation_patches(
+            &acct_id,
+            &[
+                TransactionAnnotationPatch {
+                    transaction_id: split_tx_id,
+                    timestamp: clock.now(),
+                    description: None,
+                    note: None,
+                    tags: None,
+                    subtags: Some(Some(vec![
+                        "Restaurants".to_string(),
+                        "Flights".to_string(),
+                        "restaurants".to_string(),
+                    ])),
+                    effective_date: None,
+                    ignore_spending: None,
+                },
+                TransactionAnnotationPatch {
+                    transaction_id: food_tx_id,
+                    timestamp: clock.now(),
+                    description: None,
+                    note: None,
+                    tags: None,
+                    subtags: Some(Some(vec!["Groceries".to_string()])),
+                    effective_date: None,
+                    ignore_spending: None,
+                },
+            ],
+        )
+        .await?;
+
+    let mut display = crate::config::DisplayConfig::default();
+    display.currency_decimals = Some(2);
+    let cfg = ResolvedConfig {
+        data_dir: std::path::PathBuf::from("/tmp"),
+        reporting_currency: "USD".to_string(),
+        display,
+        refresh: crate::config::RefreshConfig::default(),
+        history: crate::config::HistoryConfig::default(),
+        tray: crate::config::TrayConfig::default(),
+        spending: crate::config::SpendingConfig::default(),
+        tags: crate::config::TagsConfig {
+            aliases: HashMap::new(),
+            parents: HashMap::from([
+                ("Restaurants".to_string(), vec!["Food".to_string()]),
+                ("Flights".to_string(), vec!["Travel".to_string()]),
+                ("Groceries".to_string(), vec!["Food".to_string()]),
+            ]),
+        },
+        portfolio: crate::config::PortfolioConfig::default(),
+        ignore: crate::config::IgnoreConfig::default(),
+        ai: crate::config::AiConfig::default(),
+        git: crate::config::GitConfig::default(),
+    };
+    let options = |group_by: &str| SpendingReportOptions {
+        currency: None,
+        start: Some("2026-02-01".to_string()),
+        end: Some("2026-02-28".to_string()),
+        period: "monthly".to_string(),
+        period_alignment: None,
+        tz: Some("UTC".to_string()),
+        week_start: None,
+        bucket: None,
+        account: Some("acct-1".to_string()),
+        connection: None,
+        status: "posted".to_string(),
+        direction: "outflow".to_string(),
+        group_by: group_by.to_string(),
+        top: None,
+        lookback_days: 7,
+        include_noncurrency: false,
+        include_empty: false,
+    };
+
+    let tag_out = spending_report_with_store(
+        &storage,
+        &cfg,
+        options("tag"),
+        Arc::new(MemoryMarketDataStore::default()),
+    )
+    .await?;
+    assert_eq!(tag_out.periods[0].total, "12.01");
+    assert_eq!(
+        tag_out.periods[0]
+            .breakdown
+            .iter()
+            .map(|entry| (
+                entry.key.as_str(),
+                entry.total.as_str(),
+                entry.transaction_count
+            ))
+            .collect::<Vec<_>>(),
+        vec![("Food", "7.01", 2), ("Travel", "5", 1)]
+    );
+
+    let subtag_out = spending_report_with_store(
+        &storage,
+        &cfg,
+        options("subtag"),
+        Arc::new(MemoryMarketDataStore::default()),
+    )
+    .await?;
+    assert_eq!(subtag_out.periods[0].total, "12.01");
+    assert_eq!(
+        subtag_out.periods[0]
+            .breakdown
+            .iter()
+            .map(|entry| (
+                entry.key.as_str(),
+                entry.total.as_str(),
+                entry.transaction_count
+            ))
+            .collect::<Vec<_>>(),
+        vec![
+            ("Restaurants", "5.01", 1),
+            ("Flights", "5", 1),
+            ("Groceries", "2", 1),
+        ]
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn spending_report_supports_exact_and_close_merchant_grouping() -> Result<()> {
     let storage = MemoryStorage::new();
     let conn_id = Id::from_string("conn-1");
