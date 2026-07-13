@@ -46,7 +46,9 @@ app appear frozen.
 
 - Hovering a stacked spending segment identifies the category and shows both
   that segment's amount and the total for its day, week, month, quarter, or
-  year. Hovering empty space in the bucket shows the bucket total alone.
+  year. The tooltip background expands for its longest line and shifts within
+  the chart bounds rather than clipping text at either edge. Hovering empty
+  space in the bucket shows the bucket total alone.
 - Clicking a segment pins the same category-and-bucket detail while the chart
   and transaction list focus on that selection.
 

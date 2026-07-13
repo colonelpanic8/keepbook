@@ -1224,6 +1224,30 @@ pub(crate) fn spending_segment_tooltip_detail(
     )
 }
 
+pub(crate) fn spending_tooltip_layout(
+    title: &str,
+    detail: &str,
+    preferred_center_x: f64,
+    chart_width: f64,
+) -> (f64, f64) {
+    const EDGE_GAP: f64 = 8.0;
+    const MIN_WIDTH: f64 = 184.0;
+    const HORIZONTAL_PADDING: f64 = 28.0;
+    const TITLE_CHAR_WIDTH: f64 = 8.5;
+    const DETAIL_CHAR_WIDTH: f64 = 7.5;
+
+    let title_width = title.chars().count() as f64 * TITLE_CHAR_WIDTH;
+    let detail_width = detail.chars().count() as f64 * DETAIL_CHAR_WIDTH;
+    let max_width = (chart_width - EDGE_GAP * 2.0).max(MIN_WIDTH);
+    let tooltip_width =
+        (title_width.max(detail_width) + HORIZONTAL_PADDING).clamp(MIN_WIDTH, max_width);
+    let half_width = tooltip_width / 2.0;
+    let center_x =
+        preferred_center_x.clamp(EDGE_GAP + half_width, chart_width - EDGE_GAP - half_width);
+
+    (tooltip_width, center_x)
+}
+
 fn spending_period_label(start: &str, end: &str) -> String {
     if start == end {
         return start.to_string();

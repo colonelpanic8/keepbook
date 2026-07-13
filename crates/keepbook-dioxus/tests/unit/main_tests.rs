@@ -459,6 +459,20 @@ fn spending_segment_tooltip_shows_category_and_bucket_totals() {
 }
 
 #[test]
+fn spending_tooltip_expands_for_long_text_and_stays_inside_chart() {
+    let title = "2026-07 · Restaurants and entertainment";
+    let detail = "$12,345.67 category · $98,765.43 month total";
+
+    let (width, left_center) = spending_tooltip_layout(title, detail, 20.0, 720.0);
+    assert!(width > 240.0);
+    assert_eq!(left_center - width / 2.0, 8.0);
+
+    let (same_width, right_center) = spending_tooltip_layout(title, detail, 700.0, 720.0);
+    assert_eq!(same_width, width);
+    assert_eq!(right_center + width / 2.0, 712.0);
+}
+
+#[test]
 fn narrow_spending_points_to_tag_keeps_only_selected_tag_totals() {
     let spending = SpendingOutput {
         currency: "USD".to_string(),

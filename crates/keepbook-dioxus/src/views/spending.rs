@@ -1181,12 +1181,21 @@ fn SpendingOverTimeChart(
                     }
                 }
                 if let Some((tooltip_title, tooltip_detail, tooltip_x, tooltip_y)) = tooltip {
+                    {
+                        let (tooltip_width, tooltip_center_x) = spending_tooltip_layout(
+                            &tooltip_title,
+                            &tooltip_detail,
+                            tooltip_x,
+                            width,
+                        );
+                        let tooltip_left = -tooltip_width / 2.0;
+                        rsx! {
                     g { class: "spending-chart-tooltip",
-                        transform: "translate({tooltip_x}, {tooltip_y})",
+                        transform: "translate({tooltip_center_x}, {tooltip_y})",
                         rect {
-                            x: "-120",
+                            x: "{tooltip_left}",
                             y: "-11",
-                            width: "240",
+                            width: "{tooltip_width}",
                             height: "42",
                             rx: "5"
                         }
@@ -1201,6 +1210,8 @@ fn SpendingOverTimeChart(
                             x: "0",
                             y: "19",
                             "{tooltip_detail}"
+                        }
+                    }
                         }
                     }
                 }
