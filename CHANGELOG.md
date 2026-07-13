@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.3 - 2026-07-12
+
+### Fixed
+
+- Made spending-chart tooltips expand to fit their longest line and reposition
+  within the chart so text remains inside the tooltip at either edge.
+
 ## 0.7.2 - 2026-07-12
 
 ### Fixed
