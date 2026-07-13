@@ -482,8 +482,10 @@ async fn spending_report_splits_multi_tagged_transactions_without_inflating_tota
         )
         .await?;
 
-    let mut display = crate::config::DisplayConfig::default();
-    display.currency_decimals = Some(2);
+    let display = crate::config::DisplayConfig {
+        currency_decimals: Some(2),
+        ..Default::default()
+    };
     let cfg = ResolvedConfig {
         data_dir: std::path::PathBuf::from("/tmp"),
         reporting_currency: "USD".to_string(),
