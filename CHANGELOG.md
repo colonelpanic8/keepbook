@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.7.2 - 2026-07-12
+
+### Fixed
+
+- Split multi-tagged transaction amounts across distinct categories at currency
+  precision, keeping spending breakdowns additive to their period totals.
+- Updated spending-chart segment tooltips to show both the hovered category
+  amount and the total for its time bucket.
+
+### Changed
+
+- Kept loaded UI content available during background operations while showing
+  nearby progress, success, and failure status.
+
 ## 0.7.1 - 2026-07-12
 
 ### Fixed
