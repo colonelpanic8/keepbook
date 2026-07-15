@@ -1,15 +1,20 @@
 # Changelog
 
-## Unreleased
+## 0.7.4 - 2026-07-15
 
 ### Fixed
 
+- Kept net-worth and account charts aligned with the current portfolio snapshot
+  when history contains a UTC date that is tomorrow in the local timezone.
+- Refreshed account and net-worth data when navigating back to those views or
+  reopening the desktop app from the system tray.
 - Moved the Git SSH identity path out of repository `keepbook.toml` files and
   into device-local configuration. Saving Git settings now also removes legacy
   `ssh_key_path` entries from the repository config.
 - Fixed desktop Git SSH pushes when an available SSH agent has no usable
   identities. Git authentication now tries configured and default private keys
   before the agent and advances to the next credential after a rejected key.
+- Moved the Git sync action to the end of the Accounts view controls.
 
 ## 0.7.3 - 2026-07-12
 
