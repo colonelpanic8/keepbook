@@ -57,6 +57,10 @@ pub(super) fn AccountsView(
     let active_accounts = accounts.iter().filter(|account| account.active).count();
     let net_worth = current_net_worth_from_snapshot(&snapshot);
     let account_summaries = snapshot.by_account.clone();
+    let selected_graph_selection = selected_graph();
+    let selected_graph_current_value = selected_graph_selection
+        .as_ref()
+        .and_then(|selection| account_snapshot_value(&selection.id, &account_summaries));
     let _ = balances;
     let is_price_busy = price_busy();
     let price_status_text = price_status();
@@ -142,7 +146,7 @@ pub(super) fn AccountsView(
                         detail: "Configured sources".to_string()
                     }
                 }
-                if let Some(selection) = selected_graph() {
+                if let Some(selection) = selected_graph_selection {
                     Panel {
                         class: "graph-panel account-detail-graph",
                         title: selection.name.clone(),
@@ -164,6 +168,7 @@ pub(super) fn AccountsView(
                             defaults: defaults.clone(),
                             filter_overrides: filter_overrides.clone(),
                             account: Some(selection.id.clone()),
+                            current_value: selected_graph_current_value,
                             show_header: false,
                         }
                     }

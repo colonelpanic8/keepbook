@@ -950,6 +950,54 @@ fn current_net_worth_uses_portfolio_snapshot_total() {
 }
 
 #[test]
+fn current_snapshot_replaces_utc_tomorrow_history_point_on_local_today() {
+    let history = History {
+        currency: "USD".to_string(),
+        points: vec![
+            HistoryPoint {
+                date: "2026-07-13".to_string(),
+                total_value: "100".to_string(),
+                percentage_change_from_previous: None,
+            },
+            HistoryPoint {
+                date: "2026-07-14".to_string(),
+                total_value: "110".to_string(),
+                percentage_change_from_previous: None,
+            },
+            HistoryPoint {
+                date: "2026-07-15".to_string(),
+                total_value: "120".to_string(),
+                percentage_change_from_previous: None,
+            },
+        ],
+        summary: None,
+    };
+
+    assert_eq!(
+        history_data_points_with_current_snapshot(&history, "2026-07-14", 125.0),
+        vec![point("2026-07-13", 100.0), point("2026-07-14", 125.0)]
+    );
+}
+
+#[test]
+fn current_snapshot_appends_local_today_when_history_has_no_today_point() {
+    let history = History {
+        currency: "USD".to_string(),
+        points: vec![HistoryPoint {
+            date: "2026-07-13".to_string(),
+            total_value: "100".to_string(),
+            percentage_change_from_previous: None,
+        }],
+        summary: None,
+    };
+
+    assert_eq!(
+        history_data_points_with_current_snapshot(&history, "2026-07-14", 125.0),
+        vec![point("2026-07-13", 100.0), point("2026-07-14", 125.0)]
+    );
+}
+
+#[test]
 fn account_value_uses_portfolio_snapshot_account_total() {
     let account_summaries = vec![AccountSummary {
         account_id: "empower".to_string(),

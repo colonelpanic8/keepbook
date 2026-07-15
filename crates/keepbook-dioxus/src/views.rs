@@ -307,6 +307,14 @@ fn Dashboard(
                             label: view.label(),
                             selected: active == view,
                             onclick: move |_| {
+                                if matches!(
+                                    view,
+                                    ActiveView::Accounts
+                                        | ActiveView::NetWorth
+                                        | ActiveView::NetWorthBreakdown
+                                ) {
+                                    onrefresh.call(());
+                                }
                                 active_view.set(view);
                                 mobile_nav_open.set(false);
                             }
@@ -340,6 +348,7 @@ fn Dashboard(
                             currency: overview.reporting_currency.clone(),
                             defaults: overview.history_defaults.clone(),
                             filter_overrides,
+                            current_value: current_net_worth_from_snapshot(&overview.snapshot),
                         }
                     },
                     ActiveView::NetWorthBreakdown => rsx! {

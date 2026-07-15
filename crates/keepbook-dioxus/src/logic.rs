@@ -97,6 +97,30 @@ pub(crate) fn history_data_points(history: &History) -> Vec<NetWorthDataPoint> {
     points
 }
 
+pub(crate) fn history_data_points_with_current_snapshot(
+    history: &History,
+    local_today: &str,
+    current_value: f64,
+) -> Vec<NetWorthDataPoint> {
+    let mut points = history_data_points(history);
+    points.retain(|point| point.date.as_str() <= local_today);
+
+    if !current_value.is_finite() {
+        return points;
+    }
+
+    if let Some(point) = points.last_mut().filter(|point| point.date == local_today) {
+        point.value = current_value;
+    } else {
+        points.push(NetWorthDataPoint {
+            date: local_today.to_string(),
+            value: current_value,
+        });
+    }
+
+    points
+}
+
 pub(crate) fn stacked_history_data_points(
     history: &StackedHistory,
 ) -> Vec<StackedHistoryDataPoint> {

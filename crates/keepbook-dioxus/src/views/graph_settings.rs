@@ -14,6 +14,7 @@ pub(super) fn NetWorthGraphView(
     currency: String,
     defaults: HistoryDefaults,
     filter_overrides: FilterOverrides,
+    current_value: f64,
 ) -> Element {
     rsx! {
         section { class: "panel graph-panel",
@@ -26,6 +27,7 @@ pub(super) fn NetWorthGraphView(
                 defaults: defaults.clone(),
                 filter_overrides,
                 account: None,
+                current_value: Some(current_value),
                 show_header: true,
             }
         }

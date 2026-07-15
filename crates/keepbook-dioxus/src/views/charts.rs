@@ -94,6 +94,7 @@ pub(super) fn AccountGraphPanel(
                     defaults,
                     filter_overrides,
                     account: Some(selected_id),
+                    current_value: None,
                     show_header: false,
                 }
             }
@@ -391,6 +392,7 @@ pub(super) fn HistoryGraphPanel(
     defaults: HistoryDefaults,
     filter_overrides: FilterOverrides,
     account: Option<String>,
+    current_value: Option<f64>,
     show_header: bool,
 ) -> Element {
     let initial_range_preset = range_preset_from_config(&defaults.graph_range);
@@ -435,7 +437,13 @@ pub(super) fn HistoryGraphPanel(
         Some(Ok(history)) => Some(history),
         _ => None,
     };
-    let data = loaded_history.map(history_data_points).unwrap_or_default();
+    let local_today = current_date_string();
+    let data = loaded_history
+        .map(|history| match current_value {
+            Some(value) => history_data_points_with_current_snapshot(history, &local_today, value),
+            None => history_data_points(history),
+        })
+        .unwrap_or_default();
     let bounds = date_bounds(&data);
     let (start_date, end_date) = visible_date_range(&data, selected_range, &start_text, &end_text);
     let visible_data = filter_data_by_date_range(&data, &start_date, &end_date);
