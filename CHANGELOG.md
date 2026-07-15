@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- Moved the Git SSH identity path out of repository `keepbook.toml` files and
+  into device-local configuration. Saving Git settings now also removes legacy
+  `ssh_key_path` entries from the repository config.
 - Fixed desktop Git SSH pushes when an available SSH agent has no usable
   identities. Git authentication now tries configured and default private keys
   before the agent and advances to the next credential after a rejected key.

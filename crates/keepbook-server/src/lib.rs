@@ -2173,16 +2173,28 @@ fn load_config_doc(config_path: &Path) -> Result<DocumentMut> {
 }
 
 fn load_git_remote_settings(config_path: &Path) -> Result<GitRemoteSettings> {
+    let device_config_path = keepbook::config::device_config_path(config_path);
+    load_git_remote_settings_from(config_path, device_config_path.as_deref())
+}
+
+fn load_git_remote_settings_from(
+    config_path: &Path,
+    device_config_path: Option<&Path>,
+) -> Result<GitRemoteSettings> {
     let doc = load_config_doc(config_path)?;
     let defaults = GitRemoteSettings::default();
     let git_sync = doc.get("git_sync");
-    let git = doc.get("git");
+    let ssh_key_path = device_config_path
+        .map(keepbook::config::load_device_ssh_key_path_from)
+        .transpose()?
+        .flatten()
+        .map(|path| path.display().to_string());
     Ok(GitRemoteSettings {
         host: table_string(git_sync, "host").unwrap_or(defaults.host),
         repo: table_string(git_sync, "repo").unwrap_or(defaults.repo),
         branch: table_string(git_sync, "branch").unwrap_or(defaults.branch),
         ssh_user: table_string(git_sync, "ssh_user").unwrap_or(defaults.ssh_user),
-        ssh_key_path: table_string(git, "ssh_key_path"),
+        ssh_key_path,
     })
 }
 
@@ -2244,6 +2256,16 @@ fn table_string(table: Option<&Item>, key: &str) -> Option<String> {
 }
 
 fn write_git_settings(config_path: &Path, input: &GitSettingsInput) -> Result<()> {
+    let device_config_path = keepbook::config::device_config_path(config_path)
+        .context("cannot resolve device-local keepbook config path")?;
+    write_git_settings_to(config_path, &device_config_path, input)
+}
+
+fn write_git_settings_to(
+    config_path: &Path,
+    device_config_path: &Path,
+    input: &GitSettingsInput,
+) -> Result<()> {
     let mut doc = load_config_doc(config_path)?;
     if let Some(parent) = config_path.parent() {
         std::fs::create_dir_all(parent)
@@ -2264,25 +2286,41 @@ fn write_git_settings(config_path: &Path, input: &GitSettingsInput) -> Result<()
     if let Some(git_sync) = doc["git_sync"].as_table_like_mut() {
         git_sync.remove("ssh_key_path");
     }
+    if let Some(git) = doc.get_mut("git").and_then(Item::as_table_like_mut) {
+        git.remove("ssh_key_path");
+    }
+
+    std::fs::write(config_path, doc.to_string())
+        .with_context(|| format!("failed to write {}", config_path.display()))?;
+    write_device_ssh_key_path(device_config_path, input.ssh_key_path.as_deref())?;
+    Ok(())
+}
+
+fn write_device_ssh_key_path(device_config_path: &Path, ssh_key_path: Option<&str>) -> Result<()> {
+    let ssh_key_path = ssh_key_path.map(str::trim).filter(|path| !path.is_empty());
+    if ssh_key_path.is_none() && !device_config_path.exists() {
+        return Ok(());
+    }
+
+    let mut doc = load_config_doc(device_config_path)?;
     if doc
         .get("git")
         .is_none_or(|item| item.as_table_like().is_none())
     {
         doc.insert("git", Item::Table(Table::new()));
     }
-    if let Some(path) = input
-        .ssh_key_path
-        .as_deref()
-        .map(str::trim)
-        .filter(|path| !path.is_empty())
-    {
+    if let Some(path) = ssh_key_path {
         doc["git"]["ssh_key_path"] = value(path);
     } else if let Some(git) = doc["git"].as_table_like_mut() {
         git.remove("ssh_key_path");
     }
 
-    std::fs::write(config_path, doc.to_string())
-        .with_context(|| format!("failed to write {}", config_path.display()))?;
+    if let Some(parent) = device_config_path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    std::fs::write(device_config_path, doc.to_string())
+        .with_context(|| format!("failed to write {}", device_config_path.display()))?;
     Ok(())
 }
 
@@ -2431,13 +2469,7 @@ fn default_git_ssh_key_path(config_path: &Path) -> Result<PathBuf> {
 fn private_state_dir(_config_path: &Path) -> Option<PathBuf> {
     #[cfg(target_os = "android")]
     {
-        let config_dir = _config_path.parent()?;
-        Some(
-            config_dir
-                .parent()
-                .map(Path::to_path_buf)
-                .unwrap_or_else(|| config_dir.to_path_buf()),
-        )
+        app_private_state_dir(_config_path)
     }
     #[cfg(not(target_os = "android"))]
     {
@@ -2448,6 +2480,17 @@ fn private_state_dir(_config_path: &Path) -> Option<PathBuf> {
             })
             .map(|state_dir| state_dir.join("keepbook"))
     }
+}
+
+#[cfg(any(target_os = "android", test))]
+fn app_private_state_dir(config_path: &Path) -> Option<PathBuf> {
+    let config_dir = config_path.parent()?;
+    Some(
+        config_dir
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| config_dir.to_path_buf()),
+    )
 }
 
 fn persist_git_private_key(config_path: &Path, private_key_pem: &str) -> Result<String> {

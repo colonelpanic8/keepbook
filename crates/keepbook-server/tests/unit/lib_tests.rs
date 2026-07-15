@@ -16,9 +16,10 @@ fn validate_git_data_dir_accepts_nested_path() {
 #[test]
 fn load_git_remote_settings_ignores_non_table_git_sync() -> Result<()> {
     let config_path = unique_test_config_path("load-git-non-table");
+    let device_config_path = config_path.with_file_name("device.toml");
     write_test_config(&config_path, "git_sync = \"invalid\"\n")?;
 
-    let settings = load_git_remote_settings(&config_path)?;
+    let settings = load_git_remote_settings_from(&config_path, Some(&device_config_path))?;
     let defaults = GitRemoteSettings::default();
 
     assert_eq!(settings.host, defaults.host);
@@ -33,10 +34,12 @@ fn load_git_remote_settings_ignores_non_table_git_sync() -> Result<()> {
 #[test]
 fn write_git_settings_creates_missing_git_sync_table() -> Result<()> {
     let config_path = unique_test_config_path("write-git-missing-table");
+    let device_config_path = config_path.with_file_name("device.toml");
     write_test_config(&config_path, "data_dir = \"./old-data\"\n")?;
 
-    write_git_settings(
+    write_git_settings_to(
         &config_path,
+        &device_config_path,
         &GitSettingsInput {
             data_dir: "/tmp/keepbook-data".to_string(),
             host: "github.com".to_string(),
@@ -47,33 +50,44 @@ fn write_git_settings_creates_missing_git_sync_table() -> Result<()> {
         },
     )?;
 
-    let settings = load_git_remote_settings(&config_path)?;
+    let settings = load_git_remote_settings_from(&config_path, Some(&device_config_path))?;
     assert_eq!(settings.host, "github.com");
     assert_eq!(settings.repo, "colonelpanic8/keepbook-data");
     assert_eq!(settings.branch, "master");
     assert_eq!(settings.ssh_user, "git");
     assert_eq!(
         settings.ssh_key_path.as_deref(),
-        Some(".ssh/keepbook_sync_key")
+        Some(
+            device_config_path
+                .parent()
+                .expect("device config should have a parent")
+                .join(".ssh/keepbook_sync_key")
+                .to_str()
+                .expect("test path should be UTF-8")
+        )
     );
     let content = std::fs::read_to_string(&config_path)?;
     assert!(content.contains("[git_sync]"));
-    assert!(content.contains("[git]"));
-    assert!(content.contains("ssh_key_path = \".ssh/keepbook_sync_key\""));
+    assert!(!content.contains("ssh_key_path"));
+    let device_content = std::fs::read_to_string(&device_config_path)?;
+    assert!(device_content.contains("[git]"));
+    assert!(device_content.contains("ssh_key_path = \".ssh/keepbook_sync_key\""));
     remove_test_config(config_path);
     Ok(())
 }
 
 #[test]
-fn write_git_settings_keeps_data_dir_portable_and_writes_git_ssh_key_path() -> Result<()> {
+fn write_git_settings_keeps_data_dir_portable_and_moves_ssh_key_path_to_device_config() -> Result<()>
+{
     let config_path = unique_test_config_path("write-git-portable-paths");
+    let device_config_path = config_path.with_file_name("device.toml");
     let config_dir = config_path
         .parent()
         .expect("test config should have parent")
         .to_path_buf();
     write_test_config(
         &config_path,
-        "data_dir = \"./old-data\"\n[git_sync]\nssh_key_path = \"/Users/kat/.ssh/id_ed25519\"\n",
+        "data_dir = \"./old-data\"\n[git_sync]\nssh_key_path = \"/Users/kat/.ssh/id_rsa\"\n[git]\nssh_key_path = \"/Users/kat/.ssh/id_ed25519\"\n",
     )?;
 
     let home = std::env::var_os("HOME")
@@ -81,8 +95,9 @@ fn write_git_settings_keeps_data_dir_portable_and_writes_git_ssh_key_path() -> R
         .unwrap_or_else(|| config_dir.join("home"));
     let ssh_key_path = home.join(".ssh").join("id_ed25519");
 
-    write_git_settings(
+    write_git_settings_to(
         &config_path,
+        &device_config_path,
         &GitSettingsInput {
             data_dir: config_dir.display().to_string(),
             host: "github.com".to_string(),
@@ -95,9 +110,10 @@ fn write_git_settings_keeps_data_dir_portable_and_writes_git_ssh_key_path() -> R
 
     let content = std::fs::read_to_string(&config_path)?;
     assert!(content.contains("data_dir = \".\""));
-    assert!(content.contains("[git]"));
-    assert!(content.contains(&format!("ssh_key_path = \"{}\"", ssh_key_path.display())));
-    assert!(!content.contains("[git_sync]\nssh_key_path"));
+    assert!(!content.contains("ssh_key_path"));
+    let device_content = std::fs::read_to_string(&device_config_path)?;
+    assert!(device_content.contains("[git]"));
+    assert!(device_content.contains(&format!("ssh_key_path = \"{}\"", ssh_key_path.display())));
     remove_test_config(config_path);
     Ok(())
 }
@@ -148,6 +164,20 @@ fn default_ssh_key_path_prefers_ed25519_then_rsa() -> Result<()> {
     );
     let _ = std::fs::remove_dir_all(home.parent().unwrap_or(&home));
     Ok(())
+}
+
+#[test]
+fn android_private_state_is_outside_data_repo() {
+    let config_path = Path::new(
+        "/data/user/0/org.colonelpanic.keepbook.dioxus/files/keepbook-data/keepbook.toml",
+    );
+
+    assert_eq!(
+        app_private_state_dir(config_path).as_deref(),
+        Some(Path::new(
+            "/data/user/0/org.colonelpanic.keepbook.dioxus/files"
+        ))
+    );
 }
 
 #[test]

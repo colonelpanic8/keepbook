@@ -123,7 +123,7 @@ fn test_load_refresh_config() -> Result<()> {
 }
 
 #[test]
-fn test_load_git_config() -> Result<()> {
+fn test_repo_git_config_ignores_device_specific_ssh_key_path() -> Result<()> {
     let dir = TempDir::new()?;
     let config_path = dir.path().join("keepbook.toml");
 
@@ -142,30 +142,48 @@ fn test_load_git_config() -> Result<()> {
     assert!(config.git.pull_before_edit);
     assert!(config.git.push_after_sync);
     assert!(config.git.merge_master_before_command);
+    assert_eq!(config.git.ssh_key_path, None);
+
+    Ok(())
+}
+
+#[test]
+fn test_device_git_ssh_key_path_is_device_config_relative() -> Result<()> {
+    let dir = TempDir::new()?;
+    let device_config_path = dir.path().join("device").join("device.toml");
+    std::fs::create_dir_all(device_config_path.parent().unwrap())?;
+
+    let mut file = std::fs::File::create(&device_config_path)?;
+    writeln!(file, "[git]")?;
+    writeln!(file, "ssh_key_path = \".ssh/keepbook_sync_key\"")?;
+
+    let ssh_key_path = load_device_ssh_key_path_from(&device_config_path)?;
     assert_eq!(
-        config.git.ssh_key_path.as_deref(),
-        Some(std::path::Path::new(".ssh/keepbook_sync_key"))
+        ssh_key_path.as_deref(),
+        Some(
+            device_config_path
+                .parent()
+                .unwrap()
+                .join(".ssh/keepbook_sync_key")
+                .as_path()
+        )
     );
 
     Ok(())
 }
 
 #[test]
-fn test_resolved_git_ssh_key_path_is_config_relative() -> Result<()> {
-    let dir = TempDir::new()?;
-    let config_path = dir.path().join("keepbook.toml");
-
-    let mut file = std::fs::File::create(&config_path)?;
-    writeln!(file, "[git]")?;
-    writeln!(file, "ssh_key_path = \".ssh/keepbook_sync_key\"")?;
-
-    let config = ResolvedConfig::load(&config_path)?;
-    assert_eq!(
-        config.git.ssh_key_path.as_deref(),
-        Some(dir.path().join(".ssh/keepbook_sync_key").as_path())
+fn test_android_device_config_path_is_app_private_and_outside_data_repo() {
+    let repo_config_path = Path::new(
+        "/data/user/0/org.colonelpanic.keepbook.dioxus/files/keepbook-data/keepbook.toml",
     );
 
-    Ok(())
+    assert_eq!(
+        app_private_device_config_path(repo_config_path).as_deref(),
+        Some(Path::new(
+            "/data/user/0/org.colonelpanic.keepbook.dioxus/files/keepbook-device.toml"
+        ))
+    );
 }
 
 #[test]

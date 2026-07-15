@@ -538,7 +538,6 @@ impl<'de> Deserialize<'de> for GitConfig {
             pull_before_edit: bool,
             push_after_sync: bool,
             merge_master_before_command: bool,
-            ssh_key_path: Option<PathBuf>,
         }
 
         let raw = RawGitConfig::deserialize(deserializer)?;
@@ -549,17 +548,8 @@ impl<'de> Deserialize<'de> for GitConfig {
             pull_before_edit: raw.pull_before_edit,
             push_after_sync: raw.push_after_sync,
             merge_master_before_command: raw.merge_master_before_command,
-            ssh_key_path: raw.ssh_key_path,
+            ssh_key_path: None,
         })
-    }
-}
-
-impl GitConfig {
-    fn resolve_paths(mut self, config_dir: &Path) -> Self {
-        self.ssh_key_path = self
-            .ssh_key_path
-            .map(|path| resolve_config_path(config_dir, path));
-        self
     }
 }
 
@@ -709,6 +699,80 @@ pub struct ResolvedConfig {
     pub git: GitConfig,
 }
 
+#[derive(Debug, Deserialize, Default)]
+#[serde(default)]
+struct DeviceConfig {
+    git: DeviceGitConfig,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(default)]
+struct DeviceGitConfig {
+    ssh_key_path: Option<PathBuf>,
+}
+
+/// Returns the device-local config path used for settings that must not be
+/// stored in a repository's `keepbook.toml`.
+pub fn device_config_path(_repo_config_path: &Path) -> Option<PathBuf> {
+    #[cfg(target_os = "android")]
+    {
+        return app_private_device_config_path(_repo_config_path);
+    }
+
+    #[cfg(not(target_os = "android"))]
+    {
+        dirs::config_dir().map(|dir| dir.join("keepbook").join("device.toml"))
+    }
+}
+
+#[cfg(any(target_os = "android", test))]
+fn app_private_device_config_path(repo_config_path: &Path) -> Option<PathBuf> {
+    let repo_dir = repo_config_path.parent()?;
+    Some(
+        repo_dir
+            .parent()
+            .unwrap_or(repo_dir)
+            .join("keepbook-device.toml"),
+    )
+}
+
+/// Loads the device-local SSH identity path, resolving relative paths from the
+/// device config rather than from the repository config.
+pub fn load_device_ssh_key_path(repo_config_path: &Path) -> Result<Option<PathBuf>> {
+    let Some(device_config_path) = device_config_path(repo_config_path) else {
+        return Ok(None);
+    };
+    load_device_ssh_key_path_from(&device_config_path)
+}
+
+/// Loads an SSH identity from an explicit device config path.
+pub fn load_device_ssh_key_path_from(device_config_path: &Path) -> Result<Option<PathBuf>> {
+    if !device_config_path.exists() {
+        return Ok(None);
+    }
+
+    let content = std::fs::read_to_string(&device_config_path).with_context(|| {
+        format!(
+            "Failed to read device config file: {}",
+            device_config_path.display()
+        )
+    })?;
+    let config: DeviceConfig = toml::from_str(&content).with_context(|| {
+        format!(
+            "Failed to parse device config file: {}",
+            device_config_path.display()
+        )
+    })?;
+    let Some(path) = config.git.ssh_key_path else {
+        return Ok(None);
+    };
+    let device_config_dir = device_config_path
+        .parent()
+        .context("Device config file has no parent directory")?;
+
+    Ok(Some(resolve_config_path(device_config_dir, path)))
+}
+
 /// Returns the default config file path.
 ///
 /// Resolution order:
@@ -803,7 +867,7 @@ impl ResolvedConfig {
 
         let mut config = Config::load(&config_path)?;
         let data_dir = config.resolve_data_dir(config_dir);
-        config.git = config.git.resolve_paths(config_dir);
+        config.git.ssh_key_path = load_device_ssh_key_path(&config_path)?;
 
         Ok(Self {
             data_dir,
@@ -845,6 +909,9 @@ impl ResolvedConfig {
                 .parent()
                 .context("Config path has no parent directory")?;
 
+            let mut git = GitConfig::default();
+            git.ssh_key_path = load_device_ssh_key_path(&config_path)?;
+
             Ok(Self {
                 data_dir: config_dir.to_path_buf(),
                 reporting_currency: default_reporting_currency(),
@@ -857,7 +924,7 @@ impl ResolvedConfig {
                 portfolio: PortfolioConfig::default(),
                 ignore: IgnoreConfig::default(),
                 ai: AiConfig::default(),
-                git: GitConfig::default(),
+                git,
             })
         }
     }
