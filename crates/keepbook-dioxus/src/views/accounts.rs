@@ -173,51 +173,6 @@ pub(super) fn AccountsView(
                     subtitle: account_count.to_string(),
                     actions: rsx! {
                         div { class: "settings-actions inline-actions",
-                            ControlButton {
-                                disabled: any_account_operation_busy,
-                                busy: is_git_sync_busy,
-                                onclick: move |_| {
-                                    git_sync_busy.set(true);
-                                    price_status.set(String::new());
-                                    resync_status.set(String::new());
-                                    git_sync_status.set("Syncing Git repository...".to_string());
-                                    spawn(async move {
-                                        let result = async {
-                                            let settings = fetch_git_settings().await?;
-                                            let input = GitSyncInput {
-                                                data_dir: normalize_git_data_dir_for_client(settings.data_dir),
-                                                host: settings.git.host,
-                                                repo: settings.git.repo,
-                                                branch: settings.git.branch,
-                                                ssh_user: settings.git.ssh_user,
-                                                private_key_pem: String::new(),
-                                                save_settings: false,
-                                            };
-                                            sync_git_repo_cancelable(
-                                                input,
-                                                new_git_sync_cancel_handle(),
-                                            )
-                                            .await
-                                        }
-                                        .await;
-
-                                        match result {
-                                            Ok(result) => {
-                                                git_sync_status.set(format!(
-                                                    "Git sync complete: {} {}.",
-                                                    result.remote_url, result.branch
-                                                ));
-                                                onrefresh.call(());
-                                            }
-                                            Err(error) => {
-                                                git_sync_status.set(format!("Git sync failed: {error}"));
-                                            }
-                                        }
-                                        git_sync_busy.set(false);
-                                    });
-                                },
-                                if is_git_sync_busy { "Syncing Git" } else { "Git sync" }
-                            }
                             label { class: "compact-check",
                                 input {
                                     r#type: "checkbox",
@@ -282,6 +237,51 @@ pub(super) fn AccountsView(
                                     });
                                 },
                                 if is_resync_busy { "Resyncing" } else { "Resync data" }
+                            }
+                            ControlButton {
+                                disabled: any_account_operation_busy,
+                                busy: is_git_sync_busy,
+                                onclick: move |_| {
+                                    git_sync_busy.set(true);
+                                    price_status.set(String::new());
+                                    resync_status.set(String::new());
+                                    git_sync_status.set("Syncing Git repository...".to_string());
+                                    spawn(async move {
+                                        let result = async {
+                                            let settings = fetch_git_settings().await?;
+                                            let input = GitSyncInput {
+                                                data_dir: normalize_git_data_dir_for_client(settings.data_dir),
+                                                host: settings.git.host,
+                                                repo: settings.git.repo,
+                                                branch: settings.git.branch,
+                                                ssh_user: settings.git.ssh_user,
+                                                private_key_pem: String::new(),
+                                                save_settings: false,
+                                            };
+                                            sync_git_repo_cancelable(
+                                                input,
+                                                new_git_sync_cancel_handle(),
+                                            )
+                                            .await
+                                        }
+                                        .await;
+
+                                        match result {
+                                            Ok(result) => {
+                                                git_sync_status.set(format!(
+                                                    "Git sync complete: {} {}.",
+                                                    result.remote_url, result.branch
+                                                ));
+                                                onrefresh.call(());
+                                            }
+                                            Err(error) => {
+                                                git_sync_status.set(format!("Git sync failed: {error}"));
+                                            }
+                                        }
+                                        git_sync_busy.set(false);
+                                    });
+                                },
+                                if is_git_sync_busy { "Syncing Git" } else { "Git sync" }
                             }
                         }
                     },
