@@ -261,14 +261,16 @@ fn signature(repo: &Repository) -> Result<Signature<'_>> {
 
 fn callbacks(repo: &Repository, git_config: &GitConfig) -> Result<RemoteCallbacks<'static>> {
     let config = repo.config().context("failed to read git config")?;
-    let configured_ssh_key = configured_ssh_private_key_for_credentials(git_config);
-    let default_ssh_keys = default_ssh_private_keys_for_credentials();
+    let ssh_keys = ssh_private_keys_for_credentials(git_config);
+    let mut next_ssh_key = 0;
+    let mut ssh_agent_attempted = false;
     let mut callbacks = RemoteCallbacks::new();
     configure_certificate_check(&mut callbacks);
     callbacks.credentials(move |url, username, allowed| {
         if allowed.contains(CredentialType::SSH_KEY) {
             if let Some(username) = username {
-                if let Some(key) = configured_ssh_key.as_ref() {
+                while let Some(key) = ssh_keys.get(next_ssh_key) {
+                    next_ssh_key += 1;
                     if let Ok(cred) =
                         Cred::ssh_key_from_memory(username, None, &key.private_key, None)
                     {
@@ -276,14 +278,9 @@ fn callbacks(repo: &Repository, git_config: &GitConfig) -> Result<RemoteCallback
                     }
                 }
 
-                if let Ok(cred) = Cred::ssh_key_from_agent(username) {
-                    return Ok(cred);
-                }
-
-                for key in &default_ssh_keys {
-                    if let Ok(cred) =
-                        Cred::ssh_key_from_memory(username, None, &key.private_key, None)
-                    {
+                if !ssh_agent_attempted {
+                    ssh_agent_attempted = true;
+                    if let Ok(cred) = Cred::ssh_key_from_agent(username) {
                         return Ok(cred);
                     }
                 }
@@ -318,11 +315,30 @@ fn configured_ssh_private_key_for_credentials(git_config: &GitConfig) -> Option<
         .and_then(|path| ssh_private_key_from_file(path))
 }
 
-fn default_ssh_private_keys_for_credentials() -> Vec<SshPrivateKey> {
+fn ssh_private_keys_for_credentials(git_config: &GitConfig) -> Vec<SshPrivateKey> {
     let Some(home_dir) = dirs::home_dir() else {
-        return Vec::new();
+        return configured_ssh_private_key_for_credentials(git_config)
+            .into_iter()
+            .collect();
     };
-    default_ssh_private_keys_for_credentials_in_home(&home_dir)
+    ssh_private_keys_for_credentials_in_home(git_config, &home_dir)
+}
+
+fn ssh_private_keys_for_credentials_in_home(
+    git_config: &GitConfig,
+    home_dir: &Path,
+) -> Vec<SshPrivateKey> {
+    let mut keys = Vec::new();
+    if let Some(key) = configured_ssh_private_key_for_credentials(git_config) {
+        keys.push(key);
+    }
+
+    for key in default_ssh_private_keys_for_credentials_in_home(home_dir) {
+        if !keys.iter().any(|candidate| candidate.path == key.path) {
+            keys.push(key);
+        }
+    }
+    keys
 }
 
 fn default_ssh_private_keys_for_credentials_in_home(home_dir: &Path) -> Vec<SshPrivateKey> {

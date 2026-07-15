@@ -107,6 +107,36 @@ fn default_ssh_private_keys_for_credentials_loads_existing_files() -> Result<()>
     Ok(())
 }
 
+#[test]
+fn ssh_private_keys_prioritize_configured_key_then_defaults_without_duplicates() -> Result<()> {
+    let dir = TempDir::new()?;
+    let ssh_dir = dir.path().join(".ssh");
+    let configured_path = ssh_dir.join("keepbook_sync_key");
+    let default_path = ssh_dir.join("id_ed25519");
+    fs::create_dir_all(&ssh_dir)?;
+    fs::write(&configured_path, "configured key\n")?;
+    fs::write(&default_path, "default key\n")?;
+    let git_config = GitConfig {
+        ssh_key_path: Some(configured_path.clone()),
+        ..GitConfig::default()
+    };
+
+    assert_eq!(
+        ssh_private_keys_for_credentials_in_home(&git_config, dir.path()),
+        vec![
+            SshPrivateKey {
+                path: configured_path,
+                private_key: "configured key\n".to_string(),
+            },
+            SshPrivateKey {
+                path: default_path,
+                private_key: "default key\n".to_string(),
+            },
+        ]
+    );
+    Ok(())
+}
+
 fn run_git(dir: &Path, args: &[&str]) -> Result<std::process::Output> {
     let output = Command::new("git").arg("-C").arg(dir).args(args).output()?;
     Ok(output)

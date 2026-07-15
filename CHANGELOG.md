@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Fixed desktop Git SSH pushes when an available SSH agent has no usable
+  identities. Git authentication now tries configured and default private keys
+  before the agent and advances to the next credential after a rejected key.
+
 ## 0.7.3 - 2026-07-12
 
 ### Fixed
