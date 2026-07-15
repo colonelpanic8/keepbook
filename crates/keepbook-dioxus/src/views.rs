@@ -99,6 +99,11 @@ pub(crate) fn App() -> Element {
             last_cycle_text: tray_last_cycle_text(),
             next_cycle_text: "Next price refresh: unscheduled".to_string(),
             last_summary: tray_last_summary(),
+            onshowwindow: move |_| {
+                overview.restart();
+                tray_snapshot.restart();
+                refresh_epoch.set(refresh_epoch().wrapping_add(1));
+            },
             onsyncnow: move |_| {
                 tray_status_text.set("Refreshing prices...".to_string());
                 tray_last_summary.set("Running price refresh (manual)".to_string());
@@ -184,6 +189,7 @@ fn DesktopTrayBridge(
     last_cycle_text: String,
     next_cycle_text: String,
     last_summary: String,
+    onshowwindow: EventHandler<()>,
     onsyncnow: EventHandler<()>,
 ) -> Element {
     rsx! {
@@ -196,6 +202,7 @@ fn DesktopTrayBridge(
                 next_cycle_text,
                 last_summary,
             },
+            onshowwindow,
             onsyncnow,
         }
     }
@@ -213,6 +220,7 @@ fn DesktopTrayBridge(
     last_cycle_text: String,
     next_cycle_text: String,
     last_summary: String,
+    onshowwindow: EventHandler<()>,
     onsyncnow: EventHandler<()>,
 ) -> Element {
     let _ = overview;
@@ -221,6 +229,7 @@ fn DesktopTrayBridge(
     let _ = last_cycle_text;
     let _ = next_cycle_text;
     let _ = last_summary;
+    let _ = onshowwindow;
     let _ = onsyncnow;
     rsx! {}
 }

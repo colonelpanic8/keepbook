@@ -117,6 +117,7 @@ pub fn KeepbookTray(
     overview: Option<Overview>,
     tray_snapshot: Option<Result<TraySnapshot, String>>,
     runtime: TrayRuntime,
+    onshowwindow: EventHandler<()>,
     onsyncnow: EventHandler<()>,
 ) -> Element {
     let mut tray_state = use_signal(|| None);
@@ -124,8 +125,17 @@ pub fn KeepbookTray(
         move |mut receiver: UnboundedReceiver<TrayCommand>| async move {
             while let Some(command) = receiver.next().await {
                 match command {
-                    TrayCommand::ShowWindow => show_window(),
-                    TrayCommand::ToggleWindow => toggle_window_visibility(),
+                    TrayCommand::ShowWindow => {
+                        show_window();
+                        onshowwindow.call(());
+                    }
+                    TrayCommand::ToggleWindow => {
+                        let showing_window = !window().is_visible();
+                        toggle_window_visibility();
+                        if showing_window {
+                            onshowwindow.call(());
+                        }
+                    }
                     TrayCommand::SyncNow => {
                         onsyncnow.call(());
                     }
