@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.8.0 - 2026-07-17
+
+### Added
+
+- Added an XDG application registry for managing multiple Keepbook data
+  repositories, including repository creation, cloning, switching, syncing, and
+  removal from the Dioxus app.
+- Added portfolio asset and liability breakdowns to the CLI, API, and Dioxus
+  app.
+
+### Changed
+
+- Added a device-level environment override for starting the desktop app
+  minimized to the system tray.
+
 ## 0.7.5 - 2026-07-17
 
 ### Fixed
