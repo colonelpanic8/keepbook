@@ -867,6 +867,8 @@ fn desktop_config() -> dioxus::desktop::Config {
         .with_disable_dma_buf_on_wayland(false)
         .with_window(desktop_window_builder(startup_options));
     #[cfg(target_os = "linux")]
+    let config = config.with_data_directory(glib::user_data_dir().join("keepbook-dioxus"));
+    #[cfg(target_os = "linux")]
     let config = {
         use dioxus::desktop::tao::event_loop::EventLoopBuilder;
         use dioxus::desktop::tao::platform::unix::EventLoopBuilderExtUnix;
