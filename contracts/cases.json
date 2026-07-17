@@ -162,6 +162,60 @@
     "command": ["list", "balances"]
   },
   {
+    "name": "portfolio_assets_empty",
+    "reporting_currency": "USD",
+    "seed": {},
+    "command": ["portfolio", "assets", "--date", "2024-06-15"]
+  },
+  {
+    "name": "portfolio_assets_liability_partition",
+    "reporting_currency": "USD",
+    "seed": {
+      "connections": [
+        {
+          "id": "conn-1",
+          "name": "Bank",
+          "synchronizer": "manual",
+          "status": "active",
+          "account_ids": ["acct-1", "acct-2"]
+        }
+      ],
+      "accounts": [
+        {
+          "id": "acct-1",
+          "name": "Checking",
+          "connection_id": "conn-1",
+          "tags": [],
+          "active": true
+        },
+        {
+          "id": "acct-2",
+          "name": "Credit Card",
+          "connection_id": "conn-1",
+          "tags": [],
+          "active": true
+        }
+      ],
+      "balance_snapshots": [
+        {
+          "account_id": "acct-1",
+          "timestamp": "2024-01-15T10:00:00Z",
+          "balances": [
+            { "asset": { "type": "currency", "iso_code": "USD" }, "amount": "100.5" }
+          ]
+        },
+        {
+          "account_id": "acct-2",
+          "timestamp": "2024-01-15T10:00:00Z",
+          "balances": [
+            { "asset": { "type": "currency", "iso_code": "USD" }, "amount": "-40.25" }
+          ]
+        }
+      ]
+    },
+    "command": ["portfolio", "assets", "--date", "2024-06-15"]
+  },
+  {
     "name": "portfolio_history_empty_range",
     "reporting_currency": "USD",
     "seed": {},

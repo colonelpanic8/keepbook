@@ -4,6 +4,7 @@ use super::*;
 use dioxus::prelude::*;
 
 mod accounts;
+mod assets;
 mod charts;
 mod connections;
 mod graph_settings;
@@ -13,6 +14,7 @@ mod shared;
 mod spending;
 
 use accounts::AccountsView;
+use assets::AssetsView;
 use charts::{HistoryGraphPanel, StackedHistoryGraphPanel};
 use connections::ConnectionsView;
 use graph_settings::{NetWorthBreakdownGraphView, NetWorthGraphView, SettingsView};
@@ -29,6 +31,7 @@ enum ActiveView {
     NetWorth,
     NetWorthBreakdown,
     Accounts,
+    Assets,
     Connections,
     Recurring,
     ProposedEdits,
@@ -36,8 +39,9 @@ enum ActiveView {
 }
 
 impl ActiveView {
-    const ALL: [Self; 8] = [
+    const ALL: [Self; 9] = [
         Self::Accounts,
+        Self::Assets,
         Self::Spending,
         Self::Recurring,
         Self::NetWorth,
@@ -53,6 +57,7 @@ impl ActiveView {
             Self::NetWorth => "Net Worth",
             Self::NetWorthBreakdown => "Net Worth Breakdown",
             Self::Accounts => "Accounts",
+            Self::Assets => "Assets",
             Self::Connections => "Connections",
             Self::Recurring => "Recurring",
             Self::ProposedEdits => "Proposed Edits",
@@ -80,6 +85,9 @@ pub(crate) fn App() -> Element {
 
     let mut refresh_epoch = use_context_provider(|| Signal::new(0u64));
     let mut filter_overrides = use_signal(FilterOverrides::default);
+    let mut repositories = use_resource(fetch_repositories);
+    let mut repository_status = use_signal(String::new);
+    let mut repository_busy = use_signal(|| false);
     let mut overview = use_resource(move || {
         let overrides = filter_overrides();
         async move { fetch_overview(overrides).await }
@@ -157,10 +165,32 @@ pub(crate) fn App() -> Element {
                     Dashboard {
                         overview: data,
                         overview_refreshing,
+                        repositories: repositories.cloned(),
+                        repository_busy: repository_busy(),
+                        repository_status: repository_status(),
                         filter_overrides: filter_overrides(),
                         onfilterchange: move |overrides| filter_overrides.set(overrides),
+                        onrepositorychange: move |repository_id: String| {
+                            repository_busy.set(true);
+                            repository_status.set("Switching repository...".to_string());
+                            spawn(async move {
+                                match activate_repository(repository_id).await {
+                                    Ok(_) => {
+                                        filter_overrides.set(FilterOverrides::default());
+                                        repository_status.set("Repository switched.".to_string());
+                                        repositories.restart();
+                                        overview.restart();
+                                        tray_snapshot.restart();
+                                        refresh_epoch.set(refresh_epoch().wrapping_add(1));
+                                    }
+                                    Err(error) => repository_status.set(error),
+                                }
+                                repository_busy.set(false);
+                            });
+                        },
                         onrefresh: move |_| {
                             overview.restart();
+                            repositories.restart();
                             tray_snapshot.restart();
                             refresh_epoch.set(refresh_epoch().wrapping_add(1));
                         }
@@ -272,8 +302,12 @@ fn price_sync_result_has_failures(result: &serde_json::Value) -> bool {
 fn Dashboard(
     overview: Overview,
     overview_refreshing: bool,
+    repositories: Option<Result<RepositoryRegistry, String>>,
+    repository_busy: bool,
+    repository_status: String,
     filter_overrides: FilterOverrides,
     onfilterchange: EventHandler<FilterOverrides>,
+    onrepositorychange: EventHandler<String>,
     onrefresh: EventHandler<()>,
 ) -> Element {
     let mut active_view = use_signal(|| ActiveView::Accounts);
@@ -310,6 +344,30 @@ fn Dashboard(
                         span { aria_hidden: "true" }
                     }
                 }
+                if let Some(Ok(registry)) = repositories.clone() {
+                    label { class: "repository-switcher",
+                        span { "Repository" }
+                        select {
+                            class: "control-input",
+                            disabled: repository_busy,
+                            value: registry.active_repository.as_deref().unwrap_or_default(),
+                            onchange: move |event| onrepositorychange.call(event.value()),
+                            for repository in registry.repositories {
+                                option {
+                                    value: "{repository.id}",
+                                    disabled: !repository.cloned,
+                                    "{repository.name}"
+                                }
+                            }
+                        }
+                    }
+                }
+                if !repository_status.is_empty() {
+                    div { class: "repository-switch-status", aria_live: "polite",
+                        if repository_busy { span { class: "activity-spinner" } }
+                        small { "{repository_status}" }
+                    }
+                }
                 nav {
                     for view in ActiveView::ALL {
                         NavButton {
@@ -319,6 +377,7 @@ fn Dashboard(
                                 if matches!(
                                     view,
                                     ActiveView::Accounts
+                                        | ActiveView::Assets
                                         | ActiveView::NetWorth
                                         | ActiveView::NetWorthBreakdown
                                 ) {
@@ -381,6 +440,11 @@ fn Dashboard(
                             onrefresh: move |_| onrefresh.call(()),
                         }
                     },
+                    ActiveView::Assets => rsx! {
+                        AssetsView {
+                            filter_overrides: filter_overrides.clone(),
+                        }
+                    },
                     ActiveView::Connections => rsx! {
                         ConnectionsView {
                             connections: overview.connections.clone(),
@@ -397,6 +461,9 @@ fn Dashboard(
                     },
                     ActiveView::Settings => rsx! {
                         SettingsView {
+                            repositories: repositories.clone(),
+                            repository_busy,
+                            onrepositorychange: move |id| onrepositorychange.call(id),
                             filtering: overview.filtering.clone(),
                             filter_overrides,
                             config_path: overview.config_path.clone(),

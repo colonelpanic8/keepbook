@@ -955,6 +955,13 @@ enum PortfolioCommand {
         force_refresh: bool,
     },
 
+    /// Per-asset portfolio breakdown with day/week/month/year changes
+    Assets {
+        /// Calculate as of this date (YYYY-MM-DD, default: today)
+        #[arg(long)]
+        date: Option<String>,
+    },
+
     /// Map nominal net worth to after-tax net worth under latent tax scenarios
     TaxImpact {
         /// Base currency for valuations (default: from config)
@@ -1607,6 +1614,11 @@ async fn main() -> Result<()> {
                 )
                 .await?;
                 println!("{}", serde_json::to_string_pretty(&snapshot)?);
+            }
+
+            PortfolioCommand::Assets { date } => {
+                let output = app::portfolio_assets(storage_arc.clone(), &config, date).await?;
+                println!("{}", serde_json::to_string_pretty(&output)?);
             }
 
             PortfolioCommand::TaxImpact {

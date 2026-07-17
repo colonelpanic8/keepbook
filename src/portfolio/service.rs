@@ -14,8 +14,9 @@ use crate::models::{Account, Asset, BalanceBackfillPolicy, BalanceSnapshot, Conn
 use crate::storage::Storage;
 
 use super::{
-    AccountHolding, AccountSummary, AssetSummary, EquityValuationAdjustment, Grouping,
-    PortfolioQuery, PortfolioSnapshot, PortfolioValuationScenario,
+    AccountHolding, AccountSummary, AssetBreakdownAccountHolding, AssetBreakdownRow, AssetSummary,
+    EquityValuationAdjustment, Grouping, PortfolioQuery, PortfolioSnapshot,
+    PortfolioValuationScenario,
 };
 
 pub struct PortfolioService {
@@ -170,6 +171,80 @@ impl PortfolioService {
         })
     }
 
+    /// Per-asset portfolio breakdown, split into liability and non-liability
+    /// rows. Positive (and zero) holdings of an asset aggregate into one row
+    /// and negative holdings into a separate liability row, with no netting
+    /// between the two. Reuses the same context loading (exclusions, latest
+    /// snapshot at or before the date, backfill policy) and valuation
+    /// machinery as `calculate`. `grouping` and `include_detail` on the query
+    /// are ignored.
+    pub async fn asset_breakdown(&self, query: &PortfolioQuery) -> Result<Vec<AssetBreakdownRow>> {
+        let ctx = self
+            .load_calculation_context(query.as_of_date, &query.account_ids)
+            .await?;
+
+        let by_key = Self::aggregate_by_asset_liability(&ctx.filtered_snapshots)?;
+
+        // Value each unique asset only once; both partitions of the same
+        // asset share the valuation.
+        let mut price_cache: HashMap<Asset, AssetValuation> = HashMap::new();
+        for (asset, _liability) in by_key.keys() {
+            if !price_cache.contains_key(asset) {
+                let valuation = self
+                    .value_asset(asset, Decimal::ONE, &query.currency, query.as_of_date)
+                    .await?;
+                price_cache.insert(asset.clone(), valuation);
+            }
+        }
+
+        let mut rows = Vec::with_capacity(by_key.len());
+        for ((asset, liability), agg) in &by_key {
+            let valuation = price_cache.get(asset).with_context(|| {
+                format!("missing valuation for asset {}", AssetId::from_asset(asset))
+            })?;
+            let unit_value = valuation.value;
+
+            let mut holdings = Vec::with_capacity(agg.holdings.len());
+            for holding in &agg.holdings {
+                let amount = Decimal::from_str(&holding.amount)?;
+                let account = ctx.account_map.get(&holding.account_id);
+                let account_name = account.map(|a| a.name.clone()).unwrap_or_default();
+                let connection_name = account
+                    .and_then(|a| ctx.connection_map.get(&a.connection_id))
+                    .map(|c| c.name().to_string());
+                holdings.push(AssetBreakdownAccountHolding {
+                    account_id: holding.account_id.to_string(),
+                    account_name,
+                    connection_name,
+                    amount,
+                    balance_date: holding.timestamp.date_naive(),
+                    value_in_base: unit_value.map(|price| price * amount),
+                });
+            }
+            holdings.sort_by(|a, b| {
+                a.account_name
+                    .cmp(&b.account_name)
+                    .then_with(|| a.account_id.cmp(&b.account_id))
+            });
+
+            rows.push(AssetBreakdownRow {
+                asset: asset.clone(),
+                liability: *liability,
+                total_amount: agg.total_amount,
+                value_in_base: unit_value.map(|price| price * agg.total_amount),
+                price: valuation.price.clone(),
+                price_date: valuation.price_date,
+                fx_rate: valuation.fx_rate.clone(),
+                fx_date: valuation.fx_date,
+                holdings,
+            });
+        }
+
+        rows.sort_by_key(|row| (AssetId::from_asset(&row.asset).to_string(), row.liability));
+
+        Ok(rows)
+    }
+
     /// Load accounts, connections, and balances from storage.
     async fn load_calculation_context(
         &self,
@@ -293,6 +368,54 @@ impl PortfolioService {
         }
 
         Ok(by_asset)
+    }
+
+    /// Aggregate balances by (asset, liability), where a holding is a
+    /// liability when its amount is negative. Zero-amount holdings count as
+    /// non-liability. Mirrors `aggregate_by_asset` otherwise.
+    fn aggregate_by_asset_liability(
+        snapshots: &[(Id, BalanceSnapshot)],
+    ) -> Result<HashMap<(Asset, bool), AssetAggregate>> {
+        let mut by_key: HashMap<(Asset, bool), AssetAggregate> = HashMap::new();
+
+        for (account_id, snapshot) in snapshots {
+            for asset_balance in &snapshot.balances {
+                let asset_key = asset_balance.asset.normalized();
+                let amount = Decimal::from_str(&asset_balance.amount)?;
+                let liability = amount < Decimal::ZERO;
+                let balance_date = snapshot.timestamp.date_naive();
+
+                let entry = by_key
+                    .entry((asset_key.clone(), liability))
+                    .or_insert_with(|| AssetAggregate {
+                        total_amount: Decimal::ZERO,
+                        amount_with_cost_basis: Decimal::ZERO,
+                        total_cost_basis: None,
+                        latest_balance_date: balance_date,
+                        holdings: Vec::new(),
+                    });
+
+                entry.total_amount += amount;
+                if let Some(cost_basis) = &asset_balance.cost_basis {
+                    let cost_basis = Decimal::from_str(cost_basis)?;
+                    entry.amount_with_cost_basis += amount;
+                    entry.total_cost_basis =
+                        Some(entry.total_cost_basis.unwrap_or(Decimal::ZERO) + cost_basis);
+                }
+                if balance_date > entry.latest_balance_date {
+                    entry.latest_balance_date = balance_date;
+                }
+                entry.holdings.push(AssetHolding {
+                    account_id: account_id.clone(),
+                    asset: asset_key.clone(),
+                    amount: asset_balance.amount.clone(),
+                    cost_basis: asset_balance.cost_basis.clone(),
+                    timestamp: snapshot.timestamp,
+                });
+            }
+        }
+
+        Ok(by_key)
     }
 
     /// Fetch valuations for all unique assets, caching to avoid duplicate API calls.

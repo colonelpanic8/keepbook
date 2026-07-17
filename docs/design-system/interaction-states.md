@@ -34,6 +34,17 @@ app appear frozen.
 - If an operation has no safe cancellation mechanism, users must still be able
   to navigate elsewhere. Do not imply that closing a view cancels server work.
 
+## Repository switching
+
+- The navigation repository selector reflects the app-wide active repository.
+  Repositories without a completed clone are visible but cannot be selected.
+- Switching repositories is asynchronous. Keep the current repository visible
+  until the replacement config and storage load successfully, then refresh all
+  repository-derived views together.
+- Adding or removing a repository changes only the XDG app registry. Removing
+  an entry never deletes its local files. Git clone and sync use the remote and
+  branch stored with that registry entry and retain the standard cancel flow.
+
 ## Shared components
 
 - `BackendActivity` is for initial, local data-region loading only.
@@ -51,6 +62,33 @@ app appear frozen.
   space in the bucket shows the bucket total alone.
 - Clicking a segment pins the same category-and-bucket detail while the chart
   and transaction list focus on that selection.
+
+## Assets table
+
+- The Assets view renders one `.data-table.assets-table` row per (asset,
+  liability) pair from the portfolio asset breakdown: Asset, Amount, Price,
+  Value in the reporting currency, and 1D/1W/1M/1Y trailing changes, plus a
+  trailing expander column. Data loads through the standard
+  refresh-epoch/`use_resource` flow with `BackendActivity` for the initial
+  load and `InlineStatus` for failures.
+- Column headers reuse the shared `sort-header-button`/`sort-arrow` pattern
+  from the transaction table (Price is display-only). Sorting is client-side;
+  the default is Value descending by **absolute** value, name sorts default
+  ascending, and rows without a metric (unpriced values, absent change
+  periods) always sort last in either direction.
+- Clicking a row, or its `transaction-expand-toggle` chevron, toggles
+  `.asset-holding-row` sub-rows on the `--color-surface-subtle` surface
+  listing each contributing account's amount, base-currency value, and
+  balance date. Expansion is keyed by asset id plus the liability flag, so an
+  asset's debt row expands independently of its asset row.
+- Rows aggregating negative holdings keep their own row (no netting) and get
+  the existing `status liability-status` badge, matching the accounts view's
+  badge treatment.
+- Change cells show the signed percentage colored with `change-positive` /
+  `change-negative`; exactly zero stays neutral (no class). The signed
+  absolute change is exposed as the cell tooltip. When a period exists but
+  has no comparable past value (a new position), the cell shows the signed
+  absolute change instead; a period with no data shows an em dash.
 
 Status treatments use semantic roles from `styles.css`: accent colors for
 in-flight activity, neutral surfaces for settled messages, and the shared

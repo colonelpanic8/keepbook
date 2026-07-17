@@ -465,6 +465,21 @@ pub(crate) fn spending_over_time_query_string(
     params.join("&")
 }
 
+/// Query string for the asset breakdown endpoint. Assets only honor the
+/// account include/exclude overrides; the latent-tax override is a synthetic
+/// account and never applies to per-asset rows.
+pub(crate) fn assets_query_string(overrides: FilterOverrides) -> String {
+    let mut params = Vec::new();
+    append_filter_override_params(
+        &mut params,
+        FilterOverrides {
+            include_latent_capital_gains_tax: None,
+            account_portfolio_exclusions: overrides.account_portfolio_exclusions,
+        },
+    );
+    params.join("&")
+}
+
 #[cfg(any(target_arch = "wasm32", test))]
 pub(crate) fn filter_override_query_string(overrides: FilterOverrides) -> String {
     let mut params = Vec::new();
@@ -1433,6 +1448,185 @@ pub(crate) fn compare_case_insensitive(a: &str, b: &str) -> std::cmp::Ordering {
         .then_with(|| a.cmp(b))
 }
 
+fn asset_string_field<'a>(asset: &'a serde_json::Value, key: &str) -> Option<&'a str> {
+    asset
+        .get(key)
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+/// Primary display name for an asset breakdown row: currency ISO code, equity
+/// ticker, crypto symbol, or manual-value name, falling back to the asset id.
+pub(crate) fn asset_display_name(asset: &serde_json::Value, fallback: &str) -> String {
+    let name = match asset_string_field(asset, "type") {
+        Some("currency") => asset_string_field(asset, "iso_code"),
+        Some("equity") => asset_string_field(asset, "ticker"),
+        Some("crypto") => asset_string_field(asset, "symbol"),
+        Some("manual_value") => asset_string_field(asset, "name"),
+        _ => None,
+    };
+    name.unwrap_or(fallback).to_string()
+}
+
+/// Secondary detail for an asset row: an equity's exchange or a crypto
+/// asset's network, when present.
+pub(crate) fn asset_secondary_text(asset: &serde_json::Value) -> Option<String> {
+    match asset_string_field(asset, "type") {
+        Some("equity") => asset_string_field(asset, "exchange"),
+        Some("crypto") => asset_string_field(asset, "network"),
+        _ => None,
+    }
+    .map(str::to_string)
+}
+
+pub(crate) fn asset_kind_label(asset: &serde_json::Value) -> &'static str {
+    match asset_string_field(asset, "type") {
+        Some("currency") => "Currency",
+        Some("equity") => "Equity",
+        Some("crypto") => "Crypto",
+        Some("manual_value") => "Manual",
+        _ => "Asset",
+    }
+}
+
+/// Signed percentage text using the same sign convention as
+/// `format_signed_money`: non-negative values get an explicit `+`.
+pub(crate) fn format_signed_percent(value: f64) -> String {
+    if value >= 0.0 {
+        format!("+{}%", format_number(value, 2))
+    } else {
+        format!("{}%", format_number(value, 2))
+    }
+}
+
+/// Gain/loss coloring class for a change value. Zero stays neutral.
+pub(crate) fn change_value_class(value: f64) -> &'static str {
+    if value > 0.0 {
+        "change-positive"
+    } else if value < 0.0 {
+        "change-negative"
+    } else {
+        ""
+    }
+}
+
+/// Display form of an asset holding amount: parsed and trimmed like the rest
+/// of the app's decimal output, keeping the raw text when unparseable.
+pub(crate) fn format_asset_amount(amount: &str) -> String {
+    parse_money_input(amount)
+        .map(|value| format_number(value, 4))
+        .unwrap_or_else(|| amount.to_string())
+}
+
+/// Expansion-state key for an asset breakdown row. Asset and liability rows
+/// for the same asset are distinct rows, so the flag is part of the key.
+pub(crate) fn asset_expansion_key(entry: &AssetBreakdownEntry) -> String {
+    format!(
+        "{}:{}",
+        entry.asset_id,
+        if entry.liability {
+            "liability"
+        } else {
+            "asset"
+        }
+    )
+}
+
+pub(crate) fn default_asset_sort_direction(field: AssetSortField) -> SortDirection {
+    match field {
+        AssetSortField::Name => SortDirection::Asc,
+        AssetSortField::Amount
+        | AssetSortField::Value
+        | AssetSortField::DayChange
+        | AssetSortField::WeekChange
+        | AssetSortField::MonthChange
+        | AssetSortField::YearChange => SortDirection::Desc,
+    }
+}
+
+pub(crate) fn asset_period_change(
+    entry: &AssetBreakdownEntry,
+    field: AssetSortField,
+) -> Option<&AssetChange> {
+    match field {
+        AssetSortField::DayChange => entry.changes.day.as_ref(),
+        AssetSortField::WeekChange => entry.changes.week.as_ref(),
+        AssetSortField::MonthChange => entry.changes.month.as_ref(),
+        AssetSortField::YearChange => entry.changes.year.as_ref(),
+        AssetSortField::Name | AssetSortField::Amount | AssetSortField::Value => None,
+    }
+}
+
+fn asset_sort_metric(entry: &AssetBreakdownEntry, field: AssetSortField) -> Option<f64> {
+    match field {
+        AssetSortField::Name => None,
+        AssetSortField::Amount => parse_money_input(&entry.total_amount),
+        AssetSortField::Value => entry
+            .value_in_base
+            .as_deref()
+            .and_then(parse_money_input)
+            .map(f64::abs),
+        AssetSortField::DayChange
+        | AssetSortField::WeekChange
+        | AssetSortField::MonthChange
+        | AssetSortField::YearChange => asset_period_change(entry, field)
+            .and_then(|change| change.percentage.as_deref())
+            .and_then(parse_money_input),
+    }
+}
+
+/// Missing metrics (unpriced rows, absent change periods) always sort last,
+/// regardless of direction.
+fn compare_metrics_missing_last(
+    left: Option<f64>,
+    right: Option<f64>,
+    direction: SortDirection,
+) -> std::cmp::Ordering {
+    match (left, right) {
+        (Some(left), Some(right)) => {
+            let ordering = left
+                .partial_cmp(&right)
+                .unwrap_or(std::cmp::Ordering::Equal);
+            match direction {
+                SortDirection::Asc => ordering,
+                SortDirection::Desc => ordering.reverse(),
+            }
+        }
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => std::cmp::Ordering::Equal,
+    }
+}
+
+pub(crate) fn compare_asset_entries(
+    a: &AssetBreakdownEntry,
+    b: &AssetBreakdownEntry,
+    field: AssetSortField,
+    direction: SortDirection,
+) -> std::cmp::Ordering {
+    let ordering = match field {
+        AssetSortField::Name => {
+            let ordering = compare_case_insensitive(
+                &asset_display_name(&a.asset, &a.asset_id),
+                &asset_display_name(&b.asset, &b.asset_id),
+            );
+            match direction {
+                SortDirection::Asc => ordering,
+                SortDirection::Desc => ordering.reverse(),
+            }
+        }
+        _ => compare_metrics_missing_last(
+            asset_sort_metric(a, field),
+            asset_sort_metric(b, field),
+            direction,
+        ),
+    };
+    ordering
+        .then_with(|| a.asset_id.cmp(&b.asset_id))
+        .then_with(|| a.liability.cmp(&b.liability))
+}
+
 pub(crate) fn mark_transactions_excluded_from_spending(
     mut transactions: Vec<Transaction>,
     counted_transactions: &[Transaction],
@@ -1729,25 +1923,6 @@ pub(crate) fn git_settings_from_remote(remote: &str) -> Result<(String, String, 
 
     normalize_github_repo_input(trimmed)
         .map(|repo| ("github.com".to_string(), repo, "git".to_string()))
-}
-
-pub(crate) fn remote_input_from_settings(host: &str, repo: &str, ssh_user: &str) -> String {
-    let repo = repo.trim();
-    if repo.is_empty() {
-        return String::new();
-    }
-    if is_explicit_git_remote(repo) {
-        return repo.to_string();
-    }
-
-    let host = non_empty_client(host, "github.com");
-    let ssh_user = non_empty_client(ssh_user, "git");
-    let repo = if repo.ends_with(".git") {
-        repo.to_string()
-    } else {
-        format!("{repo}.git")
-    };
-    format!("{ssh_user}@{host}:{repo}")
 }
 
 pub(crate) fn non_empty_client(value: &str, default: &str) -> String {

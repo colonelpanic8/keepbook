@@ -1,7 +1,7 @@
 use super::*;
 use crate::api::{
     fetch_application_settings, fetch_git_settings, new_git_sync_cancel_handle,
-    save_application_settings, save_git_settings, sync_git_repo_cancelable, GitSyncCancelHandle,
+    save_application_settings, sync_git_repo_cancelable, GitSyncCancelHandle,
 };
 use dioxus::core::Task;
 
@@ -267,6 +267,9 @@ fn ApplicationSettingsPanel() -> Element {
 
 #[component]
 pub(super) fn SettingsView(
+    repositories: Option<Result<RepositoryRegistry, String>>,
+    repository_busy: bool,
+    onrepositorychange: EventHandler<String>,
     filtering: FilteringSettings,
     filter_overrides: FilterOverrides,
     config_path: String,
@@ -274,13 +277,8 @@ pub(super) fn SettingsView(
     onfilterchange: EventHandler<FilterOverrides>,
     onrefresh: EventHandler<()>,
 ) -> Element {
-    let mut settings = use_resource(fetch_git_settings);
+    let settings = use_resource(fetch_git_settings);
     let mut loaded_key = use_signal(String::new);
-    let mut git_data_dir = use_signal(String::new);
-    let mut host = use_signal(|| "github.com".to_string());
-    let mut repo = use_signal(|| "colonelpanic8/keepbook-data".to_string());
-    let mut branch = use_signal(|| "master".to_string());
-    let mut ssh_user = use_signal(|| "git".to_string());
     let mut ssh_key_path = use_signal(|| None::<String>);
     let mut private_key = use_signal(String::new);
     let mut private_key_name = use_signal(String::new);
@@ -290,6 +288,7 @@ pub(super) fn SettingsView(
     let mut git_sync_cancel = use_signal(|| None::<GitSyncCancelHandle>);
     let mut git_sync_task = use_signal(|| None::<Task>);
     let mut add_location_open = use_signal(|| false);
+    let mut location_name_input = use_signal(String::new);
     let mut location_remote_input = use_signal(String::new);
     let mut location_path_input = use_signal(String::new);
     let mut location_branch_input = use_signal(|| "master".to_string());
@@ -299,21 +298,8 @@ pub(super) fn SettingsView(
     let mut clone_dialog_message = use_signal(String::new);
 
     if let Some(Ok(current)) = settings.cloned() {
-        let key = format!(
-            "{}\n{}\n{}\n{}\n{}\n{}",
-            current.data_dir,
-            current.git.host,
-            current.git.repo,
-            current.git.branch,
-            current.git.ssh_user,
-            current.git.ssh_key_path.as_deref().unwrap_or_default()
-        );
+        let key = current.git.ssh_key_path.clone().unwrap_or_default();
         if loaded_key() != key {
-            git_data_dir.set(normalize_git_data_dir_for_client(current.data_dir));
-            host.set(current.git.host);
-            repo.set(current.git.repo);
-            branch.set(current.git.branch);
-            ssh_user.set(current.git.ssh_user);
             ssh_key_path.set(current.git.ssh_key_path);
             loaded_key.set(key);
         }
@@ -335,62 +321,69 @@ pub(super) fn SettingsView(
         ApplicationSettingsPanel {}
         Panel {
             class: "settings-panel",
-            title: "Git Sync",
-            subtitle: "Repository only",
+            title: "Repositories",
+            subtitle: "App-wide",
             actions: rsx! {
-                div { class: "settings-actions inline-actions",
-                    button {
-                        class: "icon-button add-location-button",
-                        title: "Add location",
-                        disabled: is_busy,
-                        onclick: move |_| {
-                            location_remote_input.set(remote_input_from_settings(&host(), &repo(), &ssh_user()));
-                            location_path_input.set(git_data_dir());
-                            location_branch_input.set(branch());
-                            location_error.set(String::new());
-                            add_location_open.set(true);
-                        },
-                        "+"
-                    }
+                button {
+                    class: "icon-button add-location-button",
+                    title: "Add repository",
+                    disabled: is_busy || repository_busy,
+                    onclick: move |_| {
+                        location_name_input.set(String::new());
+                        location_remote_input.set(String::new());
+                        location_path_input.set(String::new());
+                        location_branch_input.set("master".to_string());
+                        location_error.set(String::new());
+                        add_location_open.set(true);
+                    },
+                    "+"
                 }
             },
-            match current_settings {
-                None => rsx! { BackendActivity { message: "Loading Git settings" } },
+            match repositories.clone() {
+                None => rsx! { BackendActivity { message: "Loading repositories" } },
                 Some(Err(error)) => rsx! { p { class: "validation", "{error}" } },
-                Some(Ok(current)) => rsx! {
+                Some(Ok(registry)) => rsx! {
                     div { class: "settings-meta",
-                        span { "Config {current.config_path}" }
+                        span { "Registry {registry.config_path}" }
                     }
-                    if !status_text.is_empty() {
-                        OperationStatus { message: status_text, busy: is_busy }
-                    }
-                    GitLocationList {
-                        current: current.clone(),
-                        staged_data_dir: git_data_dir(),
-                        staged_remote: remote_input_from_settings(&host(), &repo(), &ssh_user()),
-                        staged_branch: branch(),
-                        location_disabled: is_busy,
-                        clone_disabled: is_busy
-                            || (private_key().trim().is_empty()
-                                && ssh_key_path().as_deref().unwrap_or_default().trim().is_empty()),
-                        onlocationchange: move |value| git_data_dir.set(value),
-                        onclone: move |_| {
-                            let repo_cloned = current.repo_state.cloned;
-                            let input = GitSyncInput {
-                                data_dir: git_data_dir(),
-                                host: host(),
-                                repo: repo(),
-                                branch: branch(),
-                                ssh_user: ssh_user(),
-                                private_key_pem: private_key(),
-                                save_settings: true,
+                    RepositoryList {
+                        registry,
+                        busy: is_busy || repository_busy,
+                        clone_disabled: private_key().trim().is_empty()
+                            && ssh_key_path().as_deref().unwrap_or_default().trim().is_empty(),
+                        onactivate: move |id| onrepositorychange.call(id),
+                        onremove: move |id: String| {
+                            busy.set(true);
+                            status.set("Removing repository from Keepbook...".to_string());
+                            spawn(async move {
+                                match remove_repository(id).await {
+                                    Ok(_) => {
+                                        status.set("Repository removed from Keepbook. Files were not deleted.".to_string());
+                                        onrefresh.call(());
+                                    }
+                                    Err(error) => status.set(error),
+                                }
+                                busy.set(false);
+                            });
+                        },
+                        onclone: move |repository: Repository| {
+                            let (next_host, next_repo, next_ssh_user) = match git_settings_from_remote(&repository.remote) {
+                                Ok(settings) => settings,
+                                Err(error) => {
+                                    status.set(error);
+                                    return;
+                                }
                             };
-                            let action = if repo_cloned { "Git sync" } else { "Clone" };
-                            let action_progress = if repo_cloned { "Syncing" } else { "Cloning" };
-                            let key_source = if input.private_key_pem.trim().is_empty() {
-                                "saved SSH key"
-                            } else {
-                                "selected SSH key"
+                            let action = if repository.cloned { "Git sync" } else { "Clone" };
+                            let action_progress = if repository.cloned { "Syncing" } else { "Cloning" };
+                            let input = GitSyncInput {
+                                data_dir: repository.path.clone(),
+                                host: next_host,
+                                repo: next_repo,
+                                branch: repository.branch.clone(),
+                                ssh_user: next_ssh_user,
+                                private_key_pem: private_key(),
+                                save_settings: false,
                             };
                             let cancel_handle = new_git_sync_cancel_handle();
                             busy.set(true);
@@ -399,11 +392,8 @@ pub(super) fn SettingsView(
                             clone_dialog_open.set(true);
                             clone_dialog_title.set(format!("{action} repository"));
                             clone_dialog_message.set(format!(
-                                "{} {} at {} using {}",
-                                action_progress,
-                                remote_input_from_settings(&input.host, &input.repo, &input.ssh_user),
-                                input.data_dir,
-                                key_source
+                                "{action_progress} {} at {}",
+                                repository.remote, repository.path
                             ));
                             status.set(format!("{action_progress} repository..."));
                             let task = spawn(async move {
@@ -414,8 +404,7 @@ pub(super) fn SettingsView(
                                             "Git synced {} from {} {}",
                                             result.data_dir, result.remote_url, result.branch
                                         ));
-                                        status.set(format!("Git synced {} from {} {}", result.data_dir, result.remote_url, result.branch));
-                                        settings.restart();
+                                        status.set(format!("Repository {} is ready.", repository.name));
                                         onrefresh.call(());
                                     }
                                     Err(error) => {
@@ -437,6 +426,23 @@ pub(super) fn SettingsView(
                             });
                             git_sync_task.set(Some(task));
                         },
+                    }
+                },
+            }
+        }
+        Panel {
+            class: "settings-panel",
+            title: "Git Authentication",
+            subtitle: "Device-local",
+            match current_settings {
+                None => rsx! { BackendActivity { message: "Loading Git authentication" } },
+                Some(Err(error)) => rsx! { p { class: "validation", "{error}" } },
+                Some(Ok(current)) => rsx! {
+                    div { class: "settings-meta",
+                        span { "Config {current.config_path}" }
+                    }
+                    if !status_text.is_empty() {
+                        OperationStatus { message: status_text, busy: is_busy }
                     }
                     div { class: "control-field secret-field",
                         span { "SSH private key" }
@@ -518,7 +524,7 @@ pub(super) fn SettingsView(
         }
         if add_location_open() {
             Modal {
-                title: "Add location",
+                title: "Add repository",
                 header_actions: rsx! {
                     button {
                         class: "icon-button",
@@ -538,36 +544,28 @@ pub(super) fn SettingsView(
                         disabled: is_busy,
                         onclick: move |_| {
                             match git_settings_from_remote(&location_remote_input()) {
-                                    Ok((next_host, next_repo, next_ssh_user)) => {
+                                    Ok(_) => {
                                         let next_data_dir = location_path_input();
                                         if next_data_dir.trim().is_empty() {
                                             location_error.set("Enter a local location.".to_string());
                                             return;
                                         }
                                         let next_branch = non_empty_client(&location_branch_input(), "master");
-                                        let input = GitSettingsInput {
-                                            data_dir: next_data_dir.clone(),
-                                            host: next_host.clone(),
-                                            repo: next_repo.clone(),
-                                            branch: next_branch.clone(),
-                                            ssh_user: next_ssh_user.clone(),
-                                            ssh_key_path: ssh_key_path(),
+                                        let remote = location_remote_input().trim().to_string();
+                                        let input = AddRepositoryInput {
+                                            name: location_name_input(),
+                                            path: next_data_dir,
+                                            remote,
+                                            branch: next_branch,
                                         };
                                         busy.set(true);
-                                        status.set("Saving Git location...".to_string());
+                                        status.set("Adding repository...".to_string());
                                         spawn(async move {
-                                            match save_git_settings(input).await {
-                                                Ok(saved) => {
-                                                    git_data_dir.set(normalize_git_data_dir_for_client(saved.data_dir));
-                                                    host.set(saved.git.host);
-                                                    repo.set(saved.git.repo);
-                                                    branch.set(saved.git.branch);
-                                                    ssh_user.set(saved.git.ssh_user);
-                                                    ssh_key_path.set(saved.git.ssh_key_path);
+                                            match add_repository(input).await {
+                                                Ok(_) => {
                                                     location_error.set(String::new());
                                                     add_location_open.set(false);
-                                                    status.set("Git location added.".to_string());
-                                                    settings.restart();
+                                                    status.set("Repository added. Clone it when you are ready.".to_string());
                                                     onrefresh.call(());
                                                 }
                                                 Err(error) => {
@@ -585,13 +583,23 @@ pub(super) fn SettingsView(
                         }
                 },
                 label { class: "control-field",
+                    span { "Name" }
+                    input {
+                        class: "control-input",
+                        r#type: "text",
+                        value: "{location_name_input()}",
+                        placeholder: "Personal",
+                        autofocus: true,
+                        oninput: move |event| location_name_input.set(event.value())
+                    }
+                }
+                label { class: "control-field",
                     span { "Remote" }
                     input {
                         class: "control-input",
                         r#type: "text",
                         value: "{location_remote_input()}",
                         placeholder: "git@github.com:owner/keepbook-data.git",
-                        autofocus: true,
                         oninput: move |event| {
                             location_remote_input.set(event.value());
                             location_error.set(String::new());
@@ -684,65 +692,78 @@ pub(super) fn SettingsView(
 }
 
 #[component]
-fn GitLocationList(
-    current: GitSettingsOutput,
-    staged_data_dir: String,
-    staged_remote: String,
-    staged_branch: String,
-    location_disabled: bool,
+fn RepositoryList(
+    registry: RepositoryRegistry,
+    busy: bool,
     clone_disabled: bool,
-    onlocationchange: EventHandler<String>,
-    onclone: EventHandler<()>,
+    onactivate: EventHandler<String>,
+    onclone: EventHandler<Repository>,
+    onremove: EventHandler<String>,
 ) -> Element {
-    let state = current.repo_state;
-    let remote_label = state.remote_url.clone().unwrap_or(staged_remote);
-    let branch_label = state.branch.clone().unwrap_or(staged_branch);
-    let commit_label = state
-        .commit
-        .as_deref()
-        .map(short_commit)
-        .unwrap_or_else(|| "Not cloned".to_string());
-    let status_label = if state.cloned { "Cloned" } else { "Not cloned" };
-    let action_label = if state.cloned { "Git sync" } else { "Clone" };
-
     rsx! {
         div { class: "git-locations",
             div { class: "git-locations-heading",
-                strong { "Known locations" }
+                strong { "Known repositories" }
+                small { "The local path and clone remote are stored in the app config." }
             }
-            div { class: "git-location-row",
-                div { class: "git-location-main",
-                    div { class: "git-location-title",
-                        strong { "{status_label}" }
-                        small { "{branch_label}" }
-                    }
-                    div { class: "git-state-grid",
-                        div { class: "git-state-row",
-                            span { "Remote" }
-                            code { "{remote_label}" }
+            for repository in registry.repositories {
+                div { class: if repository.active { "git-location-row active" } else { "git-location-row" },
+                    div { class: "git-location-main",
+                        div { class: "git-location-title",
+                            strong { "{repository.name}" }
+                            small {
+                                if repository.active { "Active" } else if repository.cloned { "Ready" } else { "Not cloned" }
+                                " · {repository.branch}"
+                            }
                         }
-                        div { class: "git-state-row",
-                            span { "Commit" }
-                            code { "{commit_label}" }
-                        }
-                        div { class: "git-state-row",
-                            span { "Location" }
-                            input {
-                                class: "control-input git-location-input",
-                                r#type: "text",
-                                value: "{staged_data_dir}",
-                                disabled: location_disabled,
-                                oninput: move |event| onlocationchange.call(event.value()),
+                        div { class: "git-state-grid",
+                            div { class: "git-state-row",
+                                span { "Remote" }
+                                code { "{repository.remote}" }
+                            }
+                            div { class: "git-state-row",
+                                span { "Location" }
+                                code { "{repository.path}" }
+                            }
+                            if let Some(commit) = repository.commit.as_deref() {
+                                div { class: "git-state-row",
+                                    span { "Commit" }
+                                    code { "{short_commit(commit)}" }
+                                }
                             }
                         }
                     }
-                }
-                div { class: "git-location-actions",
-                    ControlButton {
-                        selected: true,
-                        disabled: clone_disabled,
-                        onclick: move |_| onclone.call(()),
-                        "{action_label}"
+                    div { class: "git-location-actions",
+                        if !repository.active && repository.cloned {
+                            ControlButton {
+                                selected: true,
+                                disabled: busy,
+                                onclick: {
+                                    let repository_id = repository.id.clone();
+                                    move |_| onactivate.call(repository_id.clone())
+                                },
+                                "Use"
+                            }
+                        }
+                        ControlButton {
+                            disabled: busy || clone_disabled,
+                            onclick: {
+                                let repository = repository.clone();
+                                move |_| onclone.call(repository.clone())
+                            },
+                            if repository.cloned { "Git sync" } else { "Clone" }
+                        }
+                        if !repository.active {
+                            ControlButton {
+                                danger: true,
+                                disabled: busy,
+                                onclick: {
+                                    let repository_id = repository.id.clone();
+                                    move |_| onremove.call(repository_id.clone())
+                                },
+                                "Remove"
+                            }
+                        }
                     }
                 }
             }

@@ -36,7 +36,7 @@ pub use mutations::{
 pub use portfolio::{
     default_portfolio_change_points_granularity, default_portfolio_history_granularity,
     default_portfolio_include_prices, fetch_historical_prices, fill_prices_at_date,
-    latent_capital_gains_tax_history, portfolio_change_points, portfolio_history,
+    latent_capital_gains_tax_history, portfolio_assets, portfolio_change_points, portfolio_history,
     portfolio_history_for_accounts, portfolio_recent_history, portfolio_snapshot,
     portfolio_stacked_history, portfolio_tax_impact, resolve_portfolio_history_selection,
     PortfolioHistorySelection, PriceHistoryRequest, DEFAULT_PORTFOLIO_CHANGE_POINTS_GRANULARITY,
@@ -61,16 +61,17 @@ pub use transaction_rules::{
     ApplyTransactionRulesOptions, TransactionRule, TransactionRuleInput, TransactionRuleMatcher,
 };
 pub use types::{
-    AccountOutput, AllOutput, AssetInfoOutput, BalanceOutput, ChangePointsOutput, ConnectionOutput,
-    HistoryOutput, HistoryPoint, HistorySummary, PriceHistoryFailure, PriceHistoryOutput,
-    PriceHistoryScopeOutput, PriceHistoryStats, PriceSourceOutput, ProposedTransactionEditOutput,
-    RecurringTransactionAmountOutput, RecurringTransactionOccurrenceOutput,
-    RecurringTransactionOutput, RecurringTransactionReviewOccurrenceOutput,
-    RecurringTransactionReviewOutput, RecurringTransactionsOptions, SpendingBreakdownEntryOutput,
-    SpendingOutput, SpendingPeriodOutput, SpendingScopeOutput, StackedHistoryComponent,
-    StackedHistoryOutput, StackedHistoryPoint, StackedHistorySeries, TaxImpactOutput,
-    TaxImpactPoint, TransactionAnnotationOutput, TransactionAnnotationPatchOutput,
-    TransactionOutput,
+    AccountOutput, AllOutput, AssetBreakdownEntry, AssetBreakdownHolding, AssetBreakdownOutput,
+    AssetChange, AssetChanges, AssetInfoOutput, BalanceOutput, ChangePointsOutput,
+    ConnectionOutput, HistoryOutput, HistoryPoint, HistorySummary, PriceHistoryFailure,
+    PriceHistoryOutput, PriceHistoryScopeOutput, PriceHistoryStats, PriceSourceOutput,
+    ProposedTransactionEditOutput, RecurringTransactionAmountOutput,
+    RecurringTransactionOccurrenceOutput, RecurringTransactionOutput,
+    RecurringTransactionReviewOccurrenceOutput, RecurringTransactionReviewOutput,
+    RecurringTransactionsOptions, SpendingBreakdownEntryOutput, SpendingOutput,
+    SpendingPeriodOutput, SpendingScopeOutput, StackedHistoryComponent, StackedHistoryOutput,
+    StackedHistoryPoint, StackedHistorySeries, TaxImpactOutput, TaxImpactPoint,
+    TransactionAnnotationOutput, TransactionAnnotationPatchOutput, TransactionOutput,
 };
 
 fn env_disabled(key: &str) -> bool {

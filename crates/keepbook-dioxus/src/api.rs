@@ -45,6 +45,135 @@ pub(crate) async fn fetch_overview(overrides: FilterOverrides) -> Result<Overvie
     fetch_overview_impl(overrides).await
 }
 
+pub(crate) async fn fetch_repositories() -> Result<RepositoryRegistry, String> {
+    fetch_repositories_impl().await
+}
+
+pub(crate) async fn add_repository(
+    input: AddRepositoryInput,
+) -> Result<RepositoryRegistry, String> {
+    add_repository_impl(input).await
+}
+
+pub(crate) async fn activate_repository(id: String) -> Result<RepositoryRegistry, String> {
+    activate_repository_impl(id).await
+}
+
+pub(crate) async fn remove_repository(id: String) -> Result<RepositoryRegistry, String> {
+    remove_repository_impl(id).await
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn fetch_repositories_impl() -> Result<RepositoryRegistry, String> {
+    let response = Request::get(&format!("{API_BASE}/api/repositories"))
+        .send()
+        .await
+        .map_err(|error| format!("Could not reach keepbook-server at {API_BASE}: {error}"))?;
+    decode_response(response, "repository registry").await
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn add_repository_impl(input: AddRepositoryInput) -> Result<RepositoryRegistry, String> {
+    let response = Request::post(&format!("{API_BASE}/api/repositories"))
+        .json(&input)
+        .map_err(|error| format!("Could not encode repository: {error}"))?
+        .send()
+        .await
+        .map_err(|error| format!("Could not reach keepbook-server at {API_BASE}: {error}"))?;
+    decode_response(response, "repository registry").await
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn activate_repository_impl(id: String) -> Result<RepositoryRegistry, String> {
+    let response = Request::post(&format!("{API_BASE}/api/repositories/{id}/activate"))
+        .send()
+        .await
+        .map_err(|error| format!("Could not reach keepbook-server at {API_BASE}: {error}"))?;
+    decode_response(response, "repository registry").await
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn remove_repository_impl(id: String) -> Result<RepositoryRegistry, String> {
+    let response = Request::post(&format!("{API_BASE}/api/repositories/{id}/remove"))
+        .send()
+        .await
+        .map_err(|error| format!("Could not reach keepbook-server at {API_BASE}: {error}"))?;
+    decode_response(response, "repository registry").await
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn decode_response<T: for<'de> Deserialize<'de>>(
+    response: gloo_net::http::Response,
+    label: &str,
+) -> Result<T, String> {
+    if !response.ok() {
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+        return Err(format!("keepbook-server returned HTTP {status}: {text}"));
+    }
+    response
+        .json::<T>()
+        .await
+        .map_err(|error| format!("Could not decode {label}: {error}"))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn fetch_repositories_impl() -> Result<RepositoryRegistry, String> {
+    let state = native_api_state()?.clone();
+    run_native_worker(async move {
+        let output = state
+            .repositories()
+            .await
+            .map_err(|error| format!("Could not load repositories: {error:#}"))?;
+        from_native_output(output, "repository registry")
+    })
+    .await
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn add_repository_impl(input: AddRepositoryInput) -> Result<RepositoryRegistry, String> {
+    let state = native_api_state()?.clone();
+    run_native_worker(async move {
+        let output = state
+            .add_repository(keepbook_server::AddRepositoryInput {
+                name: input.name,
+                path: input.path,
+                remote: input.remote,
+                branch: input.branch,
+            })
+            .await
+            .map_err(|error| format!("Could not add repository: {error:#}"))?;
+        from_native_output(output, "repository registry")
+    })
+    .await
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn activate_repository_impl(id: String) -> Result<RepositoryRegistry, String> {
+    let state = native_api_state()?.clone();
+    run_native_worker(async move {
+        let output = state
+            .activate_repository(&id)
+            .await
+            .map_err(|error| format!("Could not switch repository: {error:#}"))?;
+        from_native_output(output, "repository registry")
+    })
+    .await
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn remove_repository_impl(id: String) -> Result<RepositoryRegistry, String> {
+    let state = native_api_state()?.clone();
+    run_native_worker(async move {
+        let output = state
+            .remove_repository(&id)
+            .await
+            .map_err(|error| format!("Could not remove repository: {error:#}"))?;
+        from_native_output(output, "repository registry")
+    })
+    .await
+}
+
 #[cfg(target_arch = "wasm32")]
 pub(crate) async fn fetch_overview_impl(overrides: FilterOverrides) -> Result<Overview, String> {
     let query = filter_override_query_string(overrides);
@@ -102,6 +231,10 @@ pub(crate) async fn fetch_stacked_history(query: String) -> Result<StackedHistor
     fetch_stacked_history_impl(query).await
 }
 
+pub(crate) async fn fetch_assets(query: String) -> Result<AssetBreakdown, String> {
+    fetch_assets_impl(query).await
+}
+
 pub(crate) async fn fetch_spending_dashboard(
     query: String,
     over_time_query: String,
@@ -157,12 +290,6 @@ pub(crate) async fn save_application_settings(
     input: ApplicationSettingsInput,
 ) -> Result<ApplicationSettingsOutput, String> {
     save_application_settings_impl(input).await
-}
-
-pub(crate) async fn save_git_settings(
-    input: GitSettingsInput,
-) -> Result<GitSettingsOutput, String> {
-    save_git_settings_impl(input).await
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -341,6 +468,32 @@ pub(crate) async fn fetch_stacked_history_impl(query: String) -> Result<StackedH
 }
 
 #[cfg(target_arch = "wasm32")]
+pub(crate) async fn fetch_assets_impl(query: String) -> Result<AssetBreakdown, String> {
+    let url = if query.is_empty() {
+        format!("{API_BASE}/api/portfolio/assets")
+    } else {
+        format!("{API_BASE}/api/portfolio/assets?{query}")
+    };
+    let response = Request::get(&url)
+        .send()
+        .await
+        .map_err(|error| format!("Could not reach keepbook-server at {API_BASE}: {error}"))?;
+
+    if !response.ok() {
+        return Err(format!(
+            "keepbook-server returned HTTP {} {}",
+            response.status(),
+            response.status_text()
+        ));
+    }
+
+    response
+        .json::<AssetBreakdown>()
+        .await
+        .map_err(|error| format!("Could not decode asset breakdown: {error}"))
+}
+
+#[cfg(target_arch = "wasm32")]
 pub(crate) async fn fetch_spending_impl(query: String) -> Result<SpendingOutput, String> {
     let response = Request::get(&format!("{API_BASE}/api/spending?{query}"))
         .send()
@@ -416,29 +569,6 @@ pub(crate) async fn fetch_git_settings_impl() -> Result<GitSettingsOutput, Strin
             response.status(),
             response.status_text()
         ));
-    }
-
-    response
-        .json::<GitSettingsOutput>()
-        .await
-        .map_err(|error| format!("Could not decode Git settings: {error}"))
-}
-
-#[cfg(target_arch = "wasm32")]
-pub(crate) async fn save_git_settings_impl(
-    input: GitSettingsInput,
-) -> Result<GitSettingsOutput, String> {
-    let response = Request::put(&format!("{API_BASE}/api/git/settings"))
-        .json(&input)
-        .map_err(|error| format!("Could not encode Git settings: {error}"))?
-        .send()
-        .await
-        .map_err(|error| format!("Could not reach keepbook-server at {API_BASE}: {error}"))?;
-
-    if !response.ok() {
-        let status = response.status();
-        let text = response.text().await.unwrap_or_default();
-        return Err(format!("keepbook-server returned HTTP {status}: {text}"));
     }
 
     response
@@ -816,6 +946,21 @@ pub(crate) async fn fetch_stacked_history_impl(query: String) -> Result<StackedH
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn fetch_assets_impl(query: String) -> Result<AssetBreakdown, String> {
+    let query = serde_urlencoded::from_str::<keepbook_server::AssetsQuery>(&query)
+        .map_err(|error| format!("Could not encode assets query: {error}"))?;
+    let state = native_api_state()?.clone();
+    run_native_worker(async move {
+        let output = state
+            .portfolio_assets(query)
+            .await
+            .map_err(|error| format!("Could not load asset breakdown: {error:#}"))?;
+        from_native_output(output, "asset breakdown")
+    })
+    .await
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) async fn fetch_spending_impl(query: String) -> Result<SpendingOutput, String> {
     let query = serde_urlencoded::from_str::<keepbook_server::SpendingQuery>(&query)
         .map_err(|error| format!("Could not encode spending query: {error}"))?;
@@ -866,28 +1011,6 @@ pub(crate) async fn fetch_git_settings_impl() -> Result<GitSettingsOutput, Strin
             .git_settings()
             .await
             .map_err(|error| format!("Could not load Git settings: {error:#}"))?;
-        from_native_output(output, "Git settings")
-    })
-    .await
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) async fn save_git_settings_impl(
-    input: GitSettingsInput,
-) -> Result<GitSettingsOutput, String> {
-    let state = native_api_state()?.clone();
-    run_native_worker(async move {
-        let output = state
-            .save_git_settings(keepbook_server::GitSettingsInput {
-                data_dir: input.data_dir,
-                host: input.host,
-                repo: input.repo,
-                branch: input.branch,
-                ssh_user: input.ssh_user,
-                ssh_key_path: input.ssh_key_path,
-            })
-            .await
-            .map_err(|error| format!("Could not save Git settings: {error:#}"))?;
         from_native_output(output, "Git settings")
     })
     .await
@@ -1190,7 +1313,8 @@ pub(crate) fn native_config_path() -> PathBuf {
 
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 pub(crate) fn native_config_path() -> PathBuf {
-    keepbook_server::default_server_config_path()
+    let fallback = keepbook_server::default_server_config_path();
+    keepbook_server::active_repository_config_path(&fallback).unwrap_or(fallback)
 }
 
 #[cfg(all(not(target_arch = "wasm32"), target_os = "android"))]

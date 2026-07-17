@@ -14,6 +14,57 @@ fn validate_git_data_dir_accepts_nested_path() {
 }
 
 #[test]
+fn repository_registry_round_trips_location_remote_and_config_path() -> Result<()> {
+    let app_config_path = unique_test_config_path("repository-registry").with_file_name("app.toml");
+    let registry = RepositoryRegistry {
+        active_repository: Some("personal".to_string()),
+        repositories: vec![RepositoryEntry {
+            id: "personal".to_string(),
+            name: "Personal".to_string(),
+            path: PathBuf::from("/tmp/keepbook-personal"),
+            config_path: PathBuf::from("/tmp/keepbook-personal/keepbook.toml"),
+            remote: "git@github.com:owner/keepbook-personal.git".to_string(),
+            branch: "main".to_string(),
+        }],
+    };
+
+    save_repository_registry(&app_config_path, &registry)?;
+    assert_eq!(load_repository_registry(&app_config_path)?, registry);
+    let contents = std::fs::read_to_string(&app_config_path)?;
+    assert!(contents.contains("path = \"/tmp/keepbook-personal\""));
+    assert!(contents.contains("remote = \"git@github.com:owner/keepbook-personal.git\""));
+    remove_test_config(app_config_path);
+    Ok(())
+}
+
+#[test]
+fn repository_ids_are_stable_and_unique() {
+    let repositories = vec![RepositoryEntry {
+        id: "family-books".to_string(),
+        name: "Family Books".to_string(),
+        path: PathBuf::from("/tmp/family-books"),
+        config_path: PathBuf::from("/tmp/family-books/keepbook.toml"),
+        remote: "git@example.com:family/books.git".to_string(),
+        branch: "main".to_string(),
+    }];
+
+    assert_eq!(repository_id_slug("Family Books"), "family-books");
+    assert_eq!(
+        unique_repository_id("Family Books", &repositories),
+        "family-books-2"
+    );
+}
+
+#[test]
+fn managed_start_minimized_values_parse_common_boolean_forms() -> Result<()> {
+    assert!(parse_bool_setting("true")?);
+    assert!(parse_bool_setting("1")?);
+    assert!(!parse_bool_setting("off")?);
+    assert!(parse_bool_setting("sometimes").is_err());
+    Ok(())
+}
+
+#[test]
 fn load_git_remote_settings_ignores_non_table_git_sync() -> Result<()> {
     let config_path = unique_test_config_path("load-git-non-table");
     let device_config_path = config_path.with_file_name("device.toml");
@@ -419,4 +470,104 @@ fn remove_test_config(path: PathBuf) {
     if let Some(parent) = path.parent() {
         let _ = std::fs::remove_dir_all(parent);
     }
+}
+
+#[cfg(feature = "http")]
+#[tokio::test]
+async fn portfolio_assets_returns_breakdown_and_respects_account_overrides() -> Result<()> {
+    use chrono::TimeZone;
+    use keepbook::models::AssetBalance;
+
+    let config_path = unique_test_config_path("portfolio-assets");
+    write_test_config(
+        &config_path,
+        "data_dir = \".\"\nreporting_currency = \"USD\"\n",
+    )?;
+    let data_dir = config_path
+        .parent()
+        .expect("config should have a parent")
+        .to_path_buf();
+    let storage = JsonFileStorage::new(&data_dir);
+
+    let connection = keepbook::models::Connection::new(ConnectionConfig {
+        name: "Bank".to_string(),
+        synchronizer: "manual".to_string(),
+        credentials: None,
+        balance_staleness: None,
+    });
+    storage
+        .save_connection_config(connection.id(), &connection.config)
+        .await?;
+    storage.save_connection(&connection).await?;
+
+    let checking = Account::new("Checking", connection.id().clone());
+    let savings = Account::new("Savings", connection.id().clone());
+    storage.save_account(&checking).await?;
+    storage.save_account(&savings).await?;
+
+    let timestamp = Utc.with_ymd_and_hms(2024, 1, 15, 10, 0, 0).unwrap();
+    storage
+        .append_balance_snapshot(
+            &checking.id,
+            &BalanceSnapshot::new(
+                timestamp,
+                vec![AssetBalance::new(Asset::currency("USD"), "1000")],
+            ),
+        )
+        .await?;
+    storage
+        .append_balance_snapshot(
+            &savings.id,
+            &BalanceSnapshot::new(
+                timestamp,
+                vec![AssetBalance::new(Asset::currency("USD"), "500")],
+            ),
+        )
+        .await?;
+
+    let state = ApiState::load(&config_path)?;
+
+    let output = state
+        .portfolio_assets(AssetsQuery {
+            date: Some("2024-06-15".to_string()),
+            account_portfolio_overrides: None,
+        })
+        .await?;
+    assert_eq!(output.currency, "USD");
+    assert_eq!(output.total_value, "1500");
+    assert_eq!(output.assets.len(), 1);
+    let entry = &output.assets[0];
+    assert_eq!(entry.asset_id, "currency/USD");
+    assert!(!entry.liability);
+    assert_eq!(entry.total_amount, "1500");
+    assert_eq!(entry.value_in_base.as_deref(), Some("1500"));
+    assert_eq!(entry.holdings.len(), 2);
+    assert!(entry
+        .holdings
+        .iter()
+        .all(|holding| holding.connection_name.as_deref() == Some("Bank")));
+
+    let overrides = serde_json::json!([
+        {
+            "account_id": savings.id.as_str(),
+            "exclude_from_portfolio": true
+        }
+    ])
+    .to_string();
+    let output = state
+        .portfolio_assets(AssetsQuery {
+            date: Some("2024-06-15".to_string()),
+            account_portfolio_overrides: Some(overrides),
+        })
+        .await?;
+    assert_eq!(output.total_value, "1000");
+    assert_eq!(output.assets.len(), 1);
+    assert_eq!(output.assets[0].holdings.len(), 1);
+    assert_eq!(
+        output.assets[0].holdings[0].account_id,
+        checking.id.to_string()
+    );
+
+    remove_test_config(config_path);
+    Ok(())
 }

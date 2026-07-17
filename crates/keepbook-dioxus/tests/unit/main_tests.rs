@@ -1058,3 +1058,357 @@ fn portfolio_snapshot_deserializes_virtual_accounts() {
         Some("-170263.28")
     );
 }
+
+fn asset_entry(
+    asset: serde_json::Value,
+    asset_id: &str,
+    liability: bool,
+    total_amount: &str,
+    value_in_base: Option<&str>,
+    changes: AssetChanges,
+) -> AssetBreakdownEntry {
+    AssetBreakdownEntry {
+        asset,
+        asset_id: asset_id.to_string(),
+        liability,
+        total_amount: total_amount.to_string(),
+        price: None,
+        price_date: None,
+        value_in_base: value_in_base.map(str::to_string),
+        changes,
+        holdings: Vec::new(),
+    }
+}
+
+fn day_change(absolute: &str, percentage: Option<&str>) -> AssetChanges {
+    AssetChanges {
+        day: Some(AssetChange {
+            absolute: absolute.to_string(),
+            percentage: percentage.map(str::to_string),
+        }),
+        ..AssetChanges::default()
+    }
+}
+
+#[test]
+fn assets_query_includes_account_overrides_but_never_latent_tax() {
+    assert_eq!(
+        assets_query_string(FilterOverrides {
+            include_latent_capital_gains_tax: Some(true),
+            ..FilterOverrides::default()
+        }),
+        ""
+    );
+    assert_eq!(
+        assets_query_string(FilterOverrides {
+            include_latent_capital_gains_tax: Some(true),
+            account_portfolio_exclusions: vec![AccountPortfolioExclusionOverride {
+                account_id: "acct-1".to_string(),
+                exclude_from_portfolio: true,
+            }],
+        }),
+        "account_portfolio_overrides=%5B%7B%22account_id%22%3A%22acct-1%22%2C%22exclude_from_portfolio%22%3Atrue%7D%5D"
+    );
+}
+
+#[test]
+fn asset_breakdown_deserializes_with_omitted_optional_fields() {
+    let breakdown: AssetBreakdown = serde_json::from_value(serde_json::json!({
+        "as_of_date": "2026-07-17",
+        "currency": "USD",
+        "total_value": "1000.5",
+        "assets": [
+            {
+                "asset": {"type": "equity", "ticker": "AAPL", "exchange": "NASDAQ"},
+                "asset_id": "equity/AAPL",
+                "liability": false,
+                "total_amount": "10",
+                "price": "100.05",
+                "price_date": "2026-07-16",
+                "value_in_base": "1000.5",
+                "changes": {"day": {"absolute": "50", "percentage": "5.26"}},
+                "holdings": [
+                    {
+                        "account_id": "acct-1",
+                        "account_name": "Brokerage",
+                        "amount": "10",
+                        "balance_date": "2026-07-15"
+                    }
+                ]
+            },
+            {
+                "asset": {"type": "manual_value", "name": "House", "currency": "USD"},
+                "asset_id": "manual_value/House",
+                "liability": false,
+                "total_amount": "1",
+                "changes": {},
+                "holdings": []
+            }
+        ]
+    }))
+    .expect("asset breakdown should deserialize");
+
+    assert_eq!(breakdown.assets.len(), 2);
+    let priced = &breakdown.assets[0];
+    assert_eq!(priced.price.as_deref(), Some("100.05"));
+    assert_eq!(priced.holdings[0].connection_name, None);
+    assert_eq!(priced.holdings[0].value_in_base, None);
+    let unpriced = &breakdown.assets[1];
+    assert_eq!(unpriced.value_in_base, None);
+    assert_eq!(unpriced.changes, AssetChanges::default());
+}
+
+#[test]
+fn asset_display_names_cover_all_asset_kinds() {
+    let currency = serde_json::json!({"type": "currency", "iso_code": "USD"});
+    let equity = serde_json::json!({"type": "equity", "ticker": "AAPL", "exchange": "NASDAQ"});
+    let crypto = serde_json::json!({"type": "crypto", "symbol": "ETH", "network": "mainnet"});
+    let manual = serde_json::json!({"type": "manual_value", "name": "House", "currency": "USD"});
+    let unknown = serde_json::json!({"type": "mystery"});
+
+    assert_eq!(asset_display_name(&currency, "currency/USD"), "USD");
+    assert_eq!(asset_display_name(&equity, "equity/AAPL"), "AAPL");
+    assert_eq!(asset_display_name(&crypto, "crypto/ETH"), "ETH");
+    assert_eq!(asset_display_name(&manual, "manual_value/House"), "House");
+    assert_eq!(asset_display_name(&unknown, "fallback-id"), "fallback-id");
+
+    assert_eq!(asset_secondary_text(&currency), None);
+    assert_eq!(asset_secondary_text(&equity).as_deref(), Some("NASDAQ"));
+    assert_eq!(asset_secondary_text(&crypto).as_deref(), Some("mainnet"));
+    assert_eq!(
+        asset_secondary_text(&serde_json::json!({"type": "equity", "ticker": "AAPL"})),
+        None
+    );
+
+    assert_eq!(asset_kind_label(&currency), "Currency");
+    assert_eq!(asset_kind_label(&equity), "Equity");
+    assert_eq!(asset_kind_label(&crypto), "Crypto");
+    assert_eq!(asset_kind_label(&manual), "Manual");
+    assert_eq!(asset_kind_label(&unknown), "Asset");
+}
+
+#[test]
+fn signed_percent_uses_signed_money_sign_convention() {
+    assert_eq!(format_signed_percent(5.26), "+5.26%");
+    assert_eq!(format_signed_percent(-3.1), "-3.1%");
+    assert_eq!(format_signed_percent(0.0), "+0%");
+}
+
+#[test]
+fn change_value_class_keeps_zero_neutral() {
+    assert_eq!(change_value_class(4.2), "change-positive");
+    assert_eq!(change_value_class(-4.2), "change-negative");
+    assert_eq!(change_value_class(0.0), "");
+}
+
+#[test]
+fn asset_amount_display_trims_trailing_zeros() {
+    assert_eq!(format_asset_amount("10.500000"), "10.5");
+    assert_eq!(format_asset_amount("-3.0"), "-3");
+    assert_eq!(format_asset_amount("not-a-number"), "not-a-number");
+}
+
+#[test]
+fn asset_expansion_keys_distinguish_liability_rows() {
+    let asset = asset_entry(
+        serde_json::json!({"type": "currency", "iso_code": "USD"}),
+        "currency/USD",
+        false,
+        "10",
+        Some("10"),
+        AssetChanges::default(),
+    );
+    let liability = asset_entry(
+        serde_json::json!({"type": "currency", "iso_code": "USD"}),
+        "currency/USD",
+        true,
+        "-4",
+        Some("-4"),
+        AssetChanges::default(),
+    );
+    assert_ne!(asset_expansion_key(&asset), asset_expansion_key(&liability));
+}
+
+#[test]
+fn default_asset_sort_directions_match_field_semantics() {
+    assert_eq!(
+        default_asset_sort_direction(AssetSortField::Name),
+        SortDirection::Asc
+    );
+    for field in [
+        AssetSortField::Amount,
+        AssetSortField::Value,
+        AssetSortField::DayChange,
+        AssetSortField::WeekChange,
+        AssetSortField::MonthChange,
+        AssetSortField::YearChange,
+    ] {
+        assert_eq!(default_asset_sort_direction(field), SortDirection::Desc);
+    }
+}
+
+#[test]
+fn asset_value_sort_uses_absolute_value_and_keeps_unpriced_last() {
+    let mut entries = vec![
+        asset_entry(
+            serde_json::json!({"type": "manual_value", "name": "House", "currency": "USD"}),
+            "manual_value/House",
+            false,
+            "1",
+            None,
+            AssetChanges::default(),
+        ),
+        asset_entry(
+            serde_json::json!({"type": "currency", "iso_code": "USD"}),
+            "currency/USD",
+            true,
+            "-900",
+            Some("-900"),
+            AssetChanges::default(),
+        ),
+        asset_entry(
+            serde_json::json!({"type": "equity", "ticker": "AAPL"}),
+            "equity/AAPL",
+            false,
+            "5",
+            Some("500"),
+            AssetChanges::default(),
+        ),
+    ];
+
+    entries.sort_by(|a, b| compare_asset_entries(a, b, AssetSortField::Value, SortDirection::Desc));
+    let descending: Vec<&str> = entries.iter().map(|e| e.asset_id.as_str()).collect();
+    assert_eq!(
+        descending,
+        vec!["currency/USD", "equity/AAPL", "manual_value/House"]
+    );
+
+    entries.sort_by(|a, b| compare_asset_entries(a, b, AssetSortField::Value, SortDirection::Asc));
+    let ascending: Vec<&str> = entries.iter().map(|e| e.asset_id.as_str()).collect();
+    assert_eq!(
+        ascending,
+        vec!["equity/AAPL", "currency/USD", "manual_value/House"]
+    );
+}
+
+#[test]
+fn asset_change_sort_uses_percentage_and_keeps_missing_last() {
+    let mut entries = vec![
+        asset_entry(
+            serde_json::json!({"type": "equity", "ticker": "AAA"}),
+            "equity/AAA",
+            false,
+            "1",
+            Some("100"),
+            AssetChanges::default(),
+        ),
+        asset_entry(
+            serde_json::json!({"type": "equity", "ticker": "BBB"}),
+            "equity/BBB",
+            false,
+            "1",
+            Some("100"),
+            day_change("120", None),
+        ),
+        asset_entry(
+            serde_json::json!({"type": "equity", "ticker": "CCC"}),
+            "equity/CCC",
+            false,
+            "1",
+            Some("100"),
+            day_change("-3", Some("-3.1")),
+        ),
+        asset_entry(
+            serde_json::json!({"type": "equity", "ticker": "DDD"}),
+            "equity/DDD",
+            false,
+            "1",
+            Some("100"),
+            day_change("5", Some("5.26")),
+        ),
+    ];
+
+    entries.sort_by(|a, b| {
+        compare_asset_entries(a, b, AssetSortField::DayChange, SortDirection::Desc)
+    });
+    let ids: Vec<&str> = entries.iter().map(|e| e.asset_id.as_str()).collect();
+    assert_eq!(
+        ids,
+        vec!["equity/DDD", "equity/CCC", "equity/AAA", "equity/BBB"]
+    );
+}
+
+#[test]
+fn asset_name_sort_is_case_insensitive_with_stable_tie_break() {
+    let mut entries = vec![
+        asset_entry(
+            serde_json::json!({"type": "equity", "ticker": "msft"}),
+            "equity/msft",
+            false,
+            "1",
+            Some("1"),
+            AssetChanges::default(),
+        ),
+        asset_entry(
+            serde_json::json!({"type": "equity", "ticker": "AAPL"}),
+            "equity/AAPL",
+            false,
+            "1",
+            Some("1"),
+            AssetChanges::default(),
+        ),
+        asset_entry(
+            serde_json::json!({"type": "currency", "iso_code": "USD"}),
+            "currency/USD",
+            true,
+            "-1",
+            Some("-1"),
+            AssetChanges::default(),
+        ),
+        asset_entry(
+            serde_json::json!({"type": "currency", "iso_code": "USD"}),
+            "currency/USD",
+            false,
+            "2",
+            Some("2"),
+            AssetChanges::default(),
+        ),
+    ];
+
+    entries.sort_by(|a, b| compare_asset_entries(a, b, AssetSortField::Name, SortDirection::Asc));
+    let ids: Vec<(String, bool)> = entries
+        .iter()
+        .map(|e| (e.asset_id.clone(), e.liability))
+        .collect();
+    assert_eq!(
+        ids,
+        vec![
+            ("equity/AAPL".to_string(), false),
+            ("equity/msft".to_string(), false),
+            ("currency/USD".to_string(), false),
+            ("currency/USD".to_string(), true),
+        ]
+    );
+}
+
+#[test]
+fn assets_query_strings_parse_into_server_assets_query() {
+    let empty = serde_urlencoded::from_str::<keepbook_server::AssetsQuery>("")
+        .expect("empty assets query should parse");
+    assert!(empty.date.is_none());
+    assert!(empty.account_portfolio_overrides.is_none());
+
+    let query = assets_query_string(FilterOverrides {
+        include_latent_capital_gains_tax: None,
+        account_portfolio_exclusions: vec![AccountPortfolioExclusionOverride {
+            account_id: "acct-1".to_string(),
+            exclude_from_portfolio: true,
+        }],
+    });
+    let parsed = serde_urlencoded::from_str::<keepbook_server::AssetsQuery>(&query)
+        .expect("assets query with overrides should parse");
+    assert_eq!(
+        parsed.account_portfolio_overrides.as_deref(),
+        Some(r#"[{"account_id":"acct-1","exclude_from_portfolio":true}]"#)
+    );
+}

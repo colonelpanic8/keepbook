@@ -336,6 +336,35 @@ small,
   gap: var(--sp-6);
 }
 
+.repository-switcher {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+}
+
+.repository-switcher > span {
+  color: var(--color-text-muted);
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-semibold);
+}
+
+.repository-switcher select {
+  width: 100%;
+}
+
+.repository-switch-status {
+  align-items: center;
+  display: flex;
+  gap: var(--sp-6);
+  min-width: 0;
+}
+
+.repository-switch-status small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .mobile-nav-toggle {
   align-items: center;
   background: var(--color-surface-subtle);
@@ -994,6 +1023,13 @@ small,
   padding-top: var(--sp-10);
 }
 
+.git-location-row.active {
+  background: var(--color-accent-bg);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-10);
+}
+
 .git-location-main {
   display: flex;
   flex-direction: column;
@@ -1003,6 +1039,8 @@ small,
 
 .git-location-actions {
   display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-8);
   justify-content: flex-end;
 }
 
@@ -3004,4 +3042,63 @@ button.stacked-legend-item {
   .group-tag-row {
     grid-template-columns: 1fr;
   }
+}
+
+/* Assets view: per-asset breakdown table with expandable holdings. */
+.assets-table .table-head,
+.assets-table .table-row {
+  grid-template-columns:
+    minmax(200px, 1.4fr)
+    minmax(110px, 0.7fr)
+    minmax(110px, 0.6fr)
+    minmax(140px, 0.8fr)
+    minmax(84px, 0.5fr)
+    minmax(84px, 0.5fr)
+    minmax(84px, 0.5fr)
+    minmax(84px, 0.5fr)
+    32px;
+  min-width: 1080px;
+}
+
+.asset-row {
+  cursor: pointer;
+}
+
+.asset-row:hover {
+  background: var(--color-surface-hover);
+}
+
+.asset-name-cell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.asset-name-cell small {
+  color: var(--color-text-muted);
+}
+
+.asset-name-line {
+  align-items: center;
+  display: flex;
+  gap: var(--sp-8);
+  min-width: 0;
+}
+
+.asset-change-cell {
+  white-space: nowrap;
+}
+
+.assets-table .asset-holding-row {
+  background: var(--color-surface-subtle);
+  grid-template-columns:
+    minmax(200px, 1.4fr)
+    minmax(110px, 0.7fr)
+    minmax(140px, 0.8fr)
+    minmax(160px, 1fr);
+}
+
+.assets-table .asset-holding-row small {
+  color: var(--color-text-muted);
 }

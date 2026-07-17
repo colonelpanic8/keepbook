@@ -889,3 +889,272 @@ async fn historical_snapshot_prefers_same_day_quote_over_older_close() -> Result
 
     Ok(())
 }
+
+#[tokio::test]
+async fn asset_breakdown_aggregates_same_asset_across_accounts() -> Result<()> {
+    let storage = Arc::new(MemoryStorage::new());
+    let connection = Connection::new(ConnectionConfig {
+        name: "Bank".to_string(),
+        synchronizer: "manual".to_string(),
+        credentials: None,
+        balance_staleness: None,
+    });
+    storage.save_connection(&connection).await?;
+
+    let account1 = Account::new("Checking", connection.id().clone());
+    let account2 = Account::new("Savings", connection.id().clone());
+    storage.save_account(&account1).await?;
+    storage.save_account(&account2).await?;
+
+    storage
+        .append_balance_snapshot(
+            &account1.id,
+            &BalanceSnapshot::new(
+                Utc.with_ymd_and_hms(2026, 2, 1, 12, 0, 0).unwrap(),
+                vec![AssetBalance::new(Asset::currency("USD"), "1000")],
+            ),
+        )
+        .await?;
+    storage
+        .append_balance_snapshot(
+            &account2.id,
+            &BalanceSnapshot::new(
+                Utc.with_ymd_and_hms(2026, 2, 1, 14, 0, 0).unwrap(),
+                vec![AssetBalance::new(Asset::currency("USD"), "2000")],
+            ),
+        )
+        .await?;
+
+    let store = Arc::new(MemoryMarketDataStore::new());
+    let market_data = Arc::new(MarketDataService::new(store, None));
+    let service = PortfolioService::new(storage, market_data);
+
+    let query = PortfolioQuery {
+        as_of_date: chrono::NaiveDate::from_ymd_opt(2026, 2, 2).unwrap(),
+        currency: "USD".to_string(),
+        currency_decimals: None,
+        grouping: Grouping::Asset,
+        include_detail: false,
+        capital_gains_tax_rate: None,
+        equity_valuation_adjustment: None,
+        account_ids: Vec::new(),
+    };
+    let rows = service.asset_breakdown(&query).await?;
+
+    assert_eq!(rows.len(), 1);
+    let row = &rows[0];
+    assert!(!row.liability);
+    assert_eq!(row.total_amount, Decimal::from(3000));
+    assert_eq!(row.value_in_base, Some(Decimal::from(3000)));
+    assert_eq!(row.holdings.len(), 2);
+    // Holdings are sorted by account name.
+    assert_eq!(row.holdings[0].account_name, "Checking");
+    assert_eq!(row.holdings[0].amount, Decimal::from(1000));
+    assert_eq!(row.holdings[0].value_in_base, Some(Decimal::from(1000)));
+    assert_eq!(row.holdings[0].connection_name.as_deref(), Some("Bank"));
+    assert_eq!(
+        row.holdings[0].balance_date,
+        chrono::NaiveDate::from_ymd_opt(2026, 2, 1).unwrap()
+    );
+    assert_eq!(row.holdings[1].account_name, "Savings");
+    assert_eq!(row.holdings[1].amount, Decimal::from(2000));
+    assert_eq!(row.holdings[1].connection_name.as_deref(), Some("Bank"));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn asset_breakdown_partitions_liabilities_without_netting() -> Result<()> {
+    let storage = Arc::new(MemoryStorage::new());
+    let connection = Connection::new(ConnectionConfig {
+        name: "Bank".to_string(),
+        synchronizer: "manual".to_string(),
+        credentials: None,
+        balance_staleness: None,
+    });
+    storage.save_connection(&connection).await?;
+
+    let checking = Account::new("Checking", connection.id().clone());
+    let card = Account::new("Credit Card", connection.id().clone());
+    storage.save_account(&checking).await?;
+    storage.save_account(&card).await?;
+
+    storage
+        .append_balance_snapshot(
+            &checking.id,
+            &BalanceSnapshot::new(
+                Utc.with_ymd_and_hms(2026, 2, 1, 12, 0, 0).unwrap(),
+                vec![AssetBalance::new(Asset::currency("USD"), "1000")],
+            ),
+        )
+        .await?;
+    storage
+        .append_balance_snapshot(
+            &card.id,
+            &BalanceSnapshot::new(
+                Utc.with_ymd_and_hms(2026, 2, 1, 12, 0, 0).unwrap(),
+                vec![AssetBalance::new(Asset::currency("USD"), "-500")],
+            ),
+        )
+        .await?;
+
+    let store = Arc::new(MemoryMarketDataStore::new());
+    let market_data = Arc::new(MarketDataService::new(store, None));
+    let service = PortfolioService::new(storage, market_data);
+
+    let query = PortfolioQuery {
+        as_of_date: chrono::NaiveDate::from_ymd_opt(2026, 2, 2).unwrap(),
+        currency: "USD".to_string(),
+        currency_decimals: None,
+        grouping: Grouping::Asset,
+        include_detail: false,
+        capital_gains_tax_rate: None,
+        equity_valuation_adjustment: None,
+        account_ids: Vec::new(),
+    };
+    let rows = service.asset_breakdown(&query).await?;
+
+    // Same asset produces two rows: one non-liability and one liability.
+    assert_eq!(rows.len(), 2);
+    let asset_row = rows.iter().find(|row| !row.liability).expect("asset row");
+    let liability_row = rows
+        .iter()
+        .find(|row| row.liability)
+        .expect("liability row");
+
+    assert_eq!(asset_row.total_amount, Decimal::from(1000));
+    assert_eq!(asset_row.value_in_base, Some(Decimal::from(1000)));
+    assert_eq!(asset_row.holdings.len(), 1);
+    assert_eq!(asset_row.holdings[0].account_name, "Checking");
+
+    assert_eq!(liability_row.total_amount, Decimal::from(-500));
+    assert_eq!(liability_row.value_in_base, Some(Decimal::from(-500)));
+    assert_eq!(liability_row.holdings.len(), 1);
+    assert_eq!(liability_row.holdings[0].account_name, "Credit Card");
+    assert_eq!(liability_row.holdings[0].amount, Decimal::from(-500));
+    assert_eq!(
+        liability_row.holdings[0].value_in_base,
+        Some(Decimal::from(-500))
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn asset_breakdown_respects_exclude_from_portfolio() -> Result<()> {
+    let storage = Arc::new(MemoryStorage::new());
+    let connection = Connection::new(ConnectionConfig {
+        name: "Bank".to_string(),
+        synchronizer: "manual".to_string(),
+        credentials: None,
+        balance_staleness: None,
+    });
+    storage.save_connection(&connection).await?;
+
+    let included = Account::new("Checking", connection.id().clone());
+    let excluded = Account::new("Hidden", connection.id().clone());
+    storage.save_account(&included).await?;
+    storage.save_account(&excluded).await?;
+    storage
+        .set_account_config(
+            &excluded.id,
+            AccountConfig {
+                exclude_from_portfolio: Some(true),
+                ..AccountConfig::default()
+            },
+        )
+        .await;
+
+    storage
+        .append_balance_snapshot(
+            &included.id,
+            &BalanceSnapshot::new(
+                Utc.with_ymd_and_hms(2026, 2, 1, 12, 0, 0).unwrap(),
+                vec![AssetBalance::new(Asset::currency("USD"), "1000")],
+            ),
+        )
+        .await?;
+    storage
+        .append_balance_snapshot(
+            &excluded.id,
+            &BalanceSnapshot::new(
+                Utc.with_ymd_and_hms(2026, 2, 1, 12, 0, 0).unwrap(),
+                vec![AssetBalance::new(Asset::currency("USD"), "-500")],
+            ),
+        )
+        .await?;
+
+    let store = Arc::new(MemoryMarketDataStore::new());
+    let market_data = Arc::new(MarketDataService::new(store, None));
+    let service = PortfolioService::new(storage, market_data);
+
+    let query = PortfolioQuery {
+        as_of_date: chrono::NaiveDate::from_ymd_opt(2026, 2, 2).unwrap(),
+        currency: "USD".to_string(),
+        currency_decimals: None,
+        grouping: Grouping::Asset,
+        include_detail: false,
+        capital_gains_tax_rate: None,
+        equity_valuation_adjustment: None,
+        account_ids: Vec::new(),
+    };
+    let rows = service.asset_breakdown(&query).await?;
+
+    assert_eq!(rows.len(), 1);
+    assert!(!rows[0].liability);
+    assert_eq!(rows[0].total_amount, Decimal::from(1000));
+    assert_eq!(rows[0].holdings.len(), 1);
+    assert_eq!(rows[0].holdings[0].account_name, "Checking");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn asset_breakdown_missing_price_yields_none_values() -> Result<()> {
+    let storage = Arc::new(MemoryStorage::new());
+    let connection = Connection::new(ConnectionConfig {
+        name: "Broker".to_string(),
+        synchronizer: "manual".to_string(),
+        credentials: None,
+        balance_staleness: None,
+    });
+    storage.save_connection(&connection).await?;
+
+    let account = Account::new("Brokerage", connection.id().clone());
+    storage.save_account(&account).await?;
+
+    storage
+        .append_balance_snapshot(
+            &account.id,
+            &BalanceSnapshot::new(
+                Utc.with_ymd_and_hms(2026, 2, 1, 12, 0, 0).unwrap(),
+                vec![AssetBalance::new(Asset::equity("AAPL"), "10")],
+            ),
+        )
+        .await?;
+
+    let store = Arc::new(MemoryMarketDataStore::new());
+    let market_data = Arc::new(MarketDataService::new(store, None));
+    let service = PortfolioService::new(storage, market_data);
+
+    let query = PortfolioQuery {
+        as_of_date: chrono::NaiveDate::from_ymd_opt(2026, 2, 2).unwrap(),
+        currency: "USD".to_string(),
+        currency_decimals: None,
+        grouping: Grouping::Asset,
+        include_detail: false,
+        capital_gains_tax_rate: None,
+        equity_valuation_adjustment: None,
+        account_ids: Vec::new(),
+    };
+    let rows = service.asset_breakdown(&query).await?;
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].total_amount, Decimal::from(10));
+    assert_eq!(rows[0].value_in_base, None);
+    assert_eq!(rows[0].price, None);
+    assert_eq!(rows[0].holdings.len(), 1);
+    assert_eq!(rows[0].holdings[0].value_in_base, None);
+
+    Ok(())
+}

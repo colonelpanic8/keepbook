@@ -158,6 +158,33 @@ struct Overview {
     snapshot: PortfolioSnapshot,
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+struct RepositoryRegistry {
+    config_path: String,
+    active_repository: Option<String>,
+    repositories: Vec<Repository>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+struct Repository {
+    id: String,
+    name: String,
+    path: String,
+    remote: String,
+    branch: String,
+    active: bool,
+    cloned: bool,
+    commit: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+struct AddRepositoryInput {
+    name: String,
+    path: String,
+    remote: String,
+    branch: String,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 struct HistoryDefaults {
     portfolio_granularity: String,
@@ -365,6 +392,61 @@ struct StackedHistorySeries {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
+struct AssetBreakdown {
+    as_of_date: String,
+    currency: String,
+    total_value: String,
+    assets: Vec<AssetBreakdownEntry>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+struct AssetBreakdownEntry {
+    asset: serde_json::Value,
+    asset_id: String,
+    liability: bool,
+    total_amount: String,
+    #[serde(default)]
+    price: Option<String>,
+    #[serde(default)]
+    price_date: Option<String>,
+    #[serde(default)]
+    value_in_base: Option<String>,
+    changes: AssetChanges,
+    holdings: Vec<AssetBreakdownHolding>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+struct AssetChanges {
+    #[serde(default)]
+    day: Option<AssetChange>,
+    #[serde(default)]
+    week: Option<AssetChange>,
+    #[serde(default)]
+    month: Option<AssetChange>,
+    #[serde(default)]
+    year: Option<AssetChange>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+struct AssetChange {
+    absolute: String,
+    #[serde(default)]
+    percentage: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+struct AssetBreakdownHolding {
+    account_id: String,
+    account_name: String,
+    #[serde(default)]
+    connection_name: Option<String>,
+    amount: String,
+    balance_date: String,
+    #[serde(default)]
+    value_in_base: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 struct SpendingOutput {
     currency: String,
     tz: String,
@@ -489,30 +571,10 @@ struct GitRemoteSettings {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
-struct GitRepoState {
-    cloned: bool,
-    remote_url: Option<String>,
-    branch: Option<String>,
-    commit: Option<String>,
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq)]
 struct GitSettingsOutput {
     config_path: String,
     data_dir: String,
     git: GitRemoteSettings,
-    repo_state: GitRepoState,
-}
-
-#[derive(Clone, Debug, Serialize, PartialEq)]
-struct GitSettingsInput {
-    data_dir: String,
-    host: String,
-    repo: String,
-    branch: String,
-    ssh_user: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    ssh_key_path: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -740,6 +802,17 @@ enum TransactionSortField {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AssetSortField {
+    Name,
+    Amount,
+    Value,
+    DayChange,
+    WeekChange,
+    MonthChange,
+    YearChange,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SortDirection {
     Asc,
     Desc,
@@ -904,9 +977,7 @@ struct DesktopStartupOptions {
 
 #[cfg(feature = "desktop")]
 fn desktop_startup_options() -> DesktopStartupOptions {
-    match keepbook_server::desktop_start_minimized_to_tray(
-        keepbook_server::default_server_config_path(),
-    ) {
+    match keepbook_server::desktop_start_minimized_to_tray(api::native_config_path()) {
         Ok(start_minimized_to_tray) => DesktopStartupOptions {
             start_minimized_to_tray,
         },

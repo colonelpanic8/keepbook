@@ -3,7 +3,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use chrono::{Datelike, Duration, NaiveDate, Utc};
+use chrono::{Datelike, Days, Duration, Months, NaiveDate, Utc};
 use rust_decimal::Decimal;
 use tracing::warn;
 
@@ -28,7 +28,8 @@ use crate::storage::{find_account, find_connection, Storage};
 #[cfg(feature = "sync")]
 use super::sync::build_sync_service;
 use super::{
-    maybe_auto_commit, AssetInfoOutput, ChangePointsOutput, HistoryOutput, HistoryPoint,
+    maybe_auto_commit, AssetBreakdownEntry, AssetBreakdownHolding, AssetBreakdownOutput,
+    AssetChange, AssetChanges, AssetInfoOutput, ChangePointsOutput, HistoryOutput, HistoryPoint,
     HistorySummary, PriceHistoryFailure, PriceHistoryOutput, PriceHistoryScopeOutput,
     PriceHistoryStats, StackedHistoryComponent, StackedHistoryOutput, StackedHistoryPoint,
     StackedHistorySeries, TaxImpactOutput, TaxImpactPoint,
@@ -1850,6 +1851,200 @@ pub async fn portfolio_snapshot(
     maybe_auto_commit(config, "portfolio snapshot");
 
     Ok(snapshot)
+}
+
+/// Per-asset portfolio breakdown at `date` (default today) with
+/// day/week/month/year changes computed against the breakdown at the
+/// corresponding past dates. Uses cached market data only (no staleness-driven
+/// sync or price refresh), mirroring the portfolio history commands.
+pub async fn portfolio_assets(
+    storage: Arc<dyn Storage>,
+    config: &ResolvedConfig,
+    date: Option<String>,
+) -> Result<AssetBreakdownOutput> {
+    let as_of_date = match date {
+        Some(d) => NaiveDate::parse_from_str(&d, "%Y-%m-%d")
+            .with_context(|| format!("Invalid date format: {d}"))?,
+        None => Utc::now().date_naive(),
+    };
+    let currency = config.reporting_currency.clone();
+    let currency_decimals = config.display.currency_decimals;
+
+    let store: Arc<dyn MarketDataStore> = Arc::new(JsonlMarketDataStore::new(&config.data_dir));
+    let market_data = Arc::new(configure_history_market_data(
+        MarketDataServiceBuilder::new(store, config.data_dir.clone())
+            .with_quote_staleness(config.refresh.price_staleness)
+            .offline_only()
+            .build()
+            .await,
+        config,
+    ));
+    let service = PortfolioService::new(storage, market_data);
+
+    let breakdown_query = |as_of: NaiveDate| PortfolioQuery {
+        as_of_date: as_of,
+        currency: currency.clone(),
+        currency_decimals,
+        grouping: Grouping::Asset,
+        include_detail: false,
+        capital_gains_tax_rate: None,
+        equity_valuation_adjustment: None,
+        account_ids: Vec::new(),
+    };
+
+    let current_rows = service
+        .asset_breakdown(&breakdown_query(as_of_date))
+        .await?;
+
+    // Rows at each past date, keyed by (asset_id, liability). A key that is
+    // absent had no holdings at that date; a key mapped to None was held but
+    // could not be priced.
+    let mut past_values: Vec<HashMap<(String, bool), Option<Decimal>>> = Vec::with_capacity(4);
+    for past_date in [
+        as_of_date.checked_sub_days(Days::new(1)),
+        as_of_date.checked_sub_days(Days::new(7)),
+        as_of_date.checked_sub_months(Months::new(1)),
+        as_of_date.checked_sub_months(Months::new(12)),
+    ] {
+        let values = match past_date {
+            Some(date) => service
+                .asset_breakdown(&breakdown_query(date))
+                .await?
+                .into_iter()
+                .map(|row| {
+                    (
+                        (AssetId::from_asset(&row.asset).to_string(), row.liability),
+                        row.value_in_base,
+                    )
+                })
+                .collect(),
+            None => HashMap::new(),
+        };
+        past_values.push(values);
+    }
+
+    let mut total_value = Decimal::ZERO;
+    let mut entries: Vec<(Option<Decimal>, AssetBreakdownEntry)> =
+        Vec::with_capacity(current_rows.len());
+    for row in current_rows {
+        let asset_id = AssetId::from_asset(&row.asset).to_string();
+        let key = (asset_id.clone(), row.liability);
+        if let Some(value) = row.value_in_base {
+            total_value += value;
+        }
+
+        let changes = AssetChanges {
+            day: compute_asset_change(
+                row.value_in_base,
+                past_values[0].get(&key),
+                currency_decimals,
+            ),
+            week: compute_asset_change(
+                row.value_in_base,
+                past_values[1].get(&key),
+                currency_decimals,
+            ),
+            month: compute_asset_change(
+                row.value_in_base,
+                past_values[2].get(&key),
+                currency_decimals,
+            ),
+            year: compute_asset_change(
+                row.value_in_base,
+                past_values[3].get(&key),
+                currency_decimals,
+            ),
+        };
+
+        let holdings = row
+            .holdings
+            .into_iter()
+            .map(|holding| AssetBreakdownHolding {
+                account_id: holding.account_id,
+                account_name: holding.account_name,
+                connection_name: holding.connection_name,
+                amount: holding.amount.normalize().to_string(),
+                balance_date: holding.balance_date,
+                value_in_base: holding
+                    .value_in_base
+                    .map(|value| format_base_currency_value(value, currency_decimals)),
+            })
+            .collect();
+
+        entries.push((
+            row.value_in_base,
+            AssetBreakdownEntry {
+                asset: row.asset,
+                asset_id,
+                liability: row.liability,
+                total_amount: row.total_amount.normalize().to_string(),
+                price: row.price,
+                price_date: row.price_date,
+                value_in_base: row
+                    .value_in_base
+                    .map(|value| format_base_currency_value(value, currency_decimals)),
+                changes,
+                holdings,
+            },
+        ));
+    }
+
+    // Sort by absolute value descending; rows without a value last; break ties
+    // by asset_id, then liability.
+    entries.sort_by(|(a_value, a), (b_value, b)| {
+        match (
+            a_value.map(|value| value.abs()),
+            b_value.map(|value| value.abs()),
+        ) {
+            (Some(a_abs), Some(b_abs)) => b_abs.cmp(&a_abs),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        }
+        .then_with(|| a.asset_id.cmp(&b.asset_id))
+        .then_with(|| a.liability.cmp(&b.liability))
+    });
+
+    Ok(AssetBreakdownOutput {
+        as_of_date,
+        currency,
+        total_value: format_base_currency_value(total_value, currency_decimals),
+        assets: entries.into_iter().map(|(_, entry)| entry).collect(),
+    })
+}
+
+/// Change of a row's value versus a past date.
+///
+/// - Current value unknown: no change is reported.
+/// - Row absent at the past date: change from zero, percentage omitted.
+/// - Row held at the past date but unpriceable: no change is reported (rather
+///   than pretending the past value was zero).
+/// - Past value zero: percentage omitted.
+fn compute_asset_change(
+    current: Option<Decimal>,
+    past: Option<&Option<Decimal>>,
+    currency_decimals: Option<u32>,
+) -> Option<AssetChange> {
+    let current = current?;
+    let past_value = match past {
+        Some(None) => return None,
+        Some(Some(value)) => *value,
+        None => Decimal::ZERO,
+    };
+    let absolute = current - past_value;
+    let percentage = if past_value == Decimal::ZERO {
+        None
+    } else {
+        Some(
+            (absolute / past_value.abs() * Decimal::from(100))
+                .round_dp(2)
+                .to_string(),
+        )
+    };
+    Some(AssetChange {
+        absolute: format_base_currency_value(absolute, currency_decimals),
+        percentage,
+    })
 }
 
 #[allow(clippy::too_many_arguments)]

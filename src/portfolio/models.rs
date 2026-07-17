@@ -119,6 +119,36 @@ pub struct AccountHolding {
     pub unrealized_gain: Option<String>,
 }
 
+/// A single row in a per-asset portfolio breakdown. Rows are keyed by
+/// (normalized asset, liability): positive holdings of an asset aggregate into
+/// one row and negative holdings (debts) into a separate liability row.
+#[derive(Debug, Clone)]
+pub struct AssetBreakdownRow {
+    pub asset: Asset,
+    /// True when this row aggregates negative-amount holdings.
+    pub liability: bool,
+    pub total_amount: rust_decimal::Decimal,
+    /// Value in target currency. None if price/FX data unavailable.
+    pub value_in_base: Option<rust_decimal::Decimal>,
+    pub price: Option<String>,
+    pub price_date: Option<NaiveDate>,
+    pub fx_rate: Option<String>,
+    pub fx_date: Option<NaiveDate>,
+    pub holdings: Vec<AssetBreakdownAccountHolding>,
+}
+
+/// A single account's contribution to an asset breakdown row.
+#[derive(Debug, Clone)]
+pub struct AssetBreakdownAccountHolding {
+    pub account_id: String,
+    pub account_name: String,
+    pub connection_name: Option<String>,
+    pub amount: rust_decimal::Decimal,
+    pub balance_date: NaiveDate,
+    /// Value in target currency. None if price/FX data unavailable.
+    pub value_in_base: Option<rust_decimal::Decimal>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccountSummary {
     pub account_id: String,

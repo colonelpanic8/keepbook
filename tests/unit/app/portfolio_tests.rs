@@ -1450,3 +1450,262 @@ async fn resolve_scope_connection_includes_accounts_missing_from_state() -> anyh
 
     Ok(())
 }
+
+fn assets_test_config(data_dir: PathBuf) -> ResolvedConfig {
+    ResolvedConfig {
+        data_dir,
+        reporting_currency: "USD".to_string(),
+        display: DisplayConfig::default(),
+        refresh: RefreshConfig::default(),
+        history: HistoryConfig::default(),
+        tray: TrayConfig::default(),
+        spending: SpendingConfig::default(),
+        tags: Default::default(),
+        portfolio: PortfolioConfig::default(),
+        ignore: crate::config::IgnoreConfig::default(),
+        ai: crate::config::AiConfig::default(),
+        git: GitConfig::default(),
+    }
+}
+
+fn close_price(asset: &Asset, date: NaiveDate, price: &str) -> PricePoint {
+    PricePoint {
+        asset_id: AssetId::from_asset(asset),
+        as_of_date: date,
+        timestamp: Utc
+            .with_ymd_and_hms(date.year(), date.month(), date.day(), 23, 59, 59)
+            .unwrap(),
+        price: price.to_string(),
+        quote_currency: "USD".to_string(),
+        kind: PriceKind::Close,
+        source: "test".to_string(),
+    }
+}
+
+#[tokio::test]
+async fn portfolio_assets_computes_changes_across_dates() -> anyhow::Result<()> {
+    let dir = TempDir::new()?;
+    let config = assets_test_config(dir.path().to_path_buf());
+
+    let storage = Arc::new(MemoryStorage::new());
+    let connection = Connection::new(connection_config("Broker"));
+    storage.save_connection(&connection).await?;
+
+    let trading = Account::new("Trading", connection.id().clone());
+    let growth = Account::new("Growth", connection.id().clone());
+    storage.save_account(&trading).await?;
+    storage.save_account(&growth).await?;
+
+    let aapl = Asset::equity("AAPL");
+    let msft = Asset::equity("MSFT");
+    let nvda = Asset::equity("NVDA");
+
+    // AAPL and NVDA held since well before all past dates.
+    storage
+        .append_balance_snapshot(
+            &trading.id,
+            &BalanceSnapshot::new(
+                Utc.with_ymd_and_hms(2023, 1, 1, 10, 0, 0).unwrap(),
+                vec![
+                    AssetBalance::new(aapl.clone(), "10"),
+                    AssetBalance::new(nvda.clone(), "3"),
+                ],
+            ),
+        )
+        .await?;
+    // MSFT first held between the week-ago and day-ago dates.
+    storage
+        .append_balance_snapshot(
+            &growth.id,
+            &BalanceSnapshot::new(
+                Utc.with_ymd_and_hms(2024, 6, 10, 10, 0, 0).unwrap(),
+                vec![AssetBalance::new(msft.clone(), "5")],
+            ),
+        )
+        .await?;
+
+    // as_of 2024-06-15; past dates: 2024-06-14 (day), 2024-06-08 (week),
+    // 2024-05-15 (month), 2023-06-15 (year).
+    let store = JsonlMarketDataStore::new(&config.data_dir);
+    store
+        .put_prices(&[
+            close_price(&aapl, NaiveDate::from_ymd_opt(2023, 6, 15).unwrap(), "100"),
+            close_price(&aapl, NaiveDate::from_ymd_opt(2024, 5, 15).unwrap(), "160"),
+            close_price(&aapl, NaiveDate::from_ymd_opt(2024, 6, 8).unwrap(), "180"),
+            close_price(&aapl, NaiveDate::from_ymd_opt(2024, 6, 14).unwrap(), "190"),
+            close_price(&aapl, NaiveDate::from_ymd_opt(2024, 6, 15).unwrap(), "200"),
+            close_price(&msft, NaiveDate::from_ymd_opt(2024, 6, 14).unwrap(), "100"),
+            close_price(&msft, NaiveDate::from_ymd_opt(2024, 6, 15).unwrap(), "110"),
+            // NVDA has no price data at or before the week/month/year dates.
+            close_price(&nvda, NaiveDate::from_ymd_opt(2024, 6, 14).unwrap(), "120"),
+            close_price(&nvda, NaiveDate::from_ymd_opt(2024, 6, 15).unwrap(), "130"),
+        ])
+        .await?;
+
+    let output = portfolio_assets(storage, &config, Some("2024-06-15".to_string())).await?;
+
+    assert_eq!(
+        output.as_of_date,
+        NaiveDate::from_ymd_opt(2024, 6, 15).unwrap()
+    );
+    assert_eq!(output.currency, "USD");
+    // 2000 (AAPL) + 550 (MSFT) + 390 (NVDA)
+    assert_eq!(output.total_value, "2940");
+    assert_eq!(
+        output
+            .assets
+            .iter()
+            .map(|entry| entry.asset_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["equity/AAPL", "equity/MSFT", "equity/NVDA"]
+    );
+
+    let pct = |change: &Option<AssetChange>| -> Option<Decimal> {
+        change
+            .as_ref()
+            .and_then(|c| c.percentage.as_deref())
+            .map(|p| Decimal::from_str(p).unwrap())
+    };
+    let abs = |change: &Option<AssetChange>| -> Option<String> {
+        change.as_ref().map(|c| c.absolute.clone())
+    };
+
+    // AAPL: held with prices at every past date.
+    let aapl_entry = &output.assets[0];
+    assert!(!aapl_entry.liability);
+    assert_eq!(aapl_entry.total_amount, "10");
+    assert_eq!(aapl_entry.price.as_deref(), Some("200"));
+    assert_eq!(aapl_entry.value_in_base.as_deref(), Some("2000"));
+    assert_eq!(abs(&aapl_entry.changes.day).as_deref(), Some("100"));
+    // Exact string mirrors compute_percentage_change_from_previous formatting.
+    assert_eq!(
+        aapl_entry
+            .changes
+            .day
+            .as_ref()
+            .and_then(|c| c.percentage.as_deref()),
+        Some("5.26")
+    );
+    assert_eq!(abs(&aapl_entry.changes.week).as_deref(), Some("200"));
+    assert_eq!(pct(&aapl_entry.changes.week), Some(Decimal::new(1111, 2)));
+    assert_eq!(abs(&aapl_entry.changes.month).as_deref(), Some("400"));
+    assert_eq!(pct(&aapl_entry.changes.month), Some(Decimal::from(25)));
+    assert_eq!(abs(&aapl_entry.changes.year).as_deref(), Some("1000"));
+    assert_eq!(pct(&aapl_entry.changes.year), Some(Decimal::from(100)));
+
+    // MSFT: no holdings at the week/month/year dates -> change from zero with
+    // percentage omitted.
+    let msft_entry = &output.assets[1];
+    assert_eq!(msft_entry.value_in_base.as_deref(), Some("550"));
+    assert_eq!(abs(&msft_entry.changes.day).as_deref(), Some("50"));
+    assert_eq!(pct(&msft_entry.changes.day), Some(Decimal::from(10)));
+    assert_eq!(abs(&msft_entry.changes.week).as_deref(), Some("550"));
+    assert_eq!(pct(&msft_entry.changes.week), None);
+    assert_eq!(abs(&msft_entry.changes.month).as_deref(), Some("550"));
+    assert_eq!(pct(&msft_entry.changes.month), None);
+    assert_eq!(abs(&msft_entry.changes.year).as_deref(), Some("550"));
+    assert_eq!(pct(&msft_entry.changes.year), None);
+
+    // NVDA: held at the week/month/year dates but unpriceable then -> those
+    // periods report no change at all.
+    let nvda_entry = &output.assets[2];
+    assert_eq!(nvda_entry.value_in_base.as_deref(), Some("390"));
+    assert_eq!(abs(&nvda_entry.changes.day).as_deref(), Some("30"));
+    assert_eq!(
+        pct(&nvda_entry.changes.day),
+        Some(Decimal::from_str("8.33")?)
+    );
+    assert!(nvda_entry.changes.week.is_none());
+    assert!(nvda_entry.changes.month.is_none());
+    assert!(nvda_entry.changes.year.is_none());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn portfolio_assets_sorts_by_absolute_value_descending() -> anyhow::Result<()> {
+    let dir = TempDir::new()?;
+    let config = assets_test_config(dir.path().to_path_buf());
+
+    let storage = Arc::new(MemoryStorage::new());
+    let connection = Connection::new(connection_config("Bank"));
+    storage.save_connection(&connection).await?;
+
+    let checking = Account::new("Checking", connection.id().clone());
+    let mortgage = Account::new("Mortgage", connection.id().clone());
+    let brokerage = Account::new("Brokerage", connection.id().clone());
+    storage.save_account(&checking).await?;
+    storage.save_account(&mortgage).await?;
+    storage.save_account(&brokerage).await?;
+
+    let timestamp = Utc.with_ymd_and_hms(2024, 1, 15, 10, 0, 0).unwrap();
+    storage
+        .append_balance_snapshot(
+            &checking.id,
+            &BalanceSnapshot::new(
+                timestamp,
+                vec![AssetBalance::new(Asset::currency("USD"), "100")],
+            ),
+        )
+        .await?;
+    storage
+        .append_balance_snapshot(
+            &mortgage.id,
+            &BalanceSnapshot::new(
+                timestamp,
+                vec![AssetBalance::new(Asset::currency("USD"), "-5000")],
+            ),
+        )
+        .await?;
+    storage
+        .append_balance_snapshot(
+            &brokerage.id,
+            &BalanceSnapshot::new(
+                timestamp,
+                vec![
+                    AssetBalance::new(Asset::equity("AAPL"), "10"),
+                    // No price data exists for this asset.
+                    AssetBalance::new(Asset::crypto("XYZ"), "1"),
+                ],
+            ),
+        )
+        .await?;
+
+    let store = JsonlMarketDataStore::new(&config.data_dir);
+    store
+        .put_prices(&[close_price(
+            &Asset::equity("AAPL"),
+            NaiveDate::from_ymd_opt(2024, 6, 15).unwrap(),
+            "200",
+        )])
+        .await?;
+
+    let output = portfolio_assets(storage, &config, Some("2024-06-15".to_string())).await?;
+
+    // |-5000| > |2000| > |100|; unpriceable rows sort last.
+    assert_eq!(
+        output
+            .assets
+            .iter()
+            .map(|entry| (entry.asset_id.as_str(), entry.liability))
+            .collect::<Vec<_>>(),
+        vec![
+            ("currency/USD", true),
+            ("equity/AAPL", false),
+            ("currency/USD", false),
+            ("crypto/XYZ", false),
+        ]
+    );
+
+    let unpriced = &output.assets[3];
+    assert_eq!(unpriced.value_in_base, None);
+    assert!(unpriced.changes.day.is_none());
+    assert!(unpriced.changes.week.is_none());
+    assert!(unpriced.changes.month.is_none());
+    assert!(unpriced.changes.year.is_none());
+
+    // total_value counts only priced rows: 100 - 5000 + 2000.
+    assert_eq!(output.total_value, "-2900");
+
+    Ok(())
+}

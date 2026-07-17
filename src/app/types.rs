@@ -1,3 +1,4 @@
+use chrono::NaiveDate;
 use serde::Serialize;
 
 use crate::models::{Asset, TransactionStandardizedMetadata};
@@ -323,6 +324,72 @@ pub struct StackedHistoryOutput {
     pub granularity: String,
     pub series: Vec<StackedHistorySeries>,
     pub points: Vec<StackedHistoryPoint>,
+}
+
+/// Output for the portfolio assets command: per-asset breakdown with
+/// day/week/month/year changes.
+#[derive(Serialize)]
+pub struct AssetBreakdownOutput {
+    pub as_of_date: NaiveDate,
+    pub currency: String,
+    /// Sum of all rows' value_in_base; rows with missing values contribute 0.
+    pub total_value: String,
+    pub assets: Vec<AssetBreakdownEntry>,
+}
+
+/// One (asset, liability) row of the per-asset portfolio breakdown.
+#[derive(Serialize)]
+pub struct AssetBreakdownEntry {
+    pub asset: Asset,
+    pub asset_id: String,
+    /// True when this row aggregates negative-amount holdings.
+    pub liability: bool,
+    pub total_amount: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub price: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub price_date: Option<NaiveDate>,
+    /// Value in base currency. None if price data unavailable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value_in_base: Option<String>,
+    pub changes: AssetChanges,
+    pub holdings: Vec<AssetBreakdownHolding>,
+}
+
+/// A single account's contribution to an asset breakdown row.
+#[derive(Serialize)]
+pub struct AssetBreakdownHolding {
+    pub account_id: String,
+    pub account_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connection_name: Option<String>,
+    pub amount: String,
+    pub balance_date: NaiveDate,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value_in_base: Option<String>,
+}
+
+/// Changes for an asset breakdown row over standard trailing periods.
+#[derive(Serialize)]
+pub struct AssetChanges {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub day: Option<AssetChange>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub week: Option<AssetChange>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub month: Option<AssetChange>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub year: Option<AssetChange>,
+}
+
+/// Change of a row's base-currency value versus a past date.
+#[derive(Serialize)]
+pub struct AssetChange {
+    pub absolute: String,
+    /// Percentage change vs |past value|. None when the past value was zero
+    /// or the row had no holdings at the past date.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub percentage: Option<String>,
 }
 
 /// Summary statistics for the history
