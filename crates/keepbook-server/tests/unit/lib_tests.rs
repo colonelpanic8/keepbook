@@ -167,6 +167,29 @@ fn default_ssh_key_path_prefers_ed25519_then_rsa() -> Result<()> {
 }
 
 #[test]
+fn saved_app_private_key_is_used_without_home_fallback() -> Result<()> {
+    let config_path = unique_test_config_path("saved-app-private-key");
+    let saved_key_path = config_path
+        .parent()
+        .expect("test config should have a parent")
+        .join("keepbook_sync_key");
+    std::fs::create_dir_all(
+        saved_key_path
+            .parent()
+            .expect("test key should have a parent"),
+    )?;
+    std::fs::write(&saved_key_path, "test key")?;
+
+    assert_eq!(
+        select_default_ssh_key_path(Some(saved_key_path.clone()), None).as_deref(),
+        Some(saved_key_path.as_path())
+    );
+
+    remove_test_config(config_path);
+    Ok(())
+}
+
+#[test]
 fn android_private_state_is_outside_data_repo() {
     let config_path = Path::new(
         "/data/user/0/org.colonelpanic.keepbook.dioxus/files/keepbook-data/keepbook.toml",

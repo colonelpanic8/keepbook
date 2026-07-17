@@ -751,7 +751,7 @@ pub fn load_device_ssh_key_path_from(device_config_path: &Path) -> Result<Option
         return Ok(None);
     }
 
-    let content = std::fs::read_to_string(&device_config_path).with_context(|| {
+    let content = std::fs::read_to_string(device_config_path).with_context(|| {
         format!(
             "Failed to read device config file: {}",
             device_config_path.display()
@@ -909,8 +909,10 @@ impl ResolvedConfig {
                 .parent()
                 .context("Config path has no parent directory")?;
 
-            let mut git = GitConfig::default();
-            git.ssh_key_path = load_device_ssh_key_path(&config_path)?;
+            let git = GitConfig {
+                ssh_key_path: load_device_ssh_key_path(&config_path)?,
+                ..GitConfig::default()
+            };
 
             Ok(Self {
                 data_dir: config_dir.to_path_buf(),

@@ -63,7 +63,6 @@
         isDarwin = pkgs.stdenv.hostPlatform.isDarwin;
         androidRustTargets = lib.optionals isLinux [
           fenixPkgs.targets.aarch64-linux-android.stable.rust-std
-          fenixPkgs.targets.x86_64-linux-android.stable.rust-std
         ];
         rustTargets =
           [
@@ -107,7 +106,7 @@
           toolsVersion = "26.1.1";
           platformToolsVersion = androidPlatformToolsVersion;
           buildToolsVersions = ["34.0.0" androidBuildToolsVersion];
-          includeEmulator = true;
+          includeEmulator = false;
           # Dioxus still generates an initial Gradle project pinned to older
           # SDKs before the wrapper patches and rebuilds with the latest
           # versions below. Include those generated SDKs in the immutable SDK.
@@ -115,7 +114,7 @@
           includeSources = false;
           includeSystemImages = false;
           systemImageTypes = ["google_apis_playstore"];
-          abiVersions = ["arm64-v8a" "x86_64"];
+          abiVersions = ["arm64-v8a"];
           includeNDK = true;
           ndkVersions = [androidNdkVersion];
           cmakeVersions = ["3.22.1"];
@@ -134,12 +133,8 @@
           NDK_HOME = androidNdkHome;
           CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER = "${androidLlvmBin}/aarch64-linux-android24-clang";
           CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS = android16KbPageRustFlags;
-          CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER = "${androidLlvmBin}/x86_64-linux-android24-clang";
-          CARGO_TARGET_X86_64_LINUX_ANDROID_RUSTFLAGS = android16KbPageRustFlags;
           CC_aarch64_linux_android = "${androidLlvmBin}/aarch64-linux-android24-clang";
-          CC_x86_64_linux_android = "${androidLlvmBin}/x86_64-linux-android24-clang";
           AR_aarch64_linux_android = "${androidLlvmBin}/llvm-ar";
-          AR_x86_64_linux_android = "${androidLlvmBin}/llvm-ar";
           GRADLE_OPTS = "-Dorg.gradle.project.android.aapt2FromMavenOverride=${androidAapt2}";
           JAVA_HOME = pkgs.jdk17.home;
           OPENSSL_NO_VENDOR = "0";

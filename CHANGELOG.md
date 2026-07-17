@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Restored persisted Android SSH private keys from app-private storage even
+  when no device-config path is available, without probing desktop home keys.
+- Fixed CI failures from new Rust 1.97 Clippy lints and Android builds exhausting
+  hosted-runner disk space.
+
 ## 0.7.4 - 2026-07-15
 
 ### Fixed

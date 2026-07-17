@@ -2224,18 +2224,22 @@ fn with_default_desktop_ssh_key_path(
 }
 
 fn default_desktop_ssh_key_path(config_path: &Path) -> Option<PathBuf> {
-    if cfg!(target_os = "android") {
-        return None;
-    }
+    let saved_key_path = default_git_ssh_key_path(config_path).ok();
+    let home_dir = if cfg!(target_os = "android") {
+        None
+    } else {
+        std::env::var_os("HOME").map(PathBuf::from)
+    };
+    select_default_ssh_key_path(saved_key_path, home_dir.as_deref())
+}
 
-    if let Ok(path) = default_git_ssh_key_path(config_path) {
-        if path.is_file() {
-            return Some(path);
-        }
-    }
-
-    let home_dir = std::env::var_os("HOME").map(PathBuf::from)?;
-    default_ssh_key_path_in_home(&home_dir)
+fn select_default_ssh_key_path(
+    saved_key_path: Option<PathBuf>,
+    home_dir: Option<&Path>,
+) -> Option<PathBuf> {
+    saved_key_path
+        .filter(|path| path.is_file())
+        .or_else(|| home_dir.and_then(default_ssh_key_path_in_home))
 }
 
 fn default_ssh_key_path_in_home(home_dir: &Path) -> Option<PathBuf> {
