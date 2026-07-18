@@ -38,12 +38,48 @@ pub struct DisplayConfig {
     pub currency_fixed_decimals: bool,
 }
 
+/// Controls whether the desktop app uses native system window decorations.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum WindowDecorationsConfig {
+    #[default]
+    Auto,
+    System,
+    Hidden,
+}
+
+impl WindowDecorationsConfig {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::System => "system",
+            Self::Hidden => "hidden",
+        }
+    }
+}
+
+impl std::str::FromStr for WindowDecorationsConfig {
+    type Err = anyhow::Error;
+
+    fn from_str(value: &str) -> Result<Self> {
+        match value {
+            "auto" => Ok(Self::Auto),
+            "system" => Ok(Self::System),
+            "hidden" => Ok(Self::Hidden),
+            _ => anyhow::bail!("unsupported window decorations setting {value:?}"),
+        }
+    }
+}
+
 /// Tray UI configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TrayConfig {
     /// When true, desktop UI starts hidden and is opened from the tray icon.
     pub start_minimized: bool,
+
+    /// Controls whether the desktop app uses native system window decorations.
+    pub window_decorations: WindowDecorationsConfig,
 
     /// Maximum number of recent portfolio history rows shown in the tray menu.
     pub history_points: usize,
@@ -62,6 +98,7 @@ impl Default for TrayConfig {
     fn default() -> Self {
         Self {
             start_minimized: false,
+            window_decorations: WindowDecorationsConfig::Auto,
             history_points: 17,
             history_spec: vec![
                 "last 4 days".to_string(),

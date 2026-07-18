@@ -132,14 +132,20 @@ fn ApplicationSettingsPanel() -> Element {
     let app_commit = short_commit(env!("GIT_COMMIT_HASH"));
     let mut settings = use_resource(fetch_application_settings);
     let mut start_minimized = use_signal(|| false);
-    let mut loaded_value = use_signal(|| None::<bool>);
+    let mut window_decorations = use_signal(|| "auto".to_string());
+    let mut loaded_value = use_signal(|| None::<(bool, String)>);
     let mut status = use_signal(String::new);
     let mut busy = use_signal(|| false);
 
     if let Some(Ok(current)) = settings.cloned() {
-        if loaded_value() != Some(current.start_minimized_to_tray) {
+        let current_value = (
+            current.start_minimized_to_tray,
+            current.window_decorations.clone(),
+        );
+        if loaded_value() != Some(current_value.clone()) {
             start_minimized.set(current.start_minimized_to_tray);
-            loaded_value.set(Some(current.start_minimized_to_tray));
+            window_decorations.set(current.window_decorations);
+            loaded_value.set(Some(current_value));
         }
     }
 
@@ -231,10 +237,15 @@ fn ApplicationSettingsPanel() -> Element {
                                         spawn(async move {
                                             match save_application_settings(ApplicationSettingsInput {
                                                 start_minimized_to_tray: next,
+                                                window_decorations: window_decorations(),
                                             }).await {
                                                 Ok(saved) => {
                                                     start_minimized.set(saved.start_minimized_to_tray);
-                                                    loaded_value.set(Some(saved.start_minimized_to_tray));
+                                                    window_decorations.set(saved.window_decorations.clone());
+                                                    loaded_value.set(Some((
+                                                        saved.start_minimized_to_tray,
+                                                        saved.window_decorations,
+                                                    )));
                                                     status.set("Saved. This takes effect the next time Keepbook starts.".to_string());
                                                     settings.restart();
                                                 }
@@ -250,6 +261,50 @@ fn ApplicationSettingsPanel() -> Element {
                                 span { class: "switch-track",
                                     span { class: "switch-thumb" }
                                 }
+                            }
+                        }
+                        article { class: "setting-row",
+                            div { class: "setting-copy",
+                                strong { "Window decorations" }
+                                small { "Auto hides the system title bar on Hyprland; choose System or Hidden to override it" }
+                            }
+                            select {
+                                class: "control-input",
+                                value: "{window_decorations}",
+                                disabled: is_busy,
+                                onchange: move |event| {
+                                    let previous = window_decorations();
+                                    let next = event.value();
+                                    let current_start_minimized = start_minimized();
+                                    window_decorations.set(next.clone());
+                                    busy.set(true);
+                                    status.set("Saving application settings...".to_string());
+                                    spawn(async move {
+                                        match save_application_settings(ApplicationSettingsInput {
+                                            start_minimized_to_tray: current_start_minimized,
+                                            window_decorations: next,
+                                        }).await {
+                                            Ok(saved) => {
+                                                start_minimized.set(saved.start_minimized_to_tray);
+                                                window_decorations.set(saved.window_decorations.clone());
+                                                loaded_value.set(Some((
+                                                    saved.start_minimized_to_tray,
+                                                    saved.window_decorations,
+                                                )));
+                                                status.set("Saved. This takes effect the next time Keepbook starts.".to_string());
+                                                settings.restart();
+                                            }
+                                            Err(error) => {
+                                                window_decorations.set(previous);
+                                                status.set(error);
+                                            }
+                                        }
+                                        busy.set(false);
+                                    });
+                                },
+                                option { value: "auto", "Auto" }
+                                option { value: "system", "System" }
+                                option { value: "hidden", "Hidden" }
                             }
                         }
                     }

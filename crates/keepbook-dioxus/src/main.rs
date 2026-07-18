@@ -581,11 +581,13 @@ struct GitSettingsOutput {
 struct ApplicationSettingsOutput {
     config_path: String,
     start_minimized_to_tray: bool,
+    window_decorations: String,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
 struct ApplicationSettingsInput {
     start_minimized_to_tray: bool,
+    window_decorations: String,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
@@ -932,6 +934,62 @@ fn configure_linux_desktop_environment() {
 fn configure_linux_desktop_environment() {}
 
 #[cfg(feature = "desktop")]
+fn should_disable_window_decorations_for(
+    config: keepbook_server::WindowDecorationsConfig,
+    env_var: impl FnMut(&str) -> Option<std::ffi::OsString>,
+) -> bool {
+    match config {
+        keepbook_server::WindowDecorationsConfig::Auto => {
+            auto_should_disable_window_decorations(env_var)
+        }
+        keepbook_server::WindowDecorationsConfig::System => false,
+        keepbook_server::WindowDecorationsConfig::Hidden => true,
+    }
+}
+
+#[cfg(feature = "desktop")]
+fn auto_should_disable_window_decorations(
+    env_var: impl FnMut(&str) -> Option<std::ffi::OsString>,
+) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        is_hyprland_session(env_var)
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        false
+    }
+}
+
+#[cfg(all(feature = "desktop", target_os = "linux"))]
+fn is_hyprland_session(mut env_var: impl FnMut(&str) -> Option<std::ffi::OsString>) -> bool {
+    if env_var("HYPRLAND_INSTANCE_SIGNATURE")
+        .as_deref()
+        .is_some_and(|value| !value.is_empty())
+    {
+        return true;
+    }
+
+    [
+        "XDG_CURRENT_DESKTOP",
+        "XDG_SESSION_DESKTOP",
+        "DESKTOP_SESSION",
+    ]
+    .into_iter()
+    .filter_map(&mut env_var)
+    .any(|value| desktop_session_value_is_hyprland(&value))
+}
+
+#[cfg(all(feature = "desktop", target_os = "linux"))]
+fn desktop_session_value_is_hyprland(value: &std::ffi::OsStr) -> bool {
+    value
+        .to_string_lossy()
+        .split([':', ';', ','])
+        .any(|part| part.trim().eq_ignore_ascii_case("hyprland"))
+}
+
+#[cfg(feature = "desktop")]
 fn desktop_config() -> dioxus::desktop::Config {
     let startup_options = desktop_startup_options();
     let config = dioxus::desktop::Config::new()
@@ -963,30 +1021,45 @@ fn desktop_config() -> dioxus::desktop::Config {
 fn desktop_window_builder(
     startup_options: DesktopStartupOptions,
 ) -> dioxus::desktop::tao::window::WindowBuilder {
-    dioxus::desktop::tao::window::WindowBuilder::new()
+    let mut window = dioxus::desktop::tao::window::WindowBuilder::new()
         .with_title("Keepbook")
-        .with_decorations(false)
-        .with_visible(desktop_window_visible(startup_options))
+        .with_visible(desktop_window_visible(startup_options));
+    if should_disable_window_decorations_for(startup_options.window_decorations, |name| {
+        std::env::var_os(name)
+    }) {
+        window = window.with_decorations(false);
+    }
+    window
 }
 
 #[cfg(feature = "desktop")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct DesktopStartupOptions {
     start_minimized_to_tray: bool,
+    window_decorations: keepbook_server::WindowDecorationsConfig,
 }
 
 #[cfg(feature = "desktop")]
 fn desktop_startup_options() -> DesktopStartupOptions {
-    match keepbook_server::desktop_start_minimized_to_tray(api::native_config_path()) {
-        Ok(start_minimized_to_tray) => DesktopStartupOptions {
-            start_minimized_to_tray,
-        },
-        Err(error) => {
-            eprintln!("Failed to load Keepbook desktop startup config: {error:#}");
-            DesktopStartupOptions {
-                start_minimized_to_tray: false,
+    let config_path = api::native_config_path();
+    let start_minimized_to_tray =
+        match keepbook_server::desktop_start_minimized_to_tray(&config_path) {
+            Ok(start_minimized_to_tray) => start_minimized_to_tray,
+            Err(error) => {
+                eprintln!("Failed to load Keepbook start-minimized config: {error:#}");
+                false
             }
+        };
+    let window_decorations = match keepbook_server::desktop_window_decorations(&config_path) {
+        Ok(window_decorations) => window_decorations,
+        Err(error) => {
+            eprintln!("Failed to load Keepbook window decorations config: {error:#}");
+            keepbook_server::WindowDecorationsConfig::Auto
         }
+    };
+    DesktopStartupOptions {
+        start_minimized_to_tray,
+        window_decorations,
     }
 }
 

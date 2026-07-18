@@ -69,6 +69,9 @@ price_staleness = "24h"
 [tray]
 # Start the desktop UI hidden and open it from the tray icon.
 start_minimized = false
+# "auto" hides the system title bar on Hyprland only. Use "system" to always
+# show native decorations or "hidden" to always hide them.
+window_decorations = "auto"
 # Number of most-recent portfolio history rows shown in tray menu.
 history_points = 8
 # Spending lookback windows (in days) shown as "Last Nd" rows.

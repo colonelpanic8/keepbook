@@ -100,6 +100,30 @@ fn test_load_empty_config() -> Result<()> {
 }
 
 #[test]
+fn test_window_decorations_default_to_auto_and_parse_explicit_values() -> Result<()> {
+    assert_eq!(
+        Config::default().tray.window_decorations,
+        WindowDecorationsConfig::Auto
+    );
+
+    let dir = TempDir::new()?;
+    let config_path = dir.path().join("keepbook.toml");
+    std::fs::write(&config_path, "[tray]\nwindow_decorations = \"hidden\"\n")?;
+
+    let config = Config::load(&config_path)?;
+    assert_eq!(
+        config.tray.window_decorations,
+        WindowDecorationsConfig::Hidden
+    );
+    assert_eq!(config.tray.window_decorations.as_str(), "hidden");
+    assert_eq!(
+        "system".parse::<WindowDecorationsConfig>()?,
+        WindowDecorationsConfig::System
+    );
+    Ok(())
+}
+
+#[test]
 fn test_load_refresh_config() -> Result<()> {
     let dir = TempDir::new()?;
     let config_path = dir.path().join("keepbook.toml");

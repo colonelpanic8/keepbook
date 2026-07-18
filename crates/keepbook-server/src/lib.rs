@@ -49,6 +49,7 @@ const DEFAULT_SSH_IDENTITY_FILES: &[&str] = &[
 pub use ai_rules::{
     AiRuleSuggestionInput, AiRuleSuggestionsOutput, AiRuleToolCallOutput, AiRuleTransactionInput,
 };
+pub use keepbook::config::WindowDecorationsConfig;
 
 #[derive(Clone)]
 pub struct ApiState {
@@ -924,6 +925,9 @@ impl ApiState {
         Ok(ApplicationSettingsOutput {
             config_path: snapshot.config_path.display().to_string(),
             start_minimized_to_tray: desktop_start_minimized_to_tray(&snapshot.config_path)?,
+            window_decorations: desktop_window_decorations(&snapshot.config_path)?
+                .as_str()
+                .to_string(),
         })
     }
 
@@ -1198,11 +1202,13 @@ pub struct GitSettingsInput {
 pub struct ApplicationSettingsOutput {
     pub config_path: String,
     pub start_minimized_to_tray: bool,
+    pub window_decorations: String,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct ApplicationSettingsInput {
     pub start_minimized_to_tray: bool,
+    pub window_decorations: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -2690,6 +2696,7 @@ fn write_device_ssh_key_path(device_config_path: &Path, ssh_key_path: Option<&st
 }
 
 fn write_application_settings(config_path: &Path, input: &ApplicationSettingsInput) -> Result<()> {
+    let window_decorations = WindowDecorationsConfig::from_str(&input.window_decorations)?;
     let mut doc = load_config_doc(config_path)?;
     if let Some(parent) = config_path.parent() {
         std::fs::create_dir_all(parent)
@@ -2702,6 +2709,7 @@ fn write_application_settings(config_path: &Path, input: &ApplicationSettingsInp
         doc.insert("tray", Item::Table(Table::new()));
     }
     doc["tray"]["start_minimized"] = value(input.start_minimized_to_tray);
+    doc["tray"]["window_decorations"] = value(window_decorations.as_str());
 
     std::fs::write(config_path, doc.to_string())
         .with_context(|| format!("failed to write {}", config_path.display()))?;
@@ -3277,6 +3285,14 @@ pub fn desktop_start_minimized_to_tray(config_path: impl AsRef<Path>) -> Result<
     Ok(ResolvedConfig::load_or_default(config_path.as_ref())?
         .tray
         .start_minimized)
+}
+
+pub fn desktop_window_decorations(
+    config_path: impl AsRef<Path>,
+) -> Result<WindowDecorationsConfig> {
+    Ok(ResolvedConfig::load_or_default(config_path.as_ref())?
+        .tray
+        .window_decorations)
 }
 
 fn parse_bool_setting(value: &str) -> Result<bool> {

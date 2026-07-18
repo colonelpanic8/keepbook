@@ -390,6 +390,19 @@ fn desktop_start_minimized_to_tray_reads_tray_config() -> Result<()> {
 }
 
 #[test]
+fn desktop_window_decorations_reads_tray_config() -> Result<()> {
+    let config_path = unique_test_config_path("desktop-window-decorations");
+    write_test_config(&config_path, "[tray]\nwindow_decorations = \"system\"\n")?;
+
+    assert_eq!(
+        desktop_window_decorations(&config_path)?,
+        WindowDecorationsConfig::System
+    );
+    remove_test_config(config_path);
+    Ok(())
+}
+
+#[test]
 fn write_application_settings_updates_tray_config_without_replacing_other_settings() -> Result<()> {
     let config_path = unique_test_config_path("application-settings");
     write_test_config(
@@ -401,6 +414,7 @@ fn write_application_settings_updates_tray_config_without_replacing_other_settin
         &config_path,
         &ApplicationSettingsInput {
             start_minimized_to_tray: true,
+            window_decorations: "hidden".to_string(),
         },
     )?;
 
@@ -409,7 +423,27 @@ fn write_application_settings_updates_tray_config_without_replacing_other_settin
     assert!(content.contains("reporting_currency = \"EUR\""));
     assert!(content.contains("history_points = 12"));
     assert!(content.contains("start_minimized = true"));
+    assert!(content.contains("window_decorations = \"hidden\""));
     remove_test_config(config_path);
+    Ok(())
+}
+
+#[test]
+fn write_application_settings_rejects_unknown_window_decorations() -> Result<()> {
+    let config_path = unique_test_config_path("invalid-window-decorations");
+    let error = write_application_settings(
+        &config_path,
+        &ApplicationSettingsInput {
+            start_minimized_to_tray: false,
+            window_decorations: "custom".to_string(),
+        },
+    )
+    .expect_err("unknown window decoration values should fail");
+
+    assert!(error
+        .to_string()
+        .contains("unsupported window decorations setting"));
+    assert!(!config_path.exists());
     Ok(())
 }
 

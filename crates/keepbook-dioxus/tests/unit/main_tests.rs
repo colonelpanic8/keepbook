@@ -312,22 +312,73 @@ fn default_spending_queries_request_one_year_monthly_total() {
 fn desktop_start_minimized_to_tray_starts_window_hidden() {
     assert!(!desktop_window_visible(DesktopStartupOptions {
         start_minimized_to_tray: true,
+        window_decorations: keepbook_server::WindowDecorationsConfig::Auto,
     }));
     assert!(desktop_window_visible(DesktopStartupOptions {
         start_minimized_to_tray: false,
+        window_decorations: keepbook_server::WindowDecorationsConfig::Auto,
     }));
 }
 
 #[cfg(feature = "desktop")]
 #[test]
-fn desktop_window_builder_removes_native_window_chrome() {
+fn desktop_window_builder_respects_explicit_window_decoration_setting() {
     let window_builder = desktop_window_builder(DesktopStartupOptions {
         start_minimized_to_tray: false,
+        window_decorations: keepbook_server::WindowDecorationsConfig::Hidden,
     });
 
     assert_eq!(window_builder.window.title, "Keepbook");
     assert!(!window_builder.window.decorations);
     assert!(window_builder.window.visible);
+
+    let window_builder = desktop_window_builder(DesktopStartupOptions {
+        start_minimized_to_tray: false,
+        window_decorations: keepbook_server::WindowDecorationsConfig::System,
+    });
+    assert!(window_builder.window.decorations);
+}
+
+#[cfg(all(feature = "desktop", target_os = "linux"))]
+fn desktop_environment<'a>(
+    entries: &'a [(&'a str, &'a str)],
+) -> impl FnMut(&str) -> Option<std::ffi::OsString> + 'a {
+    move |name| {
+        entries
+            .iter()
+            .find(|(key, _)| *key == name)
+            .map(|(_, value)| std::ffi::OsString::from(value))
+    }
+}
+
+#[cfg(all(feature = "desktop", target_os = "linux"))]
+#[test]
+fn auto_window_decorations_are_hidden_only_on_hyprland() {
+    assert!(should_disable_window_decorations_for(
+        keepbook_server::WindowDecorationsConfig::Auto,
+        desktop_environment(&[("HYPRLAND_INSTANCE_SIGNATURE", "abc123")]),
+    ));
+    assert!(should_disable_window_decorations_for(
+        keepbook_server::WindowDecorationsConfig::Auto,
+        desktop_environment(&[("XDG_CURRENT_DESKTOP", "KDE:Hyprland")]),
+    ));
+    assert!(!should_disable_window_decorations_for(
+        keepbook_server::WindowDecorationsConfig::Auto,
+        desktop_environment(&[("XDG_CURRENT_DESKTOP", "KDE")]),
+    ));
+}
+
+#[cfg(all(feature = "desktop", target_os = "linux"))]
+#[test]
+fn explicit_window_decoration_overrides_take_precedence() {
+    assert!(should_disable_window_decorations_for(
+        keepbook_server::WindowDecorationsConfig::Hidden,
+        desktop_environment(&[]),
+    ));
+    assert!(!should_disable_window_decorations_for(
+        keepbook_server::WindowDecorationsConfig::System,
+        desktop_environment(&[("XDG_CURRENT_DESKTOP", "Hyprland")]),
+    ));
 }
 
 #[test]

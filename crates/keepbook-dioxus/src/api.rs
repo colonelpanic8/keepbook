@@ -1038,6 +1038,7 @@ pub(crate) async fn save_application_settings_impl(
         let output = state
             .save_application_settings(keepbook_server::ApplicationSettingsInput {
                 start_minimized_to_tray: input.start_minimized_to_tray,
+                window_decorations: input.window_decorations,
             })
             .await
             .map_err(|error| format!("Could not save application settings: {error:#}"))?;
