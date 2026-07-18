@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.1 - 2026-07-18
+
+### Added
+
+- Added configurable desktop window decorations with `auto`, `system`, and
+  `hidden` modes. Auto mode keeps the frameless window on Hyprland and uses
+  native system decorations elsewhere.
+
 ## 0.8.0 - 2026-07-17
 
 ### Added
