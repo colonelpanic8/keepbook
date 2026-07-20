@@ -960,6 +960,10 @@ enum PortfolioCommand {
         /// Calculate as of this date (YYYY-MM-DD, default: today)
         #[arg(long)]
         date: Option<String>,
+
+        /// Include holding amount changes in trailing-period changes
+        #[arg(long)]
+        include_amount_changes: bool,
     },
 
     /// Map nominal net worth to after-tax net worth under latent tax scenarios
@@ -1616,8 +1620,17 @@ async fn main() -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&snapshot)?);
             }
 
-            PortfolioCommand::Assets { date } => {
-                let output = app::portfolio_assets(storage_arc.clone(), &config, date).await?;
+            PortfolioCommand::Assets {
+                date,
+                include_amount_changes,
+            } => {
+                let output = app::portfolio_assets(
+                    storage_arc.clone(),
+                    &config,
+                    date,
+                    include_amount_changes,
+                )
+                .await?;
                 println!("{}", serde_json::to_string_pretty(&output)?);
             }
 

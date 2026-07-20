@@ -1125,10 +1125,22 @@ fn asset_entry(
         total_amount: total_amount.to_string(),
         price: None,
         price_date: None,
+        price_updated_at: None,
+        amount_last_checked_at: None,
+        amount_last_changed_at: None,
         value_in_base: value_in_base.map(str::to_string),
         changes,
         holdings: Vec::new(),
     }
+}
+
+fn compare_asset_entries(
+    a: &AssetBreakdownEntry,
+    b: &AssetBreakdownEntry,
+    field: AssetSortField,
+    direction: SortDirection,
+) -> std::cmp::Ordering {
+    compare_asset_entries_with_change_metric(a, b, field, direction, false)
 }
 
 fn day_change(absolute: &str, percentage: Option<&str>) -> AssetChanges {
@@ -1144,10 +1156,13 @@ fn day_change(absolute: &str, percentage: Option<&str>) -> AssetChanges {
 #[test]
 fn assets_query_includes_account_overrides_but_never_latent_tax() {
     assert_eq!(
-        assets_query_string(FilterOverrides {
-            include_latent_capital_gains_tax: Some(true),
-            ..FilterOverrides::default()
-        }),
+        assets_query_string(
+            FilterOverrides {
+                include_latent_capital_gains_tax: Some(true),
+                ..FilterOverrides::default()
+            },
+            false
+        ),
         ""
     );
     assert_eq!(
@@ -1157,7 +1172,7 @@ fn assets_query_includes_account_overrides_but_never_latent_tax() {
                 account_id: "acct-1".to_string(),
                 exclude_from_portfolio: true,
             }],
-        }),
+        }, false),
         "account_portfolio_overrides=%5B%7B%22account_id%22%3A%22acct-1%22%2C%22exclude_from_portfolio%22%3Atrue%7D%5D"
     );
 }
@@ -1167,6 +1182,7 @@ fn asset_breakdown_deserializes_with_omitted_optional_fields() {
     let breakdown: AssetBreakdown = serde_json::from_value(serde_json::json!({
         "as_of_date": "2026-07-17",
         "currency": "USD",
+        "change_mode": "price_only",
         "total_value": "1000.5",
         "assets": [
             {
@@ -1176,6 +1192,9 @@ fn asset_breakdown_deserializes_with_omitted_optional_fields() {
                 "total_amount": "10",
                 "price": "100.05",
                 "price_date": "2026-07-16",
+                "price_updated_at": "2026-07-16T21:05:00+00:00",
+                "amount_last_checked_at": "2026-07-17T09:00:00+00:00",
+                "amount_last_changed_at": "2026-07-15T09:00:00+00:00",
                 "value_in_base": "1000.5",
                 "changes": {"day": {"absolute": "50", "percentage": "5.26"}},
                 "holdings": [
@@ -1202,6 +1221,10 @@ fn asset_breakdown_deserializes_with_omitted_optional_fields() {
     assert_eq!(breakdown.assets.len(), 2);
     let priced = &breakdown.assets[0];
     assert_eq!(priced.price.as_deref(), Some("100.05"));
+    assert_eq!(
+        priced.price_updated_at.as_deref(),
+        Some("2026-07-16T21:05:00+00:00")
+    );
     assert_eq!(priced.holdings[0].connection_name, None);
     assert_eq!(priced.holdings[0].value_in_base, None);
     let unpriced = &breakdown.assets[1];
@@ -1288,6 +1311,9 @@ fn default_asset_sort_directions_match_field_semantics() {
     );
     for field in [
         AssetSortField::Amount,
+        AssetSortField::AmountChecked,
+        AssetSortField::AmountChanged,
+        AssetSortField::PriceUpdated,
         AssetSortField::Value,
         AssetSortField::DayChange,
         AssetSortField::WeekChange,
@@ -1299,8 +1325,100 @@ fn default_asset_sort_directions_match_field_semantics() {
 }
 
 #[test]
+fn asset_timestamp_fields_sort_latest_first_and_missing_last() {
+    let mut old = asset_entry(
+        serde_json::json!({"type": "equity", "ticker": "OLD"}),
+        "equity/OLD",
+        false,
+        "1",
+        Some("1"),
+        AssetChanges::default(),
+    );
+    old.price_updated_at = Some("2026-07-10T10:00:00+00:00".to_string());
+    let mut recent = asset_entry(
+        serde_json::json!({"type": "equity", "ticker": "RECENT"}),
+        "equity/RECENT",
+        false,
+        "1",
+        Some("1"),
+        AssetChanges::default(),
+    );
+    recent.price_updated_at = Some("2026-07-20T10:00:00+00:00".to_string());
+    let missing = asset_entry(
+        serde_json::json!({"type": "currency", "iso_code": "USD"}),
+        "currency/USD",
+        false,
+        "1",
+        Some("1"),
+        AssetChanges::default(),
+    );
+    let mut entries = [old, missing, recent];
+
+    entries.sort_by(|a, b| {
+        compare_asset_entries_with_change_metric(
+            a,
+            b,
+            AssetSortField::PriceUpdated,
+            SortDirection::Desc,
+            false,
+        )
+    });
+
+    assert_eq!(
+        entries
+            .iter()
+            .map(|entry| entry.asset_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["equity/RECENT", "equity/OLD", "currency/USD"]
+    );
+}
+
+#[test]
+fn asset_change_sort_switches_between_percentage_and_absolute() {
+    let percentage_winner = asset_entry(
+        serde_json::json!({"type": "equity", "ticker": "PCT"}),
+        "equity/PCT",
+        false,
+        "1",
+        Some("1"),
+        day_change("10", Some("20")),
+    );
+    let absolute_winner = asset_entry(
+        serde_json::json!({"type": "equity", "ticker": "ABS"}),
+        "equity/ABS",
+        false,
+        "1",
+        Some("1"),
+        day_change("100", Some("5")),
+    );
+    let mut entries = [percentage_winner, absolute_winner];
+
+    entries.sort_by(|a, b| {
+        compare_asset_entries_with_change_metric(
+            a,
+            b,
+            AssetSortField::DayChange,
+            SortDirection::Desc,
+            false,
+        )
+    });
+    assert_eq!(entries[0].asset_id, "equity/PCT");
+
+    entries.sort_by(|a, b| {
+        compare_asset_entries_with_change_metric(
+            a,
+            b,
+            AssetSortField::DayChange,
+            SortDirection::Desc,
+            true,
+        )
+    });
+    assert_eq!(entries[0].asset_id, "equity/ABS");
+}
+
+#[test]
 fn asset_value_sort_uses_absolute_value_and_keeps_unpriced_last() {
-    let mut entries = vec![
+    let mut entries = [
         asset_entry(
             serde_json::json!({"type": "manual_value", "name": "House", "currency": "USD"}),
             "manual_value/House",
@@ -1344,7 +1462,7 @@ fn asset_value_sort_uses_absolute_value_and_keeps_unpriced_last() {
 
 #[test]
 fn asset_change_sort_uses_percentage_and_keeps_missing_last() {
-    let mut entries = vec![
+    let mut entries = [
         asset_entry(
             serde_json::json!({"type": "equity", "ticker": "AAA"}),
             "equity/AAA",
@@ -1391,7 +1509,7 @@ fn asset_change_sort_uses_percentage_and_keeps_missing_last() {
 
 #[test]
 fn asset_name_sort_is_case_insensitive_with_stable_tie_break() {
-    let mut entries = vec![
+    let mut entries = [
         asset_entry(
             serde_json::json!({"type": "equity", "ticker": "msft"}),
             "equity/msft",
@@ -1448,18 +1566,27 @@ fn assets_query_strings_parse_into_server_assets_query() {
         .expect("empty assets query should parse");
     assert!(empty.date.is_none());
     assert!(empty.account_portfolio_overrides.is_none());
+    assert!(!empty.include_amount_changes);
 
-    let query = assets_query_string(FilterOverrides {
-        include_latent_capital_gains_tax: None,
-        account_portfolio_exclusions: vec![AccountPortfolioExclusionOverride {
-            account_id: "acct-1".to_string(),
-            exclude_from_portfolio: true,
-        }],
-    });
+    let query = assets_query_string(
+        FilterOverrides {
+            include_latent_capital_gains_tax: None,
+            account_portfolio_exclusions: vec![AccountPortfolioExclusionOverride {
+                account_id: "acct-1".to_string(),
+                exclude_from_portfolio: true,
+            }],
+        },
+        false,
+    );
     let parsed = serde_urlencoded::from_str::<keepbook_server::AssetsQuery>(&query)
         .expect("assets query with overrides should parse");
     assert_eq!(
         parsed.account_portfolio_overrides.as_deref(),
         Some(r#"[{"account_id":"acct-1","exclude_from_portfolio":true}]"#)
     );
+
+    let combined = assets_query_string(FilterOverrides::default(), true);
+    let parsed = serde_urlencoded::from_str::<keepbook_server::AssetsQuery>(&combined)
+        .expect("combined change mode should parse");
+    assert!(parsed.include_amount_changes);
 }

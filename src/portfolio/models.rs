@@ -132,6 +132,12 @@ pub struct AssetBreakdownRow {
     pub value_in_base: Option<rust_decimal::Decimal>,
     pub price: Option<String>,
     pub price_date: Option<NaiveDate>,
+    /// Exact timestamp when the price used for this row was fetched/recorded.
+    pub price_timestamp: Option<DateTime<Utc>>,
+    /// Most recent balance snapshot that checked this asset's amount.
+    pub amount_last_checked_at: Option<DateTime<Utc>>,
+    /// Most recent balance snapshot where this asset's aggregate amount changed.
+    pub amount_last_changed_at: Option<DateTime<Utc>>,
     pub fx_rate: Option<String>,
     pub fx_date: Option<NaiveDate>,
     pub holdings: Vec<AssetBreakdownAccountHolding>,

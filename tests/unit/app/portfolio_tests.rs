@@ -1542,7 +1542,7 @@ async fn portfolio_assets_computes_changes_across_dates() -> anyhow::Result<()> 
         ])
         .await?;
 
-    let output = portfolio_assets(storage, &config, Some("2024-06-15".to_string())).await?;
+    let output = portfolio_assets(storage, &config, Some("2024-06-15".to_string()), true).await?;
 
     assert_eq!(
         output.as_of_date,
@@ -1623,6 +1623,100 @@ async fn portfolio_assets_computes_changes_across_dates() -> anyhow::Result<()> 
 }
 
 #[tokio::test]
+async fn portfolio_assets_reports_freshness_and_switches_change_modes() -> anyhow::Result<()> {
+    let dir = TempDir::new()?;
+    let config = assets_test_config(dir.path().to_path_buf());
+    let storage = Arc::new(MemoryStorage::new());
+    let connection = Connection::new(connection_config("Broker"));
+    storage.save_connection(&connection).await?;
+    let account = Account::new("Trading", connection.id().clone());
+    storage.save_account(&account).await?;
+    let asset = Asset::equity("AAPL");
+
+    for (timestamp, amount) in [
+        (Utc.with_ymd_and_hms(2024, 6, 8, 10, 0, 0).unwrap(), "10"),
+        (Utc.with_ymd_and_hms(2024, 6, 14, 10, 0, 0).unwrap(), "20"),
+        (Utc.with_ymd_and_hms(2024, 6, 15, 9, 0, 0).unwrap(), "20"),
+    ] {
+        storage
+            .append_balance_snapshot(
+                &account.id,
+                &BalanceSnapshot::new(timestamp, vec![AssetBalance::new(asset.clone(), amount)]),
+            )
+            .await?;
+    }
+
+    let store = JsonlMarketDataStore::new(&config.data_dir);
+    store
+        .put_prices(&[
+            close_price(&asset, NaiveDate::from_ymd_opt(2024, 6, 8).unwrap(), "100"),
+            close_price(&asset, NaiveDate::from_ymd_opt(2024, 6, 14).unwrap(), "100"),
+            close_price(&asset, NaiveDate::from_ymd_opt(2024, 6, 15).unwrap(), "110"),
+        ])
+        .await?;
+
+    let price_only = portfolio_assets(
+        storage.clone(),
+        &config,
+        Some("2024-06-15".to_string()),
+        false,
+    )
+    .await?;
+    assert_eq!(price_only.change_mode, "price_only");
+    let entry = &price_only.assets[0];
+    assert_eq!(
+        entry.price_updated_at.as_deref(),
+        Some("2024-06-15T23:59:59+00:00")
+    );
+    assert_eq!(
+        entry.amount_last_checked_at.as_deref(),
+        Some("2024-06-15T09:00:00+00:00")
+    );
+    assert_eq!(
+        entry.amount_last_changed_at.as_deref(),
+        Some("2024-06-14T10:00:00+00:00")
+    );
+    let serialized = serde_json::to_value(&price_only)?;
+    assert_eq!(serialized["change_mode"], serde_json::json!("price_only"));
+    assert_eq!(
+        serialized["assets"][0]["price_updated_at"],
+        serde_json::json!("2024-06-15T23:59:59+00:00")
+    );
+    assert_eq!(
+        serialized["assets"][0]["amount_last_checked_at"],
+        serde_json::json!("2024-06-15T09:00:00+00:00")
+    );
+    assert_eq!(
+        serialized["assets"][0]["amount_last_changed_at"],
+        serde_json::json!("2024-06-14T10:00:00+00:00")
+    );
+    assert_eq!(
+        entry
+            .changes
+            .week
+            .as_ref()
+            .map(|change| change.absolute.as_str()),
+        Some("200")
+    );
+    assert_eq!(
+        entry
+            .changes
+            .week
+            .as_ref()
+            .and_then(|change| change.percentage.as_deref()),
+        Some("10.00")
+    );
+
+    let combined = portfolio_assets(storage, &config, Some("2024-06-15".to_string()), true).await?;
+    assert_eq!(combined.change_mode, "price_and_amount");
+    let week = combined.assets[0].changes.week.as_ref().unwrap();
+    assert_eq!(week.absolute, "1200");
+    assert_eq!(week.percentage.as_deref(), Some("120.00"));
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn portfolio_assets_sorts_by_absolute_value_descending() -> anyhow::Result<()> {
     let dir = TempDir::new()?;
     let config = assets_test_config(dir.path().to_path_buf());
@@ -1680,7 +1774,7 @@ async fn portfolio_assets_sorts_by_absolute_value_descending() -> anyhow::Result
         )])
         .await?;
 
-    let output = portfolio_assets(storage, &config, Some("2024-06-15".to_string())).await?;
+    let output = portfolio_assets(storage, &config, Some("2024-06-15".to_string()), false).await?;
 
     // |-5000| > |2000| > |100|; unpriceable rows sort last.
     assert_eq!(

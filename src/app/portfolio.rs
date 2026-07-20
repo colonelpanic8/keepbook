@@ -1861,6 +1861,7 @@ pub async fn portfolio_assets(
     storage: Arc<dyn Storage>,
     config: &ResolvedConfig,
     date: Option<String>,
+    include_amount_changes: bool,
 ) -> Result<AssetBreakdownOutput> {
     let as_of_date = match date {
         Some(d) => NaiveDate::parse_from_str(&d, "%Y-%m-%d")
@@ -1895,6 +1896,7 @@ pub async fn portfolio_assets(
     let current_rows = service
         .asset_breakdown(&breakdown_query(as_of_date))
         .await?;
+    let current_assets: HashSet<Asset> = current_rows.iter().map(|row| row.asset.clone()).collect();
 
     // Rows at each past date, keyed by (asset_id, liability). A key that is
     // absent had no holdings at that date; a key mapped to None was held but
@@ -1907,7 +1909,7 @@ pub async fn portfolio_assets(
         as_of_date.checked_sub_months(Months::new(12)),
     ] {
         let values = match past_date {
-            Some(date) => service
+            Some(date) if include_amount_changes => service
                 .asset_breakdown(&breakdown_query(date))
                 .await?
                 .into_iter()
@@ -1918,6 +1920,25 @@ pub async fn portfolio_assets(
                     )
                 })
                 .collect(),
+            Some(date) => {
+                let unit_values = service
+                    .asset_unit_values(&current_assets, &currency, date)
+                    .await?;
+                current_rows
+                    .iter()
+                    .map(|row| {
+                        let value = unit_values
+                            .get(&row.asset)
+                            .copied()
+                            .flatten()
+                            .map(|unit_value| unit_value * row.total_amount);
+                        (
+                            (AssetId::from_asset(&row.asset).to_string(), row.liability),
+                            value,
+                        )
+                    })
+                    .collect()
+            }
             None => HashMap::new(),
         };
         past_values.push(values);
@@ -1980,6 +2001,13 @@ pub async fn portfolio_assets(
                 total_amount: row.total_amount.normalize().to_string(),
                 price: row.price,
                 price_date: row.price_date,
+                price_updated_at: row.price_timestamp.map(|timestamp| timestamp.to_rfc3339()),
+                amount_last_checked_at: row
+                    .amount_last_checked_at
+                    .map(|timestamp| timestamp.to_rfc3339()),
+                amount_last_changed_at: row
+                    .amount_last_changed_at
+                    .map(|timestamp| timestamp.to_rfc3339()),
                 value_in_base: row
                     .value_in_base
                     .map(|value| format_base_currency_value(value, currency_decimals)),
@@ -2008,6 +2036,11 @@ pub async fn portfolio_assets(
     Ok(AssetBreakdownOutput {
         as_of_date,
         currency,
+        change_mode: if include_amount_changes {
+            "price_and_amount".to_string()
+        } else {
+            "price_only".to_string()
+        },
         total_value: format_base_currency_value(total_value, currency_decimals),
         assets: entries.into_iter().map(|(_, entry)| entry).collect(),
     })

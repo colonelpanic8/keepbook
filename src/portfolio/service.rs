@@ -76,6 +76,12 @@ struct CalculationContext {
     zero_accounts: Vec<Id>,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+struct AssetUpdateMetadata {
+    amount_last_checked_at: Option<DateTime<Utc>>,
+    amount_last_changed_at: Option<DateTime<Utc>>,
+}
+
 impl PortfolioService {
     pub fn new(storage: Arc<dyn Storage>, market_data: Arc<MarketDataService>) -> Self {
         Self {
@@ -184,6 +190,7 @@ impl PortfolioService {
             .await?;
 
         let by_key = Self::aggregate_by_asset_liability(&ctx.filtered_snapshots)?;
+        let update_metadata = self.asset_update_metadata(query).await?;
 
         // Value each unique asset only once; both partitions of the same
         // asset share the valuation.
@@ -234,6 +241,13 @@ impl PortfolioService {
                 value_in_base: unit_value.map(|price| price * agg.total_amount),
                 price: valuation.price.clone(),
                 price_date: valuation.price_date,
+                price_timestamp: valuation.price_timestamp,
+                amount_last_checked_at: update_metadata
+                    .get(&(asset.clone(), *liability))
+                    .and_then(|metadata| metadata.amount_last_checked_at),
+                amount_last_changed_at: update_metadata
+                    .get(&(asset.clone(), *liability))
+                    .and_then(|metadata| metadata.amount_last_changed_at),
                 fx_rate: valuation.fx_rate.clone(),
                 fx_date: valuation.fx_date,
                 holdings,
@@ -243,6 +257,150 @@ impl PortfolioService {
         rows.sort_by_key(|row| (AssetId::from_asset(&row.asset).to_string(), row.liability));
 
         Ok(rows)
+    }
+
+    /// Value one unit of each asset at a historical date using the same
+    /// price/FX selection rules as portfolio calculations.
+    pub async fn asset_unit_values(
+        &self,
+        assets: &HashSet<Asset>,
+        target_currency: &str,
+        as_of_date: NaiveDate,
+    ) -> Result<HashMap<Asset, Option<Decimal>>> {
+        let mut values = HashMap::with_capacity(assets.len());
+        for asset in assets {
+            let valuation = self
+                .value_asset(asset, Decimal::ONE, target_currency, as_of_date)
+                .await?;
+            values.insert(asset.clone(), valuation.value);
+        }
+        Ok(values)
+    }
+
+    /// Derive amount freshness from complete account balance snapshots. Each
+    /// snapshot checks every asset previously seen in that account (an omitted
+    /// asset is a zero balance), while change timestamps reflect changes to the
+    /// aggregate amount across all included accounts.
+    async fn asset_update_metadata(
+        &self,
+        query: &PortfolioQuery,
+    ) -> Result<HashMap<(Asset, bool), AssetUpdateMetadata>> {
+        type AssetKey = (Asset, bool);
+        type AccountAmounts = HashMap<AssetKey, Decimal>;
+
+        let cutoff = query
+            .as_of_date
+            .and_hms_opt(23, 59, 59)
+            .expect("end-of-day time should be valid")
+            .and_utc();
+        let scoped_account_ids: HashSet<&Id> = query.account_ids.iter().collect();
+        let mut events: Vec<(DateTime<Utc>, Id, AccountAmounts)> = Vec::new();
+
+        for account in self.storage.list_accounts().await? {
+            if !scoped_account_ids.is_empty() && !scoped_account_ids.contains(&account.id) {
+                continue;
+            }
+
+            let account_config = self.storage.get_account_config(&account.id)?;
+            if account_config
+                .as_ref()
+                .and_then(|config| config.exclude_from_portfolio)
+                .unwrap_or(false)
+            {
+                continue;
+            }
+
+            let mut snapshots = self.storage.get_balance_snapshots(&account.id).await?;
+            snapshots.sort_by_key(|snapshot| snapshot.timestamp);
+            let mut eligible: Vec<BalanceSnapshot> = snapshots
+                .iter()
+                .filter(|snapshot| snapshot.timestamp <= cutoff)
+                .cloned()
+                .collect();
+            if eligible.is_empty()
+                && matches!(
+                    account_config.and_then(|config| config.balance_backfill),
+                    Some(BalanceBackfillPolicy::CarryEarliest)
+                )
+            {
+                if let Some(earliest) = snapshots.first().cloned() {
+                    eligible.push(earliest);
+                }
+            }
+
+            for snapshot in eligible {
+                let mut amounts = AccountAmounts::new();
+                for balance in snapshot.balances {
+                    let asset = balance.asset.normalized();
+                    let amount = Decimal::from_str(&balance.amount)?;
+                    let key = (asset, amount < Decimal::ZERO);
+                    *amounts.entry(key).or_insert(Decimal::ZERO) += amount;
+                }
+                events.push((snapshot.timestamp, account.id.clone(), amounts));
+            }
+        }
+
+        events.sort_by(|(a_timestamp, a_account, _), (b_timestamp, b_account, _)| {
+            a_timestamp
+                .cmp(b_timestamp)
+                .then_with(|| a_account.as_str().cmp(b_account.as_str()))
+        });
+
+        let mut metadata: HashMap<AssetKey, AssetUpdateMetadata> = HashMap::new();
+        let mut account_amounts: HashMap<Id, AccountAmounts> = HashMap::new();
+        let mut account_known_assets: HashMap<Id, HashSet<AssetKey>> = HashMap::new();
+        let mut totals: AccountAmounts = HashMap::new();
+        let mut index = 0;
+
+        while index < events.len() {
+            let timestamp = events[index].0;
+            let group_end = events[index..]
+                .iter()
+                .position(|(candidate, _, _)| *candidate != timestamp)
+                .map(|offset| index + offset)
+                .unwrap_or(events.len());
+            let totals_before = totals.clone();
+            let mut touched_keys = HashSet::new();
+
+            for (_, account_id, current_amounts) in &events[index..group_end] {
+                let previous_amounts = account_amounts
+                    .insert(account_id.clone(), current_amounts.clone())
+                    .unwrap_or_default();
+                let known_assets = account_known_assets.entry(account_id.clone()).or_default();
+
+                for key in previous_amounts.keys().chain(current_amounts.keys()) {
+                    known_assets.insert(key.clone());
+                    touched_keys.insert(key.clone());
+                }
+                for key in known_assets.iter() {
+                    metadata
+                        .entry(key.clone())
+                        .or_default()
+                        .amount_last_checked_at = Some(timestamp);
+                }
+
+                for (key, amount) in previous_amounts {
+                    *totals.entry(key).or_insert(Decimal::ZERO) -= amount;
+                }
+                for (key, amount) in current_amounts {
+                    *totals.entry(key.clone()).or_insert(Decimal::ZERO) += *amount;
+                }
+            }
+
+            touched_keys.extend(totals_before.keys().cloned());
+            touched_keys.extend(totals.keys().cloned());
+            for key in touched_keys {
+                let before = totals_before.get(&key).copied().unwrap_or(Decimal::ZERO);
+                let after = totals.get(&key).copied().unwrap_or(Decimal::ZERO);
+                if before != after {
+                    metadata.entry(key).or_default().amount_last_changed_at = Some(timestamp);
+                }
+            }
+
+            index = group_end;
+        }
+
+        Ok(metadata)
     }
 
     /// Load accounts, connections, and balances from storage.

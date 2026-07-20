@@ -4,10 +4,19 @@ use std::collections::HashSet;
 #[component]
 pub(super) fn AssetsView(filter_overrides: FilterOverrides) -> Element {
     let refresh_epoch = use_context::<Signal<u64>>();
-    let breakdown = use_resource(move || {
+    let mut include_amount_changes = use_signal(|| false);
+    let mut show_absolute_changes = use_signal(|| false);
+    let mut breakdown = use_resource(move || {
         let _refresh_epoch = refresh_epoch();
         let current_filter_overrides = filter_overrides.clone();
-        async move { fetch_assets(assets_query_string(current_filter_overrides)).await }
+        let current_include_amount_changes = include_amount_changes();
+        async move {
+            fetch_assets(assets_query_string(
+                current_filter_overrides,
+                current_include_amount_changes,
+            ))
+            .await
+        }
     });
     let mut sort_field = use_signal(|| AssetSortField::Value);
     let mut sort_direction = use_signal(|| SortDirection::Desc);
@@ -32,7 +41,13 @@ pub(super) fn AssetsView(filter_overrides: FilterOverrides) -> Element {
                 let currency = data.currency.clone();
                 let mut entries = data.assets.clone();
                 entries.sort_by(|a, b| {
-                    compare_asset_entries(a, b, selected_sort_field, selected_sort_direction)
+                    compare_asset_entries_with_change_metric(
+                        a,
+                        b,
+                        selected_sort_field,
+                        selected_sort_direction,
+                        show_absolute_changes(),
+                    )
                 });
                 let liability_count = entries.iter().filter(|entry| entry.liability).count();
                 let asset_count = entries.len() - liability_count;
@@ -59,7 +74,34 @@ pub(super) fn AssetsView(filter_overrides: FilterOverrides) -> Element {
                     }
                     Panel {
                         title: "Assets",
-                        subtitle: format!("As of {}", data.as_of_date),
+                        subtitle: if data.change_mode == "price_and_amount" {
+                            format!("As of {} · Changes include price and amount", data.as_of_date)
+                        } else {
+                            format!("As of {} · Price changes only", data.as_of_date)
+                        },
+                        actions: rsx! {
+                            div { class: "settings-actions inline-actions",
+                                label { class: "compact-check",
+                                    input {
+                                        r#type: "checkbox",
+                                        checked: include_amount_changes(),
+                                        onchange: move |event| {
+                                            include_amount_changes.set(event.checked());
+                                            breakdown.restart();
+                                        }
+                                    }
+                                    span { "Include amount changes" }
+                                }
+                                label { class: "compact-check",
+                                    input {
+                                        r#type: "checkbox",
+                                        checked: show_absolute_changes(),
+                                        onchange: move |event| show_absolute_changes.set(event.checked())
+                                    }
+                                    span { "Absolute changes" }
+                                }
+                            }
+                        },
                         if entries.is_empty() {
                             div { class: "chart-empty",
                                 strong { "No assets" }
@@ -84,7 +126,31 @@ pub(super) fn AssetsView(filter_overrides: FilterOverrides) -> Element {
                                         onsortfieldchange: move |field| sort_field.set(field),
                                         onsortdirectionchange: move |direction| sort_direction.set(direction),
                                     }
+                                    AssetSortHeader {
+                                        label: "Amount checked".to_string(),
+                                        field: AssetSortField::AmountChecked,
+                                        selected_field: selected_sort_field,
+                                        direction: selected_sort_direction,
+                                        onsortfieldchange: move |field| sort_field.set(field),
+                                        onsortdirectionchange: move |direction| sort_direction.set(direction),
+                                    }
+                                    AssetSortHeader {
+                                        label: "Amount changed".to_string(),
+                                        field: AssetSortField::AmountChanged,
+                                        selected_field: selected_sort_field,
+                                        direction: selected_sort_direction,
+                                        onsortfieldchange: move |field| sort_field.set(field),
+                                        onsortdirectionchange: move |direction| sort_direction.set(direction),
+                                    }
                                     span { "Price" }
+                                    AssetSortHeader {
+                                        label: "Price updated".to_string(),
+                                        field: AssetSortField::PriceUpdated,
+                                        selected_field: selected_sort_field,
+                                        direction: selected_sort_direction,
+                                        onsortfieldchange: move |field| sort_field.set(field),
+                                        onsortdirectionchange: move |direction| sort_direction.set(direction),
+                                    }
                                     AssetSortHeader {
                                         label: format!("Value ({currency})"),
                                         field: AssetSortField::Value,
@@ -133,6 +199,7 @@ pub(super) fn AssetsView(filter_overrides: FilterOverrides) -> Element {
                                         entry: entry.clone(),
                                         currency: currency.clone(),
                                         expanded: expanded.contains(&asset_expansion_key(&entry)),
+                                        show_absolute_changes: show_absolute_changes(),
                                         ontoggle: move |key: String| {
                                             let mut next = expanded_assets();
                                             if !next.insert(key.clone()) {
@@ -156,6 +223,7 @@ fn AssetRow(
     entry: AssetBreakdownEntry,
     currency: String,
     expanded: bool,
+    show_absolute_changes: bool,
     ontoggle: EventHandler<String>,
 ) -> Element {
     let name = asset_display_name(&entry.asset, &entry.asset_id);
@@ -165,6 +233,8 @@ fn AssetRow(
         None => kind.to_string(),
     };
     let amount = format_asset_amount(&entry.total_amount);
+    let amount_checked = format_asset_timestamp(entry.amount_last_checked_at.as_deref());
+    let amount_changed = format_asset_timestamp(entry.amount_last_changed_at.as_deref());
     let price = entry
         .price
         .as_deref()
@@ -176,6 +246,7 @@ fn AssetRow(
         .as_deref()
         .map(|date| format!("Price as of {date}"))
         .unwrap_or_default();
+    let price_updated = format_asset_timestamp(entry.price_updated_at.as_deref());
     let value = entry
         .value_in_base
         .as_deref()
@@ -206,12 +277,15 @@ fn AssetRow(
                 small { "{detail_text}" }
             }
             span { "{amount}" }
+            span { title: "{entry.amount_last_checked_at.clone().unwrap_or_default()}", "{amount_checked}" }
+            span { title: "{entry.amount_last_changed_at.clone().unwrap_or_default()}", "{amount_changed}" }
             span { title: "{price_title}", "{price}" }
+            span { title: "{entry.price_updated_at.clone().unwrap_or_default()}", "{price_updated}" }
             strong { "{value}" }
-            {asset_change_cell(&entry, AssetSortField::DayChange, &currency)}
-            {asset_change_cell(&entry, AssetSortField::WeekChange, &currency)}
-            {asset_change_cell(&entry, AssetSortField::MonthChange, &currency)}
-            {asset_change_cell(&entry, AssetSortField::YearChange, &currency)}
+            {asset_change_cell(&entry, AssetSortField::DayChange, &currency, show_absolute_changes)}
+            {asset_change_cell(&entry, AssetSortField::WeekChange, &currency, show_absolute_changes)}
+            {asset_change_cell(&entry, AssetSortField::MonthChange, &currency, show_absolute_changes)}
+            {asset_change_cell(&entry, AssetSortField::YearChange, &currency, show_absolute_changes)}
             button {
                 class: "transaction-expand-toggle",
                 r#type: "button",
@@ -261,6 +335,7 @@ fn asset_change_cell(
     entry: &AssetBreakdownEntry,
     field: AssetSortField,
     currency: &str,
+    show_absolute: bool,
 ) -> Element {
     let Some(change) = asset_period_change(entry, field) else {
         return rsx! {
@@ -269,6 +344,21 @@ fn asset_change_cell(
     };
     let absolute = parse_money_input(&change.absolute).unwrap_or_default();
     let absolute_text = format_signed_money(absolute, currency);
+    if show_absolute {
+        let percentage_title = change
+            .percentage
+            .as_deref()
+            .and_then(parse_money_input)
+            .map(format_signed_percent)
+            .unwrap_or_else(|| "No comparable percentage".to_string());
+        return rsx! {
+            span {
+                class: "asset-change-cell {change_value_class(absolute)}",
+                title: "{percentage_title}",
+                "{absolute_text}"
+            }
+        };
+    }
     match change.percentage.as_deref().and_then(parse_money_input) {
         Some(percent) => rsx! {
             span {

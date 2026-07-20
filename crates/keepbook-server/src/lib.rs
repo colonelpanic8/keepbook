@@ -861,7 +861,13 @@ impl ApiState {
             state.storage.clone(),
             &query.account_portfolio_overrides,
         )?;
-        keepbook::app::portfolio_assets(storage, &state.config, query.date).await
+        keepbook::app::portfolio_assets(
+            storage,
+            &state.config,
+            query.date,
+            query.include_amount_changes,
+        )
+        .await
     }
 
     pub async fn portfolio_stacked_history(
@@ -1623,6 +1629,8 @@ pub struct HistoryQuery {
 pub struct AssetsQuery {
     pub date: Option<String>,
     pub account_portfolio_overrides: Option<String>,
+    #[serde(default)]
+    pub include_amount_changes: bool,
 }
 
 #[derive(Debug, Deserialize)]

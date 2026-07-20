@@ -565,6 +565,7 @@ async fn portfolio_assets_returns_breakdown_and_respects_account_overrides() -> 
         .portfolio_assets(AssetsQuery {
             date: Some("2024-06-15".to_string()),
             account_portfolio_overrides: None,
+            include_amount_changes: false,
         })
         .await?;
     assert_eq!(output.currency, "USD");
@@ -592,6 +593,7 @@ async fn portfolio_assets_returns_breakdown_and_respects_account_overrides() -> 
         .portfolio_assets(AssetsQuery {
             date: Some("2024-06-15".to_string()),
             account_portfolio_overrides: Some(overrides),
+            include_amount_changes: false,
         })
         .await?;
     assert_eq!(output.total_value, "1000");

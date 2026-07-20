@@ -332,6 +332,8 @@ pub struct StackedHistoryOutput {
 pub struct AssetBreakdownOutput {
     pub as_of_date: NaiveDate,
     pub currency: String,
+    /// `price_only` or `price_and_amount`.
+    pub change_mode: String,
     /// Sum of all rows' value_in_base; rows with missing values contribute 0.
     pub total_value: String,
     pub assets: Vec<AssetBreakdownEntry>,
@@ -349,6 +351,15 @@ pub struct AssetBreakdownEntry {
     pub price: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub price_date: Option<NaiveDate>,
+    /// Exact time when the price used for this row was fetched/recorded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub price_updated_at: Option<String>,
+    /// Most recent balance snapshot that checked this asset's amount.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub amount_last_checked_at: Option<String>,
+    /// Most recent balance snapshot where this asset's aggregate amount changed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub amount_last_changed_at: Option<String>,
     /// Value in base currency. None if price data unavailable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value_in_base: Option<String>,

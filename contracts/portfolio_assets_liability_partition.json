@@ -1,6 +1,7 @@
 {
   "as_of_date": "2024-06-15",
   "currency": "USD",
+  "change_mode": "price_only",
   "total_value": "60.25",
   "assets": [
     {
@@ -8,12 +9,14 @@
       "asset_id": "currency/USD",
       "liability": false,
       "total_amount": "100.5",
+      "amount_last_checked_at": "2024-01-15T10:00:00+00:00",
+      "amount_last_changed_at": "2024-01-15T10:00:00+00:00",
       "value_in_base": "100.5",
       "changes": {
         "day": { "absolute": "0", "percentage": "0" },
         "week": { "absolute": "0", "percentage": "0" },
         "month": { "absolute": "0", "percentage": "0" },
-        "year": { "absolute": "100.5" }
+        "year": { "absolute": "0", "percentage": "0" }
       },
       "holdings": [
         {
@@ -31,12 +34,14 @@
       "asset_id": "currency/USD",
       "liability": true,
       "total_amount": "-40.25",
+      "amount_last_checked_at": "2024-01-15T10:00:00+00:00",
+      "amount_last_changed_at": "2024-01-15T10:00:00+00:00",
       "value_in_base": "-40.25",
       "changes": {
         "day": { "absolute": "0", "percentage": "0" },
         "week": { "absolute": "0", "percentage": "0" },
         "month": { "absolute": "0", "percentage": "0" },
-        "year": { "absolute": "-40.25" }
+        "year": { "absolute": "0", "percentage": "0" }
       },
       "holdings": [
         {

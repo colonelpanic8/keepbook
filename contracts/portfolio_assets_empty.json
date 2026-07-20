@@ -1,6 +1,7 @@
 {
   "as_of_date": "2024-06-15",
   "currency": "USD",
+  "change_mode": "price_only",
   "total_value": "0",
   "assets": []
 }

@@ -3050,14 +3050,17 @@ button.stacked-legend-item {
   grid-template-columns:
     minmax(200px, 1.4fr)
     minmax(110px, 0.7fr)
+    minmax(150px, 0.8fr)
+    minmax(150px, 0.8fr)
     minmax(110px, 0.6fr)
+    minmax(150px, 0.8fr)
     minmax(140px, 0.8fr)
     minmax(84px, 0.5fr)
     minmax(84px, 0.5fr)
     minmax(84px, 0.5fr)
     minmax(84px, 0.5fr)
     32px;
-  min-width: 1080px;
+  min-width: 1530px;
 }
 
 .asset-row {

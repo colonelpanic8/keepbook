@@ -395,6 +395,8 @@ struct StackedHistorySeries {
 struct AssetBreakdown {
     as_of_date: String,
     currency: String,
+    #[serde(default)]
+    change_mode: String,
     total_value: String,
     assets: Vec<AssetBreakdownEntry>,
 }
@@ -409,6 +411,12 @@ struct AssetBreakdownEntry {
     price: Option<String>,
     #[serde(default)]
     price_date: Option<String>,
+    #[serde(default)]
+    price_updated_at: Option<String>,
+    #[serde(default)]
+    amount_last_checked_at: Option<String>,
+    #[serde(default)]
+    amount_last_changed_at: Option<String>,
     #[serde(default)]
     value_in_base: Option<String>,
     changes: AssetChanges,
@@ -807,6 +815,9 @@ enum TransactionSortField {
 enum AssetSortField {
     Name,
     Amount,
+    AmountChecked,
+    AmountChanged,
+    PriceUpdated,
     Value,
     DayChange,
     WeekChange,

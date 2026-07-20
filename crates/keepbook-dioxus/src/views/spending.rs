@@ -938,7 +938,7 @@ fn SpendingOverTimeChart(
     // A clicked (pinned) segment takes precedence over a hovered segment. Both
     // show the category amount alongside the full bucket total. Empty column
     // space and externally-selected periods continue to show period totals.
-    let active_segment = pinned_segment().or_else(|| hovered_segment());
+    let active_segment = pinned_segment().or_else(&*hovered_segment);
     let tooltip = active_segment
         .as_ref()
         .and_then(|pin| {

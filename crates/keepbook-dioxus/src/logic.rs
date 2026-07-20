@@ -468,8 +468,14 @@ pub(crate) fn spending_over_time_query_string(
 /// Query string for the asset breakdown endpoint. Assets only honor the
 /// account include/exclude overrides; the latent-tax override is a synthetic
 /// account and never applies to per-asset rows.
-pub(crate) fn assets_query_string(overrides: FilterOverrides) -> String {
+pub(crate) fn assets_query_string(
+    overrides: FilterOverrides,
+    include_amount_changes: bool,
+) -> String {
     let mut params = Vec::new();
+    if include_amount_changes {
+        params.push("include_amount_changes=true".to_string());
+    }
     append_filter_override_params(
         &mut params,
         FilterOverrides {
@@ -1537,6 +1543,9 @@ pub(crate) fn default_asset_sort_direction(field: AssetSortField) -> SortDirecti
     match field {
         AssetSortField::Name => SortDirection::Asc,
         AssetSortField::Amount
+        | AssetSortField::AmountChecked
+        | AssetSortField::AmountChanged
+        | AssetSortField::PriceUpdated
         | AssetSortField::Value
         | AssetSortField::DayChange
         | AssetSortField::WeekChange
@@ -1554,14 +1563,32 @@ pub(crate) fn asset_period_change(
         AssetSortField::WeekChange => entry.changes.week.as_ref(),
         AssetSortField::MonthChange => entry.changes.month.as_ref(),
         AssetSortField::YearChange => entry.changes.year.as_ref(),
-        AssetSortField::Name | AssetSortField::Amount | AssetSortField::Value => None,
+        AssetSortField::Name
+        | AssetSortField::Amount
+        | AssetSortField::AmountChecked
+        | AssetSortField::AmountChanged
+        | AssetSortField::PriceUpdated
+        | AssetSortField::Value => None,
     }
 }
 
-fn asset_sort_metric(entry: &AssetBreakdownEntry, field: AssetSortField) -> Option<f64> {
+fn asset_sort_metric(
+    entry: &AssetBreakdownEntry,
+    field: AssetSortField,
+    use_absolute_changes: bool,
+) -> Option<f64> {
     match field {
         AssetSortField::Name => None,
         AssetSortField::Amount => parse_money_input(&entry.total_amount),
+        AssetSortField::AmountChecked => {
+            asset_timestamp_sort_metric(entry.amount_last_checked_at.as_deref())
+        }
+        AssetSortField::AmountChanged => {
+            asset_timestamp_sort_metric(entry.amount_last_changed_at.as_deref())
+        }
+        AssetSortField::PriceUpdated => {
+            asset_timestamp_sort_metric(entry.price_updated_at.as_deref())
+        }
         AssetSortField::Value => entry
             .value_in_base
             .as_deref()
@@ -1570,9 +1597,38 @@ fn asset_sort_metric(entry: &AssetBreakdownEntry, field: AssetSortField) -> Opti
         AssetSortField::DayChange
         | AssetSortField::WeekChange
         | AssetSortField::MonthChange
-        | AssetSortField::YearChange => asset_period_change(entry, field)
-            .and_then(|change| change.percentage.as_deref())
-            .and_then(parse_money_input),
+        | AssetSortField::YearChange => asset_period_change(entry, field).and_then(|change| {
+            if use_absolute_changes {
+                parse_money_input(&change.absolute)
+            } else {
+                change.percentage.as_deref().and_then(parse_money_input)
+            }
+        }),
+    }
+}
+
+/// RFC 3339 app timestamps are UTC (`+00:00`), so their compact numeric form
+/// preserves chronological ordering without target-specific date libraries.
+fn asset_timestamp_sort_metric(timestamp: Option<&str>) -> Option<f64> {
+    timestamp.map(|value| {
+        value
+            .bytes()
+            .filter(u8::is_ascii_digit)
+            .take(17)
+            .fold(0_f64, |metric, digit| {
+                metric * 10.0 + f64::from(digit - b'0')
+            })
+    })
+}
+
+pub(crate) fn format_asset_timestamp(timestamp: Option<&str>) -> String {
+    let Some(value) = timestamp else {
+        return "—".to_string();
+    };
+    if value.len() >= 16 && value.as_bytes().get(10) == Some(&b'T') {
+        format!("{} {} UTC", &value[..10], &value[11..16])
+    } else {
+        value.to_string()
     }
 }
 
@@ -1599,11 +1655,12 @@ fn compare_metrics_missing_last(
     }
 }
 
-pub(crate) fn compare_asset_entries(
+pub(crate) fn compare_asset_entries_with_change_metric(
     a: &AssetBreakdownEntry,
     b: &AssetBreakdownEntry,
     field: AssetSortField,
     direction: SortDirection,
+    use_absolute_changes: bool,
 ) -> std::cmp::Ordering {
     let ordering = match field {
         AssetSortField::Name => {
@@ -1617,8 +1674,8 @@ pub(crate) fn compare_asset_entries(
             }
         }
         _ => compare_metrics_missing_last(
-            asset_sort_metric(a, field),
-            asset_sort_metric(b, field),
+            asset_sort_metric(a, field, use_absolute_changes),
+            asset_sort_metric(b, field, use_absolute_changes),
             direction,
         ),
     };
