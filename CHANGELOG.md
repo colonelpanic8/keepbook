@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.9.0 - 2026-07-20
+
+### Added
+
+- Added sortable price-update, amount-check, and amount-change timestamps to
+  every row in the Assets view.
+- Added Assets view controls for switching trailing changes between percentage
+  and absolute values and for optionally including holding amount changes.
+
+### Changed
+
+- Asset trailing changes now isolate price movement by default, valuing the
+  current amount at both current and historical prices.
+
 ## 0.8.1 - 2026-07-18
 
 ### Added
