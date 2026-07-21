@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.1 - 2026-07-21
+
+### Fixed
+
+- Redesigned the Assets view at mobile widths as compact, labeled cards that
+  foreground each holding's value and clearly group position, performance, and
+  freshness details without horizontal scrolling.
+- Restored access to every Assets sort on mobile with dedicated field and
+  direction controls, including amount/price freshness and all trailing-change
+  periods.
+
 ## 0.9.0 - 2026-07-20
 
 ### Added
