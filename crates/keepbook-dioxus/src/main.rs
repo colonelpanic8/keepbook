@@ -825,6 +825,57 @@ enum AssetSortField {
     YearChange,
 }
 
+impl AssetSortField {
+    const OPTIONS: [Self; 10] = [
+        Self::Name,
+        Self::Amount,
+        Self::AmountChecked,
+        Self::AmountChanged,
+        Self::PriceUpdated,
+        Self::Value,
+        Self::DayChange,
+        Self::WeekChange,
+        Self::MonthChange,
+        Self::YearChange,
+    ];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Name => "Asset",
+            Self::Amount => "Amount",
+            Self::AmountChecked => "Amount checked",
+            Self::AmountChanged => "Amount changed",
+            Self::PriceUpdated => "Price updated",
+            Self::Value => "Value",
+            Self::DayChange => "1D change",
+            Self::WeekChange => "1W change",
+            Self::MonthChange => "1M change",
+            Self::YearChange => "1Y change",
+        }
+    }
+
+    fn value(self) -> &'static str {
+        match self {
+            Self::Name => "name",
+            Self::Amount => "amount",
+            Self::AmountChecked => "amount_checked",
+            Self::AmountChanged => "amount_changed",
+            Self::PriceUpdated => "price_updated",
+            Self::Value => "value",
+            Self::DayChange => "day_change",
+            Self::WeekChange => "week_change",
+            Self::MonthChange => "month_change",
+            Self::YearChange => "year_change",
+        }
+    }
+
+    fn from_value(value: &str) -> Option<Self> {
+        Self::OPTIONS
+            .into_iter()
+            .find(|field| field.value() == value)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SortDirection {
     Asc,

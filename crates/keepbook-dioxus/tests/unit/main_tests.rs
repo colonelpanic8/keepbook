@@ -1325,6 +1325,29 @@ fn default_asset_sort_directions_match_field_semantics() {
 }
 
 #[test]
+fn asset_sort_options_round_trip_and_cover_every_field() {
+    let expected = [
+        AssetSortField::Name,
+        AssetSortField::Amount,
+        AssetSortField::AmountChecked,
+        AssetSortField::AmountChanged,
+        AssetSortField::PriceUpdated,
+        AssetSortField::Value,
+        AssetSortField::DayChange,
+        AssetSortField::WeekChange,
+        AssetSortField::MonthChange,
+        AssetSortField::YearChange,
+    ];
+
+    assert_eq!(AssetSortField::OPTIONS, expected);
+    for field in AssetSortField::OPTIONS {
+        assert_eq!(AssetSortField::from_value(field.value()), Some(field));
+        assert!(!field.label().is_empty());
+    }
+    assert_eq!(AssetSortField::from_value("price"), None);
+}
+
+#[test]
 fn asset_timestamp_fields_sort_latest_first_and_missing_last() {
     let mut old = asset_entry(
         serde_json::json!({"type": "equity", "ticker": "OLD"}),

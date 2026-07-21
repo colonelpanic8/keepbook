@@ -3053,19 +3053,20 @@ button.stacked-legend-item {
 }
 
 /* Assets view: per-asset breakdown table with expandable holdings. */
+.asset-mobile-sort {
+  display: none;
+}
+
 .assets-table .table-head,
-.assets-table .table-row {
+.assets-table .asset-row {
   grid-template-columns:
     minmax(200px, 1.4fr)
-    minmax(110px, 0.7fr)
-    minmax(110px, 0.6fr)
+    minmax(230px, 1.2fr)
     minmax(140px, 0.8fr)
-    minmax(84px, 0.5fr)
-    minmax(84px, 0.5fr)
-    minmax(84px, 0.5fr)
-    minmax(84px, 0.5fr)
+    minmax(465px, 2.4fr)
+    minmax(336px, 2fr)
     32px;
-  min-width: 1080px;
+  min-width: 1530px;
 }
 
 .asset-row {
@@ -3094,6 +3095,35 @@ button.stacked-legend-item {
   min-width: 0;
 }
 
+.asset-position-grid,
+.asset-freshness-grid,
+.asset-change-grid {
+  align-items: center;
+  display: grid;
+  gap: var(--sp-12);
+  min-width: 0;
+}
+
+.asset-position-grid {
+  grid-template-columns: repeat(2, minmax(110px, 1fr));
+}
+
+.asset-freshness-grid {
+  grid-template-columns: repeat(3, minmax(145px, 1fr));
+}
+
+.asset-change-grid {
+  grid-template-columns: repeat(4, minmax(72px, 1fr));
+}
+
+.asset-labeled-cell {
+  min-width: 0;
+}
+
+.asset-cell-label {
+  display: none;
+}
+
 .asset-change-cell {
   white-space: nowrap;
 }
@@ -3109,6 +3139,185 @@ button.stacked-legend-item {
 
 .assets-table .asset-holding-row small {
   color: var(--color-text-muted);
+}
+
+@media (max-width: 1200px) {
+  .assets-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .assets-summary-grid .metric:first-child {
+    grid-column: 1 / -1;
+  }
+
+  .assets-panel .panel-header {
+    flex-wrap: wrap;
+  }
+
+  .asset-view-actions {
+    flex: 1 1 100%;
+    justify-content: flex-start !important;
+  }
+
+  .asset-mobile-sort {
+    align-items: end;
+    background: var(--color-surface-subtle);
+    border: 1px solid var(--color-border-muted);
+    border-radius: var(--radius-md);
+    display: grid;
+    gap: var(--sp-10);
+    grid-template-columns: minmax(0, 1fr) auto;
+    margin-bottom: var(--sp-12);
+    padding: var(--sp-10);
+  }
+
+  .asset-mobile-sort-field {
+    min-width: 0;
+  }
+
+  .asset-mobile-sort-field select {
+    width: 100%;
+  }
+
+  .asset-sort-direction {
+    align-items: center;
+    display: inline-flex;
+    gap: var(--sp-6);
+    justify-content: center;
+    min-height: 38px;
+    white-space: nowrap;
+  }
+
+  .assets-table {
+    border: 0;
+    border-radius: 0;
+  }
+
+  .assets-table .asset-row {
+    gap: var(--sp-12);
+    grid-template-areas:
+      "name toggle"
+      "value value"
+      "position position"
+      "changes changes"
+      "freshness freshness";
+    grid-template-columns: minmax(0, 1fr) 36px !important;
+    padding: var(--sp-14);
+  }
+
+  .assets-table .asset-name-cell {
+    grid-area: name;
+  }
+
+  .assets-table .asset-name-line strong {
+    font-size: var(--fs-lead);
+  }
+
+  .assets-table .asset-position-grid {
+    grid-area: position;
+  }
+
+  .assets-table .asset-value-cell {
+    align-items: baseline;
+    background: var(--color-accent-bg);
+    border-radius: var(--radius-sm);
+    display: flex;
+    gap: var(--sp-10);
+    grid-area: value;
+    justify-content: space-between;
+    padding: var(--sp-10);
+  }
+
+  .assets-table .asset-value-cell strong {
+    font-size: var(--fs-lead);
+    text-align: right;
+  }
+
+  .assets-table .asset-freshness-grid {
+    border-top: 1px solid var(--color-divider);
+    gap: var(--sp-6);
+    grid-area: freshness;
+    grid-template-columns: minmax(0, 1fr);
+    padding-top: var(--sp-10);
+  }
+
+  .assets-table .asset-freshness-grid .asset-labeled-cell {
+    align-items: baseline;
+    display: flex;
+    gap: var(--sp-10);
+    justify-content: space-between;
+  }
+
+  .assets-table .asset-change-grid {
+    background: var(--color-surface-subtle);
+    border-radius: var(--radius-sm);
+    gap: var(--sp-4);
+    grid-area: changes;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    padding: var(--sp-8);
+  }
+
+  .assets-table .asset-position-grid {
+    gap: var(--sp-8);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .assets-table .asset-position-grid .asset-labeled-cell,
+  .assets-table .asset-change-cell {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+  }
+
+  .assets-table .asset-change-cell {
+    align-items: center;
+    font-size: var(--fs-small);
+    text-align: center;
+  }
+
+  .assets-table .asset-cell-label {
+    color: var(--color-text-muted);
+    display: block;
+    font-size: var(--fs-micro);
+    font-weight: var(--fw-bold);
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }
+
+  .assets-table .asset-row > .transaction-expand-toggle {
+    align-self: start;
+    grid-area: toggle;
+  }
+
+  .assets-table .asset-labeled-cell > span,
+  .assets-table .asset-value-cell strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .assets-table .asset-holding-row {
+    border-left: 3px solid var(--color-accent-border);
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    margin-left: var(--sp-12);
+    width: calc(100% - var(--sp-12));
+  }
+
+  .assets-table .asset-holding-row .asset-name-cell,
+  .assets-table .asset-holding-date {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 520px) {
+  .asset-mobile-sort {
+    align-items: stretch;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .asset-sort-direction {
+    width: 100%;
+  }
 }
 
 </style>

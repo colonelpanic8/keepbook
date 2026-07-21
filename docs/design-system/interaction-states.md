@@ -67,15 +67,23 @@ app appear frozen.
 
 - The Assets view renders one `.data-table.assets-table` row per (asset,
   liability) pair from the portfolio asset breakdown: Asset, Amount, Price,
-  Value in the reporting currency, and 1D/1W/1M/1Y trailing changes, plus a
-  trailing expander column. Data loads through the standard
+  Value in the reporting currency, amount/price freshness, and 1D/1W/1M/1Y
+  trailing changes, plus a trailing expander column. Data loads through the standard
   refresh-epoch/`use_resource` flow with `BackendActivity` for the initial
   load and `InlineStatus` for failures.
 - Column headers reuse the shared `sort-header-button`/`sort-arrow` pattern
-  from the transaction table (Price is display-only). Sorting is client-side;
-  the default is Value descending by **absolute** value, name sorts default
-  ascending, and rows without a metric (unpriced values, absent change
-  periods) always sort last in either direction.
+  from the transaction table (Price is display-only). At the shared mobile
+  breakpoint, headers become a dedicated `asset-mobile-sort` field and
+  direction control while rows become labeled cards; the mobile field exposes
+  every desktop sort: Asset, Amount, Amount checked, Amount changed, Price
+  updated, Value, 1D, 1W, 1M, and 1Y. Sorting is client-side; the default is
+  Value descending by **absolute** value, name sorts default ascending, and
+  rows without a metric (unpriced values, absent timestamps or change periods)
+  always sort last in either direction.
+- Mobile asset cards foreground the asset identity and reporting-currency
+  value, pair Amount with Price, group the four trailing changes, and place
+  freshness timestamps in a quieter labeled footer. Expanded account holdings
+  use the same labeled-card treatment instead of relying on hidden headers.
 - Clicking a row, or its `transaction-expand-toggle` chevron, toggles
   `.asset-holding-row` sub-rows on the `--color-surface-subtle` surface
   listing each contributing account's amount, base-currency value, and
