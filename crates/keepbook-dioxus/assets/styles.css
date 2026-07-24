@@ -3055,8 +3055,9 @@ button.stacked-legend-item {
     minmax(200px, 1.4fr)
     minmax(230px, 1.2fr)
     minmax(140px, 0.8fr)
-    minmax(465px, 2.4fr)
+    minmax(145px, 0.8fr)
     minmax(336px, 2fr)
+    minmax(290px, 1.4fr)
     32px;
   min-width: 1530px;
 }
@@ -3088,7 +3089,7 @@ button.stacked-legend-item {
 }
 
 .asset-position-grid,
-.asset-freshness-grid,
+.asset-audit-grid,
 .asset-change-grid {
   align-items: center;
   display: grid;
@@ -3100,8 +3101,15 @@ button.stacked-legend-item {
   grid-template-columns: repeat(2, minmax(110px, 1fr));
 }
 
-.asset-freshness-grid {
-  grid-template-columns: repeat(3, minmax(145px, 1fr));
+.asset-price-freshness {
+  color: var(--color-text-muted);
+  font-size: var(--fs-caption);
+}
+
+.asset-audit-grid {
+  color: var(--color-text-faint);
+  font-size: var(--fs-caption);
+  grid-template-columns: repeat(2, minmax(140px, 1fr));
 }
 
 .asset-change-grid {
@@ -3192,7 +3200,8 @@ button.stacked-legend-item {
       "value value"
       "position position"
       "changes changes"
-      "freshness freshness";
+      "price-freshness price-freshness"
+      "audit audit";
     grid-template-columns: minmax(0, 1fr) 36px !important;
     padding: var(--sp-14);
   }
@@ -3225,18 +3234,31 @@ button.stacked-legend-item {
     text-align: right;
   }
 
-  .assets-table .asset-freshness-grid {
+  .assets-table .asset-price-freshness {
+    align-items: baseline;
     border-top: 1px solid var(--color-divider);
-    gap: var(--sp-6);
-    grid-area: freshness;
-    grid-template-columns: minmax(0, 1fr);
+    display: flex;
+    gap: var(--sp-10);
+    grid-area: price-freshness;
+    justify-content: space-between;
     padding-top: var(--sp-10);
   }
 
-  .assets-table .asset-freshness-grid .asset-labeled-cell {
+  .assets-table .asset-audit-grid {
+    display: none;
+    gap: var(--sp-4);
+    grid-area: audit;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .assets-table .asset-row.expanded .asset-audit-grid {
+    display: grid;
+  }
+
+  .assets-table .asset-audit-grid .asset-labeled-cell {
     align-items: baseline;
     display: flex;
-    gap: var(--sp-10);
+    gap: var(--sp-8);
     justify-content: space-between;
   }
 
@@ -3302,12 +3324,193 @@ button.stacked-legend-item {
 }
 
 @media (max-width: 520px) {
+  .assets-summary-grid {
+    display: block;
+    margin-bottom: var(--sp-12);
+  }
+
+  .assets-summary-grid .metric {
+    gap: var(--sp-4);
+    padding: var(--sp-12);
+  }
+
+  .assets-summary-grid .metric:first-child strong {
+    font-size: var(--fs-stat-sm);
+  }
+
+  .assets-summary-grid .metric:not(:first-child) {
+    display: none;
+  }
+
+  .assets-panel {
+    background: transparent;
+    border: 0;
+    padding: 0;
+  }
+
+  .assets-panel .panel-header {
+    gap: var(--sp-8);
+    margin-bottom: var(--sp-8);
+    padding-bottom: var(--sp-8);
+  }
+
+  .assets-panel .panel-title {
+    gap: var(--sp-2);
+  }
+
+  .asset-view-actions {
+    gap: var(--sp-12);
+  }
+
+  .asset-view-actions .compact-check {
+    font-size: var(--fs-caption);
+    min-height: 28px;
+  }
+
   .asset-mobile-sort {
-    align-items: stretch;
-    grid-template-columns: minmax(0, 1fr);
+    align-items: end;
+    gap: var(--sp-8);
+    grid-template-columns: minmax(0, 1fr) 42px;
+    margin-bottom: var(--sp-8);
+    padding: var(--sp-8);
   }
 
   .asset-sort-direction {
+    min-width: 42px;
+    padding: 0;
     width: 100%;
+  }
+
+  .asset-sort-direction-label {
+    display: none;
+  }
+
+  .asset-sort-control-label {
+    border: 0;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    padding: 0;
+    position: absolute;
+    white-space: nowrap;
+    width: 1px;
+  }
+
+  .assets-table {
+    gap: 0;
+  }
+
+  .assets-table .asset-row {
+    border-left: 0;
+    border-radius: 0;
+    border-right: 0;
+    border-top: 0;
+    gap: var(--sp-8);
+    grid-template-areas:
+      "name value toggle"
+      "position position position"
+      "changes changes changes"
+      "price-freshness price-freshness price-freshness"
+      "audit audit audit";
+    grid-template-columns: minmax(0, 1fr) auto 28px !important;
+    padding: 12px 0;
+  }
+
+  .assets-table .asset-name-cell {
+    align-self: center;
+  }
+
+  .assets-table .asset-name-line {
+    gap: var(--sp-6);
+  }
+
+  .assets-table .asset-name-line strong {
+    font-size: var(--fs-title);
+  }
+
+  .assets-table .asset-name-cell > small {
+    font-size: var(--fs-caption);
+  }
+
+  .assets-table .asset-value-cell {
+    align-items: flex-end;
+    align-self: center;
+    background: transparent;
+    display: flex;
+    gap: 0;
+    justify-content: flex-end;
+    padding: 0;
+  }
+
+  .assets-table .asset-value-cell .asset-cell-label {
+    display: none;
+  }
+
+  .assets-table .asset-value-cell strong {
+    font-size: var(--fs-title-sm);
+  }
+
+  .assets-table .asset-position-grid {
+    border-top: 1px solid var(--color-divider);
+    gap: var(--sp-12);
+    padding-top: var(--sp-8);
+  }
+
+  .assets-table .asset-position-grid .asset-labeled-cell {
+    flex-direction: row;
+    gap: var(--sp-6);
+  }
+
+  .assets-table .asset-position-grid .asset-labeled-cell:last-child {
+    justify-content: flex-end;
+    text-align: right;
+  }
+
+  .assets-table .asset-change-grid {
+    background: transparent;
+    border-radius: 0;
+    border-top: 1px solid var(--color-divider);
+    padding: var(--sp-8) 0 0;
+  }
+
+  .assets-table .asset-price-freshness {
+    border-top: 0;
+    color: var(--color-text-faint);
+    display: none;
+    font-size: var(--fs-micro);
+    padding-top: 0;
+  }
+
+  .assets-table .asset-row.expanded .asset-price-freshness {
+    display: flex;
+  }
+
+  .assets-table .asset-price-freshness .asset-cell-label,
+  .assets-table .asset-audit-grid .asset-cell-label {
+    color: var(--color-text-faint);
+    font-weight: var(--fw-semibold);
+  }
+
+  .assets-table .asset-audit-grid {
+    border-top: 1px solid var(--color-divider);
+    padding-top: var(--sp-8);
+  }
+
+  .assets-table .asset-row > .transaction-expand-toggle {
+    align-self: center;
+    height: 28px;
+    min-height: 28px;
+    min-width: 28px;
+    width: 28px;
+  }
+
+  .assets-table .asset-holding-row {
+    border-left-width: 2px;
+    border-radius: var(--radius-sm);
+    margin: var(--sp-4) 0 var(--sp-8) var(--sp-8);
+    padding: var(--sp-8);
+    width: calc(100% - var(--sp-8));
   }
 }

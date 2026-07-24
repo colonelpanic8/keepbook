@@ -53,13 +53,26 @@ pub(super) fn AssetsView(filter_overrides: FilterOverrides) -> Element {
                 let asset_count = entries.len() - liability_count;
                 let total_value = parse_money_input(&data.total_value).unwrap_or_default();
                 let expanded = expanded_assets();
+                let asset_label = if asset_count == 1 { "asset" } else { "assets" };
+                let liability_label = if liability_count == 1 {
+                    "liability"
+                } else {
+                    "liabilities"
+                };
 
                 rsx! {
                     section { class: "summary-grid assets-summary-grid",
                         MetricCard {
                             label: "Total value",
                             value: format_full_money(total_value, &currency),
-                            detail: format!("As of {}", data.as_of_date)
+                            detail: format!(
+                                "As of {} · {} {} · {} {}",
+                                data.as_of_date,
+                                asset_count,
+                                asset_label,
+                                liability_count,
+                                liability_label
+                            )
                         }
                         MetricCard {
                             label: "Assets",
@@ -144,31 +157,13 @@ pub(super) fn AssetsView(filter_overrides: FilterOverrides) -> Element {
                                         onsortfieldchange: move |field| sort_field.set(field),
                                         onsortdirectionchange: move |direction| sort_direction.set(direction),
                                     }
-                                    div { class: "asset-freshness-grid",
-                                        AssetSortHeader {
-                                            label: "Amount checked".to_string(),
-                                            field: AssetSortField::AmountChecked,
-                                            selected_field: selected_sort_field,
-                                            direction: selected_sort_direction,
-                                            onsortfieldchange: move |field| sort_field.set(field),
-                                            onsortdirectionchange: move |direction| sort_direction.set(direction),
-                                        }
-                                        AssetSortHeader {
-                                            label: "Amount changed".to_string(),
-                                            field: AssetSortField::AmountChanged,
-                                            selected_field: selected_sort_field,
-                                            direction: selected_sort_direction,
-                                            onsortfieldchange: move |field| sort_field.set(field),
-                                            onsortdirectionchange: move |direction| sort_direction.set(direction),
-                                        }
-                                        AssetSortHeader {
-                                            label: "Price updated".to_string(),
-                                            field: AssetSortField::PriceUpdated,
-                                            selected_field: selected_sort_field,
-                                            direction: selected_sort_direction,
-                                            onsortfieldchange: move |field| sort_field.set(field),
-                                            onsortdirectionchange: move |direction| sort_direction.set(direction),
-                                        }
+                                    AssetSortHeader {
+                                        label: "Price updated".to_string(),
+                                        field: AssetSortField::PriceUpdated,
+                                        selected_field: selected_sort_field,
+                                        direction: selected_sort_direction,
+                                        onsortfieldchange: move |field| sort_field.set(field),
+                                        onsortdirectionchange: move |direction| sort_direction.set(direction),
                                     }
                                     div { class: "asset-change-grid",
                                         AssetSortHeader {
@@ -198,6 +193,24 @@ pub(super) fn AssetsView(filter_overrides: FilterOverrides) -> Element {
                                         AssetSortHeader {
                                             label: "1Y".to_string(),
                                             field: AssetSortField::YearChange,
+                                            selected_field: selected_sort_field,
+                                            direction: selected_sort_direction,
+                                            onsortfieldchange: move |field| sort_field.set(field),
+                                            onsortdirectionchange: move |direction| sort_direction.set(direction),
+                                        }
+                                    }
+                                    div { class: "asset-audit-grid",
+                                        AssetSortHeader {
+                                            label: "Amount checked".to_string(),
+                                            field: AssetSortField::AmountChecked,
+                                            selected_field: selected_sort_field,
+                                            direction: selected_sort_direction,
+                                            onsortfieldchange: move |field| sort_field.set(field),
+                                            onsortdirectionchange: move |direction| sort_direction.set(direction),
+                                        }
+                                        AssetSortHeader {
+                                            label: "Amount changed".to_string(),
+                                            field: AssetSortField::AmountChanged,
                                             selected_field: selected_sort_field,
                                             direction: selected_sort_direction,
                                             onsortfieldchange: move |field| sort_field.set(field),
@@ -278,7 +291,7 @@ fn AssetRow(
     rsx! {
         div {
             class: "{row_class}",
-            title: if expanded { "Hide accounts" } else { "Show accounts" },
+            title: if expanded { "Hide details and accounts" } else { "Show details and accounts" },
             onclick: move |_| ontoggle.call(row_toggle_key.clone()),
             div { class: "asset-name-cell",
                 div { class: "asset-name-line",
@@ -303,7 +316,19 @@ fn AssetRow(
                 small { class: "asset-cell-label", "Value ({currency})" }
                 strong { "{value}" }
             }
-            div { class: "asset-freshness-grid",
+            span {
+                class: "asset-price-freshness asset-labeled-cell",
+                title: "{entry.price_updated_at.clone().unwrap_or_default()}",
+                small { class: "asset-cell-label", "Price updated" }
+                span { "{price_updated}" }
+            }
+            div { class: "asset-change-grid",
+                {asset_change_cell(&entry, AssetSortField::DayChange, &currency, show_absolute_changes)}
+                {asset_change_cell(&entry, AssetSortField::WeekChange, &currency, show_absolute_changes)}
+                {asset_change_cell(&entry, AssetSortField::MonthChange, &currency, show_absolute_changes)}
+                {asset_change_cell(&entry, AssetSortField::YearChange, &currency, show_absolute_changes)}
+            }
+            div { class: "asset-audit-grid",
                 span {
                     class: "asset-labeled-cell",
                     title: "{entry.amount_last_checked_at.clone().unwrap_or_default()}",
@@ -316,23 +341,11 @@ fn AssetRow(
                     small { class: "asset-cell-label", "Amount changed" }
                     span { "{amount_changed}" }
                 }
-                span {
-                    class: "asset-labeled-cell",
-                    title: "{entry.price_updated_at.clone().unwrap_or_default()}",
-                    small { class: "asset-cell-label", "Price updated" }
-                    span { "{price_updated}" }
-                }
-            }
-            div { class: "asset-change-grid",
-                {asset_change_cell(&entry, AssetSortField::DayChange, &currency, show_absolute_changes)}
-                {asset_change_cell(&entry, AssetSortField::WeekChange, &currency, show_absolute_changes)}
-                {asset_change_cell(&entry, AssetSortField::MonthChange, &currency, show_absolute_changes)}
-                {asset_change_cell(&entry, AssetSortField::YearChange, &currency, show_absolute_changes)}
             }
             button {
                 class: "transaction-expand-toggle",
                 r#type: "button",
-                title: if expanded { "Hide accounts" } else { "Show accounts" },
+                title: if expanded { "Hide details and accounts" } else { "Show details and accounts" },
                 onclick: move |event| {
                     event.stop_propagation();
                     ontoggle.call(chevron_toggle_key.clone());
@@ -442,9 +455,10 @@ fn AssetMobileSortControls(
     rsx! {
         div { class: "asset-mobile-sort", aria_label: "Asset sorting controls",
             label { class: "control-field asset-mobile-sort-field",
-                span { "Sort by" }
+                span { class: "asset-sort-control-label", "Sort by" }
                 select {
                     class: "control-input",
+                    aria_label: "Sort assets by",
                     value: "{selected_field.value()}",
                     onchange: move |event| {
                         if let Some(field) = AssetSortField::from_value(&event.value()) {
@@ -466,7 +480,7 @@ fn AssetMobileSortControls(
                 r#type: "button",
                 title: "Reverse asset sort order",
                 onclick: move |_| onsortdirectionchange.call(direction.toggle()),
-                span { "{direction.label()}" }
+                span { class: "asset-sort-direction-label", "{direction.label()}" }
                 span { aria_hidden: "true", "{sort_direction_arrow(direction)}" }
             }
         }

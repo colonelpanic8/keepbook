@@ -67,23 +67,29 @@ app appear frozen.
 
 - The Assets view renders one `.data-table.assets-table` row per (asset,
   liability) pair from the portfolio asset breakdown: Asset, Amount, Price,
-  Value in the reporting currency, amount/price freshness, and 1D/1W/1M/1Y
-  trailing changes, plus a trailing expander column. Data loads through the standard
-  refresh-epoch/`use_resource` flow with `BackendActivity` for the initial
-  load and `InlineStatus` for failures.
+  Value in the reporting currency, price freshness, 1D/1W/1M/1Y trailing
+  changes, and finally the lower-priority amount checked/changed timestamps,
+  plus a trailing expander column. Data loads through the standard
+  refresh-epoch/`use_resource` flow with `BackendActivity` for the initial load
+  and `InlineStatus` for failures.
 - Column headers reuse the shared `sort-header-button`/`sort-arrow` pattern
   from the transaction table (Price is display-only). At the shared mobile
   breakpoint, headers become a dedicated `asset-mobile-sort` field and
   direction control while rows become labeled cards; the mobile field exposes
-  every desktop sort: Asset, Amount, Amount checked, Amount changed, Price
-  updated, Value, 1D, 1W, 1M, and 1Y. Sorting is client-side; the default is
-  Value descending by **absolute** value, name sorts default ascending, and
-  rows without a metric (unpriced values, absent timestamps or change periods)
-  always sort last in either direction.
+  every desktop sort in display-priority order: Asset, Amount, Value, Price
+  updated, 1D, 1W, 1M, 1Y, Amount checked, and Amount changed. Sorting is
+  client-side; the default is Value descending by **absolute** value, name
+  sorts default ascending, and rows without a metric (unpriced values, absent
+  timestamps or change periods) always sort last in either direction.
 - Mobile asset cards foreground the asset identity and reporting-currency
-  value, pair Amount with Price, group the four trailing changes, and place
-  freshness timestamps in a quieter labeled footer. Expanded account holdings
-  use the same labeled-card treatment instead of relying on hidden headers.
+  value together on one scan line, pair Amount with Price, group the four
+  trailing changes, and leave freshness metadata out of the collapsed scan
+  path. The compact phone layout drops the redundant count cards from the
+  summary and keeps sorting on one line. Price updated, Amount checked, and
+  Amount changed appear after performance when the row is expanded, with the
+  amount timestamps last in the quietest labeled metadata group. Expanded
+  account holdings use the same labeled-card treatment instead of relying on
+  hidden headers.
 - Clicking a row, or its `transaction-expand-toggle` chevron, toggles
   `.asset-holding-row` sub-rows on the `--color-surface-subtle` surface
   listing each contributing account's amount, base-currency value, and

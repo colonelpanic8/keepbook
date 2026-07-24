@@ -829,14 +829,14 @@ impl AssetSortField {
     const OPTIONS: [Self; 10] = [
         Self::Name,
         Self::Amount,
-        Self::AmountChecked,
-        Self::AmountChanged,
-        Self::PriceUpdated,
         Self::Value,
+        Self::PriceUpdated,
         Self::DayChange,
         Self::WeekChange,
         Self::MonthChange,
         Self::YearChange,
+        Self::AmountChecked,
+        Self::AmountChanged,
     ];
 
     fn label(self) -> &'static str {

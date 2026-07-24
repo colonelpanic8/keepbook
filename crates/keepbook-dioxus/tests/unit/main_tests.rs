@@ -1329,14 +1329,14 @@ fn asset_sort_options_round_trip_and_cover_every_field() {
     let expected = [
         AssetSortField::Name,
         AssetSortField::Amount,
-        AssetSortField::AmountChecked,
-        AssetSortField::AmountChanged,
-        AssetSortField::PriceUpdated,
         AssetSortField::Value,
+        AssetSortField::PriceUpdated,
         AssetSortField::DayChange,
         AssetSortField::WeekChange,
         AssetSortField::MonthChange,
         AssetSortField::YearChange,
+        AssetSortField::AmountChecked,
+        AssetSortField::AmountChanged,
     ];
 
     assert_eq!(AssetSortField::OPTIONS, expected);
