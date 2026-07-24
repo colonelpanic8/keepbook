@@ -3886,7 +3886,7 @@ dependencies = [
 
 [[package]]
 name = "keepbook"
-version = "0.9.1"
+version = "0.9.2"
 dependencies = [
  "age",
  "anyhow",
@@ -3926,7 +3926,7 @@ dependencies = [
 
 [[package]]
 name = "keepbook-dioxus"
-version = "0.9.1"
+version = "0.9.2"
 dependencies = [
  "chrono",
  "dioxus",

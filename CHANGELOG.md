@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.2 - 2026-07-23
+
+### Fixed
+
+- Reworked the phone Assets view into compact list rows with a single summary
+  card, one-line sorting, and freshness/account details available on expansion.
+- Moved amount-check and amount-change timestamps to the end of the Assets view
+  and reduced their visual priority across desktop and mobile layouts.
+
 ## 0.9.1 - 2026-07-21
 
 ### Fixed
