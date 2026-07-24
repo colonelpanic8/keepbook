@@ -34,8 +34,9 @@ importer. Pages: `colors.html`, `typography.html` (Foundations);
   widths it remains a fixed sidebar; at narrower widths its compact header
   remains stuck to the top of the viewport, including on mobile.
 - In the compact header, place the repository selector between the hamburger
-  control and the Keepbook logo/title. In the wide sidebar, keep the labeled
-  selector beneath the heading.
+  control and the Keepbook logo/title. Opening navigation must leave this
+  header completely unchanged and attach the drawer beneath it. In the wide
+  sidebar, keep the labeled full-width selector beneath the heading.
 - Horizontal overflow clipping on navigation ancestors must use `clip`, not
   `hidden`. An overflow container prevents the compact header's sticky
   positioning from tracking the viewport.

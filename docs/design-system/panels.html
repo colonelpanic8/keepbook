@@ -234,6 +234,8 @@
   --workspace-max-width: 1560px;
   --spending-max-width: 1320px;
   --compact-header-control-height: 38px;
+  --compact-header-padding-block: 10px;
+  --compact-header-padding-inline: 14px;
   --safe-area-top: env(safe-area-inset-top, 0px);
   --safe-area-right: env(safe-area-inset-right, 0px);
   --safe-area-bottom: env(safe-area-inset-bottom, 0px);
@@ -2846,10 +2848,10 @@ button.stacked-legend-item {
     max-width: 100%;
     overflow-y: visible;
     padding:
-      calc(10px + var(--safe-area-top))
-      calc(14px + var(--safe-area-right))
-      10px
-      calc(14px + var(--safe-area-left));
+      calc(var(--compact-header-padding-block) + var(--safe-area-top))
+      calc(var(--compact-header-padding-inline) + var(--safe-area-right))
+      var(--compact-header-padding-block)
+      calc(var(--compact-header-padding-inline) + var(--safe-area-left));
     position: sticky;
     top: 0;
     width: auto;
@@ -2896,27 +2898,27 @@ button.stacked-legend-item {
   }
 
   .app-nav.open nav {
-    display: flex;
-  }
-
-  .app-nav.open {
-    bottom: 0;
-    border-bottom: 0;
+    background: var(--color-surface);
     border-right: 1px solid var(--color-border);
     box-shadow: var(--shadow-drawer);
-    height: 100vh;
-    height: 100dvh;
+    display: flex;
+    height: calc(100vh - 100%);
+    height: calc(100dvh - 100%);
     left: 0;
     max-width: calc(100vw - 44px);
     overflow-y: auto;
     padding:
-      calc(18px + var(--safe-area-top))
+      18px
       16px
       calc(18px + var(--safe-area-bottom))
       calc(16px + var(--safe-area-left));
-    position: fixed;
-    top: 0;
+    position: absolute;
+    top: 100%;
     width: 284px;
+    z-index: 30;
+  }
+
+  .app-nav.open {
     z-index: 30;
   }
 

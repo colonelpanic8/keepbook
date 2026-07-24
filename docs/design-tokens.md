@@ -206,5 +206,9 @@ churn without theming payoff.
 ### Compact navigation
 
 `--compact-header-control-height: 38px` keeps the compact navigation toggle,
-repository selector, and logo aligned to one shared height. Components must
-reference this token rather than repeating its value.
+repository selector, and logo aligned to one shared height.
+`--compact-header-padding-block: 10px` and
+`--compact-header-padding-inline: 14px` define the compact bar's sole padding
+geometry. Opening navigation attaches a drawer beneath the bar instead of
+overriding that geometry. Components must reference these tokens rather than
+repeating their values.

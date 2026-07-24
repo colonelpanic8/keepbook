@@ -19,6 +19,24 @@ fn navigation_styles_keep_compact_header_sticky_to_the_viewport() {
         APP_CSS.contains("position: sticky;\n    top: 0;"),
         "the compact navigation header must remain sticky at the top"
     );
+    assert!(
+        APP_CSS
+            .matches("var(--compact-header-padding-block)")
+            .count()
+            == 2,
+        "compact navigation padding must have one state-independent vertical definition"
+    );
+    assert!(
+        APP_CSS
+            .matches("var(--compact-header-padding-inline)")
+            .count()
+            == 2,
+        "compact navigation padding must have one state-independent horizontal definition"
+    );
+    assert!(
+        APP_CSS.contains("height: calc(100dvh - 100%);\n    left: 0;"),
+        "the open drawer must derive its height from the unchanged compact header"
+    );
 }
 
 #[cfg(not(target_arch = "wasm32"))]
