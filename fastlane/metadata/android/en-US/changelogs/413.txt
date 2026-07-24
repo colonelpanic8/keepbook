@@ -1,0 +1,1 @@
+* Fixed: Added app-id desktop metadata and icon aliases to Dioxus Linux release bundles.

@@ -1,0 +1,1 @@
+* Changed: Rendered Android launcher icons on a black background with slightly larger Keepbook artwork.

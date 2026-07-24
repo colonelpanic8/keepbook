@@ -1,0 +1,1 @@
+* Changed: Made generated Android launcher icons slightly larger and rendered their background with the Keepbook foreground green.

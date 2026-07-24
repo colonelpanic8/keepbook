@@ -1,0 +1,1 @@
+* Fixed: Fixed Android Git push operations failing with libgit2 certificate error -17 by accepting host certificate callbacks in the Android Git path.

@@ -1,0 +1,26 @@
+Categories:
+  - Money
+License: MIT OR Apache-2.0
+AuthorName: Ivan Malison
+WebSite: https://github.com/colonelpanic8/keepbook
+SourceCode: https://github.com/colonelpanic8/keepbook
+IssueTracker: https://github.com/colonelpanic8/keepbook/issues
+Changelog: https://github.com/colonelpanic8/keepbook/blob/master/CHANGELOG.md
+
+# Keepbook can connect directly to brokerages, banks, and market data providers.
+# Those services are proprietary, so the app is flagged accordingly even though
+# every connection is opt-in and no Keepbook-operated server exists.
+AntiFeatures:
+  NonFreeNet:
+    en-US: >-
+      Optional account syncing and price refresh talk to proprietary third-party
+      financial services. Keepbook works fully offline if you enter balances
+      manually.
+
+# Localized name, summary, description, icon, and changelogs are sourced from
+# fastlane/metadata/android/, which is also what IzzyOnDroid and the F-Droid
+# main repo read.
+
+# Versions are discovered from the APKs placed in repo/ by
+# scripts/fdroid/build-repo.sh, so there is no update checking to configure.
+UpdateCheckMode: None

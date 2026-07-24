@@ -1,0 +1,1 @@
+* Fixed: Made spending-chart tooltips expand to fit their longest line and reposition within the chart so text remains inside the tooltip at either edge.

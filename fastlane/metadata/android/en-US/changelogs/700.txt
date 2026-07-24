@@ -1,0 +1,1 @@
+* Added: Added a Settings toggle that starts the desktop app hidden in the system tray. The preference is saved to `[tray].start_minimized` and takes effect on the next launch.

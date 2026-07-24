@@ -1,0 +1,1 @@
+* Fixed: Constrained the Dioxus desktop workspace and spending layout so fullscreen ultrawide windows do not over-expand the UI.

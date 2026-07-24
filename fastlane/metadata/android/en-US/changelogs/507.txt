@@ -1,0 +1,3 @@
+* Fixed: The net worth chart's last data point now matches the total on the accounts page. History requests no longer send a local-timezone end date, which had trimmed freshly synced points stamped with the next day's UTC date off the end of the chart.
+* Added: Added a "Resync data" action to the accounts view that reloads all data from disk (via a new `POST /api/reload` endpoint / native reload) without restarting the app.
+* ...see CHANGELOG.md for the rest.

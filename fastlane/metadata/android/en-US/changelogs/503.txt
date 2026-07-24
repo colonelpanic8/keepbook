@@ -1,0 +1,1 @@
+* Changed: Reduced the generated Android launcher icon scale so the adaptive icon uses the standard safe-zone size and the legacy square icon has more padding.

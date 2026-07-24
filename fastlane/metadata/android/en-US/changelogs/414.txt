@@ -1,0 +1,1 @@
+* Fixed: Set the Linux desktop window class before GTK initialization so taskbars can match the Keepbook icon.

@@ -1,0 +1,3 @@
+* Fixed: Replaced bright spending-chart dividers with subtle dark-theme separators.
+* Fixed: Removed stacked-area outlines that rendered as vertical artifacts in the net worth breakdown chart.
+* Changed: Renamed the misleading Contributions view to Net Worth Breakdown.

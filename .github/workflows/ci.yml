@@ -38,6 +38,11 @@ jobs:
       - name: Check formatting
         run: nix develop --command cargo fmt --check
 
+      # The F-Droid and IzzyOnDroid listings read release notes from these
+      # files, so a CHANGELOG.md edit that skips them ships a stale listing.
+      - name: Check fastlane changelogs are current
+        run: python3 scripts/fdroid/changelogs.py --check
+
       - name: Check (No Warnings)
         run: nix develop --command env RUSTFLAGS=-D warnings cargo check --all-targets --all-features
 

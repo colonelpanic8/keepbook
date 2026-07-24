@@ -1,0 +1,1 @@
+* Fixed: Pointed Android Git SSH known-hosts lookup at app-private storage so mobile Git sync can initialize libgit2 without a conventional user home directory.

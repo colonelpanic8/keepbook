@@ -1,0 +1,1 @@
+* Fixed: Enlarged the Keepbook launcher artwork on mobile by removing excess transparent icon padding.

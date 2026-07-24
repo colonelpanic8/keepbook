@@ -1,0 +1,1 @@
+* Fixed: Fixed Android/mobile Git SSH auth during auto-push by loading configured and default private key files into memory before creating libgit2 credentials. This avoids libssh2 private-key path handling failures during price refresh auto-commit pushes.

@@ -1,0 +1,1 @@
+* Added: Added configurable desktop window decorations with `auto`, `system`, and `hidden` modes. Auto mode keeps the frameless window on Hyprland and uses native system decorations elsewhere.

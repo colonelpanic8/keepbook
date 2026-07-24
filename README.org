@@ -12,9 +12,18 @@ Keepbook is a local-first personal finance toolkit focused on data ownership.
 
 * App Downloads
 
-Android APKs and desktop app bundles are attached to the latest GitHub release:
+On Android, add the Keepbook F-Droid repository to get updates automatically:
+
+- https://colonelpanic8.github.io/keepbook/
+
+Android APKs and desktop app bundles are also attached to the latest GitHub
+release:
 
 - https://github.com/colonelpanic8/keepbook/releases/latest
+
+The repository serves the same signed APKs as the releases page, so either
+install upgrades in place from the other. See [[file:docs/fdroid.md][docs/fdroid.md]] for how it is
+published.
 
 * CLI
 

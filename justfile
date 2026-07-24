@@ -92,6 +92,17 @@ dioxus-android-build *args:
 dioxus-android-release *args:
     nix run .#dioxus-android-release -- "$@"
 
+# Regenerate fastlane store changelogs from CHANGELOG.md.
+# Pass --check to verify the committed files are current (what CI runs).
+fdroid-changelogs *args:
+    ./scripts/fdroid/changelogs.py "$@"
+
+# Build the self-hosted F-Droid repository into target/fdroid.
+# Needs fdroidserver on PATH plus the FDROID_* signing environment; see
+# docs/fdroid.md. CI runs this via .github/workflows/fdroid-repo.yml.
+fdroid-repo:
+    ./scripts/fdroid/build-repo.sh
+
 # Portfolio history distilled to daily date/balance JSON objects.
 # Extra CLI args can be passed through, e.g.:
 #   just history-daily-balance -- --start 2026-01-01 --end 2026-02-01

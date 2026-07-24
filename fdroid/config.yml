@@ -1,0 +1,28 @@
+# Configuration for the self-hosted Keepbook F-Droid repository.
+#
+# `scripts/fdroid/build-repo.sh` copies this file into a scratch repo directory,
+# populates `repo/` with APKs from GitHub releases, and runs `fdroid update`.
+# The result is deployed to GitHub Pages by `.github/workflows/fdroid-repo.yml`.
+#
+# Secrets are resolved from the environment at `fdroid update` time via
+# fdroidserver's `{env: ...}` indirection, so nothing sensitive lives in git.
+
+repo_url: https://colonelpanic8.github.io/keepbook/fdroid/repo
+repo_name: Keepbook
+repo_icon: icon.png
+repo_description: >-
+  Official repository for Keepbook, a local-first personal finance app. Builds
+  here are the same signed APKs attached to GitHub releases, so they upgrade
+  in place from a manually installed APK.
+
+# Every published version stays in the main repo; there is no separate archive
+# section to deploy or link to.
+archive_older: 0
+
+# The repo index is signed with the same keystore used to sign release APKs.
+keystore: keystore.p12
+repo_keyalias: {env: FDROID_KEY_ALIAS}
+keystorepass: {env: FDROID_KEYSTORE_PASSWORD}
+keypass: {env: FDROID_KEY_PASSWORD}
+
+make_current_version_link: false

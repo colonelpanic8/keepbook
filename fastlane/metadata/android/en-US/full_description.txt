@@ -1,0 +1,37 @@
+Keepbook is a local-first personal finance toolkit built around data ownership.
+
+Your accounts, balances, transactions, and price history live on your device as
+plain JSON, TOML, and JSONL files. The on-disk format is human-readable and easy
+to inspect or edit with ordinary tools, and the whole data directory is
+portable: copy it, back it up, put it in version control, and keep it for
+decades without lock-in.
+
+Features
+
+* Net worth and portfolio valuation across every account and asset you track.
+* Portfolio history with daily, weekly, and monthly granularity.
+* Asset views with trailing changes, price freshness, and holding details.
+* Spending totals broken down by category over any date range.
+* Multi-currency support with a configurable reporting currency.
+* Manual balance entry for accounts you would rather not connect.
+* Optional Git integration to version and sync your data directory yourself.
+
+Your data stays yours
+
+Keepbook has no account system, no telemetry, and no analytics. Nothing is
+uploaded to a Keepbook server, because there is no Keepbook server. The app runs
+entirely on your device against your own files.
+
+Network access
+
+Keepbook can optionally connect directly to financial institutions and market
+data providers to refresh balances, transactions, and prices. Those services
+(for example brokerages, banks, and price feeds) are operated by third parties
+and are not free software, which is why this app is flagged with the NonFreeNet
+anti-feature. Connections are opt-in and configured by you; if you only enter
+balances by hand, Keepbook never talks to the network at all. Credentials are
+stored locally and are never sent anywhere except to the institution they belong
+to.
+
+Keepbook is free software under the MIT or Apache-2.0 licenses, and also ships
+as a command-line tool and a desktop application.

@@ -1,0 +1,1 @@
+* Fixed: Made selected text (such as prices-sync error messages) copyable in the Dioxus desktop app. Release builds suppressed the WebKit context menu, so text could be highlighted but the "Copy" option never appeared; the native menu is now restored whenever there is an active text selection or editable field.

@@ -1,0 +1,2 @@
+* Added: Made the category subsections of the spending "Over Time" bar chart clickable in the Dioxus app. Clicking a segment pins the tooltip to show that single category's amount and transaction count for that period; clicking it again restores the period totals.
+* Changed: Reworked the generated Android launcher icon as an adaptive icon so the logo fills more of the masked tile (appears larger) and rendered its background with the Keepbook accent green (`#638A68`).

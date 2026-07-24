@@ -1,0 +1,3 @@
+* Fixed: Corrected Android Git clone paths that retained stale macOS Application Support locations.
+* Fixed: Made the Android Git Sync clone location editable in settings.
+* Fixed: Packaged the keepbook launcher icon in Android release builds.

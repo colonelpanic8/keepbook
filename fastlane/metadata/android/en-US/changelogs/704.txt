@@ -1,0 +1,3 @@
+* Fixed: Kept net-worth and account charts aligned with the current portfolio snapshot when history contains a UTC date that is tomorrow in the local timezone.
+* Fixed: Refreshed account and net-worth data when navigating back to those views or reopening the desktop app from the system tray.
+* ...see CHANGELOG.md for the rest.

@@ -1,0 +1,1 @@
+Local-first personal finance, with your data kept in plain files you own.

@@ -1,0 +1,1 @@
+* Fixed: Wrapped Linux keepbook package executables with the OpenSSL runtime library path.

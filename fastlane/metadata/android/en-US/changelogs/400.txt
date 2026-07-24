@@ -1,0 +1,6 @@
+* Added: Added a spending-over-time chart in the Dioxus UI.
+* Added: Added manual value assets so non-priced holdings can be included in portfolio valuation.
+* Added: Added stacked net worth charts and tooltips for drilling into portfolio composition.
+* Added: Added a recurring transaction review UI backed by persisted recurring review state.
+* Added: Added recursive tag hierarchy configuration for aliases, parent tags, and rollups.
+* ...see CHANGELOG.md for the rest.

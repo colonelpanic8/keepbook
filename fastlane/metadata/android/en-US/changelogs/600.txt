@@ -1,0 +1,4 @@
+* Added: Added recurring-cost estimates for the fitted interval, typical charge, and annualized cost to the recurring transaction API and Dioxus app.
+* Added: Added annual-cost and confidence sorting to the Dioxus recurring-cost view, with highest annual cost shown first by default.
+* Added: Made the Dioxus web API origin configurable at build time with `KEEPBOOK_API_BASE` for remote and Tailscale previews.
+* ...see CHANGELOG.md for the rest.
