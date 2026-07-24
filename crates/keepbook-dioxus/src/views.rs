@@ -177,7 +177,7 @@ pub(crate) fn App() -> Element {
                                 match activate_repository(repository_id).await {
                                     Ok(_) => {
                                         filter_overrides.set(FilterOverrides::default());
-                                        repository_status.set("Repository switched.".to_string());
+                                        repository_status.set(String::new());
                                         repositories.restart();
                                         overview.restart();
                                         tray_snapshot.restart();
