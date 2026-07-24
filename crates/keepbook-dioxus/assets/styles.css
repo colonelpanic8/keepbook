@@ -2856,7 +2856,25 @@ button.stacked-legend-item {
   .mobile-nav-toggle {
     display: flex;
     flex: 0 0 auto;
+    order: -2;
+  }
+
+  .repository-switcher {
+    flex: 1 1 auto;
+    gap: 0;
+    min-width: 0;
     order: -1;
+  }
+
+  .repository-switcher > span {
+    display: none;
+  }
+
+  .repository-switcher select {
+    font-size: var(--fs-small);
+    height: 38px;
+    min-height: 38px;
+    padding: 4px 7px;
   }
 
   .app-nav nav {

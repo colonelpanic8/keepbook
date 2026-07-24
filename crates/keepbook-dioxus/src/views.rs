@@ -343,20 +343,21 @@ fn Dashboard(
                         span { aria_hidden: "true" }
                         span { aria_hidden: "true" }
                     }
-                }
-                if let Some(Ok(registry)) = repositories.clone() {
-                    label { class: "repository-switcher",
-                        span { "Repository" }
-                        select {
-                            class: "control-input",
-                            disabled: repository_busy,
-                            value: registry.active_repository.as_deref().unwrap_or_default(),
-                            onchange: move |event| onrepositorychange.call(event.value()),
-                            for repository in registry.repositories {
-                                option {
-                                    value: "{repository.id}",
-                                    disabled: !repository.cloned,
-                                    "{repository.name}"
+                    if let Some(Ok(registry)) = repositories.clone() {
+                        label { class: "repository-switcher",
+                            span { "Repository" }
+                            select {
+                                class: "control-input",
+                                aria_label: "Repository",
+                                disabled: repository_busy,
+                                value: registry.active_repository.as_deref().unwrap_or_default(),
+                                onchange: move |event| onrepositorychange.call(event.value()),
+                                for repository in registry.repositories {
+                                    option {
+                                        value: "{repository.id}",
+                                        disabled: !repository.cloned,
+                                        "{repository.name}"
+                                    }
                                 }
                             }
                         }
