@@ -27,3 +27,12 @@ importer. Pages: `colors.html`, `typography.html` (Foundations);
   surface.
 - [Design tokens](../design-tokens.md) defines the semantic visual tokens used
   by the app and preview bundle.
+
+## Layout behavior
+
+- Keep the primary navigation visible while the workspace scrolls. At wide
+  widths it remains a fixed sidebar; at narrower widths its compact header
+  remains stuck to the top of the viewport, including on mobile.
+- Horizontal overflow clipping on navigation ancestors must use `clip`, not
+  `hidden`. An overflow container prevents the compact header's sticky
+  positioning from tracking the viewport.

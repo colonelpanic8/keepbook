@@ -1,6 +1,26 @@
 use super::logic::*;
 use super::*;
 
+#[test]
+fn navigation_styles_keep_compact_header_sticky_to_the_viewport() {
+    assert!(
+        APP_CSS.contains(
+            "html,\nbody {\n  max-width: 100%;\n  overflow-x: clip;\n}"
+        ),
+        "the document must clip horizontal overflow without becoming a sticky-positioning container"
+    );
+    assert!(
+        APP_CSS.contains(
+            ".shell {\n  max-width: 100%;\n  min-height: 100vh;\n  min-height: 100dvh;\n  overflow-x: clip;\n}"
+        ),
+        "the shell must not capture the compact header's sticky positioning"
+    );
+    assert!(
+        APP_CSS.contains("position: sticky;\n    top: 0;"),
+        "the compact navigation header must remain sticky at the top"
+    );
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn native_worker_completes_off_the_ui_thread() {
