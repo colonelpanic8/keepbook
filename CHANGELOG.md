@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.10.0 - 2026-07-24
+
+### Changed
+
+- Integrated the active repository selector into the compact navigation header
+  while retaining the labeled, full-width selector in the wide sidebar.
+- Kept the compact header completely stable when opening navigation, attaching
+  the menu drawer beneath it without moving or resizing the hamburger,
+  repository selector, logo, or title.
+
+### Fixed
+
+- Kept navigation visible while scrolling across compact desktop and mobile
+  layouts.
+- Removed the redundant repository-switch success message after switching.
+
 ## 0.9.2 - 2026-07-23
 
 ### Fixed
