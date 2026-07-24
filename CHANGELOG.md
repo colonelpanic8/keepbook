@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.10.1 - 2026-07-24
+
+### Fixed
+
+- Cut the Android release APK from 76 MB to 28 MB by stripping symbols and
+  enabling whole-program optimization, bringing it under the size limit for
+  third-party F-Droid repositories such as IzzyOnDroid.
+
+### Added
+
+- Published a self-hosted F-Droid repository, rebuilt automatically from each
+  release's signed APKs.
+
 ## 0.10.0 - 2026-07-24
 
 ### Changed
