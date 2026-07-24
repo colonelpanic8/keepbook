@@ -150,6 +150,17 @@ wiremock = "0.6"
 
 [profile]
 
+[profile.release]
+# Cargo defaults to keeping the symbol table and DWARF info, which dominated the
+# shipped Android library: 76 MB unstripped versus 48 MB with symbols removed.
+# Most of that is .symtab rather than .debug_*, so "debuginfo" is not enough.
+strip = "symbols"
+# Whole-program optimization across the crate graph. This is primarily here to
+# shrink the Android library, where APK size is a distribution constraint, but
+# it also tends to help runtime performance; the cost is build time.
+lto = "fat"
+codegen-units = 1
+
 [profile.wasm-dev]
 inherits = "dev"
 opt-level = 1
