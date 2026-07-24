@@ -233,6 +233,7 @@
   font-family: var(--font-sans);
   --workspace-max-width: 1560px;
   --spending-max-width: 1320px;
+  --compact-header-control-height: 38px;
   --safe-area-top: env(safe-area-inset-top, 0px);
   --safe-area-right: env(safe-area-inset-right, 0px);
   --safe-area-bottom: env(safe-area-inset-bottom, 0px);
@@ -382,7 +383,7 @@ small,
   display: none;
   flex-direction: column;
   gap: var(--sp-4);
-  height: 38px;
+  height: var(--compact-header-control-height);
   justify-content: center;
   padding: 0;
   width: 42px;
@@ -2845,10 +2846,10 @@ button.stacked-legend-item {
     max-width: 100%;
     overflow-y: visible;
     padding:
-      calc(12px + var(--safe-area-top))
-      calc(16px + var(--safe-area-right))
-      12px
-      calc(16px + var(--safe-area-left));
+      calc(10px + var(--safe-area-top))
+      calc(14px + var(--safe-area-right))
+      10px
+      calc(14px + var(--safe-area-left));
     position: sticky;
     top: 0;
     width: auto;
@@ -2859,6 +2860,11 @@ button.stacked-legend-item {
     align-items: center;
     flex-direction: row;
     justify-content: space-between;
+  }
+
+  .nav-logo {
+    height: var(--compact-header-control-height);
+    width: var(--compact-header-control-height);
   }
 
   .mobile-nav-toggle {
@@ -2880,8 +2886,8 @@ button.stacked-legend-item {
 
   .repository-switcher select {
     font-size: var(--fs-small);
-    height: 38px;
-    min-height: 38px;
+    height: var(--compact-header-control-height);
+    min-height: var(--compact-header-control-height);
     padding: 4px 7px;
   }
 

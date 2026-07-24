@@ -202,3 +202,9 @@ Apply to single-value `gap`/`padding`/`margin` declarations that match a token
 exactly. Compound shorthands (`padding: 8px 10px`) and odd one-off values
 (3/5/7/9px, layout dimensions, breakpoints) stay literal — tokenizing those is
 churn without theming payoff.
+
+### Compact navigation
+
+`--compact-header-control-height: 38px` keeps the compact navigation toggle,
+repository selector, and logo aligned to one shared height. Components must
+reference this token rather than repeating its value.
