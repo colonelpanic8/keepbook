@@ -1,0 +1,1 @@
+* Fixed: Matched the mobile workspace's top padding to its side and bottom margins; it was previously half their size, leaving the gap under the header noticeably smaller than the gaps elsewhere.

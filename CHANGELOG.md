@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.4 - 2026-07-25
+
+### Fixed
+
+- Matched the mobile workspace's top padding to its side and bottom margins;
+  it was previously half their size, leaving the gap under the header
+  noticeably smaller than the gaps elsewhere.
+
 ## 0.10.3 - 2026-07-25
 
 ### Fixed
