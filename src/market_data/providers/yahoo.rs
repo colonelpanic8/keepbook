@@ -64,9 +64,7 @@ impl YahooPriceSource {
         period1: i64,
         period2: i64,
     ) -> Result<Option<ChartResult>> {
-        let url = format!(
-            "{BASE_URL}/{symbol}?period1={period1}&period2={period2}&interval=1d"
-        );
+        let url = format!("{BASE_URL}/{symbol}?period1={period1}&period2={period2}&interval=1d");
         let response = self
             .client
             .get(&url)
@@ -80,7 +78,10 @@ impl YahooPriceSource {
             anyhow::bail!("Yahoo Finance API error: status={status}, body={body}");
         }
 
-        let body = response.text().await.context("Failed to read response body")?;
+        let body = response
+            .text()
+            .await
+            .context("Failed to read response body")?;
         parse_chart_body(&body)
     }
 }
@@ -156,7 +157,11 @@ impl EquityPriceSource for YahooPriceSource {
             return Ok(None);
         };
 
-        let currency = result.meta.currency.clone().unwrap_or_else(|| "USD".to_string());
+        let currency = result
+            .meta
+            .currency
+            .clone()
+            .unwrap_or_else(|| "USD".to_string());
         let point = extract_points(&result)
             .into_iter()
             .filter(|(d, _)| *d <= date)
@@ -195,7 +200,11 @@ impl EquityPriceSource for YahooPriceSource {
             return Ok(Vec::new());
         };
 
-        let currency = result.meta.currency.clone().unwrap_or_else(|| "USD".to_string());
+        let currency = result
+            .meta
+            .currency
+            .clone()
+            .unwrap_or_else(|| "USD".to_string());
         let now = Utc::now();
         let mut prices: Vec<PricePoint> = extract_points(&result)
             .into_iter()
@@ -227,7 +236,11 @@ impl EquityPriceSource for YahooPriceSource {
             return Ok(None);
         };
 
-        let currency = result.meta.currency.clone().unwrap_or_else(|| "USD".to_string());
+        let currency = result
+            .meta
+            .currency
+            .clone()
+            .unwrap_or_else(|| "USD".to_string());
         // Prefer the live regular-market price; fall back to the latest close.
         if let Some(price) = result.meta.regular_market_price.and_then(decimal_price) {
             let as_of_date = result

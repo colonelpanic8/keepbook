@@ -34,7 +34,9 @@ const SAMPLE_NO_DATA: &str = r#"{
 
 #[test]
 fn test_parse_chart_body_ok() {
-    let result = parse_chart_body(SAMPLE_RESPONSE).unwrap().expect("result present");
+    let result = parse_chart_body(SAMPLE_RESPONSE)
+        .unwrap()
+        .expect("result present");
     assert_eq!(result.meta.currency, Some("USD".to_string()));
     assert_eq!(result.meta.gmtoffset, -14400);
     assert_eq!(result.timestamp.as_ref().unwrap().len(), 3);
