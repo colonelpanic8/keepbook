@@ -21,6 +21,8 @@ pub enum PriceSourceType {
     AlphaVantage,
     /// Marketstack equity prices
     Marketstack,
+    /// Yahoo Finance equity prices (no API key required)
+    Yahoo,
     /// CoinGecko crypto prices
     Coingecko,
     /// CryptoCompare crypto prices
@@ -36,16 +38,22 @@ impl PriceSourceType {
     pub fn requires_credentials(&self) -> bool {
         match self {
             Self::Eodhd | Self::TwelveData | Self::AlphaVantage | Self::Marketstack => true,
-            Self::Coingecko | Self::Cryptocompare | Self::Coincap | Self::Frankfurter => false,
+            Self::Yahoo
+            | Self::Coingecko
+            | Self::Cryptocompare
+            | Self::Coincap
+            | Self::Frankfurter => false,
         }
     }
 
     /// The asset types this source can provide prices for.
     pub fn supported_assets(&self) -> &'static [AssetCategory] {
         match self {
-            Self::Eodhd | Self::TwelveData | Self::AlphaVantage | Self::Marketstack => {
-                &[AssetCategory::Equity]
-            }
+            Self::Eodhd
+            | Self::TwelveData
+            | Self::AlphaVantage
+            | Self::Marketstack
+            | Self::Yahoo => &[AssetCategory::Equity],
             Self::Coingecko | Self::Cryptocompare | Self::Coincap => &[AssetCategory::Crypto],
             Self::Frankfurter => &[AssetCategory::Fx],
         }

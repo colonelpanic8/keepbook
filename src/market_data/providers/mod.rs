@@ -6,6 +6,7 @@ pub mod eodhd;
 pub mod frankfurter;
 pub mod marketstack;
 pub mod twelve_data;
+pub mod yahoo;
 
 pub use alpha_vantage::AlphaVantagePriceSource;
 pub use coincap::CoinCapPriceSource;
@@ -15,3 +16,4 @@ pub use eodhd::EodhdPriceSource;
 pub use frankfurter::FrankfurterRateSource;
 pub use marketstack::MarketstackPriceSource;
 pub use twelve_data::TwelveDataPriceSource;
+pub use yahoo::YahooPriceSource;
