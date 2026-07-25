@@ -1,0 +1,1 @@
+* Fixed: Regenerated the fastlane changelog for 0.10.5 with `scripts/fdroid/changelogs.py` instead of hand-writing it; the mismatch failed CI's "fastlane changelogs are current" check.

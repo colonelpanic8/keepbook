@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.6 - 2026-07-25
+
+### Fixed
+
+- Regenerated the fastlane changelog for 0.10.5 with
+  `scripts/fdroid/changelogs.py` instead of hand-writing it; the mismatch
+  failed CI's "fastlane changelogs are current" check.
+
 ## 0.10.5 - 2026-07-25
 
 ### Changed
