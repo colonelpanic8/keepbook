@@ -12,13 +12,35 @@ enum SpendingTab {
 }
 
 impl SpendingTab {
+    const OPTIONS: [Self; 2] = [Self::Tags, Self::StringMatches];
+
     fn label(self) -> &'static str {
         match self {
             Self::Tags => "Tags",
             Self::StringMatches => "String Matches",
         }
     }
+
+    fn value(self) -> &'static str {
+        match self {
+            Self::Tags => "tags",
+            Self::StringMatches => "string_matches",
+        }
+    }
+
+    fn from_value(value: &str) -> Option<Self> {
+        Self::OPTIONS.into_iter().find(|tab| tab.value() == value)
+    }
 }
+
+/// Range presets offered by the spending view, in display order.
+const SPENDING_RANGE_PRESETS: [(RangePreset, &str); 5] = [
+    (RangePreset::OneMonth, "30D"),
+    (RangePreset::NinetyDays, "90D"),
+    (RangePreset::SixMonths, "6M"),
+    (RangePreset::OneYear, "1Y"),
+    (RangePreset::Max, "Max"),
+];
 
 #[component]
 pub(super) fn SpendingView(currency: String) -> Element {
@@ -26,6 +48,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
     let mut start_override = use_signal(String::new);
     let mut end_override = use_signal(String::new);
     let mut spending_bucket = use_signal(|| DEFAULT_SPENDING_BUCKET);
+    let mut custom_range_open = use_signal(|| false);
     let mut active_tab = use_signal(|| SpendingTab::Tags);
     let mut selected_tag = use_signal(|| None::<String>);
     let mut selected_period = use_signal(|| None::<SpendingPeriodSelection>);
@@ -209,10 +232,21 @@ pub(super) fn SpendingView(currency: String) -> Element {
         let last = (page_start + page_transactions.len()).min(filtered_transactions.len());
         format!("{first}-{last} of {}", filtered_transactions.len())
     };
-    let focus_label = match (selected.as_ref(), selected_period_value.as_ref()) {
-        (Some(tag), Some(period)) => Some(format!("Focused: {tag} · {}", period.label)),
-        _ => None,
+    // A single contextual chip replaces the always-present "All" button: it only
+    // exists while something is focused, and clearing it is the only thing that
+    // button ever did.
+    let focus_chip_label = match (selected.as_ref(), selected_period_value.as_ref()) {
+        (Some(tag), Some(period)) => Some(format!("{tag} · {}", period.label)),
+        (Some(tag), None) => Some(tag.clone()),
+        (None, Some(period)) => Some(period.label.clone()),
+        (None, None) => None,
     };
+    // The date pickers stay collapsed behind a readout of the range in effect.
+    // A custom range can only be entered through those pickers, so the toggle
+    // alone drives visibility; a collapsed custom range stays marked as the
+    // active source of the range instead of forcing the panel back open.
+    let dates_open = custom_range_open();
+    let custom_range_active = selected_range == RangePreset::Custom;
     let selected_label = selected.as_deref().unwrap_or("All tags");
     let panel_title = match selected_tab {
         SpendingTab::Tags => "Spending Tags",
@@ -241,150 +275,126 @@ pub(super) fn SpendingView(currency: String) -> Element {
             if let Some(message) = tag_update_status() {
                 OperationStatus { message, busy: mutation_busy() }
             }
-            div { class: "chart-controls",
-                div { class: "preset-row",
-                    span { class: "control-label", "Range" }
-                    SpendingPresetButton {
-                        label: "30D",
-                        selected: selected_range == RangePreset::OneMonth,
-                        onclick: move |_| {
-                            range_preset.set(RangePreset::OneMonth);
-                            start_override.set(String::new());
-                            end_override.set(String::new());
-                            selected_tag.set(None);
-                            selected_period.set(None);
-                            transaction_page.set(0);
-                        }
+            div { class: "chart-controls spending-controls",
+                SegmentedControl {
+                    label: "Range",
+                    options: range_preset_options(&SPENDING_RANGE_PRESETS),
+                    selected: selected_range.value().to_string(),
+                    onselect: move |value: String| {
+                        let Some(preset) = range_preset_from_value(&SPENDING_RANGE_PRESETS, &value)
+                        else {
+                            return;
+                        };
+                        range_preset.set(preset);
+                        start_override.set(String::new());
+                        end_override.set(String::new());
+                        custom_range_open.set(false);
+                        selected_tag.set(None);
+                        selected_period.set(None);
+                        transaction_page.set(0);
                     }
-                    SpendingPresetButton {
-                        label: "90D",
-                        selected: selected_range == RangePreset::NinetyDays,
-                        onclick: move |_| {
-                            range_preset.set(RangePreset::NinetyDays);
-                            start_override.set(String::new());
-                            end_override.set(String::new());
-                            selected_tag.set(None);
-                            selected_period.set(None);
-                            transaction_page.set(0);
-                        }
-                    }
-                    SpendingPresetButton {
-                        label: "6M",
-                        selected: selected_range == RangePreset::SixMonths,
-                        onclick: move |_| {
-                            range_preset.set(RangePreset::SixMonths);
-                            start_override.set(String::new());
-                            end_override.set(String::new());
-                            selected_tag.set(None);
-                            selected_period.set(None);
-                            transaction_page.set(0);
-                        }
-                    }
-                    SpendingPresetButton {
-                        label: "1Y",
-                        selected: selected_range == RangePreset::OneYear,
-                        onclick: move |_| {
-                            range_preset.set(RangePreset::OneYear);
-                            start_override.set(String::new());
-                            end_override.set(String::new());
-                            selected_tag.set(None);
-                            selected_period.set(None);
-                            transaction_page.set(0);
-                        }
-                    }
-                    SpendingPresetButton {
-                        label: "Max",
-                        selected: selected_range == RangePreset::Max,
-                        onclick: move |_| {
-                            range_preset.set(RangePreset::Max);
-                            start_override.set(String::new());
-                            end_override.set(String::new());
-                            selected_tag.set(None);
-                            selected_period.set(None);
-                            transaction_page.set(0);
-                        }
-                    }
-                    ControlButton {
-                        disabled: selected.is_none() && selected_period_value.is_none(),
-                        onclick: move |_| {
-                            selected_tag.set(None);
-                            selected_period.set(None);
-                            transaction_page.set(0);
-                        },
-                        "All"
-                    }
-                    if let Some(label) = focus_label.clone() {
+                }
+                div { class: "segmented-field range-disclosure-field",
+                    span { class: "control-label segmented-label", "Dates" }
+                    div { class: "range-disclosure-body",
                         button {
-                            class: "control-button focus-chip",
-                            title: "Clear segment focus",
+                            class: match (dates_open, custom_range_active) {
+                                (true, true) => "range-disclosure open active",
+                                (true, false) => "range-disclosure open",
+                                (false, true) => "range-disclosure active",
+                                (false, false) => "range-disclosure",
+                            },
+                            r#type: "button",
+                            aria_expanded: dates_open,
+                            title: "Set an exact start and end date",
+                            onclick: move |_| custom_range_open.set(!dates_open),
+                            span { class: "range-disclosure-value", "{resolved_start} → {resolved_end}" }
+                            span { class: "range-disclosure-caret", aria_hidden: "true",
+                                if dates_open { "▴" } else { "▾" }
+                            }
+                        }
+                        if dates_open {
+                            div { class: "control-grid spending-date-grid",
+                                DateInput {
+                                    label: "Start",
+                                    value: resolved_start.clone(),
+                                    min: String::new(),
+                                    max: resolved_end.clone(),
+                                    oninput: move |value| {
+                                        start_override.set(value);
+                                        range_preset.set(RangePreset::Custom);
+                                        selected_tag.set(None);
+                                        selected_period.set(None);
+                                        transaction_page.set(0);
+                                    }
+                                }
+                                DateInput {
+                                    label: "End",
+                                    value: resolved_end.clone(),
+                                    min: resolved_start.clone(),
+                                    max: current_date_string(),
+                                    oninput: move |value| {
+                                        end_override.set(value);
+                                        range_preset.set(RangePreset::Custom);
+                                        selected_tag.set(None);
+                                        selected_period.set(None);
+                                        transaction_page.set(0);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                SegmentedControl {
+                    label: "View",
+                    options: SpendingTab::OPTIONS
+                        .iter()
+                        .map(|tab| SegmentedOption::new(tab.value(), tab.label()))
+                        .collect::<Vec<_>>(),
+                    selected: selected_tab.value().to_string(),
+                    onselect: move |value: String| {
+                        let Some(tab) = SpendingTab::from_value(&value) else {
+                            return;
+                        };
+                        active_tab.set(tab);
+                        if tab == SpendingTab::StringMatches {
+                            selected_tag.set(None);
+                            selected_period.set(None);
+                            transaction_page.set(0);
+                        }
+                    }
+                }
+                if selected_tab == SpendingTab::Tags {
+                    SegmentedControl {
+                        label: "Bucket",
+                        options: SpendingBucket::OPTIONS
+                            .iter()
+                            .map(|option| SegmentedOption::new(option.query_value(), option.label()))
+                            .collect::<Vec<_>>(),
+                        selected: selected_bucket.query_value().to_string(),
+                        onselect: move |value: String| {
+                            let Some(bucket) = SpendingBucket::from_value(&value) else {
+                                return;
+                            };
+                            spending_bucket.set(bucket);
+                            selected_period.set(None);
+                            transaction_page.set(0);
+                        }
+                    }
+                }
+                if let Some(label) = focus_chip_label.clone() {
+                    div { class: "filter-chip-row",
+                        button {
+                            class: "filter-clear-chip",
+                            r#type: "button",
+                            title: "Clear the focused tag and period",
                             onclick: move |_| {
                                 selected_tag.set(None);
                                 selected_period.set(None);
                                 transaction_page.set(0);
                             },
-                            "{label} ✕"
-                        }
-                    }
-                }
-                div { class: "control-grid spending-date-grid",
-                    DateInput {
-                        label: "Start",
-                        value: resolved_start.clone(),
-                        min: String::new(),
-                        max: resolved_end.clone(),
-                        oninput: move |value| {
-                            start_override.set(value);
-                            range_preset.set(RangePreset::Custom);
-                            selected_tag.set(None);
-                            selected_period.set(None);
-                            transaction_page.set(0);
-                        }
-                    }
-                    DateInput {
-                        label: "End",
-                        value: resolved_end.clone(),
-                        min: resolved_start.clone(),
-                        max: current_date_string(),
-                        oninput: move |value| {
-                            end_override.set(value);
-                            range_preset.set(RangePreset::Custom);
-                            selected_tag.set(None);
-                            selected_period.set(None);
-                            transaction_page.set(0);
-                        }
-                    }
-                }
-                div { class: "spending-tab-row",
-                    span { class: "control-label", "View" }
-                    SpendingTabButton {
-                        label: SpendingTab::Tags.label(),
-                        selected: selected_tab == SpendingTab::Tags,
-                        onclick: move |_| active_tab.set(SpendingTab::Tags),
-                    }
-                    SpendingTabButton {
-                        label: SpendingTab::StringMatches.label(),
-                        selected: selected_tab == SpendingTab::StringMatches,
-                        onclick: move |_| {
-                            active_tab.set(SpendingTab::StringMatches);
-                            selected_tag.set(None);
-                            selected_period.set(None);
-                            transaction_page.set(0);
-                        },
-                    }
-                }
-                if selected_tab == SpendingTab::Tags {
-                    div { class: "sampling-row",
-                        span { class: "control-label", "Bucket" }
-                        for option in SpendingBucket::OPTIONS {
-                            GraphPresetButton {
-                                label: option.label(),
-                                selected: selected_bucket == option,
-                                onclick: move |_| {
-                                    spending_bucket.set(option);
-                                    selected_period.set(None);
-                                    transaction_page.set(0);
-                                }
-                            }
+                            span { class: "filter-clear-chip-text", "Focused: {label}" }
+                            span { aria_hidden: "true", "✕" }
                         }
                     }
                 }
@@ -730,42 +740,6 @@ pub(super) fn SpendingView(currency: String) -> Element {
                     }
                 },
             }
-        }
-    }
-}
-
-#[component]
-fn SpendingPresetButton(
-    label: &'static str,
-    selected: bool,
-    onclick: EventHandler<MouseEvent>,
-) -> Element {
-    rsx! {
-        GraphPresetButton {
-            label: label,
-            selected: selected,
-            onclick: move |event| onclick.call(event),
-        }
-    }
-}
-
-#[component]
-fn SpendingTabButton(
-    label: &'static str,
-    selected: bool,
-    onclick: EventHandler<MouseEvent>,
-) -> Element {
-    let class = if selected {
-        "control-button selected"
-    } else {
-        "control-button"
-    };
-
-    rsx! {
-        button {
-            class: "{class}",
-            onclick: move |event| onclick.call(event),
-            "{label}"
         }
     }
 }

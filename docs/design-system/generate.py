@@ -250,6 +250,22 @@ typo_body = (
     "", typo_body))
 
 # ---------------------------------------------------------------- buttons.html
+def segment_group(label, options, selected):
+    buttons = "\n".join(
+        '    <button class="segment%s" type="button">%s</button>'
+        % (" selected" if opt == selected else "", opt)
+        for opt in options
+    )
+    return (
+        '<div class="segmented-field">\n'
+        '  <span class="control-label segmented-label">%s</span>\n'
+        '  <div class="segmented-control" role="group" aria-label="%s" style="--segment-count: %d;">\n'
+        "%s\n"
+        "  </div>\n"
+        "</div>" % (label, label, len(options), buttons)
+    )
+
+
 def buttons_inner():
     return """<div class="ds-group-title">control-button</div>
 <div class="ds-row">
@@ -260,6 +276,38 @@ def buttons_inner():
   <button class="control-button danger">Danger</button>
   <button class="control-button danger-button">Danger button</button>
 </div>
+<div class="ds-group-title">segmented-control</div>
+<div class="ds-col">
+""" + segment_group("Range", ["30D", "90D", "6M", "1Y", "Max"], "1Y") + """
+""" + segment_group("View", ["Tags", "String Matches"], "Tags") + """
+""" + segment_group("Bucket", ["Daily", "Weekly", "Monthly", "Quarterly", "Yearly"], "Monthly") + """
+</div>
+<div class="ds-caption" style="margin:8px 0 14px;">Mutually exclusive options. The markup publishes the option
+count as <code>--segment-count</code> and the stylesheet lays them out as exactly that many equal grid columns,
+so a group can never wrap an orphan option onto a second line. Labels shrink (fluid type, then ellipsis) instead.</div>
+<div class="ds-group-title">range-disclosure</div>
+<div class="ds-col">
+  <div class="segmented-field range-disclosure-field">
+    <span class="control-label segmented-label">Dates</span>
+    <div class="range-disclosure-body">
+      <button class="range-disclosure" type="button" aria-expanded="false">
+        <span class="range-disclosure-value">2025-07-25 &rarr; 2026-07-25</span>
+        <span class="range-disclosure-caret" aria-hidden="true">&#9662;</span>
+      </button>
+    </div>
+  </div>
+</div>
+<div class="ds-caption" style="margin:8px 0 14px;">Collapses the exact start/end date pickers behind a readout of
+the range currently in effect. Expands in place when opened or when a custom range is active.</div>
+<div class="ds-group-title">filter-clear-chip</div>
+<div class="ds-row filter-chip-row">
+  <button class="filter-clear-chip" type="button">
+    <span class="filter-clear-chip-text">Focused: Home &middot; 2026-03</span>
+    <span aria-hidden="true">&#10005;</span>
+  </button>
+</div>
+<div class="ds-caption" style="margin:8px 0 14px;">Only rendered while a filter is active, so a permanently
+disabled &ldquo;clear&rdquo; control never occupies a slot in an option group.</div>
 <div class="ds-group-title">icon-button</div>
 <div class="ds-row">
   <button class="icon-button" title="Edit">&#9998;</button>

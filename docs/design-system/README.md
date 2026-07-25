@@ -40,3 +40,23 @@ importer. Pages: `colors.html`, `typography.html` (Foundations);
 - Horizontal overflow clipping on navigation ancestors must use `clip`, not
   `hidden`. An overflow container prevents the compact header's sticky
   positioning from tracking the viewport.
+- A group of mutually exclusive options (range presets, sampling granularity,
+  spending bucket, view tabs) must use the `segmented-control` pattern rather
+  than a `flex-wrap` row of `control-button`s. The markup publishes the option
+  count as `--segment-count` and the stylesheet renders exactly that many equal
+  grid columns, which makes single-row layout structural: no viewport width or
+  option count can orphan an option onto a second line. Labels absorb the
+  pressure via fluid type and padding, then ellipsis. Use the
+  `SegmentedControl` component in `views/shared.rs`; it derives
+  `--segment-count` from the options it is given, so adding an option cannot
+  reintroduce wrapping.
+- Segments size from the space they actually have, not from the viewport: the
+  track is a query container and each segment's type and padding are fractions
+  of `100cqw / --segment-count`. A group therefore reads the same whether it
+  sits in a narrow mobile panel or beside a wide sidebar. Keep the `vw`-based
+  `clamp()` in the base rule as the fallback for engines without container
+  queries.
+- Actions and clear/reset controls do not belong inside an option group — they
+  change its column count without being one of the choices. Put them in their
+  own row, and prefer a contextual chip (`filter-clear-chip`) that only exists
+  while there is something to clear over a permanently visible disabled button.

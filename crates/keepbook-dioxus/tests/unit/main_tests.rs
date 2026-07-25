@@ -1,6 +1,65 @@
 use super::logic::*;
 use super::*;
 
+/// Declarations of the first top-level rule in `styles.css` for `selector`.
+fn css_rule_body(selector: &str) -> &'static str {
+    let needle = format!("\n{selector} {{");
+    let start = APP_CSS
+        .find(&needle)
+        .unwrap_or_else(|| panic!("styles.css must define a `{selector}` rule"))
+        + needle.len();
+    let end = start
+        + APP_CSS[start..]
+            .find('}')
+            .expect("css rule must be terminated");
+    &APP_CSS[start..end]
+}
+
+#[test]
+fn segmented_control_lays_options_out_as_a_single_row_of_equal_columns() {
+    let control = css_rule_body(".segmented-control");
+    assert!(
+        control.contains("display: grid;"),
+        "option groups must be a grid; a flex row can wrap an option onto a second line"
+    );
+    assert!(
+        control.contains("grid-template-columns: repeat(var(--segment-count, 1), minmax(0, 1fr));"),
+        "the column count must come from the option count, so adding an option cannot introduce a second row"
+    );
+    assert!(
+        !control.contains("flex-wrap"),
+        "option groups must not opt back into wrapping"
+    );
+
+    let segment = css_rule_body(".segment");
+    assert!(
+        segment.contains("white-space: nowrap;"),
+        "an option label must not break across lines inside its segment"
+    );
+    assert!(
+        segment.contains("min-width: 0;"),
+        "segments must be allowed to shrink below their label width"
+    );
+    assert!(
+        segment.contains("text-overflow: ellipsis;"),
+        "an over-long label must ellipsize rather than force the group wider"
+    );
+    assert!(
+        segment.contains("font-size: clamp("),
+        "segment type must scale down before ellipsis is reached"
+    );
+
+    assert!(
+        APP_CSS.contains("container-type: inline-size;"),
+        "the segmented track must be a query container so segments size from the space they have, \
+         not from the viewport"
+    );
+    assert!(
+        APP_CSS.contains("--segment-share: calc(100cqw / var(--segment-count, 1));"),
+        "each segment's share of the track must be derived from the option count"
+    );
+}
+
 #[test]
 fn navigation_styles_keep_compact_header_sticky_to_the_viewport() {
     assert!(

@@ -1,0 +1,1 @@
+* Changed: Replaced wrapping option rows (spending Range/View/Bucket, net worth Range/Sampling) with a single-row segmented control that can no longer spill an option onto its own line, and collapsed the custom date range behind a compact disclosure.

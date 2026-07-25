@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.10.5 - 2026-07-25
+
+### Changed
+
+- Replaced the wrapping option rows for spending Range, View, and Bucket
+  (and the net worth graph's Range and Sampling) with a segmented-control
+  pattern that lays options out as a single row of equal-width columns,
+  so an option can no longer spill onto its own line on narrow screens.
+  Segments now size their type and padding from the space actually
+  available to them rather than the viewport.
+- Collapsed the spending view's custom start/end date pickers behind a
+  single disclosure row that reads as "start → end" until expanded.
+- Replaced the always-visible, usually-disabled "All" button with a
+  contextual chip that only appears while a tag or period is focused.
+
 ## 0.10.4 - 2026-07-25
 
 ### Fixed

@@ -1,6 +1,23 @@
 use super::*;
 use std::collections::{HashMap, HashSet};
 
+/// Range presets offered by the net-worth graph panels, in display order.
+const CHART_RANGE_PRESETS: [(RangePreset, &str); 6] = [
+    (RangePreset::OneMonth, "1M"),
+    (RangePreset::NinetyDays, "90D"),
+    (RangePreset::SixMonths, "6M"),
+    (RangePreset::OneYear, "1Y"),
+    (RangePreset::TwoYears, "2Y"),
+    (RangePreset::Max, "Max"),
+];
+
+fn sampling_options() -> Vec<SegmentedOption> {
+    SamplingGranularity::OPTIONS
+        .iter()
+        .map(|option| SegmentedOption::new(option.value(), option.label()))
+        .collect()
+}
+
 #[component]
 pub(super) fn AccountGraphPanel(
     accounts: Vec<Account>,
@@ -213,70 +230,27 @@ pub(super) fn StackedHistoryGraphPanel(
                 BackendActivity { message: "Waiting on backend net worth data" }
             }
             div { class: "chart-controls",
-                div { class: "preset-row",
-                    span { class: "control-label", "Range" }
-                    GraphPresetButton {
-                        label: "1M",
-                        selected: selected_range == RangePreset::OneMonth,
-                        onclick: move |_| {
-                            range_preset.set(RangePreset::OneMonth);
-                            start_override.set(String::new());
-                            end_override.set(String::new());
-                        }
-                    }
-                    GraphPresetButton {
-                        label: "90D",
-                        selected: selected_range == RangePreset::NinetyDays,
-                        onclick: move |_| {
-                            range_preset.set(RangePreset::NinetyDays);
-                            start_override.set(String::new());
-                            end_override.set(String::new());
-                        }
-                    }
-                    GraphPresetButton {
-                        label: "6M",
-                        selected: selected_range == RangePreset::SixMonths,
-                        onclick: move |_| {
-                            range_preset.set(RangePreset::SixMonths);
-                            start_override.set(String::new());
-                            end_override.set(String::new());
-                        }
-                    }
-                    GraphPresetButton {
-                        label: "1Y",
-                        selected: selected_range == RangePreset::OneYear,
-                        onclick: move |_| {
-                            range_preset.set(RangePreset::OneYear);
-                            start_override.set(String::new());
-                            end_override.set(String::new());
-                        }
-                    }
-                    GraphPresetButton {
-                        label: "2Y",
-                        selected: selected_range == RangePreset::TwoYears,
-                        onclick: move |_| {
-                            range_preset.set(RangePreset::TwoYears);
-                            start_override.set(String::new());
-                            end_override.set(String::new());
-                        }
-                    }
-                    GraphPresetButton {
-                        label: "Max",
-                        selected: selected_range == RangePreset::Max,
-                        onclick: move |_| {
-                            range_preset.set(RangePreset::Max);
-                            start_override.set(String::new());
-                            end_override.set(String::new());
-                        }
+                SegmentedControl {
+                    label: "Range",
+                    options: range_preset_options(&CHART_RANGE_PRESETS),
+                    selected: selected_range.value().to_string(),
+                    onselect: move |value: String| {
+                        let Some(preset) = range_preset_from_value(&CHART_RANGE_PRESETS, &value)
+                        else {
+                            return;
+                        };
+                        range_preset.set(preset);
+                        start_override.set(String::new());
+                        end_override.set(String::new());
                     }
                 }
-                div { class: "sampling-row",
-                    span { class: "control-label", "Sampling" }
-                    for option in SamplingGranularity::OPTIONS {
-                        GraphPresetButton {
-                            label: option.label(),
-                            selected: selected_sampling == option,
-                            onclick: move |_| sampling_granularity.set(option)
+                SegmentedControl {
+                    label: "Sampling",
+                    options: sampling_options(),
+                    selected: selected_sampling.value().to_string(),
+                    onselect: move |value: String| {
+                        if let Some(option) = SamplingGranularity::from_value(&value) {
+                            sampling_granularity.set(option);
                         }
                     }
                 }
@@ -520,62 +494,32 @@ pub(super) fn HistoryGraphPanel(
             BackendActivity { message: "Waiting on backend graph data" }
         }
         div { class: "chart-controls",
+            SegmentedControl {
+                label: "Range",
+                options: range_preset_options(&CHART_RANGE_PRESETS),
+                selected: selected_range.value().to_string(),
+                onselect: move |value: String| {
+                    let Some(preset) = range_preset_from_value(&CHART_RANGE_PRESETS, &value) else {
+                        return;
+                    };
+                    range_preset.set(preset);
+                    start_override.set(String::new());
+                    end_override.set(String::new());
+                }
+            }
+            SegmentedControl {
+                label: "Sampling",
+                options: sampling_options(),
+                selected: selected_sampling.value().to_string(),
+                onselect: move |value: String| {
+                    if let Some(option) = SamplingGranularity::from_value(&value) {
+                        sampling_granularity.set(option);
+                    }
+                }
+            }
+            // "Fit Y" is an action, not one of the range options, so it lives in
+            // its own row instead of taking a slot in the range group.
             div { class: "preset-row",
-                span { class: "control-label", "Range" }
-                GraphPresetButton {
-                    label: "1M",
-                    selected: selected_range == RangePreset::OneMonth,
-                    onclick: move |_| {
-                        range_preset.set(RangePreset::OneMonth);
-                        start_override.set(String::new());
-                        end_override.set(String::new());
-                    }
-                }
-                GraphPresetButton {
-                    label: "90D",
-                    selected: selected_range == RangePreset::NinetyDays,
-                    onclick: move |_| {
-                        range_preset.set(RangePreset::NinetyDays);
-                        start_override.set(String::new());
-                        end_override.set(String::new());
-                    }
-                }
-                GraphPresetButton {
-                    label: "6M",
-                    selected: selected_range == RangePreset::SixMonths,
-                    onclick: move |_| {
-                        range_preset.set(RangePreset::SixMonths);
-                        start_override.set(String::new());
-                        end_override.set(String::new());
-                    }
-                }
-                GraphPresetButton {
-                    label: "1Y",
-                    selected: selected_range == RangePreset::OneYear,
-                    onclick: move |_| {
-                        range_preset.set(RangePreset::OneYear);
-                        start_override.set(String::new());
-                        end_override.set(String::new());
-                    }
-                }
-                GraphPresetButton {
-                    label: "2Y",
-                    selected: selected_range == RangePreset::TwoYears,
-                    onclick: move |_| {
-                        range_preset.set(RangePreset::TwoYears);
-                        start_override.set(String::new());
-                        end_override.set(String::new());
-                    }
-                }
-                GraphPresetButton {
-                    label: "Max",
-                    selected: selected_range == RangePreset::Max,
-                    onclick: move |_| {
-                        range_preset.set(RangePreset::Max);
-                        start_override.set(String::new());
-                        end_override.set(String::new());
-                    }
-                }
                 ControlButton {
                     onclick: move |_| {
                         if let Some((min, max)) = visible_value_bounds {
@@ -584,16 +528,6 @@ pub(super) fn HistoryGraphPanel(
                         }
                     },
                     "Fit Y"
-                }
-            }
-            div { class: "sampling-row",
-                span { class: "control-label", "Sampling" }
-                for option in SamplingGranularity::OPTIONS {
-                    GraphPresetButton {
-                        label: option.label(),
-                        selected: selected_sampling == option,
-                        onclick: move |_| sampling_granularity.set(option)
-                    }
                 }
             }
         }

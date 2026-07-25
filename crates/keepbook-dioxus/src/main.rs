@@ -782,6 +782,22 @@ enum RangePreset {
     Custom,
 }
 
+impl RangePreset {
+    /// Stable identifier used to round-trip a preset through segmented-control
+    /// option values.
+    fn value(self) -> &'static str {
+        match self {
+            Self::OneMonth => "one_month",
+            Self::NinetyDays => "ninety_days",
+            Self::SixMonths => "six_months",
+            Self::OneYear => "one_year",
+            Self::TwoYears => "two_years",
+            Self::Max => "max",
+            Self::Custom => "custom",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SamplingGranularity {
     Auto,
@@ -926,6 +942,24 @@ impl SamplingGranularity {
             Self::Yearly => "yearly",
         }
     }
+
+    /// Distinct from [`Self::query_value`], which collapses `Auto` onto `Daily`
+    /// for the backend query.
+    fn value(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Daily => "daily",
+            Self::Weekly => "weekly",
+            Self::Monthly => "monthly",
+            Self::Yearly => "yearly",
+        }
+    }
+
+    fn from_value(value: &str) -> Option<Self> {
+        Self::OPTIONS
+            .into_iter()
+            .find(|option| option.value() == value)
+    }
 }
 
 impl SpendingBucket {
@@ -955,6 +989,12 @@ impl SpendingBucket {
             Self::Quarterly => "quarterly",
             Self::Yearly => "yearly",
         }
+    }
+
+    fn from_value(value: &str) -> Option<Self> {
+        Self::OPTIONS
+            .into_iter()
+            .find(|option| option.query_value() == value)
     }
 }
 
