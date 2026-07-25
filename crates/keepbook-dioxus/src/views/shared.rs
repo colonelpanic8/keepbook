@@ -1,4 +1,5 @@
 use super::*;
+use std::rc::Rc;
 
 #[component]
 pub(super) fn InlineStatus(title: String, message: String) -> Element {
@@ -266,6 +267,52 @@ pub(super) fn Modal(
     }
 }
 
+/// Dismissal for the native `<input type="date">` calendar.
+///
+/// The picker keeps covering the chart or table it was opened over after a day
+/// is clicked, so the committed value is hidden behind the thing that set it.
+/// Dropping focus closes the picker in every engine. Keyboard entry is exempt:
+/// a date input fires `input` as soon as its segments read as a valid date, so
+/// blurring there would cut someone off in the middle of retyping a date.
+#[derive(Clone, Copy)]
+pub(super) struct DatePickerDismissal {
+    field: Signal<Option<Rc<MountedData>>>,
+    keyboard_edit: Signal<bool>,
+}
+
+pub(super) fn use_date_picker_dismissal() -> DatePickerDismissal {
+    DatePickerDismissal {
+        field: use_signal(|| None),
+        keyboard_edit: use_signal(|| false),
+    }
+}
+
+impl DatePickerDismissal {
+    pub(super) fn on_mounted(&mut self, event: Event<MountedData>) {
+        self.field.set(Some(event.data()));
+    }
+
+    pub(super) fn on_key_edit(&mut self) {
+        self.keyboard_edit.set(true);
+    }
+
+    pub(super) fn on_pointer_edit(&mut self) {
+        self.keyboard_edit.set(false);
+    }
+
+    pub(super) fn dismiss(&self) {
+        if (self.keyboard_edit)() {
+            return;
+        }
+        let Some(field) = (self.field)() else {
+            return;
+        };
+        spawn(async move {
+            let _ = field.set_focus(false).await;
+        });
+    }
+}
+
 #[component]
 pub(super) fn DateInput(
     label: &'static str,
@@ -274,6 +321,8 @@ pub(super) fn DateInput(
     max: String,
     oninput: EventHandler<String>,
 ) -> Element {
+    let mut dismissal = use_date_picker_dismissal();
+
     rsx! {
         label { class: "control-field",
             span { "{label}" }
@@ -283,7 +332,13 @@ pub(super) fn DateInput(
                 value: "{value}",
                 min: "{min}",
                 max: "{max}",
-                oninput: move |event| oninput.call(event.value())
+                onmounted: move |event| dismissal.on_mounted(event),
+                onmousedown: move |_| dismissal.on_pointer_edit(),
+                onkeydown: move |_| dismissal.on_key_edit(),
+                oninput: move |event| {
+                    oninput.call(event.value());
+                    dismissal.dismiss();
+                }
             }
         }
     }

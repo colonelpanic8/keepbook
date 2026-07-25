@@ -1883,6 +1883,7 @@ fn TransactionEditorPanel(
     let transaction_id = transaction.id.clone();
     let current_tags = transaction_tags(&transaction);
     let mut draft_tag = use_signal(String::new);
+    let mut date_dismissal = use_date_picker_dismissal();
     let draft = draft_tag();
     let can_add = !disabled && !draft.trim().is_empty();
     let suggestions = tag_editor_suggestions(&tag_options, &current_tags);
@@ -2035,10 +2036,14 @@ fn TransactionEditorPanel(
                             value: "{date_value}",
                             title: "Reporting date",
                             disabled,
+                            onmounted: move |event| date_dismissal.on_mounted(event),
+                            onmousedown: move |_| date_dismissal.on_pointer_edit(),
+                            onkeydown: move |_| date_dismissal.on_key_edit(),
                             onchange: {
                                 let account_id = account_id.clone();
                                 let transaction_id = transaction_id.clone();
                                 move |event: FormEvent| {
+                                    date_dismissal.dismiss();
                                     let value = event.value().trim().to_string();
                                     let clear_effective_date =
                                         value.is_empty() || value == posted_date;
