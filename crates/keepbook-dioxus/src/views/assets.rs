@@ -157,14 +157,6 @@ pub(super) fn AssetsView(filter_overrides: FilterOverrides) -> Element {
                                         onsortfieldchange: move |field| sort_field.set(field),
                                         onsortdirectionchange: move |direction| sort_direction.set(direction),
                                     }
-                                    AssetSortHeader {
-                                        label: "Price updated".to_string(),
-                                        field: AssetSortField::PriceUpdated,
-                                        selected_field: selected_sort_field,
-                                        direction: selected_sort_direction,
-                                        onsortfieldchange: move |field| sort_field.set(field),
-                                        onsortdirectionchange: move |direction| sort_direction.set(direction),
-                                    }
                                     div { class: "asset-change-grid",
                                         AssetSortHeader {
                                             label: "1D".to_string(),
@@ -200,6 +192,14 @@ pub(super) fn AssetsView(filter_overrides: FilterOverrides) -> Element {
                                         }
                                     }
                                     div { class: "asset-audit-grid",
+                                        AssetSortHeader {
+                                            label: "Price updated".to_string(),
+                                            field: AssetSortField::PriceUpdated,
+                                            selected_field: selected_sort_field,
+                                            direction: selected_sort_direction,
+                                            onsortfieldchange: move |field| sort_field.set(field),
+                                            onsortdirectionchange: move |direction| sort_direction.set(direction),
+                                        }
                                         AssetSortHeader {
                                             label: "Amount checked".to_string(),
                                             field: AssetSortField::AmountChecked,
@@ -316,12 +316,6 @@ fn AssetRow(
                 small { class: "asset-cell-label", "Value ({currency})" }
                 strong { "{value}" }
             }
-            span {
-                class: "asset-price-freshness asset-labeled-cell",
-                title: "{entry.price_updated_at.clone().unwrap_or_default()}",
-                small { class: "asset-cell-label", "Price updated" }
-                span { "{price_updated}" }
-            }
             div { class: "asset-change-grid",
                 {asset_change_cell(&entry, AssetSortField::DayChange, &currency, show_absolute_changes)}
                 {asset_change_cell(&entry, AssetSortField::WeekChange, &currency, show_absolute_changes)}
@@ -329,6 +323,12 @@ fn AssetRow(
                 {asset_change_cell(&entry, AssetSortField::YearChange, &currency, show_absolute_changes)}
             }
             div { class: "asset-audit-grid",
+                span {
+                    class: "asset-labeled-cell asset-price-freshness",
+                    title: "{entry.price_updated_at.clone().unwrap_or_default()}",
+                    small { class: "asset-cell-label", "Price updated" }
+                    span { "{price_updated}" }
+                }
                 span {
                     class: "asset-labeled-cell",
                     title: "{entry.amount_last_checked_at.clone().unwrap_or_default()}",
