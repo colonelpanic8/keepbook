@@ -1,0 +1,1 @@
+* Changed: Grouped the price-updated timestamp with the other freshness timestamps (amount checked, amount changed) in the Assets view, placed first among them.

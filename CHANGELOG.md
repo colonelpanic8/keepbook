@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.2 - 2026-07-24
+
+### Changed
+
+- Grouped the price-updated timestamp with the other freshness timestamps
+  (amount checked, amount changed) in the Assets view, placed first among
+  them.
+
 ## 0.10.1 - 2026-07-24
 
 ### Fixed
