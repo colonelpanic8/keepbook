@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.10.7 - 2026-07-25
+
+### Fixed
+
+- Date fields now dismiss the native calendar once a date is picked,
+  instead of leaving it open over the chart or transaction row it was
+  opened from. Applies to the spending custom range, both history
+  charts, and the transaction reporting date. Keyboard entry is
+  unaffected.
+- Dropdowns keep the theme's surface colour in dark mode instead of
+  falling back to a light platform background, which the repository
+  switcher made most visible. Both themes also declare their colour
+  scheme, so select popups, date-picker calendars, and scrollbars follow
+  the active theme.
+
 ## 0.10.6 - 2026-07-25
 
 ### Fixed

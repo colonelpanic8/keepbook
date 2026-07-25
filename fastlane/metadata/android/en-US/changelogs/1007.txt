@@ -1,0 +1,2 @@
+* Fixed: Date fields now dismiss the native calendar once a date is picked, instead of leaving it open over the chart or transaction row it was opened from. Applies to the spending custom range, both history charts, and the transaction reporting date. Keyboard entry is unaffected.
+* ...see CHANGELOG.md for the rest.
