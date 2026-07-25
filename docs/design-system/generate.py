@@ -492,6 +492,13 @@ def forms_inner():
     <span>Amount</span>
     <input class="control-input" type="number" value="1200" step="0.01">
   </label>
+  <label class="control-field">
+    <span>Sort</span>
+    <select class="control-input">
+      <option>Value</option>
+      <option>Name</option>
+    </select>
+  </label>
 </div>
 <div class="ds-group-title">transaction-search-input</div>
 <div class="ds-row">

@@ -61,6 +61,30 @@ fn segmented_control_lays_options_out_as_a_single_row_of_equal_columns() {
 }
 
 #[test]
+fn dropdowns_take_their_background_from_the_active_theme() {
+    let dark = css_rule_body(":root[data-theme=\"dark\"]");
+    assert!(
+        dark.contains("color-scheme: dark;"),
+        "the dark theme must declare its color scheme, or platform-drawn surfaces \
+         (select popups, date-picker calendars, scrollbars) stay light"
+    );
+
+    let select = css_rule_body("select.control-input");
+    assert!(
+        select.contains("appearance: none;"),
+        "the platform select widget ignores the themed background; the control must be drawn by us"
+    );
+    assert!(
+        select.contains("background-color: var(--color-surface);"),
+        "a select must sit on the themed surface colour, not the platform default"
+    );
+    assert!(
+        select.contains("background-image:"),
+        "dropping the native widget also drops its caret, so one must be drawn back in"
+    );
+}
+
+#[test]
 fn navigation_styles_keep_compact_header_sticky_to_the_viewport() {
     assert!(
         APP_CSS.contains(

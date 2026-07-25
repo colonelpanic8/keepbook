@@ -1,5 +1,10 @@
 :root,
 :root[data-theme="fern"] {
+  /* Tells the engine which palette to render UA-drawn surfaces with: select
+     dropdowns, date-picker calendars, scrollbars. Without it those stay light
+     on top of a dark theme. */
+  color-scheme: light;
+
   /* Surfaces */
   --color-bg: #f4f7f6;
   --color-surface: #ffffff;
@@ -148,6 +153,8 @@
 }
 
 :root[data-theme="dark"] {
+  color-scheme: dark;
+
   /* Surfaces */
   --color-bg: #10171d;
   --color-surface: #1a232b;
@@ -1037,6 +1044,31 @@ small,
   min-height: 38px;
   min-width: 0;
   padding: 7px 9px;
+}
+
+/* Left to the platform widget a `select` keeps a light native background under
+   the dark theme, so the control is drawn from tokens instead and given a
+   token-coloured caret in place of the native one. `option` is restated too:
+   the popup list is drawn by the platform and does not inherit. */
+select.control-input {
+  appearance: none;
+  background-color: var(--color-surface);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--color-text-muted) 50%),
+    linear-gradient(135deg, var(--color-text-muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - 16px) calc(50% + 1px),
+    calc(100% - 11px) calc(50% + 1px);
+  background-repeat: no-repeat;
+  background-size:
+    5px 5px,
+    5px 5px;
+  padding-right: 28px;
+}
+
+select.control-input option {
+  background-color: var(--color-surface);
+  color: var(--color-text);
 }
 
 .compact-control-field {
@@ -3103,7 +3135,8 @@ button.stacked-legend-item {
     font-size: var(--fs-small);
     height: var(--compact-header-control-height);
     min-height: var(--compact-header-control-height);
-    padding: 4px 7px;
+    /* Right side stays wide enough for the caret drawn on `select.control-input`. */
+    padding: 4px 26px 4px 7px;
   }
 
   .app-nav nav {
