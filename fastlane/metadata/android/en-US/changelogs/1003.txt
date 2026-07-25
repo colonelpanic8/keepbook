@@ -1,0 +1,1 @@
+* Fixed: Removed a double-counted safe-area gap below the sticky mobile header, which left an oversized empty space above the first card on phones with a status bar or notch inset.

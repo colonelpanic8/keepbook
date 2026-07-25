@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.3 - 2026-07-25
+
+### Fixed
+
+- Removed a double-counted safe-area gap below the sticky mobile header,
+  which left an oversized empty space above the first card on phones with a
+  status bar or notch inset.
+
 ## 0.10.2 - 2026-07-24
 
 ### Changed

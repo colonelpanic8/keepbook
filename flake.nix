@@ -25,7 +25,7 @@
         };
         fenixPkgs = fenix.packages.${system};
         lib = pkgs.lib;
-        appVersion = "0.10.2";
+        appVersion = "0.10.3";
         # Derived from appVersion so a version bump alone is enough: major.minor.patch
         # becomes major*10000 + minor*100 + patch (0.10.0 -> 1000). A hand-maintained
         # code silently produces duplicate versionCodes across releases, which an
