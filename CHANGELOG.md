@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.10.8 - 2026-08-05
+
+### Changed
+
+- The navigation drawer now animates instead of appearing and vanishing
+  instantly: the panel slides in from the left while the scrim fades.
+  Closing plays the same transition in reverse. Systems configured to
+  reduce motion keep the previous instant behaviour.
+
 ## 0.10.7 - 2026-07-25
 
 ### Fixed
