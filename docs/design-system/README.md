@@ -37,6 +37,13 @@ importer. Pages: `colors.html`, `typography.html` (Foundations);
   control and the Keepbook logo/title. Opening navigation must leave this
   header completely unchanged and attach the drawer beneath it. In the wide
   sidebar, keep the labeled full-width selector beneath the heading.
+- The navigation drawer animates open and closed: the panel slides in from the
+  left and the scrim fades, both over 160ms ease. Both elements stay in the DOM
+  in either state (the Rust view toggles an `open` class) so the closing
+  transition can play; `visibility` flips discretely after the slide so the
+  hidden drawer leaves the focus order and a11y tree. The compact header keeps
+  `z-index` above the scrim in both states so it never dims mid-transition, and
+  `prefers-reduced-motion: reduce` disables the transitions entirely.
 - Horizontal overflow clipping on navigation ancestors must use `clip`, not
   `hidden`. An overflow container prevents the compact header's sticky
   positioning from tracking the viewport.

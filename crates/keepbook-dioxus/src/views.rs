@@ -391,13 +391,11 @@ fn Dashboard(
                     }
                 }
             }
-            if mobile_nav_open() {
-                button {
-                    class: "nav-backdrop",
-                    r#type: "button",
-                    aria_label: "Close navigation",
-                    onclick: move |_| mobile_nav_open.set(false),
-                }
+            button {
+                class: if mobile_nav_open() { "nav-backdrop open" } else { "nav-backdrop" },
+                r#type: "button",
+                aria_label: "Close navigation",
+                onclick: move |_| mobile_nav_open.set(false),
             }
             div { class: "workspace",
                 if overview_refreshing {

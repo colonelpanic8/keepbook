@@ -3100,7 +3100,9 @@ button.stacked-legend-item {
     position: sticky;
     top: 0;
     width: auto;
-    z-index: 20;
+    /* Stays above the drawer scrim (25) even while the closing drawer animates
+       out, so the header never dims mid-transition. */
+    z-index: 30;
   }
 
   .nav-header {
@@ -3139,15 +3141,13 @@ button.stacked-legend-item {
     padding: 4px 26px 4px 7px;
   }
 
+  /* The drawer stays in the DOM in both states so opening and closing can
+     animate; `visibility` flips discretely after the slide finishes, which
+     also removes the hidden drawer from focus order and the a11y tree. */
   .app-nav nav {
-    display: none;
-  }
-
-  .app-nav.open nav {
     background: var(--color-surface);
     border-right: 1px solid var(--color-border);
     box-shadow: var(--shadow-drawer);
-    display: flex;
     height: calc(100vh - 100%);
     height: calc(100dvh - 100%);
     left: 0;
@@ -3160,12 +3160,19 @@ button.stacked-legend-item {
       calc(16px + var(--safe-area-left));
     position: absolute;
     top: 100%;
+    transform: translateX(-100%);
+    transition:
+      transform 160ms ease,
+      visibility 0s linear 160ms;
+    visibility: hidden;
     width: 284px;
     z-index: 30;
   }
 
-  .app-nav.open {
-    z-index: 30;
+  .app-nav.open nav {
+    transform: none;
+    transition: transform 160ms ease;
+    visibility: visible;
   }
 
   .nav-backdrop {
@@ -3173,9 +3180,29 @@ button.stacked-legend-item {
     border: 0;
     display: block;
     inset: 0;
+    opacity: 0;
     padding: 0;
     position: fixed;
+    transition:
+      opacity 160ms ease,
+      visibility 0s linear 160ms;
+    visibility: hidden;
     z-index: 25;
+  }
+
+  .nav-backdrop.open {
+    opacity: 1;
+    transition: opacity 160ms ease;
+    visibility: visible;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .app-nav nav,
+    .app-nav.open nav,
+    .nav-backdrop,
+    .nav-backdrop.open {
+      transition: none;
+    }
   }
 
   .summary-grid {
