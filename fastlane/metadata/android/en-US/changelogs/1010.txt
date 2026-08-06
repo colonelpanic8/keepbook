@@ -1,0 +1,1 @@
+* Fixed: Pushing to an SSH remote no longer falls back to the git credential helper, which reported the confusing "failed to acquire username/password from local configuration" error even though SSH remotes never use a password. When no key works, the error now names the keys that were tried and points at the SSH agent.

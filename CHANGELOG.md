@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.10.10 - 2026-08-06
+
+### Fixed
+
+- Pushing to an SSH remote no longer falls back to the git credential
+  helper, which reported the confusing "failed to acquire
+  username/password from local configuration" error even though SSH
+  remotes never use a password. The username-only credential round that
+  libgit2 performs first for SSH remotes is now answered (defaulting to
+  `git`), and when no key works the error names the keys that were tried
+  and points at the SSH agent.
+
 ## 0.10.9 - 2026-08-06
 
 ### Fixed

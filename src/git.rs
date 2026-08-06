@@ -9,6 +9,7 @@ use git2::{
 };
 
 const AUTO_COMMIT_EXCLUDED_PATH: &str = "keepbook.toml";
+const SSH_DEFAULT_USERNAME: &str = "git";
 const DEFAULT_SSH_IDENTITY_FILES: &[&str] = &[
     "id_ed25519",
     "id_rsa",
@@ -267,24 +268,32 @@ fn callbacks(repo: &Repository, git_config: &GitConfig) -> Result<RemoteCallback
     let mut callbacks = RemoteCallbacks::new();
     configure_certificate_check(&mut callbacks);
     callbacks.credentials(move |url, username, allowed| {
-        if allowed.contains(CredentialType::SSH_KEY) {
-            if let Some(username) = username {
-                while let Some(key) = ssh_keys.get(next_ssh_key) {
-                    next_ssh_key += 1;
-                    if let Ok(cred) =
-                        Cred::ssh_key_from_memory(username, None, &key.private_key, None)
-                    {
-                        return Ok(cred);
-                    }
-                }
+        // For SSH remotes libgit2 first asks only for the username to use.
+        if allowed.contains(CredentialType::USERNAME) {
+            return Cred::username(username.unwrap_or(SSH_DEFAULT_USERNAME));
+        }
 
-                if !ssh_agent_attempted {
-                    ssh_agent_attempted = true;
-                    if let Ok(cred) = Cred::ssh_key_from_agent(username) {
-                        return Ok(cred);
-                    }
+        if allowed.contains(CredentialType::SSH_KEY) {
+            let username = username.unwrap_or(SSH_DEFAULT_USERNAME);
+            while let Some(key) = ssh_keys.get(next_ssh_key) {
+                next_ssh_key += 1;
+                if let Ok(cred) = Cred::ssh_key_from_memory(username, None, &key.private_key, None)
+                {
+                    return Ok(cred);
                 }
             }
+
+            if !ssh_agent_attempted {
+                ssh_agent_attempted = true;
+                if let Ok(cred) = Cred::ssh_key_from_agent(username) {
+                    return Ok(cred);
+                }
+            }
+
+            // Never fall through to the credential helper for SSH remotes: it
+            // reports a confusing "failed to acquire username/password from
+            // local configuration" error even though no password is involved.
+            return Err(no_usable_ssh_credentials_error(&ssh_keys));
         }
 
         if allowed.contains(CredentialType::USER_PASS_PLAINTEXT) {
@@ -300,6 +309,23 @@ fn callbacks(repo: &Repository, git_config: &GitConfig) -> Result<RemoteCallback
         Cred::credential_helper(&config, url, username)
     });
     Ok(callbacks)
+}
+
+fn no_usable_ssh_credentials_error(ssh_keys: &[SshPrivateKey]) -> git2::Error {
+    let message = if ssh_keys.is_empty() {
+        "no SSH key available for this remote: configure `git.ssh_key_path` or run an SSH agent"
+            .to_string()
+    } else {
+        let paths = ssh_keys
+            .iter()
+            .map(|key| key.path.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!(
+            "SSH authentication failed: no usable key among [{paths}] and no SSH agent key was accepted (a passphrase-protected key needs an agent)"
+        )
+    };
+    git2::Error::new(git2::ErrorCode::Auth, git2::ErrorClass::Ssh, message)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
