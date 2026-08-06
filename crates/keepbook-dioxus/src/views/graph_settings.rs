@@ -438,7 +438,9 @@ pub(super) fn SettingsView(
                                 branch: repository.branch.clone(),
                                 ssh_user: next_ssh_user,
                                 private_key_pem: private_key(),
-                                save_settings: false,
+                                // Persist a freshly provided key so it survives app restarts;
+                                // mobile has no ~/.ssh fallback.
+                                save_settings: !private_key().trim().is_empty(),
                             };
                             let cancel_handle = new_git_sync_cancel_handle();
                             busy.set(true);
