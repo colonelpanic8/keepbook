@@ -1,0 +1,1 @@
+* Fixed: The SSH key picked in Git Authentication is now saved once a sync succeeds, instead of living only for the lifetime of the running app. On Android, where there is no `~/.ssh` to fall back to, the key was lost whenever the system reclaimed the app and the next sync failed with "SSH private key is empty and no saved SSH key path is configured".
