@@ -56,13 +56,31 @@ importer. Pages: `colors.html`, `typography.html` (Foundations);
   pressure via fluid type and padding, then ellipsis. Use the
   `SegmentedControl` component in `views/shared.rs`; it derives
   `--segment-count` from the options it is given, so adding an option cannot
-  reintroduce wrapping.
+  reintroduce wrapping. This includes the theme picker in Settings. When the
+  group sits inside a setting row the row's copy already names it, so
+  `setting-segmented` hides the field's own label while the group keeps its
+  `aria-label`.
 - Segments size from the space they actually have, not from the viewport: the
   track is a query container and each segment's type and padding are fractions
   of `100cqw / --segment-count`. A group therefore reads the same whether it
   sits in a narrow mobile panel or beside a wide sidebar. Keep the `vw`-based
   `clamp()` in the base rule as the fallback for engines without container
   queries.
+- A panel is a single column that cannot exceed its own width
+  (`grid-template-columns: minmax(0, 1fr)`). Panels routinely carry values that
+  are one long unbreakable token — a config path, a remote URL, an id — and an
+  `auto` track sizes to that token, growing the panel past the workspace. The
+  workspace clips horizontally, so the growth is not scrollable: it pushes the
+  rest of the panel off the right edge. Clamp the column and let the value wrap.
+- Machine values shown in full (`settings-source`, `settings-meta`,
+  `key-file-status`) set `overflow-wrap: anywhere` so they break inside a path
+  segment. Values shown as an identifier rather than read in full (the `code`
+  cells in a repository row) stay on one line and ellipsize instead.
+- A setting row pairs copy with one control. A switch is narrow enough to sit
+  beside its copy at any width; a select or an option group is not, so rows
+  carrying one are marked `setting-row-stacked` and stack below 520px, handing
+  the control the row width rather than squeezing both halves. Repository rows
+  and their label/value pairs stack at the same width for the same reason.
 - Actions and clear/reset controls do not belong inside an option group — they
   change its column count without being one of the choices. Put them in their
   own row, and prefer a contextual chip (`filter-clear-chip`) that only exists

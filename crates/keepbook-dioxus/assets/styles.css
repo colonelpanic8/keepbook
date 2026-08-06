@@ -475,7 +475,13 @@ small,
   padding: var(--sp-16);
 }
 
+/* One column that can never exceed the panel. A single unbreakable value — a
+   config path, a remote URL, an id — contributes a min-content width of its own
+   longest token, and an `auto` track would grow the panel to fit it rather than
+   letting it wrap. The workspace clips horizontally, so that growth is not
+   scrollable: it silently pushes content off the right edge on narrow screens. */
 .panel {
+  grid-template-columns: minmax(0, 1fr);
   margin-bottom: var(--sp-16);
 }
 
@@ -2562,6 +2568,12 @@ button.stacked-legend-item {
   justify-content: flex-end;
 }
 
+/* A stacked action column trails its panel like the inline variant does; the
+   shared `align-items: center` above is meant for the inline row. */
+.settings-actions:not(.inline-actions) {
+  align-items: flex-end;
+}
+
 .setting-row {
   align-items: center;
   border: 1px solid var(--color-border-muted);
@@ -2634,6 +2646,37 @@ button.stacked-legend-item {
   border-top: 1px solid var(--color-divider);
   margin-top: var(--sp-14);
   padding-top: var(--sp-12);
+}
+
+/* Machine values (paths, registry files, key locations) are one long token with
+   almost no break opportunities. They are shown in full rather than truncated,
+   so they have to be allowed to break anywhere; without this their min-content
+   width is the whole string. */
+.settings-source small,
+.settings-meta span,
+.key-file-status {
+  overflow-wrap: anywhere;
+}
+
+/* Inside a setting row the row's own copy names the control, so the field label
+   is redundant — the group keeps its `aria-label` for assistive tech. The field
+   is sized by the row instead of the wide-screen label/control grid. */
+.setting-segmented {
+  width: min(100%, 240px);
+}
+
+.setting-segmented .segmented-label {
+  display: none;
+}
+
+/* Above the breakpoint the track sizes to its labels, so the field sizes to the
+   track rather than reserving the narrow-screen measure beside it. */
+@media (min-width: 721px) {
+  .setting-segmented {
+    display: flex;
+    grid-template-columns: none;
+    width: auto;
+  }
 }
 
 .change-positive {
@@ -3348,6 +3391,41 @@ button.stacked-legend-item {
 
   .group-tag-row {
     grid-template-columns: 1fr;
+  }
+
+  /* Once the readouts no longer fit on one line, columns beat a wrapping row:
+     the second line starts at a column edge instead of wherever the first line
+     ran out. Above this width they still fit, and a row keeps them together
+     rather than spreading them across the panel. */
+  .settings-meta-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  }
+
+  /* A switch is narrow enough to sit beside its copy at any width, but a select
+     or an option group is not: side by side both halves are squeezed, so rows
+     carrying one stack and hand the control the full row width. */
+  .setting-row-stacked {
+    align-items: stretch;
+    flex-direction: column;
+    gap: var(--sp-10);
+  }
+
+  /* Repository rows stack for the same reason: the action buttons need the row
+     width, not the remainder of it. */
+  .git-location-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .git-location-actions {
+    justify-content: flex-start;
+  }
+
+  /* A fixed label column leaves too little for the value; stacking gives the
+     path and remote the full width before they ellipsize. */
+  .git-state-row {
+    gap: var(--sp-2);
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

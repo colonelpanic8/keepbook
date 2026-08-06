@@ -174,36 +174,39 @@ fn ApplicationSettingsPanel() -> Element {
                 span { "Build" }
             }
             div { class: "settings-list",
-                article { class: "setting-row",
+                article { class: "setting-row setting-row-stacked",
                     div { class: "setting-copy",
                         strong { "Theme" }
                         small { "Appearance of the app" }
                     }
-                    div { class: "settings-actions inline-actions",
-                        for (theme_id , theme_label) in THEMES.iter().copied() {
-                            ControlButton {
-                                key: "{theme_id}",
-                                selected: current_theme() == theme_id,
-                                onclick: move |_| {
-                                    current_theme.set(theme_id.to_string());
-                                    // `theme_id` comes only from the THEMES const, so
-                                    // formatting it into the JS string is safe.
-                                    let js = format!(
-                                        r#"
-                                        var theme = "{theme_id}";
-                                        if (theme === "fern") {{
-                                            delete document.documentElement.dataset.theme;
-                                        }} else {{
-                                            document.documentElement.dataset.theme = theme;
-                                        }}
-                                        localStorage.setItem("keepbook-theme", theme);
-                                        "#
-                                    );
-                                    let _ = document::eval(&js);
-                                },
-                                "{theme_label}"
+                    SegmentedControl {
+                        class: "setting-segmented".to_string(),
+                        label: "Theme".to_string(),
+                        options: THEMES
+                            .iter()
+                            .map(|(id, label)| SegmentedOption::new(*id, *label))
+                            .collect::<Vec<_>>(),
+                        selected: current_theme(),
+                        onselect: move |theme_id: String| {
+                            if !THEMES.iter().any(|(id, _)| *id == theme_id) {
+                                return;
                             }
-                        }
+                            current_theme.set(theme_id.clone());
+                            // `theme_id` was just matched against the THEMES const, so
+                            // formatting it into the JS string is safe.
+                            let js = format!(
+                                r#"
+                                var theme = "{theme_id}";
+                                if (theme === "fern") {{
+                                    delete document.documentElement.dataset.theme;
+                                }} else {{
+                                    document.documentElement.dataset.theme = theme;
+                                }}
+                                localStorage.setItem("keepbook-theme", theme);
+                                "#
+                            );
+                            let _ = document::eval(&js);
+                        },
                     }
                 }
             }
@@ -263,7 +266,7 @@ fn ApplicationSettingsPanel() -> Element {
                                 }
                             }
                         }
-                        article { class: "setting-row",
+                        article { class: "setting-row setting-row-stacked",
                             div { class: "setting-copy",
                                 strong { "Window decorations" }
                                 small { "Auto hides the system title bar on Hyprland; choose System or Hidden to override it" }
