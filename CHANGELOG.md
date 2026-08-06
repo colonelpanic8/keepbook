@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.10.11 - 2026-08-06
+
+### Fixed
+
+- The Settings page no longer runs off the right edge on narrow phones.
+  The config paths shown in each panel were widening their panel past the
+  screen instead of wrapping, pushing the switches, the theme buttons,
+  and the panel headings out of view. Long paths now wrap, and rows whose
+  control is a dropdown or a set of options stack so that both the label
+  and the control get the full width.
+- The Android launcher now shows the app as "Keepbook" rather than
+  "KeepbookDioxus".
+
+### Changed
+
+- The theme picker in Settings is now a segmented control, matching the
+  other groups of mutually exclusive options in the app.
+
 ## 0.10.10 - 2026-08-06
 
 ### Fixed
