@@ -306,6 +306,14 @@
                   sed -i '/android:extractNativeLibs=/d' "$manifest"
                 fi
 
+                # `dx` derives the launcher label from the crate name
+                # (keepbook-dioxus -> KeepbookDioxus) rather than from the
+                # `[application] name` in Dioxus.toml. The app is just Keepbook.
+                if [[ -f "$res/values/strings.xml" ]]; then
+                  sed -i 's|<string name="app_name">[^<]*</string>|<string name="app_name">Keepbook</string>|' \
+                    "$res/values/strings.xml"
+                fi
+
                 if [[ -d "$res" && -f "$repo/assets/keepbook-icon.svg" ]]; then
                   # Adaptive launcher icon (API 26+): a solid brand-green background
                   # with the logo as a separate foreground layer. This replaces the
