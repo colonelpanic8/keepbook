@@ -1,5 +1,5 @@
 [application]
-name = "keepbook drop diodes"
+name = "Keepbook"
 
 [bundle]
 identifier = "org.colonelpanic.keepbook.dioxus"

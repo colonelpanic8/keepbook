@@ -25,7 +25,7 @@
         };
         fenixPkgs = fenix.packages.${system};
         lib = pkgs.lib;
-        appVersion = "0.10.12";
+        appVersion = "0.10.13";
         # Derived from appVersion so a version bump alone is enough: major.minor.patch
         # becomes major*10000 + minor*100 + patch (0.10.0 -> 1000). A hand-maintained
         # code silently produces duplicate versionCodes across releases, which an
@@ -202,7 +202,7 @@
             <key>CFBundleDevelopmentRegion</key>
             <string>en</string>
             <key>CFBundleDisplayName</key>
-            <string>keepbook drop diodes</string>
+            <string>Keepbook</string>
             <key>CFBundleExecutable</key>
             <string>Keepbook</string>
             <key>CFBundleIconFile</key>
@@ -212,7 +212,7 @@
             <key>CFBundleInfoDictionaryVersion</key>
             <string>6.0</string>
             <key>CFBundleName</key>
-            <string>keepbook drop diodes</string>
+            <string>Keepbook</string>
             <key>CFBundlePackageType</key>
             <string>APPL</string>
             <key>CFBundleShortVersionString</key>
@@ -310,7 +310,7 @@
                 # (keepbook-dioxus -> KeepbookDioxus) rather than from the
                 # `[application] name` in Dioxus.toml.
                 if [[ -f "$res/values/strings.xml" ]]; then
-                  sed -i 's|<string name="app_name">[^<]*</string>|<string name="app_name">keepbook drop diodes</string>|' \
+                  sed -i 's|<string name="app_name">[^<]*</string>|<string name="app_name">Keepbook</string>|' \
                     "$res/values/strings.xml"
                 fi
 
@@ -537,7 +537,7 @@ Comment=Local-first personal finance toolkit
 Exec=keepbook-dioxus
 GenericName=Personal finance toolkit
 Icon=$icon_name
-Name=keepbook drop diodes
+Name=Keepbook
 StartupNotify=true
 StartupWMClass=$startup_wm_class
 Terminal=false
@@ -593,7 +593,7 @@ EOF
         };
         keepbookDioxusDesktopItem = pkgs.makeDesktopItem {
           name = keepbookDioxusAppId;
-          desktopName = "keepbook drop diodes";
+          desktopName = "Keepbook";
           genericName = "Personal finance toolkit";
           comment = "Local-first personal finance toolkit";
           exec = "keepbook-dioxus";
@@ -604,7 +604,7 @@ EOF
         };
         keepbookDioxusDesktopAliasItem = pkgs.makeDesktopItem {
           name = keepbookDioxusDesktopAlias;
-          desktopName = "keepbook drop diodes";
+          desktopName = "Keepbook";
           genericName = "Personal finance toolkit";
           comment = "Local-first personal finance toolkit";
           exec = "keepbook-dioxus";

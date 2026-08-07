@@ -14,7 +14,7 @@ mod tray;
 const ANDROID_PACKAGE_DATA_DIR: &str = "/data/user/0/org.colonelpanic.keepbook.dioxus";
 
 const APP_CSS: &str = include_str!("../assets/styles.css");
-const APP_NAME: &str = "keepbook drop diodes";
+const APP_NAME: &str = "Keepbook";
 #[cfg(feature = "desktop")]
 const APP_ID: &str = "org.colonelpanic.keepbook.dioxus";
 #[cfg(feature = "desktop")]
