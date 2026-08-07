@@ -1,0 +1,1 @@
+* Changed: Renamed the app to "keepbook drop diodes" across its desktop, mobile, and web surfaces.

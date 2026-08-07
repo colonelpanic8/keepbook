@@ -449,7 +449,7 @@ fn desktop_window_builder_respects_explicit_window_decoration_setting() {
         window_decorations: keepbook_server::WindowDecorationsConfig::Hidden,
     });
 
-    assert_eq!(window_builder.window.title, "Keepbook");
+    assert_eq!(window_builder.window.title, "keepbook drop diodes");
     assert!(!window_builder.window.decorations);
     assert!(window_builder.window.visible);
 

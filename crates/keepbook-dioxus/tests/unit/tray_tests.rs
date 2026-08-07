@@ -34,6 +34,7 @@ fn overlay_status_tracks_runtime_state() {
 }
 
 #[test]
+#[allow(clippy::assertions_on_constants)]
 fn tray_left_click_activates_window_instead_of_menu() {
     assert!(!<KeepbookTrayItem as ksni::Tray>::MENU_ON_ACTIVATE);
 }

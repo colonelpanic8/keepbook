@@ -14,6 +14,7 @@ mod tray;
 const ANDROID_PACKAGE_DATA_DIR: &str = "/data/user/0/org.colonelpanic.keepbook.dioxus";
 
 const APP_CSS: &str = include_str!("../assets/styles.css");
+const APP_NAME: &str = "keepbook drop diodes";
 #[cfg(feature = "desktop")]
 const APP_ID: &str = "org.colonelpanic.keepbook.dioxus";
 #[cfg(feature = "desktop")]
@@ -1023,7 +1024,7 @@ fn configure_linux_desktop_environment() {
     }
 
     glib::set_prgname(Some(APP_ID));
-    glib::set_application_name("Keepbook");
+    glib::set_application_name(APP_NAME);
     if let Err(error) = gtk::init() {
         eprintln!("Failed to initialize GTK before configuring Keepbook desktop identity: {error}");
         return;
@@ -1124,7 +1125,7 @@ fn desktop_window_builder(
     startup_options: DesktopStartupOptions,
 ) -> dioxus::desktop::tao::window::WindowBuilder {
     let mut window = dioxus::desktop::tao::window::WindowBuilder::new()
-        .with_title("Keepbook")
+        .with_title(APP_NAME)
         .with_visible(desktop_window_visible(startup_options));
     if should_disable_window_decorations_for(startup_options.window_decorations, |name| {
         std::env::var_os(name)

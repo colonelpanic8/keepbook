@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.12 - 2026-08-07
+
+### Changed
+
+- Renamed the app to "keepbook drop diodes" across its desktop, mobile,
+  and web surfaces.
+
 ## 0.10.11 - 2026-08-06
 
 ### Fixed

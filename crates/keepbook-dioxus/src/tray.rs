@@ -416,7 +416,7 @@ fn tray_tooltip(
     runtime: &TrayRuntime,
 ) -> String {
     let mut lines = vec![
-        "Keepbook".to_string(),
+        crate::APP_NAME.to_string(),
         runtime.status_text.clone(),
         runtime.last_cycle_text.clone(),
         runtime.next_cycle_text.clone(),
@@ -606,7 +606,7 @@ impl ksni::Tray for KeepbookTrayItem {
 
     fn tool_tip(&self) -> ksni::ToolTip {
         ksni::ToolTip {
-            title: "Keepbook".to_string(),
+            title: crate::APP_NAME.to_string(),
             description: tray_tooltip(self.tray_snapshot.as_ref(), &self.runtime),
             ..Default::default()
         }
@@ -621,7 +621,7 @@ impl ksni::Tray for KeepbookTrayItem {
             tray_lines(self.tray_snapshot.as_ref(), self.overview.as_ref());
 
         let mut items = vec![
-            disabled_item("keepbook"),
+            disabled_item(crate::APP_NAME),
             MenuItem::Separator,
             disabled_item(format!("Status: {}", self.runtime.status_text)),
             disabled_item(self.runtime.last_cycle_text.clone()),

@@ -148,7 +148,7 @@ pub(crate) fn App() -> Element {
                 });
             },
         }
-        document::Title { "Keepbook" }
+        document::Title { "{APP_NAME}" }
         document::Meta {
             name: "viewport",
             content: "width=device-width, initial-scale=1, viewport-fit=cover",
@@ -329,7 +329,7 @@ fn Dashboard(
                     div { class: "nav-title",
                         div { class: "nav-logo", dangerous_inner_html: NAV_LOGO_SVG }
                         div { class: "nav-title-text",
-                            strong { "Keepbook" }
+                            strong { "{APP_NAME}" }
                             small { "{overview.reporting_currency}" }
                         }
                     }
