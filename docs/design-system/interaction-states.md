@@ -38,12 +38,18 @@ app appear frozen.
 
 - The navigation repository selector reflects the app-wide active repository.
   Repositories without a completed clone are visible but cannot be selected.
+- Repository declarations in the XDG `app.toml` manifest are read-only and
+  display as managed. The active selection and repositories added from
+  Settings live in device-local `device.toml`; Settings never rewrites the
+  manifest and does not offer Remove for a managed entry.
 - Switching repositories is asynchronous. Keep the current repository visible
   until the replacement config and storage load successfully, then refresh all
   repository-derived views together.
-- Adding or removing a repository changes only the XDG app registry. Removing
-  an entry never deletes its local files. Git clone and sync use the remote and
+- Adding or removing a repository changes only device-local state. Removing an
+  entry never deletes its local files. Git clone and sync use the remote and
   branch stored with that registry entry and retain the standard cancel flow.
+- Declarative setup is an explicit CLI operation. Normal app startup remains
+  network-free and shows un-cloned manifest entries as unavailable.
 
 ## Shared components
 

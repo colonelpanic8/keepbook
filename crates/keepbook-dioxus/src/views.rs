@@ -25,6 +25,10 @@ use spending::SpendingView;
 
 const NAV_LOGO_SVG: &str = include_str!("../../../assets/keepbook-icon.svg");
 
+pub(crate) fn repository_can_remove(repository: &Repository) -> bool {
+    !repository.active && !repository.managed
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ActiveView {
     Spending,

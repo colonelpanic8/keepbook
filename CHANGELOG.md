@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.11.0 - 2026-08-17
+
+### Added
+
+- Added a declarative repository manifest in `~/.config/keepbook/app.toml` and
+  `keepbook repositories setup`, which safely clones missing data repositories
+  and validates existing checkouts without changing them.
+- Added device-local repository state in `device.toml`, including active
+  repository selection and repositories created through Settings.
+
+### Changed
+
+- Repository management now merges manifest-managed and device-local entries.
+  Managed entries are identified in Settings and cannot be removed there.
+- Repository setup reports every result as JSON and fails only after attempting
+  all declared repositories.
+
 ## 0.10.13 - 2026-08-07
 
 ### Changed

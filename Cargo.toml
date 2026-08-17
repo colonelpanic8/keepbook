@@ -1,6 +1,6 @@
 [package]
 name = "keepbook"
-version = "0.10.13"
+version = "0.11.0"
 edition = "2021"
 description = "Local-first personal finance toolkit"
 license = "MIT OR Apache-2.0"
@@ -67,7 +67,7 @@ app = []
 tui = ["app", "config", "dep:dialoguer", "dep:ratatui", "dep:crossterm", "dep:reqwest"]
 config = []
 credentials = ["dep:age"]
-git = ["dep:git2"]
+git = ["config", "dep:git2"]
 market_data = ["dep:reqwest"]
 portfolio = []
 staleness = []
@@ -94,6 +94,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
+toml_edit = "0.22"
 
 # Time handling
 chrono = { version = "0.4", features = ["serde"] }

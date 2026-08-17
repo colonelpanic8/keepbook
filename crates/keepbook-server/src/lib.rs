@@ -25,6 +25,7 @@ use keepbook::models::{
     Account, AccountConfig, Asset, BalanceSnapshot, Connection, ConnectionConfig, Id,
     ProposedTransactionEdit, RecurringTransactionReview, Transaction, TransactionAnnotationPatch,
 };
+use keepbook::repositories::{self, RepositoryDeclaration, RepositoryEntry, RepositoryRegistry};
 use keepbook::storage::{JsonFileStorage, Storage};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -321,15 +322,11 @@ impl ApiState {
 
     pub async fn repositories(&self) -> Result<RepositoryRegistryOutput> {
         let snapshot = self.snapshot().await;
-        let mut registry = load_repository_registry(&default_app_config_path())?;
-        let previous_active = registry.active_repository.clone();
-        let bootstrapped = registry.repositories.is_empty();
+        let app_config_path = default_app_config_path();
+        let mut registry = repositories::load_registry(&app_config_path)?;
         if registry.repositories.is_empty() {
-            registry = bootstrap_repository_registry(&snapshot)?;
-        }
-        normalize_active_repository(&mut registry);
-        if bootstrapped || registry.active_repository != previous_active {
-            save_repository_registry(&default_app_config_path(), &registry)?;
+            let entry = bootstrap_repository_entry(&snapshot, &registry.repositories)?;
+            registry = repositories::add_resolved_local_repository(&app_config_path, &entry)?;
         }
         repository_registry_output(&registry)
     }
@@ -340,12 +337,13 @@ impl ApiState {
     ) -> Result<RepositoryRegistryOutput> {
         let snapshot = self.snapshot().await;
         let app_config_path = default_app_config_path();
-        let mut registry = load_repository_registry(&app_config_path)?;
+        let mut registry = repositories::load_registry(&app_config_path)?;
         if registry.repositories.is_empty() {
-            registry = bootstrap_repository_registry(&snapshot)?;
+            let entry = bootstrap_repository_entry(&snapshot, &registry.repositories)?;
+            registry = repositories::add_resolved_local_repository(&app_config_path, &entry)?;
         }
 
-        let path = absolute_repository_path(&input.path)?;
+        let path = repositories::absolute_repository_path(&input.path)?;
         let remote = input.remote.trim();
         anyhow::ensure!(!remote.is_empty(), "Git remote is required");
         anyhow::ensure!(
@@ -356,23 +354,23 @@ impl ApiState {
 
         let name = input.name.trim();
         let name = if name.is_empty() {
-            repository_name_from_path(&path)
+            repositories::repository_name_from_path(&path)
         } else {
             name.to_string()
         };
-        let id = unique_repository_id(&name, &registry.repositories);
-        let config_path = path.join("keepbook.toml");
-        registry.repositories.push(RepositoryEntry {
-            id,
-            name,
-            path,
-            config_path,
-            remote: remote.to_string(),
-            branch: non_empty(input.branch.trim(), "master").to_string(),
-        });
-        normalize_active_repository(&mut registry);
-        save_repository_registry(&app_config_path, &registry)?;
-        repository_registry_output(&registry)
+        let id = repositories::unique_repository_id(&name, &registry.repositories);
+        repositories::add_local_repository(
+            &app_config_path,
+            RepositoryDeclaration {
+                id,
+                name,
+                remote: remote.to_string(),
+                branch: non_empty(input.branch.trim(), "master").to_string(),
+                path: Some(path),
+                config_path: None,
+            },
+        )
+        .and_then(|registry| repository_registry_output(&registry))
     }
 
     pub async fn activate_repository(
@@ -380,7 +378,7 @@ impl ApiState {
         repository_id: &str,
     ) -> Result<RepositoryRegistryOutput> {
         let app_config_path = default_app_config_path();
-        let mut registry = load_repository_registry(&app_config_path)?;
+        let registry = repositories::load_registry(&app_config_path)?;
         let entry = registry
             .repositories
             .iter()
@@ -395,27 +393,13 @@ impl ApiState {
         );
 
         self.switch_config(&entry.config_path).await?;
-        registry.active_repository = Some(entry.id);
-        save_repository_registry(&app_config_path, &registry)?;
+        let registry = repositories::set_active_repository(&app_config_path, &entry.id)?;
         repository_registry_output(&registry)
     }
 
     pub async fn remove_repository(&self, repository_id: &str) -> Result<RepositoryRegistryOutput> {
         let app_config_path = default_app_config_path();
-        let mut registry = load_repository_registry(&app_config_path)?;
-        anyhow::ensure!(
-            registry.active_repository.as_deref() != Some(repository_id),
-            "Switch to another repository before removing the active repository"
-        );
-        let previous_len = registry.repositories.len();
-        registry
-            .repositories
-            .retain(|entry| entry.id != repository_id);
-        anyhow::ensure!(
-            registry.repositories.len() != previous_len,
-            "Unknown Keepbook repository: {repository_id}"
-        );
-        save_repository_registry(&app_config_path, &registry)?;
+        let registry = repositories::remove_local_repository(&app_config_path, repository_id)?;
         repository_registry_output(&registry)
     }
 
@@ -1217,27 +1201,10 @@ pub struct ApplicationSettingsInput {
     pub window_decorations: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub struct RepositoryEntry {
-    pub id: String,
-    pub name: String,
-    pub path: PathBuf,
-    pub config_path: PathBuf,
-    pub remote: String,
-    #[serde(default = "default_repository_branch")]
-    pub branch: String,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(default)]
-struct RepositoryRegistry {
-    active_repository: Option<String>,
-    repositories: Vec<RepositoryEntry>,
-}
-
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub struct RepositoryRegistryOutput {
     pub config_path: String,
+    pub device_config_path: String,
     pub active_repository: Option<String>,
     pub repositories: Vec<RepositoryOutput>,
 }
@@ -1253,6 +1220,7 @@ pub struct RepositoryOutput {
     pub active: bool,
     pub cloned: bool,
     pub commit: Option<String>,
+    pub managed: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -2365,92 +2333,37 @@ fn load_api_config(config_path: &Path) -> Result<ResolvedConfig> {
 }
 
 pub fn default_app_config_path() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("keepbook")
-        .join("app.toml")
+    repositories::default_app_config_path()
 }
 
 pub fn active_repository_config_path(fallback: impl AsRef<Path>) -> Result<PathBuf> {
-    let registry = load_repository_registry(&default_app_config_path())?;
-    let Some(active_id) = registry.active_repository.as_deref() else {
-        return Ok(fallback.as_ref().to_path_buf());
-    };
-    let config_path = registry
-        .repositories
-        .iter()
-        .find(|entry| entry.id == active_id)
-        .map(|entry| entry.config_path.clone())
-        .filter(|path| path.is_file());
-    Ok(config_path.unwrap_or_else(|| fallback.as_ref().to_path_buf()))
+    repositories::active_repository_config_path(&default_app_config_path(), fallback)
 }
 
 fn default_repository_branch() -> String {
     "master".to_string()
 }
 
-fn load_repository_registry(path: &Path) -> Result<RepositoryRegistry> {
-    if !path.exists() {
-        return Ok(RepositoryRegistry::default());
-    }
-    let content = std::fs::read_to_string(path)
-        .with_context(|| format!("failed to read app config from {}", path.display()))?;
-    toml::from_str(&content)
-        .with_context(|| format!("failed to parse app config from {}", path.display()))
-}
-
-fn save_repository_registry(path: &Path, registry: &RepositoryRegistry) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
-    let content = toml::to_string_pretty(registry).context("failed to encode app config")?;
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("app.toml");
-    let temporary_path = path.with_file_name(format!(".{file_name}.tmp-{}", std::process::id()));
-    std::fs::write(&temporary_path, content).with_context(|| {
-        format!(
-            "failed to write temporary app config to {}",
-            temporary_path.display()
-        )
-    })?;
-    std::fs::rename(&temporary_path, path)
-        .with_context(|| format!("failed to replace app config at {}", path.display()))
-}
-
-fn bootstrap_repository_registry(snapshot: &ApiSnapshot) -> Result<RepositoryRegistry> {
+fn bootstrap_repository_entry(
+    snapshot: &ApiSnapshot,
+    repositories: &[RepositoryEntry],
+) -> Result<RepositoryEntry> {
     let git = load_git_remote_settings(&snapshot.config_path)?;
     let repo_state = read_git_repo_state(&snapshot.config.data_dir);
     let remote = repo_state
         .remote_url
         .unwrap_or_else(|| build_ssh_remote_url(&git.host, &git.repo, &git.ssh_user));
-    let name = repository_name_from_path(&snapshot.config.data_dir);
-    let id = repository_id_slug(&name);
-    Ok(RepositoryRegistry {
-        active_repository: Some(id.clone()),
-        repositories: vec![RepositoryEntry {
-            id,
-            name,
-            path: snapshot.config.data_dir.clone(),
-            config_path: snapshot.config_path.clone(),
-            remote,
-            branch: git.branch,
-        }],
+    let name = repositories::repository_name_from_path(&snapshot.config.data_dir);
+    let id = repositories::unique_repository_id(&name, repositories);
+    Ok(RepositoryEntry {
+        id,
+        name,
+        path: snapshot.config.data_dir.clone(),
+        config_path: snapshot.config_path.clone(),
+        remote,
+        branch: git.branch,
+        managed: false,
     })
-}
-
-fn normalize_active_repository(registry: &mut RepositoryRegistry) {
-    let active_exists = registry.active_repository.as_ref().is_some_and(|active| {
-        registry
-            .repositories
-            .iter()
-            .any(|entry| &entry.id == active)
-    });
-    if !active_exists {
-        registry.active_repository = registry.repositories.first().map(|entry| entry.id.clone());
-    }
 }
 
 fn repository_registry_output(registry: &RepositoryRegistry) -> Result<RepositoryRegistryOutput> {
@@ -2470,69 +2383,16 @@ fn repository_registry_output(registry: &RepositoryRegistry) -> Result<Repositor
                 active: active_repository.as_deref() == Some(entry.id.as_str()),
                 cloned: state.cloned && entry.config_path.is_file(),
                 commit: state.commit,
+                managed: entry.managed,
             }
         })
         .collect();
     Ok(RepositoryRegistryOutput {
-        config_path: default_app_config_path().display().to_string(),
+        config_path: registry.manifest_path.display().to_string(),
+        device_config_path: registry.device_config_path.display().to_string(),
         active_repository,
         repositories,
     })
-}
-
-fn absolute_repository_path(path: &str) -> Result<PathBuf> {
-    let trimmed = path.trim();
-    anyhow::ensure!(!trimmed.is_empty(), "Repository location is required");
-    let expanded = expand_home_path(trimmed);
-    let absolute = if expanded.is_absolute() {
-        expanded
-    } else {
-        std::env::current_dir()
-            .context("cannot resolve the current directory")?
-            .join(expanded)
-    };
-    let normalized = normalize_path_components(absolute);
-    validate_git_data_dir(&normalized)?;
-    Ok(normalized)
-}
-
-fn repository_name_from_path(path: &Path) -> String {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .filter(|name| !name.is_empty())
-        .unwrap_or("Keepbook")
-        .to_string()
-}
-
-fn repository_id_slug(name: &str) -> String {
-    let slug = name
-        .chars()
-        .flat_map(char::to_lowercase)
-        .map(|character| {
-            if character.is_ascii_alphanumeric() {
-                character
-            } else {
-                '-'
-            }
-        })
-        .collect::<String>();
-    let slug = slug.trim_matches('-').to_string();
-    if slug.is_empty() {
-        "repository".to_string()
-    } else {
-        slug
-    }
-}
-
-fn unique_repository_id(name: &str, repositories: &[RepositoryEntry]) -> String {
-    let base = repository_id_slug(name);
-    if !repositories.iter().any(|entry| entry.id == base) {
-        return base;
-    }
-    (2..)
-        .map(|suffix| format!("{base}-{suffix}"))
-        .find(|candidate| !repositories.iter().any(|entry| entry.id == *candidate))
-        .expect("repository id suffixes are unbounded")
 }
 
 fn load_config_doc(config_path: &Path) -> Result<DocumentMut> {
@@ -2756,34 +2616,12 @@ fn validate_git_data_dir(data_dir: &Path) -> Result<()> {
 }
 
 fn read_git_repo_state(data_dir: &Path) -> GitRepoState {
-    let Ok(repo) = git2::Repository::open(data_dir) else {
-        return GitRepoState {
-            cloned: false,
-            remote_url: None,
-            branch: None,
-            commit: None,
-        };
-    };
-
-    let remote_url = repo
-        .find_remote("origin")
-        .ok()
-        .and_then(|remote| remote.url().map(ToString::to_string));
-    let head = repo.head().ok();
-    let branch = head
-        .as_ref()
-        .filter(|head| head.is_branch())
-        .and_then(|head| head.shorthand().map(ToString::to_string));
-    let commit = head
-        .as_ref()
-        .and_then(|head| head.peel_to_commit().ok())
-        .map(|commit| commit.id().to_string());
-
+    let state = repositories::read_git_state(data_dir);
     GitRepoState {
-        cloned: true,
-        remote_url,
-        branch,
-        commit,
+        cloned: state.cloned,
+        remote_url: state.remote_url,
+        branch: state.branch,
+        commit: state.commit,
     }
 }
 

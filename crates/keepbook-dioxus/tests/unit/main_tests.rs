@@ -1,6 +1,34 @@
 use super::logic::*;
 use super::*;
 
+#[test]
+fn managed_and_active_repositories_cannot_be_removed_from_settings() {
+    let repository = Repository {
+        id: "books".to_string(),
+        name: "Books".to_string(),
+        path: "/tmp/books".to_string(),
+        remote: "git@example.com:books.git".to_string(),
+        branch: "main".to_string(),
+        active: false,
+        cloned: true,
+        commit: None,
+        managed: true,
+    };
+    assert!(!views::repository_can_remove(&repository));
+
+    let local = Repository {
+        managed: false,
+        ..repository.clone()
+    };
+    assert!(views::repository_can_remove(&local));
+
+    let active = Repository {
+        active: true,
+        ..local
+    };
+    assert!(!views::repository_can_remove(&active));
+}
+
 /// Declarations of the first top-level rule in `styles.css` for `selector`.
 fn css_rule_body(selector: &str) -> &'static str {
     let needle = format!("\n{selector} {{");

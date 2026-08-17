@@ -162,6 +162,8 @@ struct Overview {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 struct RepositoryRegistry {
     config_path: String,
+    #[serde(default)]
+    device_config_path: String,
     active_repository: Option<String>,
     repositories: Vec<Repository>,
 }
@@ -176,6 +178,8 @@ struct Repository {
     active: bool,
     cloned: bool,
     commit: Option<String>,
+    #[serde(default)]
+    managed: bool,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]

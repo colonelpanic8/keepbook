@@ -402,7 +402,10 @@ pub(super) fn SettingsView(
                 Some(Err(error)) => rsx! { p { class: "validation", "{error}" } },
                 Some(Ok(registry)) => rsx! {
                     div { class: "settings-meta",
-                        span { "Registry {registry.config_path}" }
+                        span { "Manifest {registry.config_path}" }
+                        if !registry.device_config_path.is_empty() {
+                            span { "Device state {registry.device_config_path}" }
+                        }
                     }
                     RepositoryList {
                         registry,
@@ -764,7 +767,7 @@ fn RepositoryList(
         div { class: "git-locations",
             div { class: "git-locations-heading",
                 strong { "Known repositories" }
-                small { "The local path and clone remote are stored in the app config." }
+                small { "Manifest repositories are read-only; repositories added here are device-local." }
             }
             for repository in registry.repositories {
                 div { class: if repository.active { "git-location-row active" } else { "git-location-row" },
@@ -773,6 +776,7 @@ fn RepositoryList(
                             strong { "{repository.name}" }
                             small {
                                 if repository.active { "Active" } else if repository.cloned { "Ready" } else { "Not cloned" }
+                                if repository.managed { " · Managed" }
                                 " · {repository.branch}"
                             }
                         }
@@ -813,7 +817,7 @@ fn RepositoryList(
                             },
                             if repository.cloned { "Git sync" } else { "Clone" }
                         }
-                        if !repository.active {
+                        if repository_can_remove(&repository) {
                             ControlButton {
                                 danger: true,
                                 disabled: busy,

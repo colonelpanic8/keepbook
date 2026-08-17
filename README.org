@@ -125,6 +125,51 @@ device's selected identity.
 ssh_key_path = "~/.ssh/id_ed25519"
 #+END_SRC
 
+** Declarative data repositories
+
+Keepbook can keep a read-only manifest of data repositories at
+=dirs::config_dir()/keepbook/app.toml= (for example,
+=~/.config/keepbook/app.toml= on Linux). This file is safe to manage as a
+dotfile or Home Manager symlink: Keepbook never rewrites it.
+
+#+BEGIN_SRC toml
+default_repository = "personal"
+
+[[repositories]]
+id = "personal"
+name = "Personal"
+remote = "git@github.com:owner/keepbook-personal.git"
+branch = "main"
+# Defaults to dirs::data_dir()/keepbook/repositories/personal.
+# path = "~/.local/share/keepbook/repositories/personal"
+# Defaults to keepbook.toml within the checkout.
+# config_path = "keepbook.toml"
+#+END_SRC
+
+=id= and =remote= are required. =name= defaults to =id= and =branch= defaults
+to =master=. Relative checkout paths resolve from =app.toml=; relative config
+paths resolve from the checkout root.
+
+Clone missing repositories and validate existing ones with:
+
+#+BEGIN_SRC bash
+keepbook repositories setup
+# Or use a non-default manifest:
+keepbook repositories setup --app-config /path/to/app.toml
+#+END_SRC
+
+Setup clones only missing paths. Existing checkouts are validated for their
+origin remote, checked-out branch, and =keepbook.toml=, but are never fetched,
+reset, or otherwise modified. Every repository gets a JSON result; the command
+continues through failures and exits nonzero if any entry failed.
+
+The selected repository and repositories added through the Settings UI are
+device-local. They are stored in the existing =device.toml= under
+=[repositories]= and =[[repositories.local]]=, alongside device-local Git
+authentication. Manifest repositories appear as managed in Settings and must
+be removed by editing the manifest; removing a device-local entry never deletes
+its checkout.
+
 * Encrypted Credentials
 
 Connection credentials can use =pass=, =env=, or =age= backends. The mobile

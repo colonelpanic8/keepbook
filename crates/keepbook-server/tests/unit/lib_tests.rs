@@ -14,48 +14,6 @@ fn validate_git_data_dir_accepts_nested_path() {
 }
 
 #[test]
-fn repository_registry_round_trips_location_remote_and_config_path() -> Result<()> {
-    let app_config_path = unique_test_config_path("repository-registry").with_file_name("app.toml");
-    let registry = RepositoryRegistry {
-        active_repository: Some("personal".to_string()),
-        repositories: vec![RepositoryEntry {
-            id: "personal".to_string(),
-            name: "Personal".to_string(),
-            path: PathBuf::from("/tmp/keepbook-personal"),
-            config_path: PathBuf::from("/tmp/keepbook-personal/keepbook.toml"),
-            remote: "git@github.com:owner/keepbook-personal.git".to_string(),
-            branch: "main".to_string(),
-        }],
-    };
-
-    save_repository_registry(&app_config_path, &registry)?;
-    assert_eq!(load_repository_registry(&app_config_path)?, registry);
-    let contents = std::fs::read_to_string(&app_config_path)?;
-    assert!(contents.contains("path = \"/tmp/keepbook-personal\""));
-    assert!(contents.contains("remote = \"git@github.com:owner/keepbook-personal.git\""));
-    remove_test_config(app_config_path);
-    Ok(())
-}
-
-#[test]
-fn repository_ids_are_stable_and_unique() {
-    let repositories = vec![RepositoryEntry {
-        id: "family-books".to_string(),
-        name: "Family Books".to_string(),
-        path: PathBuf::from("/tmp/family-books"),
-        config_path: PathBuf::from("/tmp/family-books/keepbook.toml"),
-        remote: "git@example.com:family/books.git".to_string(),
-        branch: "main".to_string(),
-    }];
-
-    assert_eq!(repository_id_slug("Family Books"), "family-books");
-    assert_eq!(
-        unique_repository_id("Family Books", &repositories),
-        "family-books-2"
-    );
-}
-
-#[test]
 fn managed_start_minimized_values_parse_common_boolean_forms() -> Result<()> {
     assert!(parse_bool_setting("true")?);
     assert!(parse_bool_setting("1")?);

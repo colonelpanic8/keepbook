@@ -16,6 +16,9 @@ pub mod app;
 #[cfg(feature = "git")]
 pub mod git;
 
+#[cfg(feature = "git")]
+pub mod repositories;
+
 #[cfg(feature = "market_data")]
 pub mod market_data;
 

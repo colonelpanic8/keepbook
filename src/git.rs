@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use crate::config::GitConfig;
 use anyhow::{Context, Result};
-use git2::build::CheckoutBuilder;
+use git2::build::{CheckoutBuilder, RepoBuilder};
 use git2::{
     BranchType, Cred, CredentialType, ErrorCode, FetchOptions, IndexAddOption, MergeOptions,
     PushOptions, RemoteCallbacks, Repository, Signature, StatusOptions,
@@ -262,6 +262,13 @@ fn signature(repo: &Repository) -> Result<Signature<'_>> {
 
 fn callbacks(repo: &Repository, git_config: &GitConfig) -> Result<RemoteCallbacks<'static>> {
     let config = repo.config().context("failed to read git config")?;
+    credential_callbacks(config, git_config)
+}
+
+fn credential_callbacks(
+    config: git2::Config,
+    git_config: &GitConfig,
+) -> Result<RemoteCallbacks<'static>> {
     let ssh_keys = ssh_private_keys_for_credentials(git_config);
     let mut next_ssh_key = 0;
     let mut ssh_agent_attempted = false;
@@ -309,6 +316,26 @@ fn callbacks(repo: &Repository, git_config: &GitConfig) -> Result<RemoteCallback
         Cred::credential_helper(&config, url, username)
     });
     Ok(callbacks)
+}
+
+/// Clone a single branch using the same standard credentials as Keepbook's
+/// fetch and push operations.
+pub fn clone_repository(
+    remote: &str,
+    branch: &str,
+    target: &Path,
+    git_config: &GitConfig,
+) -> Result<()> {
+    let config = git2::Config::open_default().context("failed to open the Git configuration")?;
+    let callbacks = credential_callbacks(config, git_config)?;
+    let mut fetch_options = FetchOptions::new();
+    fetch_options.remote_callbacks(callbacks);
+    let mut builder = RepoBuilder::new();
+    builder.branch(branch).fetch_options(fetch_options);
+    builder
+        .clone(remote, target)
+        .with_context(|| format!("failed to clone {remote} branch {branch}"))?;
+    Ok(())
 }
 
 fn no_usable_ssh_credentials_error(ssh_keys: &[SshPrivateKey]) -> git2::Error {

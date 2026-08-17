@@ -5,6 +5,7 @@ use anyhow::Result;
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use keepbook::app;
 use keepbook::config::{default_config_path, ResolvedConfig};
+use keepbook::repositories::{default_app_config_path, setup_manifest_repositories};
 use keepbook::storage::{JsonFileStorage, Storage};
 use keepbook::sync::TransactionSyncMode;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
@@ -129,6 +130,10 @@ fn apply_runtime_credential_overrides(cli: &Cli) {
 enum Command {
     /// Show current configuration
     Config,
+
+    /// Manage declarative Keepbook data repositories
+    #[command(subcommand)]
+    Repositories(RepositoriesCommand),
 
     /// Add entities
     #[command(subcommand)]
@@ -333,6 +338,16 @@ enum Command {
         /// Default output is sparse (only periods with non-zero totals).
         #[arg(long, default_value_t = false)]
         include_empty: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum RepositoriesCommand {
+    /// Clone missing manifest repositories and validate existing checkouts
+    Setup {
+        /// Path to the read-only repository manifest
+        #[arg(long, default_value_os_t = default_app_config_path())]
+        app_config: PathBuf,
     },
 }
 
@@ -1075,6 +1090,15 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     apply_runtime_credential_overrides(&cli);
 
+    if let Some(Command::Repositories(RepositoriesCommand::Setup { app_config })) = &cli.command {
+        let output = setup_manifest_repositories(app_config)?;
+        println!("{}", serde_json::to_string_pretty(&output)?);
+        if !output.ok {
+            anyhow::bail!("one or more repositories failed setup");
+        }
+        return Ok(());
+    }
+
     let config = ResolvedConfig::load_or_default(&cli.config)?;
     let storage = JsonFileStorage::new(&config.data_dir);
     let storage_arc: Arc<dyn Storage> = Arc::new(storage.clone());
@@ -1118,6 +1142,10 @@ async fn main() -> Result<()> {
         Some(Command::Config) => {
             let output = app::config_output(&cli.config, &config);
             println!("{}", serde_json::to_string_pretty(&output)?);
+        }
+
+        Some(Command::Repositories(_)) => {
+            unreachable!("repository setup is handled before loading keepbook.toml")
         }
 
         Some(Command::Add(add_cmd)) => match add_cmd {
