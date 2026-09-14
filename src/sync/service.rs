@@ -502,3 +502,7 @@ impl SyncService {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/unit/sync/service_tests.rs"]
+mod service_tests;
