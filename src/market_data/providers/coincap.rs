@@ -138,10 +138,6 @@ impl CoinCapPriceSource {
             .filter(|asset| asset.symbol.eq_ignore_ascii_case(&symbol_upper))
             .collect::<Vec<_>>();
 
-        if matches.is_empty() {
-            return Ok(None);
-        }
-
         if matches.len() > 1 {
             let ids: Vec<String> = matches.iter().map(|a| a.id.clone()).collect();
             return Err(anyhow!(
@@ -149,7 +145,9 @@ impl CoinCapPriceSource {
             ));
         }
 
-        let asset_id = matches.pop().unwrap().id;
+        let Some(asset_id) = matches.pop().map(|asset| asset.id) else {
+            return Ok(None);
+        };
         self.asset_id_cache
             .lock()
             .await

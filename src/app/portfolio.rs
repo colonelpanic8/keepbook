@@ -1,3 +1,4 @@
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 use std::sync::Arc;
@@ -1629,17 +1630,12 @@ async fn ensure_fx_rate(
     let quote_upper = quote.to_uppercase();
     let key = (base_upper.clone(), quote_upper.clone());
 
-    if !ctx.fx_cache.contains_key(&key) {
-        ctx.fx_cache.insert(
-            key.clone(),
-            load_fx_cache(ctx.store, &base_upper, &quote_upper).await?,
-        );
-    }
-
-    let cache = ctx
-        .fx_cache
-        .get(&key)
-        .expect("fx cache should be initialized");
+    let cache = match ctx.fx_cache.entry(key.clone()) {
+        Entry::Occupied(entry) => entry.into_mut(),
+        Entry::Vacant(entry) => {
+            entry.insert(load_fx_cache(ctx.store, &base_upper, &quote_upper).await?)
+        }
+    };
 
     if let Some((_, exact)) = resolve_cached_fx(cache, date, ctx.lookback_days) {
         if exact {

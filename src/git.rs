@@ -178,11 +178,12 @@ fn open_data_repo(data_dir: &Path) -> Result<DataRepo> {
         Err(err) => return Err(err).context("failed to open git repository"),
     };
 
-    let repo_root = repo
+    let workdir = repo
         .workdir()
-        .context("data directory git repository is bare")?
+        .context("data directory git repository is bare")?;
+    let repo_root = workdir
         .canonicalize()
-        .unwrap_or_else(|_| repo.workdir().unwrap().to_path_buf());
+        .unwrap_or_else(|_| workdir.to_path_buf());
     let data_dir = data_dir
         .canonicalize()
         .unwrap_or_else(|_| data_dir.to_path_buf());
