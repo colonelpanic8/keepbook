@@ -603,3 +603,7 @@ fn normalize_tag_values(values: Option<&[String]>) -> Option<Vec<String>> {
         Some(tags)
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/unit/app/transaction_rules_tests.rs"]
+mod transaction_rules_tests;
