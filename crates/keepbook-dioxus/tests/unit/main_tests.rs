@@ -592,14 +592,56 @@ fn spending_over_time_points_preserve_bucket_breakdowns() {
     };
 
     let points = spending_over_time_points(&spending);
-    let series = spending_over_time_series(&points);
 
     assert_eq!(points[0].label, "2026-01");
     assert_eq!(points[0].total, 40.0);
     assert_eq!(points[0].segments[0].key, "food");
     assert_eq!(points[0].segments[1].key, "Untagged");
-    assert_eq!(series[0].key, "food");
-    assert_eq!(series[0].total, "45");
+}
+
+#[test]
+fn spending_tags_read_the_range_report_breakdown() {
+    let spending = SpendingOutput {
+        currency: "USD".to_string(),
+        tz: "local".to_string(),
+        start_date: "2026-01-01".to_string(),
+        end_date: "2026-02-28".to_string(),
+        period: "range".to_string(),
+        total: "60".to_string(),
+        transaction_count: 3,
+        periods: vec![SpendingPeriod {
+            start_date: "2026-01-01".to_string(),
+            end_date: "2026-02-28".to_string(),
+            total: "60".to_string(),
+            transaction_count: 3,
+            breakdown: vec![
+                SpendingBreakdownEntry {
+                    key: "untagged".to_string(),
+                    total: "15".to_string(),
+                    transaction_count: 1,
+                },
+                SpendingBreakdownEntry {
+                    key: "food".to_string(),
+                    total: "45".to_string(),
+                    transaction_count: 2,
+                },
+            ],
+        }],
+        skipped_transaction_count: 0,
+        missing_price_transaction_count: 0,
+        missing_fx_transaction_count: 0,
+    };
+
+    let tags = spending_tags(&spending);
+
+    // Ordered by the app's totals, with the synthetic untagged key relabeled
+    // and the app's own totals passed through untouched.
+    assert_eq!(
+        tags.iter()
+            .map(|entry| (entry.key.as_str(), entry.total.as_str()))
+            .collect::<Vec<_>>(),
+        vec![("food", "45"), ("Untagged", "15")]
+    );
 }
 
 #[test]
@@ -638,7 +680,7 @@ fn spending_over_time_visible_points_keep_empty_periods() {
     };
 
     let points = spending_over_time_points(&spending);
-    let series = spending_over_time_series(&points);
+    let series = spending_tags(&spending);
     let visible_points = visible_spending_over_time_points(&points, &series);
 
     assert_eq!(visible_points.len(), 2);

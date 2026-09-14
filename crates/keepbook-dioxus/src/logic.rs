@@ -1110,63 +1110,51 @@ pub(crate) fn enabled_label(value: bool) -> &'static str {
     }
 }
 
+/// Sort key for a breakdown row: the app's total, read only for ordering.
+fn spending_entry_order(entry: &SpendingBreakdownEntry) -> f64 {
+    parse_money_input(&entry.total).unwrap_or_default()
+}
+
+/// Per-key totals for a `period=range` spending report. The single range
+/// period's breakdown already holds the range total for each key, so this only
+/// relabels and orders it.
 pub(crate) fn spending_tags(spending: &SpendingOutput) -> Vec<SpendingBreakdownEntry> {
-    let mut totals: Vec<SpendingBreakdownEntry> = Vec::new();
-    for period in &spending.periods {
-        for entry in &period.breakdown {
-            let key = normalize_spending_tag_key(&entry.key);
-            if let Some(existing) = totals.iter_mut().find(|item| item.key == key) {
-                let current = parse_money_input(&existing.total).unwrap_or_default();
-                let next = parse_money_input(&entry.total).unwrap_or_default();
-                existing.total = format_number(current + next, 2);
-                existing.transaction_count += entry.transaction_count;
-            } else {
-                totals.push(SpendingBreakdownEntry {
-                    key,
-                    total: entry.total.clone(),
-                    transaction_count: entry.transaction_count,
-                });
-            }
-        }
-    }
+    let mut totals = spending
+        .periods
+        .iter()
+        .flat_map(|period| &period.breakdown)
+        .map(|entry| SpendingBreakdownEntry {
+            key: normalize_spending_tag_key(&entry.key),
+            total: entry.total.clone(),
+            transaction_count: entry.transaction_count,
+        })
+        .collect::<Vec<_>>();
     totals.sort_by(|a, b| {
-        let left = parse_money_input(&a.total).unwrap_or_default();
-        let right = parse_money_input(&b.total).unwrap_or_default();
-        right
-            .partial_cmp(&left)
+        spending_entry_order(b)
+            .partial_cmp(&spending_entry_order(a))
             .unwrap_or(std::cmp::Ordering::Equal)
             .then_with(|| a.key.cmp(&b.key))
     });
     totals
 }
 
+/// Per-key totals for a `period=range` report grouped by something other than
+/// tag (merchant, fuzzy merchant), keeping the app's keys verbatim.
 pub(crate) fn spending_breakdown_entries(spending: &SpendingOutput) -> Vec<SpendingBreakdownEntry> {
-    let mut totals: Vec<SpendingBreakdownEntry> = Vec::new();
-    for period in &spending.periods {
-        for entry in &period.breakdown {
-            let key = entry.key.trim();
-            if key.is_empty() {
-                continue;
-            }
-            if let Some(existing) = totals.iter_mut().find(|item| item.key == key) {
-                let current = parse_money_input(&existing.total).unwrap_or_default();
-                let next = parse_money_input(&entry.total).unwrap_or_default();
-                existing.total = format_number(current + next, 2);
-                existing.transaction_count += entry.transaction_count;
-            } else {
-                totals.push(SpendingBreakdownEntry {
-                    key: key.to_string(),
-                    total: entry.total.clone(),
-                    transaction_count: entry.transaction_count,
-                });
-            }
-        }
-    }
+    let mut totals = spending
+        .periods
+        .iter()
+        .flat_map(|period| &period.breakdown)
+        .filter(|entry| !entry.key.trim().is_empty())
+        .map(|entry| SpendingBreakdownEntry {
+            key: entry.key.trim().to_string(),
+            total: entry.total.clone(),
+            transaction_count: entry.transaction_count,
+        })
+        .collect::<Vec<_>>();
     totals.sort_by(|a, b| {
-        let left = parse_money_input(&a.total).unwrap_or_default();
-        let right = parse_money_input(&b.total).unwrap_or_default();
-        right
-            .partial_cmp(&left)
+        spending_entry_order(b)
+            .partial_cmp(&spending_entry_order(a))
             .unwrap_or(std::cmp::Ordering::Equal)
             .then_with(|| compare_case_insensitive(&a.key, &b.key))
     });
@@ -1212,36 +1200,6 @@ pub(crate) fn spending_over_time_points(spending: &SpendingOutput) -> Vec<Spendi
         .collect()
 }
 
-pub(crate) fn spending_over_time_series(
-    points: &[SpendingBarChartPoint],
-) -> Vec<SpendingBreakdownEntry> {
-    let mut series = Vec::<SpendingBreakdownEntry>::new();
-    for point in points {
-        for segment in &point.segments {
-            if let Some(existing) = series.iter_mut().find(|entry| entry.key == segment.key) {
-                let current = parse_money_input(&existing.total).unwrap_or_default();
-                existing.total = format_number(current + segment.value, 2);
-                existing.transaction_count += segment.transaction_count;
-            } else {
-                series.push(SpendingBreakdownEntry {
-                    key: segment.key.clone(),
-                    total: format_number(segment.value, 2),
-                    transaction_count: segment.transaction_count,
-                });
-            }
-        }
-    }
-    series.sort_by(|a, b| {
-        let left = parse_money_input(&a.total).unwrap_or_default();
-        let right = parse_money_input(&b.total).unwrap_or_default();
-        right
-            .partial_cmp(&left)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| a.key.cmp(&b.key))
-    });
-    series
-}
-
 pub(crate) fn narrow_spending_points_to_tag(
     points: &[SpendingBarChartPoint],
     tag: &str,
@@ -1249,24 +1207,23 @@ pub(crate) fn narrow_spending_points_to_tag(
     points
         .iter()
         .map(|point| {
-            let segments = point
+            // A bucket breakdown holds at most one entry per key, so the tag's
+            // bucket total is that entry's, never a sum.
+            let segment = point
                 .segments
                 .iter()
-                .filter(|segment| segment.key == tag)
-                .cloned()
-                .collect::<Vec<_>>();
-            let total = segments.iter().map(|segment| segment.value).sum();
-            let transaction_count = segments
-                .iter()
-                .map(|segment| segment.transaction_count)
-                .sum();
+                .find(|segment| segment.key == tag)
+                .cloned();
             SpendingBarChartPoint {
                 label: point.label.clone(),
                 start_date: point.start_date.clone(),
                 end_date: point.end_date.clone(),
-                total,
-                transaction_count,
-                segments,
+                total: segment.as_ref().map(|segment| segment.value).unwrap_or(0.0),
+                transaction_count: segment
+                    .as_ref()
+                    .map(|segment| segment.transaction_count)
+                    .unwrap_or(0),
+                segments: segment.into_iter().collect(),
             }
         })
         .collect()

@@ -413,6 +413,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
                     if selected_tab == SpendingTab::Tags {
                         SpendingOverTimeChart {
                         spending: data.spending_over_time.clone(),
+                        series: tags.clone(),
                         selected: selected.clone(),
                         selected_period: selected_period_value.clone(),
                         bucket_label: selected_bucket.label().to_string(),
@@ -791,6 +792,8 @@ struct SpendingSegmentSelection {
 #[component]
 fn SpendingOverTimeChart(
     spending: SpendingOutput,
+    /// Per-tag totals for the whole range, from the `period=range` report.
+    series: Vec<SpendingBreakdownEntry>,
     selected: Option<String>,
     selected_period: Option<SpendingPeriodSelection>,
     bucket_label: String,
@@ -803,7 +806,6 @@ fn SpendingOverTimeChart(
     let mut hovered_segment = use_signal(|| None::<SpendingSegmentKey>);
     let mut pinned_segment = use_signal(|| None::<SpendingSegmentKey>);
     let points = spending_over_time_points(&spending);
-    let series = spending_over_time_series(&points);
     let narrowed_points = selected
         .as_ref()
         .map(|tag| narrow_spending_points_to_tag(&points, tag));
@@ -841,10 +843,13 @@ fn SpendingOverTimeChart(
         .iter()
         .map(|entry| entry.key.clone())
         .collect::<Vec<_>>();
-    let range_total = if selected.is_some() {
-        visible_points.iter().map(|point| point.total).sum::<f64>()
-    } else {
-        parse_money_input(&spending.total).unwrap_or_default().abs()
+    let range_total_text = match &selected {
+        Some(tag) => series
+            .iter()
+            .find(|entry| &entry.key == tag)
+            .map(|entry| entry.total.clone())
+            .unwrap_or_else(|| "0".to_string()),
+        None => spending.total.clone(),
     };
     let over_time_label = match &selected {
         Some(tag) => format!("Over Time · {tag}"),
@@ -860,7 +865,9 @@ fn SpendingOverTimeChart(
         .unwrap_or_default();
     let mid_label = format_compact_money(y_max / 2.0, &spending.currency);
     let max_label = format_compact_money(y_max, &spending.currency);
-    let total_label = format_full_money(range_total, &spending.currency);
+    let total_label =
+        format_money_text(range_total_text.trim_start_matches('-'), &spending.currency)
+            .unwrap_or(range_total_text);
     let mut bar_rects = Vec::new();
     let mut bar_hit_zones = Vec::new();
     for (point_index, point) in visible_points.iter().enumerate() {
