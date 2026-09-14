@@ -1,6 +1,13 @@
 use super::*;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+// The keepbook crate's unit tests share this guard; each test binary is its own
+// process, so each gets its own lock.
+#[path = "../../../../tests/unit/env_guard.rs"]
+mod env_guard;
+
+use env_guard::EnvGuard;
+
 #[cfg(unix)]
 #[test]
 fn validate_git_data_dir_rejects_filesystem_root() {
@@ -214,7 +221,7 @@ fn android_private_state_is_outside_data_repo() {
 
 #[test]
 fn prepare_git_ssh_environment_creates_known_hosts_and_home_when_missing() -> Result<()> {
-    let _env = lock_process_env();
+    let mut env = EnvGuard::new();
     let config_path = unique_test_config_path("prepare-git-ssh-env");
     write_test_config(&config_path, "data_dir = \".\"\n")?;
 
@@ -223,22 +230,11 @@ fn prepare_git_ssh_environment_creates_known_hosts_and_home_when_missing() -> Re
         .expect("test config should have parent")
         .join("state");
     let expected_state_dir = state_home.join("keepbook");
-    let old_home = std::env::var_os("HOME");
-    let old_state_home = std::env::var_os("XDG_STATE_HOME");
-    std::env::remove_var("HOME");
-    std::env::set_var("XDG_STATE_HOME", &state_home);
+    env.remove("HOME");
+    env.set("XDG_STATE_HOME", &state_home);
 
     let result = prepare_git_ssh_environment(&config_path);
     let home_after_prepare = std::env::var_os("HOME");
-
-    match old_home {
-        Some(value) => std::env::set_var("HOME", value),
-        None => std::env::remove_var("HOME"),
-    }
-    match old_state_home {
-        Some(value) => std::env::set_var("XDG_STATE_HOME", value),
-        None => std::env::remove_var("XDG_STATE_HOME"),
-    }
 
     result?;
     assert_eq!(
@@ -304,7 +300,7 @@ fn missing_configured_ssh_key_path_is_not_returned() {
 
 #[test]
 fn activate_age_identity_prefers_saved_keepbook_sync_key() -> Result<()> {
-    let _env = lock_process_env();
+    let mut env = EnvGuard::new();
     let config_path = unique_test_config_path("age-identity-saved-key");
     write_test_config(&config_path, "data_dir = \".\"\n")?;
 
@@ -312,10 +308,8 @@ fn activate_age_identity_prefers_saved_keepbook_sync_key() -> Result<()> {
         .parent()
         .expect("test config should have parent")
         .join("state");
-    let old_state_home = std::env::var_os("XDG_STATE_HOME");
-    let old_age_identity = std::env::var_os("KEEPBOOK_CREDENTIALS_AGE_IDENTITY_PATH");
-    std::env::set_var("XDG_STATE_HOME", &state_home);
-    std::env::remove_var("KEEPBOOK_CREDENTIALS_AGE_IDENTITY_PATH");
+    env.set("XDG_STATE_HOME", &state_home);
+    env.remove("KEEPBOOK_CREDENTIALS_AGE_IDENTITY_PATH");
 
     let key_path = default_git_ssh_key_path(&config_path)?;
     std::fs::create_dir_all(key_path.parent().expect("key path should have parent"))?;
@@ -327,14 +321,6 @@ fn activate_age_identity_prefers_saved_keepbook_sync_key() -> Result<()> {
         Some(key_path.as_os_str())
     );
 
-    match old_state_home {
-        Some(value) => std::env::set_var("XDG_STATE_HOME", value),
-        None => std::env::remove_var("XDG_STATE_HOME"),
-    }
-    match old_age_identity {
-        Some(value) => std::env::set_var("KEEPBOOK_CREDENTIALS_AGE_IDENTITY_PATH", value),
-        None => std::env::remove_var("KEEPBOOK_CREDENTIALS_AGE_IDENTITY_PATH"),
-    }
     remove_test_config(config_path);
     Ok(())
 }
@@ -458,14 +444,6 @@ fn write_test_config(path: &Path, contents: &str) -> Result<()> {
     }
     std::fs::write(path, contents)?;
     Ok(())
-}
-
-/// Serializes the tests that swap process-wide environment variables. Cargo runs
-/// tests in one process on many threads, so without this they observe each
-/// other's `HOME` and `XDG_STATE_HOME`.
-fn lock_process_env() -> std::sync::MutexGuard<'static, ()> {
-    static PROCESS_ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    PROCESS_ENV.lock().unwrap_or_else(|err| err.into_inner())
 }
 
 fn remove_test_config(path: PathBuf) {

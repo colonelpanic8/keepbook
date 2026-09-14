@@ -1,9 +1,15 @@
 use super::*;
 use secrecy::ExposeSecret;
 
+#[path = "../env_guard.rs"]
+mod env_guard;
+
+use env_guard::EnvGuard;
+
 #[tokio::test]
 async fn mapped_env_var_is_read() -> Result<()> {
-    std::env::set_var("KEEPBOOK_TEST_TOKEN", "secret");
+    let mut env = EnvGuard::new();
+    env.set("KEEPBOOK_TEST_TOKEN", "secret");
     let mut fields = HashMap::new();
     fields.insert("token".to_string(), "KEEPBOOK_TEST_TOKEN".to_string());
     let store = EnvCredentialStore::new(EnvConfig {
