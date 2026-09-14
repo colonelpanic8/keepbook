@@ -45,10 +45,6 @@ fn test_parse_btc_response() {
     let response: CoinHistoryResponse =
         serde_json::from_str(SAMPLE_BTC_RESPONSE).expect("Failed to parse BTC response");
 
-    assert_eq!(response.id, "bitcoin");
-    assert_eq!(response.symbol, "btc");
-    assert_eq!(response.name, "Bitcoin");
-
     let market_data = response.market_data.expect("Should have market data");
     let usd_price = market_data
         .current_price
@@ -62,7 +58,6 @@ fn test_parse_no_market_data_response() {
     let response: CoinHistoryResponse =
         serde_json::from_str(SAMPLE_NO_MARKET_DATA_RESPONSE).expect("Failed to parse response");
 
-    assert_eq!(response.id, "bitcoin");
     assert!(response.market_data.is_none());
 }
 
@@ -70,9 +65,6 @@ fn test_parse_no_market_data_response() {
 fn test_parse_eth_response() {
     let response: CoinHistoryResponse =
         serde_json::from_str(SAMPLE_ETH_RESPONSE).expect("Failed to parse ETH response");
-
-    assert_eq!(response.id, "ethereum");
-    assert_eq!(response.symbol, "eth");
 
     let market_data = response.market_data.expect("Should have market data");
     let usd_price = market_data

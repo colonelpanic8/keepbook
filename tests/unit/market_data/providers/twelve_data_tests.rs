@@ -70,9 +70,7 @@ const SAMPLE_RESPONSE_NO_CURRENCY: &str = r#"{
 fn test_parse_time_series_response() {
     let response: TimeSeriesResponse = serde_json::from_str(SAMPLE_RESPONSE).unwrap();
 
-    assert_eq!(response.meta.symbol, "AAPL");
     assert_eq!(response.meta.currency, Some("USD".to_string()));
-    assert_eq!(response.meta.exchange, Some("NASDAQ".to_string()));
     assert_eq!(response.values.len(), 3);
 
     let first_value = &response.values[0];
@@ -93,7 +91,6 @@ fn test_parse_error_response() {
 fn test_parse_response_no_currency() {
     let response: TimeSeriesResponse = serde_json::from_str(SAMPLE_RESPONSE_NO_CURRENCY).unwrap();
 
-    assert_eq!(response.meta.symbol, "AAPL");
     assert!(response.meta.currency.is_none());
 }
 

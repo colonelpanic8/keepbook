@@ -18,15 +18,6 @@ const FRANKFURTER_BASE_URL: &str = "https://api.frankfurter.app";
 /// Response from Frankfurter API for a specific date.
 #[derive(Debug, Deserialize)]
 struct FrankfurterResponse {
-    /// The amount (always 1 for our requests).
-    #[allow(dead_code)]
-    amount: f64,
-    /// The base currency.
-    #[allow(dead_code)]
-    base: String,
-    /// The date of the rates.
-    #[allow(dead_code)]
-    date: NaiveDate,
     /// Map of currency codes to rates.
     rates: HashMap<String, f64>,
 }

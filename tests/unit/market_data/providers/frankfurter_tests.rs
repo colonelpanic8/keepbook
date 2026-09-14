@@ -26,9 +26,6 @@ fn test_parse_frankfurter_response() {
     let response: FrankfurterResponse =
         serde_json::from_str(SAMPLE_EUR_RESPONSE).expect("Failed to parse response");
 
-    assert_eq!(response.amount, 1.0);
-    assert_eq!(response.base, "EUR");
-    assert_eq!(response.date, NaiveDate::from_ymd_opt(2024, 1, 15).unwrap());
     assert_eq!(response.rates.len(), 2);
     assert!((response.rates["USD"] - 1.0956).abs() < 0.0001);
     assert!((response.rates["GBP"] - 0.8623).abs() < 0.0001);

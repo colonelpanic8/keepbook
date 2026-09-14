@@ -42,15 +42,10 @@ const INFO_RESPONSE: &str = r#"{
 fn test_parse_time_series_response() {
     let response: TimeSeriesResponse = serde_json::from_str(SAMPLE_RESPONSE).unwrap();
 
-    assert_eq!(response.meta_data.symbol, "AAPL");
     assert_eq!(response.time_series.len(), 2);
 
     let jan_15 = response.time_series.get("2024-01-15").unwrap();
     assert_eq!(jan_15.close, "185.9200");
-    assert_eq!(jan_15.open, "186.0600");
-    assert_eq!(jan_15.high, "187.4700");
-    assert_eq!(jan_15.low, "183.6200");
-    assert_eq!(jan_15.volume, "65076672");
 }
 
 #[test]

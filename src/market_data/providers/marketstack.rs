@@ -23,12 +23,9 @@ struct EodResponse {
 
 /// Individual EOD data point from Marketstack.
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct EodData {
     close: f64,
     date: String,
-    symbol: String,
-    exchange: Option<String>,
 }
 
 /// Marketstack equity price provider.

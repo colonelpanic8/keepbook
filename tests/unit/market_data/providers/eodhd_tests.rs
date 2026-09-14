@@ -34,7 +34,6 @@ fn test_parse_eodhd_response() {
     let entry = &data[0];
     assert_eq!(entry.date, "2024-01-15");
     assert_eq!(entry.close, Some(186.01));
-    assert_eq!(entry.volume, Some(52894000));
 }
 
 #[test]

@@ -294,31 +294,14 @@ struct TimeSeriesResponse {
 /// Metadata from Twelve Data response.
 #[derive(Debug, Deserialize)]
 struct MetaData {
-    #[allow(dead_code)]
-    symbol: String,
-    #[allow(dead_code)]
-    interval: String,
     currency: Option<String>,
-    #[allow(dead_code)]
-    exchange: Option<String>,
-    #[allow(dead_code)]
-    #[serde(rename = "type")]
-    asset_type: Option<String>,
 }
 
 /// Single time series data point.
 #[derive(Debug, Deserialize)]
 struct TimeSeriesValue {
     datetime: String,
-    #[allow(dead_code)]
-    open: String,
-    #[allow(dead_code)]
-    high: String,
-    #[allow(dead_code)]
-    low: String,
     close: String,
-    #[allow(dead_code)]
-    volume: Option<String>,
 }
 
 /// Error response from Twelve Data API.

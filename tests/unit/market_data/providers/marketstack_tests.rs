@@ -84,7 +84,6 @@ fn test_parse_eod_response() {
     let response: EodResponse = serde_json::from_str(json).unwrap();
     assert_eq!(response.data.len(), 1);
     assert_eq!(response.data[0].close, 151.30);
-    assert_eq!(response.data[0].symbol, "AAPL");
     assert_eq!(response.data[0].date, "2024-01-15T00:00:00+0000");
 }
 

@@ -19,15 +19,9 @@ const EODHD_BASE_URL: &str = "https://eodhd.com/api/eod";
 
 /// EODHD API response for a single day's EOD data.
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct EodhdEodResponse {
     date: String,
-    open: Option<f64>,
-    high: Option<f64>,
-    low: Option<f64>,
     close: Option<f64>,
-    adjusted_close: Option<f64>,
-    volume: Option<u64>,
 }
 
 /// Price source for fetching equity prices from EODHD.

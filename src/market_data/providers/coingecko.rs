@@ -16,11 +16,7 @@ const COINGECKO_API_BASE: &str = "https://api.coingecko.com/api/v3";
 
 /// CoinGecko API response for historical coin data.
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct CoinHistoryResponse {
-    id: String,
-    symbol: String,
-    name: String,
     market_data: Option<MarketData>,
 }
 

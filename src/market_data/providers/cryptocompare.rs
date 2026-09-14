@@ -42,7 +42,6 @@ struct HistoryContainer {
 
 #[derive(Debug, Deserialize)]
 struct HistoryPoint {
-    #[allow(dead_code)]
     time: i64,
     close: Option<f64>,
 }

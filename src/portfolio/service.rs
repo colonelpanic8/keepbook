@@ -54,8 +54,6 @@ impl AssetValuation {
 /// Represents a single asset holding from a snapshot.
 struct AssetHolding {
     account_id: Id,
-    #[allow(dead_code)]
-    asset: Asset,
     amount: String,
     cost_basis: Option<String>,
     timestamp: DateTime<Utc>,
@@ -601,7 +599,6 @@ impl PortfolioService {
                 }
                 entry.holdings.push(AssetHolding {
                     account_id: account_id.clone(),
-                    asset: asset_key.clone(),
                     amount: asset_balance.amount.clone(),
                     cost_basis: asset_balance.cost_basis.clone(),
                     timestamp: snapshot.timestamp,
@@ -649,7 +646,6 @@ impl PortfolioService {
                 }
                 entry.holdings.push(AssetHolding {
                     account_id: account_id.clone(),
-                    asset: asset_key.clone(),
                     amount: asset_balance.amount.clone(),
                     cost_basis: asset_balance.cost_basis.clone(),
                     timestamp: snapshot.timestamp,

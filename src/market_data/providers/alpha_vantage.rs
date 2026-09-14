@@ -235,57 +235,14 @@ impl EquityPriceSource for AlphaVantagePriceSource {
 /// Response structure for TIME_SERIES_DAILY endpoint.
 #[derive(Debug, Deserialize)]
 struct TimeSeriesResponse {
-    #[serde(rename = "Meta Data")]
-    #[allow(dead_code)]
-    meta_data: MetaData,
-
     #[serde(rename = "Time Series (Daily)")]
     time_series: HashMap<String, DailyData>,
 }
 
 #[derive(Debug, Deserialize)]
-struct MetaData {
-    #[serde(rename = "1. Information")]
-    #[allow(dead_code)]
-    information: String,
-
-    #[serde(rename = "2. Symbol")]
-    #[allow(dead_code)]
-    symbol: String,
-
-    #[serde(rename = "3. Last Refreshed")]
-    #[allow(dead_code)]
-    last_refreshed: String,
-
-    #[serde(rename = "4. Output Size")]
-    #[allow(dead_code)]
-    output_size: String,
-
-    #[serde(rename = "5. Time Zone")]
-    #[allow(dead_code)]
-    time_zone: String,
-}
-
-#[derive(Debug, Deserialize)]
 struct DailyData {
-    #[serde(rename = "1. open")]
-    #[allow(dead_code)]
-    open: String,
-
-    #[serde(rename = "2. high")]
-    #[allow(dead_code)]
-    high: String,
-
-    #[serde(rename = "3. low")]
-    #[allow(dead_code)]
-    low: String,
-
     #[serde(rename = "4. close")]
     close: String,
-
-    #[serde(rename = "5. volume")]
-    #[allow(dead_code)]
-    volume: String,
 }
 
 /// Error response from Alpha Vantage API.

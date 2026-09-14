@@ -181,8 +181,6 @@ impl CoinbaseSynchronizer {
         #[derive(Debug, Deserialize)]
         struct Portfolio {
             uuid: String,
-            #[allow(dead_code)]
-            name: String,
         }
         #[derive(Debug, Deserialize)]
         struct PortfoliosResponse {
@@ -247,10 +245,7 @@ impl CoinbaseSynchronizer {
                         format!("{} Wallet", pos.asset)
                     },
                     currency: pos.asset,
-                    available_balance: CoinbaseBalance {
-                        value,
-                        currency: String::new(), // Not used
-                    },
+                    available_balance: CoinbaseBalance { value },
                     account_type: if is_fiat_cash {
                         "ACCOUNT_TYPE_FIAT".to_string()
                     } else {
@@ -587,8 +582,6 @@ struct CoinbaseAccount {
 #[derive(Debug, Deserialize)]
 struct CoinbaseBalance {
     value: String,
-    #[allow(dead_code)]
-    currency: String,
 }
 
 #[derive(Debug, Deserialize)]
