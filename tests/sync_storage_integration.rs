@@ -7,6 +7,54 @@ use support::{mock_connection, MockSynchronizer};
 use tempfile::TempDir;
 
 #[tokio::test]
+async fn failed_sync_write_does_not_advance_connection_cursor() -> Result<()> {
+    for blocked_file in ["balances.jsonl", "transactions.jsonl"] {
+        let dir = TempDir::new()?;
+        let storage = JsonFileStorage::new(dir.path());
+        let mut connection = mock_connection("Mock Bank");
+        connection.state.synchronizer_data = serde_json::json!({"transactions_cursor": "old"});
+        storage
+            .save_connection_config(connection.id(), &connection.config)
+            .await?;
+        storage.save_connection(&connection).await?;
+
+        let mut result = MockSynchronizer::new()
+            .sync(&mut connection, &storage)
+            .await?;
+        result.connection.state.synchronizer_data =
+            serde_json::json!({"transactions_cursor": "new"});
+        let account_id = &result.accounts[0].id;
+        let blocked_path = dir
+            .path()
+            .join("accounts")
+            .join(account_id.as_str())
+            .join(blocked_file);
+        tokio::fs::create_dir_all(&blocked_path).await?;
+
+        assert!(result.save(&storage).await.is_err());
+        let persisted = storage.get_connection(connection.id()).await?.unwrap();
+        assert_eq!(
+            persisted.state.synchronizer_data["transactions_cursor"], "old",
+            "{blocked_file}"
+        );
+
+        tokio::fs::remove_dir(&blocked_path).await?;
+        result.save(&storage).await?;
+        let persisted = storage.get_connection(connection.id()).await?.unwrap();
+        assert_eq!(
+            persisted.state.synchronizer_data["transactions_cursor"],
+            "new"
+        );
+        assert_eq!(storage.get_transactions(account_id).await?.len(), 1);
+        assert!(storage
+            .get_latest_balance_snapshot(account_id)
+            .await?
+            .is_some());
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn test_sync_result_persists_data() -> Result<()> {
     let dir = TempDir::new()?;
     let storage = JsonFileStorage::new(dir.path());

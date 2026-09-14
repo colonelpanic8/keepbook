@@ -108,8 +108,6 @@ impl SyncResult {
             }
         }
 
-        storage.save_connection(&self.connection).await?;
-
         for (account_id, synced_balances) in &self.balances {
             if !synced_balances.is_empty() {
                 let asset_balances: Vec<AssetBalance> = synced_balances
@@ -171,6 +169,8 @@ impl SyncResult {
             }
         }
 
+        // Advance sync cursors only after the data they acknowledge has been saved.
+        storage.save_connection(&self.connection).await?;
         Ok(())
     }
 }
