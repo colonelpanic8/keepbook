@@ -125,10 +125,13 @@ impl MarketDataStore for MemoryMarketDataStore {
         }
         let mut store = self.prices.lock().await;
         for price in prices {
-            store.insert(
-                (price.asset_id.clone(), price.as_of_date, price.kind),
-                price.clone(),
-            );
+            let key = (price.asset_id.clone(), price.as_of_date, price.kind);
+            if store
+                .get(&key)
+                .is_none_or(|existing| existing.timestamp <= price.timestamp)
+            {
+                store.insert(key, price.clone());
+            }
         }
         Ok(())
     }
@@ -168,15 +171,18 @@ impl MarketDataStore for MemoryMarketDataStore {
                 quote: rate.quote.trim().to_uppercase(),
                 ..rate.clone()
             };
-            store.insert(
-                (
-                    normalized.base.clone(),
-                    normalized.quote.clone(),
-                    normalized.as_of_date,
-                    normalized.kind,
-                ),
-                normalized,
+            let key = (
+                normalized.base.clone(),
+                normalized.quote.clone(),
+                normalized.as_of_date,
+                normalized.kind,
             );
+            if store
+                .get(&key)
+                .is_none_or(|existing| existing.timestamp <= normalized.timestamp)
+            {
+                store.insert(key, normalized);
+            }
         }
         Ok(())
     }

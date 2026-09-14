@@ -104,7 +104,7 @@ impl MarketDataService {
 
         if let Some(days) = self.store_lookback_days {
             let start = date - Duration::days(days as i64);
-            if let Some(price) = select_latest_price_in_range(prices.clone(), start, date) {
+            if let Some(price) = select_latest_price_in_range(&prices, start, date) {
                 debug!(
                     asset_id = %asset_id,
                     date = %price.as_of_date,
@@ -118,15 +118,15 @@ impl MarketDataService {
                 return Ok(None);
             }
 
-            return Ok(select_earliest_price_on_or_after(prices, date));
+            return Ok(select_earliest_price_on_or_after(&prices, date));
         }
 
-        if let Some(price) = select_latest_price_on_or_before(prices.clone(), date) {
+        if let Some(price) = select_latest_price_on_or_before(&prices, date) {
             return Ok(Some(price));
         }
 
         if self.allow_future_projection {
-            return Ok(select_earliest_price_on_or_after(prices, date));
+            return Ok(select_earliest_price_on_or_after(&prices, date));
         }
 
         Ok(None)
@@ -349,7 +349,7 @@ impl MarketDataService {
         date: NaiveDate,
     ) -> Result<Option<PricePoint>> {
         let prices = self.store.get_all_prices(asset_id).await?;
-        Ok(select_latest_price_on_date(prices, date))
+        Ok(select_latest_price_on_date(&prices, date))
     }
 
     pub async fn fx_close(&self, base: &str, quote: &str, date: NaiveDate) -> Result<FxRatePoint> {
@@ -492,16 +492,16 @@ impl MarketDataService {
             }
 
             let rates = self.store.get_all_fx_rates(&base, &quote).await?;
-            return Ok(select_earliest_fx_rate_on_or_after(rates, date));
+            return Ok(select_earliest_fx_rate_on_or_after(&rates, date));
         }
 
         let rates = self.store.get_all_fx_rates(&base, &quote).await?;
-        if let Some(rate) = select_latest_fx_rate_on_or_before(rates.clone(), date) {
+        if let Some(rate) = select_latest_fx_rate_on_or_before(&rates, date) {
             return Ok(Some(rate));
         }
 
         if self.allow_future_projection {
-            return Ok(select_earliest_fx_rate_on_or_after(rates, date));
+            return Ok(select_earliest_fx_rate_on_or_after(&rates, date));
         }
 
         Ok(None)
@@ -647,82 +647,82 @@ impl MarketDataService {
     }
 }
 
-fn select_latest_price_on_or_before(
-    prices: Vec<PricePoint>,
-    date: NaiveDate,
-) -> Option<PricePoint> {
+fn select_latest_price_on_or_before(prices: &[PricePoint], date: NaiveDate) -> Option<PricePoint> {
     prices
-        .into_iter()
+        .iter()
         .filter(|p| p.as_of_date <= date)
         .max_by(|a, b| {
             a.as_of_date
                 .cmp(&b.as_of_date)
                 .then_with(|| a.timestamp.cmp(&b.timestamp))
         })
+        .cloned()
 }
 
-fn select_latest_price_on_date(prices: Vec<PricePoint>, date: NaiveDate) -> Option<PricePoint> {
+fn select_latest_price_on_date(prices: &[PricePoint], date: NaiveDate) -> Option<PricePoint> {
     prices
-        .into_iter()
+        .iter()
         .filter(|p| p.as_of_date == date)
         .max_by_key(|p| p.timestamp)
+        .cloned()
 }
 
 fn select_latest_price_in_range(
-    prices: Vec<PricePoint>,
+    prices: &[PricePoint],
     start: NaiveDate,
     end: NaiveDate,
 ) -> Option<PricePoint> {
     prices
-        .into_iter()
+        .iter()
         .filter(|p| p.as_of_date >= start && p.as_of_date <= end)
         .max_by(|a, b| {
             a.as_of_date
                 .cmp(&b.as_of_date)
                 .then_with(|| a.timestamp.cmp(&b.timestamp))
         })
+        .cloned()
 }
 
-fn select_earliest_price_on_or_after(
-    prices: Vec<PricePoint>,
-    date: NaiveDate,
-) -> Option<PricePoint> {
+fn select_earliest_price_on_or_after(prices: &[PricePoint], date: NaiveDate) -> Option<PricePoint> {
     prices
-        .into_iter()
+        .iter()
         .filter(|p| p.as_of_date >= date)
         .min_by(|a, b| {
             a.as_of_date
                 .cmp(&b.as_of_date)
                 .then_with(|| b.timestamp.cmp(&a.timestamp))
         })
+        .cloned()
 }
 
 fn select_latest_fx_rate_on_or_before(
-    rates: Vec<FxRatePoint>,
+    rates: &[FxRatePoint],
     date: NaiveDate,
 ) -> Option<FxRatePoint> {
     rates
-        .into_iter()
+        .iter()
         .filter(|r| r.kind == FxRateKind::Close && r.as_of_date <= date)
         .max_by(|a, b| {
             a.as_of_date
                 .cmp(&b.as_of_date)
                 .then_with(|| a.timestamp.cmp(&b.timestamp))
         })
+        .cloned()
 }
 
 fn select_earliest_fx_rate_on_or_after(
-    rates: Vec<FxRatePoint>,
+    rates: &[FxRatePoint],
     date: NaiveDate,
 ) -> Option<FxRatePoint> {
     rates
-        .into_iter()
+        .iter()
         .filter(|r| r.kind == FxRateKind::Close && r.as_of_date >= date)
         .min_by(|a, b| {
             a.as_of_date
                 .cmp(&b.as_of_date)
-                .then_with(|| a.timestamp.cmp(&b.timestamp))
+                .then_with(|| b.timestamp.cmp(&a.timestamp))
         })
+        .cloned()
 }
 
 #[cfg(test)]
