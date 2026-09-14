@@ -12,6 +12,8 @@ mod spending;
 #[cfg(feature = "sync")]
 mod sync;
 mod transaction_rules;
+#[cfg(feature = "tui")]
+pub(crate) mod transaction_tag_rules;
 pub mod tray;
 mod types;
 mod value;

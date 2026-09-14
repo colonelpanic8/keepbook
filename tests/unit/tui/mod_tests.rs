@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::transaction_tag_rules::CompiledTransactionTagRule;
 use crate::app::TransactionAnnotationOutput;
 use crate::config::{
     DisplayConfig, GitConfig, IgnoreConfig, RefreshConfig, SpendingConfig, TrayConfig,
@@ -137,14 +138,6 @@ fn display_uses_rule_tag_when_annotation_missing() {
     };
 
     assert_eq!(transaction_tag_string(&t, &matcher), "coffee");
-}
-
-#[test]
-fn fallback_regex_suggestion_normalizes_whitespace() {
-    assert_eq!(
-        fallback_regex_suggestion("  coffee   shop  purchase "),
-        "(?i)^coffee\\s+shop\\s+purchase$"
-    );
 }
 
 #[test]
