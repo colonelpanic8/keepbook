@@ -11,7 +11,7 @@ use std::time::Instant;
 
 use anyhow::Result;
 use chrono::{Duration, TimeZone, Utc};
-use keepbook::app::portfolio_history;
+use keepbook::app::{portfolio_assets, portfolio_history};
 use keepbook::config::{
     AiConfig, DisplayConfig, GitConfig, HistoryConfig, IgnoreConfig, PortfolioConfig,
     RefreshConfig, ResolvedConfig, SpendingConfig, TrayConfig,
@@ -103,25 +103,44 @@ async fn time_portfolio_history_over_a_representative_dataset() -> Result<()> {
     }
 
     let storage: Arc<dyn Storage> = Arc::new(storage);
-    for granularity in ["monthly", "weekly", "daily"] {
+    let cases = [
+        ("monthly", None, None, false),
+        ("weekly", None, None, false),
+        ("daily", None, None, false),
+        ("daily", Some("2022-06-01"), Some("2022-06-07"), true),
+        ("full", Some("2022-06-01"), Some("2022-06-07"), true),
+    ];
+    for (granularity, start, end, include_prices) in cases {
         let began = Instant::now();
         let output = portfolio_history(
             storage.clone(),
             &config,
             None,
-            None,
-            None,
+            start.map(str::to_string),
+            end.map(str::to_string),
             granularity.to_string(),
-            false,
+            include_prices,
         )
         .await?;
         let elapsed = began.elapsed();
+        let window = match (start, end) {
+            (Some(start), Some(end)) => format!(" {start}..{end} with prices"),
+            _ => String::new(),
+        };
         println!(
-            "{granularity}: {} points over {ACCOUNTS} accounts x {ASSETS} assets in {elapsed:.2?} ({:.1?}/point)",
+            "{granularity}{window}: {} points over {ACCOUNTS} accounts x {ASSETS} assets in {elapsed:.2?} ({:.1?}/point)",
             output.points.len(),
             elapsed / output.points.len().max(1) as u32,
         );
     }
+
+    let began = Instant::now();
+    let output = portfolio_assets(storage.clone(), &config, None, false).await?;
+    println!(
+        "assets: {} rows over {ACCOUNTS} accounts x {ASSETS} assets in {:.2?}",
+        output.assets.len(),
+        began.elapsed(),
+    );
 
     Ok(())
 }
