@@ -19,6 +19,22 @@ pub struct ConnectionOutput {
     pub last_sync: Option<String>,
 }
 
+/// Counts spanning every connection, aggregating what [`ConnectionOutput`]
+/// reports per connection.
+#[derive(Debug, Serialize)]
+pub struct AccountTotalsOutput {
+    /// Stored accounts plus `virtual_account_count`.
+    pub account_count: usize,
+    /// How many stored accounts are active. Virtual accounts carry no active
+    /// flag and are not counted here.
+    pub active_account_count: usize,
+    /// How many stored accounts are configured out of the portfolio.
+    pub excluded_account_count: usize,
+    /// Accounts the portfolio contributes rather than storage, such as the
+    /// latent capital gains tax account.
+    pub virtual_account_count: usize,
+}
+
 /// JSON output for accounts
 #[derive(Serialize)]
 pub struct AccountOutput {

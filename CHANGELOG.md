@@ -22,6 +22,10 @@
 - Stacked portfolio history can append the same current point and a range
   summary, so the app's Net Worth Breakdown chart reads its current total and
   range change from the API.
+- The overview API reports `account_totals`: the counts `list connections`
+  gives per connection, summed across every connection and extended with the
+  portfolio's virtual accounts, which the app's accounts page shows instead of
+  counting accounts itself.
 
 ### Changed
 

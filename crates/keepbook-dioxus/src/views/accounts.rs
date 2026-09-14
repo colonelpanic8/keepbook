@@ -39,6 +39,7 @@ pub(super) fn AccountsView(
     defaults: HistoryDefaults,
     filter_overrides: FilterOverrides,
     onfilterchange: EventHandler<FilterOverrides>,
+    account_totals: AccountTotals,
     connection_count: usize,
     onrefresh: EventHandler<()>,
 ) -> Element {
@@ -53,8 +54,8 @@ pub(super) fn AccountsView(
     let mut pull_distance = use_signal(|| 0.0);
     let mut selected_graph = use_signal(|| None::<AccountGraphSelection>);
     let virtual_accounts = virtual_account_summaries(&snapshot);
-    let account_count = accounts.len() + virtual_accounts.len();
-    let active_accounts = accounts.iter().filter(|account| account.active).count();
+    let account_count = account_totals.account_count;
+    let active_accounts = account_totals.active_account_count;
     let net_worth = format_money_text(&snapshot.total_value, &currency)
         .unwrap_or_else(|| snapshot.total_value.clone());
     let account_summaries = snapshot.by_account.clone();

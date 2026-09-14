@@ -11,16 +11,18 @@ use crate::config::{DisplayConfig, ResolvedConfig};
 use crate::format::{currency_symbol, format_base_currency_display};
 use crate::market_data::{MarketDataServiceBuilder, PriceSourceRegistry};
 use crate::models::{Asset, Id, TransactionAnnotation, TransactionStatus};
+use crate::portfolio::PortfolioSnapshot;
 use crate::storage::Storage;
 
 use super::classification::{
     effective_transaction_subtags, effective_transaction_tags, provider_virtual_tag_hierarchy,
 };
 use super::ignore_rules::{TransactionIgnoreInput, TransactionIgnoreMatcher};
+use super::portfolio::is_virtual_account_id;
 use super::value::value_in_reporting_currency_best_effort;
 use super::{
-    AccountOutput, AllOutput, BalanceOutput, ConnectionOutput, PriceSourceOutput,
-    SpendingIgnoreReason, TransactionAnnotationOutput, TransactionOutput,
+    AccountOutput, AccountTotalsOutput, AllOutput, BalanceOutput, ConnectionOutput,
+    PriceSourceOutput, SpendingIgnoreReason, TransactionAnnotationOutput, TransactionOutput,
 };
 
 #[derive(Debug, Clone)]
@@ -132,6 +134,48 @@ pub async fn list_connections(storage: &dyn Storage) -> Result<Vec<ConnectionOut
     }
 
     Ok(output)
+}
+
+/// The same account counts [`list_connections`] reports per connection, summed
+/// across every connection and extended with the portfolio's virtual accounts,
+/// for pages that show one figure for the whole repository.
+pub async fn account_totals(
+    storage: &dyn Storage,
+    snapshot: &PortfolioSnapshot,
+) -> Result<AccountTotalsOutput> {
+    let accounts = storage.list_accounts().await?;
+    let mut active_account_count = 0;
+    let mut excluded_account_count = 0;
+    for account in &accounts {
+        if account.active {
+            active_account_count += 1;
+        }
+        if storage
+            .get_account_config(&account.id)?
+            .and_then(|config| config.exclude_from_portfolio)
+            .unwrap_or(false)
+        {
+            excluded_account_count += 1;
+        }
+    }
+
+    let virtual_account_count = snapshot
+        .by_account
+        .as_ref()
+        .map(|by_account| {
+            by_account
+                .iter()
+                .filter(|account| is_virtual_account_id(&account.account_id))
+                .count()
+        })
+        .unwrap_or(0);
+
+    Ok(AccountTotalsOutput {
+        account_count: accounts.len() + virtual_account_count,
+        active_account_count,
+        excluded_account_count,
+        virtual_account_count,
+    })
 }
 
 pub async fn list_accounts(storage: &dyn Storage) -> Result<Vec<AccountOutput>> {

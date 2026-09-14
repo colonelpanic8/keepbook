@@ -454,6 +454,8 @@ impl ApiState {
             None
         };
 
+        let account_totals = keepbook::app::account_totals(storage.as_ref(), &snapshot).await?;
+
         Ok(OverviewOutput {
             config_path: state.config_path.display().to_string(),
             data_dir: state.config.data_dir.display().to_string(),
@@ -467,6 +469,7 @@ impl ApiState {
             ),
             connections: json_value(connections)?,
             accounts: json_value(accounts)?,
+            account_totals: json_value(account_totals)?,
             balances: json_value(balances)?,
             snapshot: json_value(snapshot)?,
             history,
@@ -1297,6 +1300,7 @@ pub struct OverviewOutput {
     pub filtering: FilteringOutput,
     pub connections: serde_json::Value,
     pub accounts: serde_json::Value,
+    pub account_totals: serde_json::Value,
     pub balances: serde_json::Value,
     pub snapshot: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]

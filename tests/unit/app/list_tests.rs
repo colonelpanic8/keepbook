@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::portfolio::LATENT_CAPITAL_GAINS_TAX_ACCOUNT_ID;
 use crate::clock::{Clock, FixedClock};
 use crate::models::{
     Account, AccountConfig, Asset, FixedIdGenerator, Transaction, TransactionAnnotationPatch,
@@ -80,6 +81,96 @@ async fn list_connections_counts_active_and_excluded_accounts() -> Result<()> {
     assert_eq!(connections[0].account_count, 3);
     assert_eq!(connections[0].active_account_count, 2);
     assert_eq!(connections[0].excluded_account_count, 1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn account_totals_span_connections_and_virtual_accounts() -> Result<()> {
+    let storage = MemoryStorage::new();
+    let created_at = Utc.with_ymd_and_hms(2026, 2, 5, 12, 0, 0).unwrap();
+    let connection = |name: &str| {
+        crate::models::Connection::new(crate::models::ConnectionConfig {
+            name: name.to_string(),
+            synchronizer: "manual".to_string(),
+            credentials: None,
+            balance_staleness: None,
+        })
+    };
+    let bank = connection("Bank");
+    let broker = connection("Broker");
+    storage.save_connection(&bank).await?;
+    storage.save_connection(&broker).await?;
+
+    let account = |id: &str, name: &str, connection_id: &Id| {
+        Account::new_with(Id::from_string(id), created_at, name, connection_id.clone())
+    };
+    let mut closed = account("acct-closed", "Closed", bank.id());
+    closed.active = false;
+    for account in [
+        account("acct-checking", "Checking", bank.id()),
+        account("acct-mortgage", "Mortgage", bank.id()),
+        closed,
+        account("acct-trading", "Trading", broker.id()),
+    ] {
+        storage.save_account(&account).await?;
+    }
+    storage
+        .save_account_config(
+            &Id::from_string("acct-mortgage"),
+            &AccountConfig {
+                exclude_from_portfolio: Some(true),
+                ..AccountConfig::default()
+            },
+        )
+        .await?;
+
+    let account_summary = |account_id: &str| crate::portfolio::AccountSummary {
+        account_id: account_id.to_string(),
+        account_name: account_id.to_string(),
+        connection_name: "Bank".to_string(),
+        value_in_base: None,
+    };
+    let snapshot = crate::portfolio::PortfolioSnapshot {
+        as_of_date: created_at.date_naive(),
+        currency: "USD".to_string(),
+        total_value: "0".to_string(),
+        total_cost_basis: None,
+        total_unrealized_gain: None,
+        prospective_capital_gains_tax: None,
+        valuation_scenario: None,
+        by_asset: None,
+        by_account: Some(vec![
+            account_summary("acct-checking"),
+            account_summary("acct-trading"),
+            account_summary(LATENT_CAPITAL_GAINS_TAX_ACCOUNT_ID),
+        ]),
+        valuation_issues: Vec::new(),
+    };
+
+    let totals = account_totals(&storage, &snapshot).await?;
+
+    // Four stored accounts across both connections, plus the portfolio's one
+    // virtual account.
+    assert_eq!(totals.account_count, 5);
+    assert_eq!(totals.virtual_account_count, 1);
+    assert_eq!(totals.active_account_count, 3);
+    assert_eq!(totals.excluded_account_count, 1);
+
+    // The per-connection counts still add up to the stored-account totals.
+    let connections = list_connections(&storage).await?;
+    let sum = |count: fn(&ConnectionOutput) -> usize| connections.iter().map(count).sum::<usize>();
+    assert_eq!(
+        sum(|connection| connection.account_count),
+        totals.account_count - totals.virtual_account_count
+    );
+    assert_eq!(
+        sum(|connection| connection.active_account_count),
+        totals.active_account_count
+    );
+    assert_eq!(
+        sum(|connection| connection.excluded_account_count),
+        totals.excluded_account_count
+    );
     Ok(())
 }
 
