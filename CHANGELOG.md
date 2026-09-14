@@ -1,5 +1,59 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `portfolio snapshot` and `portfolio assets` report the assets left out of a
+  total and why (`valuation_issues` and `value_issue`), so a failed price
+  lookup no longer looks like a holding nobody has priced. The fields are
+  omitted when everything was valued.
+- `sync` output reports `balances_unavailable` and `accounts_partial` when a
+  provider could not return an account's holdings or a complete account list.
+- `list transactions` marks each transaction with `ignored_from_spending` and
+  the reason, so clients no longer re-derive the spending ignore rules.
+- `list connections` and `portfolio assets` carry account and asset counts
+  (`active_account_count`, `excluded_account_count`, `asset_count`,
+  `liability_count`).
+- `list recurring-transactions` carries `candidate_key` and `review_status`,
+  and gains `--include-dismissed`.
+- `portfolio history` can append a current point valued at request time, which
+  the app's charts use instead of computing a range change themselves.
+
+### Changed
+
+- `list recurring-transactions` hides dismissed candidates by default, matching
+  the app; pass `--include-dismissed` for the previous output.
+- Intraday history points are valued at their own instant: a morning point no
+  longer includes an afternoon balance change, and a same-day price recorded
+  by that instant is preferred over one recorded later. Daily and coarser
+  points keep their end-of-day values.
+- An empty balance list from a provider is recorded as a genuinely empty
+  account, while a failed balance request leaves stored history untouched
+  instead of being skipped silently.
+- Chase deposit accounts, which have no balance endpoint yet, say so in `sync`
+  output instead of reporting a provider failure.
+- Portfolio history loads accounts, balances, and prices once per request
+  rather than once per point, and only collects change points inside the
+  requested window.
+- The app's spending, accounts, assets, and chart pages take their totals,
+  counts, and formatted amounts from the keepbook API instead of recomputing
+  them, so figures match the CLI exactly.
+- The spending over-time panel keeps its height when it has no data.
+
+### Fixed
+
+- Sync checkpoints are saved only after balances and transactions are written,
+  so a failed write can be retried from the previous cursor.
+- Concurrent writers no longer lose market-data observations; file persistence
+  is coordinated across processes.
+- Balances recorded in the last fraction of a second of a day are included in
+  that day's valuation.
+- Stored market-data observations are selected consistently by newest
+  timestamp, and asset identifiers can no longer escape the price directory.
+- Building the library without default features works again; every feature
+  now declares the modules it uses.
+
 ## 0.11.0 - 2026-08-17
 
 ### Added
