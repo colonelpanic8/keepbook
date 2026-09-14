@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.12.1 - 2026-09-14
+
+### Changed
+
+- Internal only: no user-visible changes. `src/app/portfolio.rs` and
+  `crates/keepbook-server/src/lib.rs` were each split into modules along their
+  existing seams, and the Dioxus charts, spending view, logic, and wire DTOs
+  were split into submodules. CLI commands, JSON output, storage format, and
+  every public Rust path are unchanged.
+
 ## 0.12.0 - 2026-09-14
 
 ### Added

@@ -1,0 +1,1 @@
+* Changed: Internal code restructuring only; no user-visible changes.
