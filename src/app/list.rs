@@ -10,7 +10,7 @@ use rust_decimal::Decimal;
 use crate::config::{DisplayConfig, ResolvedConfig};
 use crate::format::{currency_symbol, format_base_currency_display};
 use crate::market_data::{MarketDataServiceBuilder, PriceSourceRegistry};
-use crate::models::{Asset, Id, TransactionAnnotation};
+use crate::models::{Asset, Id, TransactionAnnotation, TransactionStatus};
 use crate::storage::Storage;
 
 use super::classification::{
@@ -20,7 +20,7 @@ use super::ignore_rules::{TransactionIgnoreInput, TransactionIgnoreMatcher};
 use super::value::value_in_reporting_currency_best_effort;
 use super::{
     AccountOutput, AllOutput, BalanceOutput, ConnectionOutput, PriceSourceOutput,
-    TransactionAnnotationOutput, TransactionOutput,
+    SpendingIgnoreReason, TransactionAnnotationOutput, TransactionOutput,
 };
 
 #[derive(Debug, Clone)]
@@ -59,6 +59,23 @@ impl TransactionDateTz {
 
 fn annotation_ignores_spending(annotation: &TransactionAnnotation) -> bool {
     annotation.ignores_spending()
+}
+
+fn is_spending_outflow(amount: &str) -> bool {
+    Decimal::from_str(amount).is_ok_and(|amount| amount.is_sign_negative() && !amount.is_zero())
+}
+
+/// Whether `reason` is a config- or annotation-level exclusion, as opposed to
+/// the transaction merely not being a posted outflow. Only these are dropped
+/// when a listing skips ignored transactions.
+fn is_explicit_spending_ignore(reason: SpendingIgnoreReason) -> bool {
+    matches!(
+        reason,
+        SpendingIgnoreReason::Annotation
+            | SpendingIgnoreReason::Rule
+            | SpendingIgnoreReason::InternalTransfer
+            | SpendingIgnoreReason::Account
+    )
 }
 
 pub async fn list_connections(storage: &dyn Storage) -> Result<Vec<ConnectionOutput>> {
@@ -308,14 +325,7 @@ pub async fn list_transactions(
         None => end_date - chrono::Duration::days(30),
     };
 
-    let ignore_matcher = if skip_ignored {
-        Some(TransactionIgnoreMatcher::from_configs(
-            &config.ignore,
-            &config.spending,
-        )?)
-    } else {
-        None
-    };
+    let ignore_matcher = TransactionIgnoreMatcher::from_configs(&config.ignore, &config.spending)?;
     let accounts = storage.list_accounts().await?;
     let connections = storage.list_connections().await?;
     let connections_by_id: HashMap<String, crate::models::Connection> = connections
@@ -323,32 +333,27 @@ pub async fn list_transactions(
         .map(|c| (c.id().to_string(), c))
         .collect();
     let mut output = Vec::new();
-    let ignored_account_tags: HashSet<String> = if skip_ignored {
-        config
-            .spending
-            .ignore_tags
-            .iter()
-            .filter_map(|tag| {
-                let trimmed = tag.trim();
-                if trimmed.is_empty() {
-                    None
-                } else {
-                    Some(trimmed.to_lowercase())
-                }
-            })
-            .collect()
-    } else {
-        HashSet::new()
-    };
+    let ignored_account_tags: HashSet<String> = config
+        .spending
+        .ignore_tags
+        .iter()
+        .filter_map(|tag| {
+            let trimmed = tag.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_lowercase())
+            }
+        })
+        .collect();
 
     for account in accounts {
-        if skip_ignored
-            && !ignored_account_tags.is_empty()
+        let account_ignored = !ignored_account_tags.is_empty()
             && account.tags.iter().any(|tag| {
                 let trimmed = tag.trim();
                 !trimmed.is_empty() && ignored_account_tags.contains(&trimmed.to_lowercase())
-            })
-        {
+            });
+        if skip_ignored && account_ignored {
             continue;
         }
 
@@ -386,29 +391,37 @@ pub async fn list_transactions(
             }
             let status = format!("{:?}", tx.status).to_lowercase();
 
-            if skip_ignored {
-                if tx
-                    .standardized_metadata
-                    .as_ref()
-                    .and_then(|md| md.is_internal_transfer_hint)
-                    .unwrap_or(false)
-                {
-                    continue;
-                }
-                if ignore_matcher.as_ref().is_some_and(|matcher| {
-                    matcher.is_match(&TransactionIgnoreInput {
-                        account_id: account.id.as_str(),
-                        account_name: &account.name,
-                        connection_id: &connection_id,
-                        connection_name,
-                        synchronizer,
-                        description: &tx.description,
-                        status: &status,
-                        amount: &tx.amount,
-                    })
-                }) {
-                    continue;
-                }
+            let spending_ignore_reason = if ann.is_some_and(annotation_ignores_spending) {
+                Some(SpendingIgnoreReason::Annotation)
+            } else if ignore_matcher.is_match(&TransactionIgnoreInput {
+                account_id: account.id.as_str(),
+                account_name: &account.name,
+                connection_id: &connection_id,
+                connection_name,
+                synchronizer,
+                description: &tx.description,
+                status: &status,
+                amount: &tx.amount,
+            }) {
+                Some(SpendingIgnoreReason::Rule)
+            } else if tx
+                .standardized_metadata
+                .as_ref()
+                .and_then(|md| md.is_internal_transfer_hint)
+                .unwrap_or(false)
+            {
+                Some(SpendingIgnoreReason::InternalTransfer)
+            } else if account_ignored {
+                Some(SpendingIgnoreReason::Account)
+            } else if !matches!(tx.status, TransactionStatus::Posted) {
+                Some(SpendingIgnoreReason::NotPosted)
+            } else if !is_spending_outflow(&tx.amount) {
+                Some(SpendingIgnoreReason::NotOutflow)
+            } else {
+                None
+            };
+            if skip_ignored && spending_ignore_reason.is_some_and(is_explicit_spending_ignore) {
+                continue;
             }
 
             let annotation = annotations_by_tx.get(&tx.id).and_then(|ann| {
@@ -435,13 +448,6 @@ pub async fn list_transactions(
                 effective_transaction_tags(raw_annotation, &provider_hierarchy, &config.tags);
             let subtags =
                 effective_transaction_subtags(raw_annotation, &provider_hierarchy, &config.tags);
-            if skip_ignored
-                && annotations_by_tx
-                    .get(&tx.id)
-                    .is_some_and(annotation_ignores_spending)
-            {
-                continue;
-            }
 
             output.push(TransactionOutput {
                 id: tx.id.to_string(),
@@ -455,6 +461,8 @@ pub async fn list_transactions(
                 tags,
                 subtags,
                 annotation,
+                ignored_from_spending: spending_ignore_reason.is_some(),
+                spending_ignore_reason,
                 standardized_metadata: tx.standardized_metadata.clone(),
             });
         }

@@ -73,8 +73,31 @@ pub struct TransactionOutput {
     pub subtags: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub annotation: Option<TransactionAnnotationOutput>,
+    /// True when a spending report would not count this transaction.
+    pub ignored_from_spending: bool,
+    /// Why `ignored_from_spending` is set; omitted for counted transactions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub spending_ignore_reason: Option<SpendingIgnoreReason>,
     #[serde(skip_serializing)]
     pub standardized_metadata: Option<TransactionStandardizedMetadata>,
+}
+
+/// Why a transaction is left out of spending reports. When several apply, the
+/// per-transaction annotation wins, then config-level exclusions, then the
+/// transaction's own shape (only posted outflows count as spending).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SpendingIgnoreReason {
+    /// The annotation sets `ignore_spending` or carries an ignore tag.
+    Annotation,
+    /// A configured ignore rule matches the transaction.
+    Rule,
+    /// The provider flagged the transaction as an internal transfer.
+    InternalTransfer,
+    /// The account carries a configured spending ignore tag.
+    Account,
+    NotPosted,
+    NotOutflow,
 }
 
 /// Options for recurring transaction detection.

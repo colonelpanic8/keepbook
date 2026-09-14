@@ -19,6 +19,8 @@ fn tx(id: &str, timestamp: &str, amount: &str) -> TransactionOutput {
         tags: Vec::new(),
         subtags: Vec::new(),
         annotation: None,
+        ignored_from_spending: false,
+        spending_ignore_reason: None,
         standardized_metadata: None,
     }
 }

@@ -7,6 +7,7 @@
     "description": "Coffee",
     "amount": "-12.34",
     "asset": { "iso_code": "USD", "type": "currency" },
-    "status": "posted"
+    "status": "posted",
+    "ignored_from_spending": false
   }
 ]

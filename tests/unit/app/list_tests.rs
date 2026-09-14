@@ -827,3 +827,178 @@ async fn list_transactions_ignores_internal_transfer_hints_when_skipping_ignored
     assert_eq!(included.len(), 1);
     Ok(())
 }
+
+#[tokio::test]
+async fn list_transactions_marks_spending_ignore_state() -> Result<()> {
+    let storage = MemoryStorage::new();
+    let clock = FixedClock::new(Utc.with_ymd_and_hms(2026, 2, 5, 12, 0, 0).unwrap());
+
+    let account_id = Id::from_string("acct-1");
+    let account = Account::new_with(
+        account_id.clone(),
+        clock.now(),
+        "Checking",
+        Id::from_string("conn-1"),
+    );
+    storage.save_account(&account).await?;
+    let ignored_account_id = Id::from_string("acct-2");
+    let mut ignored_account = Account::new_with(
+        ignored_account_id.clone(),
+        clock.now(),
+        "Brokerage",
+        Id::from_string("conn-1"),
+    );
+    ignored_account.tags = vec!["brokerage".to_string()];
+    storage.save_account(&ignored_account).await?;
+
+    let ids = FixedIdGenerator::new([
+        Id::from_string("tx-counted"),
+        Id::from_string("tx-pending"),
+        Id::from_string("tx-inflow"),
+        Id::from_string("tx-rule"),
+        Id::from_string("tx-flag"),
+        Id::from_string("tx-tag"),
+        Id::from_string("tx-transfer"),
+        Id::from_string("tx-account"),
+    ]);
+    let usd = Asset::currency("USD");
+    let tx = |amount: &str, description: &str| {
+        Transaction::new_with_generator(&ids, &clock, amount, usd.clone(), description)
+    };
+    // Ids are handed out in construction order, so build rows in id order.
+    let counted = tx("-12.50", "Coffee");
+    let pending = tx("-4", "Pending coffee").with_status(TransactionStatus::Pending);
+    let inflow = tx("9", "Refund");
+    let rule = tx("-500", "ACH CHASE CREDIT CRD EPAY");
+    let flagged = tx("-20", "Flagged");
+    let tagged = tx("-30", "Tagged");
+    let transfer = tx("-4450.62", "Payment Thank You - Web").with_standardized_metadata(
+        TransactionStandardizedMetadata {
+            is_internal_transfer_hint: Some(true),
+            ..TransactionStandardizedMetadata::default()
+        },
+    );
+    storage
+        .append_transactions(
+            &account_id,
+            &[counted, pending, inflow, rule, flagged, tagged, transfer],
+        )
+        .await?;
+    storage
+        .append_transactions(&ignored_account_id, &[tx("-19883.99", "Buy ADBE")])
+        .await?;
+
+    let patch = |transaction_id: &str, tags: Option<Vec<&str>>, ignore: Option<bool>| {
+        TransactionAnnotationPatch {
+            transaction_id: Id::from_string(transaction_id),
+            timestamp: clock.now(),
+            description: None,
+            note: None,
+            tags: tags.map(|tags| Some(tags.into_iter().map(str::to_string).collect())),
+            subtags: None,
+            effective_date: None,
+            ignore_spending: ignore.map(Some),
+        }
+    };
+    storage
+        .append_transaction_annotation_patches(
+            &account_id,
+            &[
+                patch("tx-flag", None, Some(true)),
+                patch("tx-tag", Some(vec!["Dining", "ignore-spending"]), None),
+            ],
+        )
+        .await?;
+
+    let config = ResolvedConfig {
+        data_dir: std::path::PathBuf::from("/tmp"),
+        reporting_currency: "USD".to_string(),
+        display: crate::config::DisplayConfig::default(),
+        refresh: crate::config::RefreshConfig::default(),
+        history: crate::config::HistoryConfig::default(),
+        tray: crate::config::TrayConfig::default(),
+        spending: crate::config::SpendingConfig {
+            ignore_accounts: vec![],
+            ignore_connections: vec![],
+            ignore_tags: vec!["brokerage".to_string()],
+        },
+        tags: Default::default(),
+        portfolio: crate::config::PortfolioConfig::default(),
+        ignore: crate::config::IgnoreConfig {
+            transaction_rules: vec![crate::config::TransactionIgnoreRule {
+                description: Some("(?i)credit\\s+crd\\s+(?:e?pay|autopay)".to_string()),
+                ..Default::default()
+            }],
+        },
+        ai: crate::config::AiConfig::default(),
+        git: crate::config::GitConfig::default(),
+    };
+
+    let included = list_transactions(
+        &storage,
+        Some("2000-01-01".to_string()),
+        Some("2099-12-31".to_string()),
+        None,
+        false,
+        false,
+        &config,
+    )
+    .await?;
+    let reason = |id: &str| {
+        let tx = included
+            .iter()
+            .find(|tx| tx.id == id)
+            .unwrap_or_else(|| panic!("missing {id}"));
+        (tx.ignored_from_spending, tx.spending_ignore_reason)
+    };
+    assert_eq!(reason("tx-counted"), (false, None));
+    assert_eq!(
+        reason("tx-pending"),
+        (true, Some(SpendingIgnoreReason::NotPosted))
+    );
+    assert_eq!(
+        reason("tx-inflow"),
+        (true, Some(SpendingIgnoreReason::NotOutflow))
+    );
+    assert_eq!(reason("tx-rule"), (true, Some(SpendingIgnoreReason::Rule)));
+    assert_eq!(
+        reason("tx-flag"),
+        (true, Some(SpendingIgnoreReason::Annotation))
+    );
+    assert_eq!(
+        reason("tx-tag"),
+        (true, Some(SpendingIgnoreReason::Annotation))
+    );
+    assert_eq!(
+        reason("tx-transfer"),
+        (true, Some(SpendingIgnoreReason::InternalTransfer))
+    );
+    assert_eq!(
+        reason("tx-account"),
+        (true, Some(SpendingIgnoreReason::Account))
+    );
+
+    let skipped = list_transactions(
+        &storage,
+        Some("2000-01-01".to_string()),
+        Some("2099-12-31".to_string()),
+        None,
+        false,
+        true,
+        &config,
+    )
+    .await?;
+    let mut skipped_ids: Vec<&str> = skipped.iter().map(|tx| tx.id.as_str()).collect();
+    skipped_ids.sort();
+    assert_eq!(skipped_ids, vec!["tx-counted", "tx-inflow", "tx-pending"]);
+    assert!(skipped.iter().all(
+        |tx| tx.spending_ignore_reason.is_none_or(|reason| !matches!(
+            reason,
+            SpendingIgnoreReason::Annotation
+                | SpendingIgnoreReason::Rule
+                | SpendingIgnoreReason::InternalTransfer
+                | SpendingIgnoreReason::Account
+        ))
+    ));
+    Ok(())
+}

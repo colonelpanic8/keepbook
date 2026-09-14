@@ -72,10 +72,10 @@ pub use types::{
     RecurringTransactionOccurrenceOutput, RecurringTransactionOutput,
     RecurringTransactionReviewOccurrenceOutput, RecurringTransactionReviewOutput,
     RecurringTransactionsOptions, ReviewedRecurringTransactionOutput, SpendingBreakdownEntryOutput,
-    SpendingOutput, SpendingPeriodOutput, SpendingScopeOutput, StackedHistoryComponent,
-    StackedHistoryOutput, StackedHistoryPoint, StackedHistorySeries, TaxImpactOutput,
-    TaxImpactPoint, TransactionAnnotationOutput, TransactionAnnotationPatchOutput,
-    TransactionOutput,
+    SpendingIgnoreReason, SpendingOutput, SpendingPeriodOutput, SpendingScopeOutput,
+    StackedHistoryComponent, StackedHistoryOutput, StackedHistoryPoint, StackedHistorySeries,
+    TaxImpactOutput, TaxImpactPoint, TransactionAnnotationOutput,
+    TransactionAnnotationPatchOutput, TransactionOutput,
 };
 
 fn env_disabled(key: &str) -> bool {

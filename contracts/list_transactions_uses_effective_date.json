@@ -8,6 +8,7 @@
     "amount": "-1200",
     "asset": { "iso_code": "USD", "type": "currency" },
     "status": "posted",
+    "ignored_from_spending": false,
     "annotation": {
       "effective_date": "2026-02-01"
     }
