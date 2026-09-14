@@ -606,14 +606,14 @@ fn configure_history_market_data(
 }
 
 fn calculate_history_summary<'a>(
-    history_points: impl IntoIterator<Item = &'a HistoryPoint>,
+    total_values: impl IntoIterator<Item = &'a str>,
 ) -> Option<HistorySummary> {
-    let mut history_points = history_points.into_iter();
-    let first = history_points.next()?;
-    let last = history_points.last()?;
+    let mut total_values = total_values.into_iter();
+    let first = total_values.next()?;
+    let last = total_values.last()?;
 
-    let initial = Decimal::from_str(&first.total_value).unwrap_or(Decimal::ZERO);
-    let final_val = Decimal::from_str(&last.total_value).unwrap_or(Decimal::ZERO);
+    let initial = Decimal::from_str(first).unwrap_or(Decimal::ZERO);
+    let final_val = Decimal::from_str(last).unwrap_or(Decimal::ZERO);
     let absolute_change = final_val - initial;
     let percentage_change = if initial != Decimal::ZERO {
         ((final_val - initial) / initial * Decimal::from(100))
@@ -2353,6 +2353,7 @@ pub async fn portfolio_history_for_accounts(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn portfolio_stacked_history(
     storage: Arc<dyn Storage>,
     config: &ResolvedConfig,
@@ -2361,6 +2362,7 @@ pub async fn portfolio_stacked_history(
     end: Option<String>,
     granularity: String,
     include_prices: bool,
+    include_current: bool,
 ) -> Result<StackedHistoryOutput> {
     let today = Utc::now().date_naive();
     let start_date = start
@@ -2406,7 +2408,10 @@ pub async fn portfolio_stacked_history(
     let filtered = collect_change_points(&storage_arc, &store, &options).await?;
     let target_currency = currency.unwrap_or_else(|| config.reporting_currency.clone());
 
-    if filtered.is_empty() {
+    // A current point still needs valuing when the range holds no change
+    // points, so only bail out early when the caller did not ask for one.
+    let want_current = include_current && !end_date.is_some_and(|end| end < today);
+    if filtered.is_empty() && !want_current {
         return Ok(StackedHistoryOutput {
             currency: target_currency,
             start_date: start_date_output,
@@ -2414,6 +2419,8 @@ pub async fn portfolio_stacked_history(
             granularity,
             series: Vec::new(),
             points: Vec::new(),
+            current: None,
+            summary: None,
         });
     }
 
@@ -2460,6 +2467,39 @@ pub async fn portfolio_stacked_history(
         points.push(point);
     }
 
+    let current = if want_current {
+        let now = Utc::now();
+        Some(
+            build_stacked_history_point_for_date(
+                &service,
+                &valuation_history,
+                config,
+                StackedHistoryPointInput {
+                    target_currency: &target_currency,
+                    as_of_date: now.date_naive(),
+                    as_of_timestamp: Some(now),
+                    timestamp: now.to_rfc3339(),
+                    capital_gains_tax_rate,
+                    include_latent_tax_adjustment,
+                    cost_basis_backfill: &cost_basis_backfill,
+                },
+                &mut carry_forward_unit_values,
+                &mut series_by_key,
+                &mut series_order,
+            )
+            .await?,
+        )
+    } else {
+        None
+    };
+
+    let summary = calculate_history_summary(
+        points
+            .iter()
+            .chain(current.iter())
+            .map(|point| point.total_value.as_str()),
+    );
+
     Ok(StackedHistoryOutput {
         currency: target_currency,
         start_date: start_date_output,
@@ -2470,6 +2510,8 @@ pub async fn portfolio_stacked_history(
             .filter_map(|key| series_by_key.remove(&key))
             .collect(),
         points,
+        current,
+        summary,
     })
 }
 
@@ -2690,7 +2732,12 @@ async fn portfolio_history_scoped(
         None
     };
 
-    let summary = calculate_history_summary(history_points.iter().chain(current.iter()));
+    let summary = calculate_history_summary(
+        history_points
+            .iter()
+            .chain(current.iter())
+            .map(|point| point.total_value.as_str()),
+    );
 
     Ok(HistoryOutput {
         currency: target_currency,

@@ -833,6 +833,7 @@ impl ApiState {
         let include_prices = query
             .include_prices
             .unwrap_or(effective_config.history.include_prices);
+        let include_current = query.include_current.unwrap_or(false);
         json_value(
             keepbook::app::portfolio_stacked_history(
                 storage,
@@ -842,6 +843,7 @@ impl ApiState {
                 query.end,
                 granularity,
                 include_prices,
+                include_current,
             )
             .await?,
         )

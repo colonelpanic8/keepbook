@@ -1993,3 +1993,117 @@ async fn portfolio_history_can_append_a_current_point() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn portfolio_stacked_history_can_append_a_current_point() -> anyhow::Result<()> {
+    let dir = TempDir::new()?;
+    let config = assets_test_config(dir.path().to_path_buf());
+
+    let storage = Arc::new(MemoryStorage::new());
+    let connection = Connection::new(connection_config("Test Broker"));
+    storage.save_connection(&connection).await?;
+    let account = Account::new("Trading", connection.id().clone());
+    storage.save_account(&account).await?;
+
+    let asset = Asset::equity("AAPL");
+    let today = Utc::now().date_naive();
+    let opened = Utc::now() - chrono::Duration::days(30);
+    storage
+        .append_balance_snapshot(
+            &account.id,
+            &BalanceSnapshot::new(opened, vec![AssetBalance::new(asset.clone(), "10")]),
+        )
+        .await?;
+
+    let store = JsonlMarketDataStore::new(&config.data_dir);
+    store
+        .put_prices(&[
+            close_price(&asset, opened.date_naive(), "100"),
+            PricePoint {
+                asset_id: AssetId::from_asset(&asset),
+                as_of_date: today,
+                timestamp: Utc::now() - chrono::Duration::hours(1),
+                price: "150".to_string(),
+                quote_currency: "USD".to_string(),
+                kind: PriceKind::Close,
+                source: "test".to_string(),
+            },
+        ])
+        .await?;
+
+    let history = |start: Option<String>, end: Option<String>, include_current: bool| {
+        let storage = storage.clone();
+        let config = &config;
+        async move {
+            portfolio_stacked_history(
+                storage,
+                config,
+                None,
+                start,
+                end,
+                "none".to_string(),
+                false,
+                include_current,
+            )
+            .await
+        }
+    };
+
+    // Balance changes give one point; the current point values the same
+    // holding at today's price, and the summary runs through it.
+    let output = history(None, None, true).await?;
+    assert_eq!(
+        output
+            .points
+            .iter()
+            .map(|point| point.total_value.as_str())
+            .collect::<Vec<_>>(),
+        vec!["1000"]
+    );
+    let current = output.current.expect("current point");
+    assert_eq!(current.date, today.to_string());
+    assert_eq!(current.total_value, "1500");
+    // The current point carries the same component breakdown as the plotted
+    // points, so the stacked chart can plot it without a second request.
+    assert_eq!(
+        current
+            .components
+            .iter()
+            .map(|component| component.series_key.as_str())
+            .collect::<Vec<_>>(),
+        output.points[0]
+            .components
+            .iter()
+            .map(|component| component.series_key.as_str())
+            .collect::<Vec<_>>()
+    );
+    let summary = output.summary.expect("summary");
+    assert_eq!(summary.initial_value, "1000");
+    assert_eq!(summary.final_value, "1500");
+    assert_eq!(summary.absolute_change, "500");
+    assert_eq!(summary.percentage_change, "50.00");
+
+    // Opting out leaves the output exactly as it was.
+    let without = history(None, None, false).await?;
+    assert!(without.current.is_none());
+    assert!(without.summary.is_none());
+
+    // A range with no change points still gets its current point.
+    let empty_range = history(Some(today.to_string()), None, true).await?;
+    assert!(empty_range.points.is_empty());
+    assert_eq!(
+        empty_range.current.map(|point| point.total_value),
+        Some("1500".to_string())
+    );
+
+    // A range that ends before today gets no current point.
+    let past = history(
+        None,
+        Some((today - chrono::Duration::days(1)).to_string()),
+        true,
+    )
+    .await?;
+    assert!(past.current.is_none());
+
+    Ok(())
+}

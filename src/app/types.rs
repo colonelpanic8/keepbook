@@ -370,6 +370,13 @@ pub struct StackedHistoryOutput {
     pub granularity: String,
     pub series: Vec<StackedHistorySeries>,
     pub points: Vec<StackedHistoryPoint>,
+    /// Breakdown right now, valued past the last change point. Only present
+    /// when the request opted in and the range runs through today; `summary`
+    /// covers `points` followed by this point when it is set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current: Option<StackedHistoryPoint>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<HistorySummary>,
 }
 
 /// Output for the portfolio assets command: per-asset breakdown with

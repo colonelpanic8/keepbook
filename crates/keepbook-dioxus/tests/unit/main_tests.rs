@@ -1169,6 +1169,50 @@ fn current_snapshot_appends_local_today_when_history_has_no_today_point() {
 }
 
 #[test]
+fn stacked_current_point_replaces_utc_tomorrow_point_on_local_today() {
+    fn raw(date: &str, total: &str, value: &str) -> StackedHistoryPoint {
+        StackedHistoryPoint {
+            date: date.to_string(),
+            total_value: total.to_string(),
+            components: vec![StackedHistoryComponent {
+                series_key: "account:a".to_string(),
+                value: value.to_string(),
+            }],
+        }
+    }
+
+    let history = StackedHistory {
+        currency: "USD".to_string(),
+        points: vec![
+            raw("2026-07-13", "100", "100"),
+            raw("2026-07-14", "110", "110"),
+            raw("2026-07-15", "120", "120"),
+        ],
+        series: Vec::new(),
+        current: Some(raw("2026-07-15", "125", "125")),
+        summary: None,
+    };
+
+    assert_eq!(
+        stacked_history_data_points_with_current(&history, "2026-07-14"),
+        vec![
+            stacked_point("2026-07-13", 100.0, &[("account:a", 100.0)]),
+            stacked_point("2026-07-14", 125.0, &[("account:a", 125.0)]),
+        ]
+    );
+
+    // Without a current point the plotted range is left untouched.
+    let without = StackedHistory {
+        current: None,
+        ..history
+    };
+    assert_eq!(
+        stacked_history_data_points_with_current(&without, "2026-07-14").len(),
+        3
+    );
+}
+
+#[test]
 fn account_value_uses_portfolio_snapshot_account_total() {
     let account_summaries = vec![AccountSummary {
         account_id: "empower".to_string(),
@@ -1202,12 +1246,12 @@ fn money_formatting_keeps_unknown_currency_code() {
 
 #[test]
 fn decimal_text_money_matches_the_float_formatter() {
-    for (text, value) in [
-        ("1571.17", 1571.17),
-        ("-1571.17", -1571.17),
-        ("1.999", 1.999),
-        ("0", 0.0),
-        ("1234567.89", 1234567.89),
+    for (text, value, signed) in [
+        ("1571.17", 1571.17, "+$1,571.17"),
+        ("-1571.17", -1571.17, "-$1,571.17"),
+        ("1.999", 1.999, "+$2.00"),
+        ("0", 0.0, "+$0.00"),
+        ("1234567.89", 1234567.89, "+$1,234,567.89"),
     ] {
         assert_eq!(
             format_money_text(text, "USD").as_deref(),
@@ -1216,7 +1260,7 @@ fn decimal_text_money_matches_the_float_formatter() {
         );
         assert_eq!(
             format_signed_money_text(text, "USD").as_deref(),
-            Some(format_signed_money(value, "USD").as_str()),
+            Some(signed),
             "{text}"
         );
     }
