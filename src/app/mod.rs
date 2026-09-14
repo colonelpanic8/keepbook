@@ -12,6 +12,7 @@ mod spending;
 #[cfg(feature = "sync")]
 mod sync;
 mod transaction_rules;
+pub mod tray;
 mod types;
 mod value;
 
