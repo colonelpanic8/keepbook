@@ -377,6 +377,10 @@ struct StackedHistory {
     currency: String,
     points: Vec<StackedHistoryPoint>,
     series: Vec<StackedHistorySeries>,
+    #[serde(default)]
+    current: Option<StackedHistoryPoint>,
+    #[serde(default)]
+    summary: Option<HistorySummary>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]

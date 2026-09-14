@@ -176,7 +176,7 @@ pub(super) fn StackedHistoryGraphPanel(
         _ => None,
     };
     let data = loaded_history
-        .map(stacked_history_data_points)
+        .map(|history| stacked_history_data_points_with_current(history, &current_date_string()))
         .unwrap_or_default();
     let bounds = date_bounds(&data);
     let (start_date, end_date) = visible_date_range(&data, selected_range, &start_text, &end_text);
@@ -185,20 +185,15 @@ pub(super) fn StackedHistoryGraphPanel(
     let sampled_data = sample_data_by_granularity(&visible_data, resolved_sampling);
     let sampled_point_count = sampled_data.len();
     let sampling_label = resolved_sampling.label();
-    let current_total = sampled_data
-        .last()
-        .map(|point| point.total)
+    let current_value_text = loaded_history
+        .and_then(|history| history.current.as_ref().or(history.points.last()))
+        .map(|point| point.total_value.clone())
         .unwrap_or_default();
-    let start_total = sampled_data
-        .first()
-        .map(|point| point.total)
-        .unwrap_or_default();
-    let absolute_change = current_total - start_total;
-    let change_class = if absolute_change >= 0.0 {
-        "change-positive"
-    } else {
-        "change-negative"
-    };
+    let current_label = format_money_text(&current_value_text, &currency).unwrap_or_default();
+    let change_summary = history_change_summary(
+        loaded_history.and_then(|history| history.summary.as_ref()),
+        &currency,
+    );
     let min_date = bounds
         .as_ref()
         .map(|bounds| bounds.0.clone())
@@ -301,10 +296,8 @@ pub(super) fn StackedHistoryGraphPanel(
                     }
                     if !sampled_data.is_empty() {
                         div { class: "chart-stats",
-                            strong { "{format_full_money(current_total, &currency)}" }
-                            span { class: "{change_class}",
-                                "{format_signed_money(absolute_change, &currency)}"
-                            }
+                            strong { "{current_label}" }
+                            span { class: "{change_summary.class}", "{change_summary.text}" }
                         }
                     }
                     StackedSeriesControls {

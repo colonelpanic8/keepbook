@@ -19,6 +19,9 @@
   and gains `--include-dismissed`.
 - `portfolio history` can append a current point valued at request time, which
   the app's charts use instead of computing a range change themselves.
+- Stacked portfolio history can append the same current point and a range
+  summary, so the app's Net Worth Breakdown chart reads its current total and
+  range change from the API.
 
 ### Changed
 

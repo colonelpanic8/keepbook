@@ -230,7 +230,8 @@ pub(crate) async fn fetch_history(query: String) -> Result<History, String> {
 }
 
 pub(crate) async fn fetch_stacked_history(query: String) -> Result<StackedHistory, String> {
-    fetch_stacked_history_impl(query).await
+    // Same as [`fetch_history`]: the stacked chart plots through now too.
+    fetch_stacked_history_impl(format!("{query}&include_current=true")).await
 }
 
 pub(crate) async fn fetch_assets(query: String) -> Result<AssetBreakdown, String> {

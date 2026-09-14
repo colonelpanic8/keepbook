@@ -112,41 +112,69 @@ pub(crate) fn history_data_points_with_current_snapshot(
     points
 }
 
+fn stacked_data_point(point: &StackedHistoryPoint, date: &str) -> Option<StackedHistoryDataPoint> {
+    let total = point
+        .total_value
+        .parse::<f64>()
+        .ok()
+        .filter(|value| value.is_finite())?;
+    let components = point
+        .components
+        .iter()
+        .filter_map(|component| {
+            component
+                .value
+                .parse::<f64>()
+                .ok()
+                .filter(|value| value.is_finite())
+                .map(|value| StackedValue {
+                    series_key: component.series_key.clone(),
+                    value,
+                })
+        })
+        .collect::<Vec<_>>();
+    Some(StackedHistoryDataPoint {
+        date: date.to_string(),
+        total,
+        components,
+    })
+}
+
 pub(crate) fn stacked_history_data_points(
     history: &StackedHistory,
 ) -> Vec<StackedHistoryDataPoint> {
     let mut points = history
         .points
         .iter()
-        .filter_map(|point| {
-            let total = point
-                .total_value
-                .parse::<f64>()
-                .ok()
-                .filter(|value| value.is_finite())?;
-            let components = point
-                .components
-                .iter()
-                .filter_map(|component| {
-                    component
-                        .value
-                        .parse::<f64>()
-                        .ok()
-                        .filter(|value| value.is_finite())
-                        .map(|value| StackedValue {
-                            series_key: component.series_key.clone(),
-                            value,
-                        })
-                })
-                .collect::<Vec<_>>();
-            Some(StackedHistoryDataPoint {
-                date: point.date.clone(),
-                total,
-                components,
-            })
-        })
+        .filter_map(|point| stacked_data_point(point, &point.date))
         .collect::<Vec<_>>();
     points.sort_by(|a, b| a.date.cmp(&b.date));
+    points
+}
+
+/// [`stacked_history_data_points`] with the app's current point plotted at the
+/// viewer's local today, mirroring
+/// [`history_data_points_with_current_snapshot`].
+pub(crate) fn stacked_history_data_points_with_current(
+    history: &StackedHistory,
+    local_today: &str,
+) -> Vec<StackedHistoryDataPoint> {
+    let mut points = stacked_history_data_points(history);
+    let Some(current) = history
+        .current
+        .as_ref()
+        .and_then(|point| stacked_data_point(point, local_today))
+    else {
+        return points;
+    };
+    points.retain(|point| point.date.as_str() <= local_today);
+
+    if let Some(point) = points.last_mut().filter(|point| point.date == local_today) {
+        *point = current;
+    } else {
+        points.push(current);
+    }
+
     points
 }
 
@@ -920,14 +948,6 @@ fn currency_display_symbol(currency: &str) -> Option<&'static str> {
     match currency.trim().to_ascii_uppercase().as_str() {
         "USD" | "US DOLLAR" | "UNITED STATES DOLLAR" | "DOLLAR" => Some("$"),
         _ => None,
-    }
-}
-
-pub(crate) fn format_signed_money(value: f64, currency: &str) -> String {
-    if value >= 0.0 {
-        format!("+{}", format_full_money(value, currency))
-    } else {
-        format_full_money(value, currency)
     }
 }
 
