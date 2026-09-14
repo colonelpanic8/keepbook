@@ -1664,22 +1664,21 @@ pub(crate) fn normalize_spending_tag_key(tag: &str) -> String {
     }
 }
 
-const SPENDING_TAG_COLORS: [&str; 10] = [
-    "var(--cat-1)",
-    "var(--cat-2)",
-    "var(--cat-3)",
-    "var(--cat-4)",
-    "var(--cat-5)",
-    "var(--cat-6)",
-    "var(--cat-7)",
-    "var(--cat-8)",
-    "var(--cat-9)",
-    "var(--cat-10)",
-];
-
-pub(crate) fn spending_tag_color(index: usize) -> &'static str {
-    SPENDING_TAG_COLORS[index % SPENDING_TAG_COLORS.len()]
+/// Defines `fn $name(index: usize) -> &'static str` over the numbered CSS
+/// custom-property palette `--$prefix-$slot`, wrapping the index into range.
+/// Spending tags and stacked chart series both colour by position this way.
+macro_rules! css_var_palette {
+    ($vis:vis fn $name:ident from $prefix:literal [$($slot:literal),+ $(,)?]) => {
+        $vis fn $name(index: usize) -> &'static str {
+            const PALETTE: &[&str] = &[$(concat!("var(--", $prefix, "-", $slot, ")")),+];
+            PALETTE[index % PALETTE.len()]
+        }
+    };
 }
+
+pub(crate) use css_var_palette;
+
+css_var_palette!(pub(crate) fn spending_tag_color from "cat" [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 
 pub(crate) fn spending_tag_color_map(
     tags: &[SpendingBreakdownEntry],

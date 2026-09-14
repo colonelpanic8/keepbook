@@ -1,4 +1,5 @@
 use super::*;
+use crate::logic::css_var_palette;
 use std::collections::{HashMap, HashSet};
 
 /// Range presets offered by the net-worth graph panels, in display order.
@@ -1792,26 +1793,6 @@ fn tooltip_label(label: &str, max_chars: usize) -> String {
     truncated
 }
 
-fn stacked_chart_color(index: usize) -> &'static str {
-    const COLORS: [&str; 18] = [
-        "var(--series-1)",
-        "var(--series-2)",
-        "var(--series-3)",
-        "var(--series-4)",
-        "var(--series-5)",
-        "var(--series-6)",
-        "var(--series-7)",
-        "var(--series-8)",
-        "var(--series-9)",
-        "var(--series-10)",
-        "var(--series-11)",
-        "var(--series-12)",
-        "var(--series-13)",
-        "var(--series-14)",
-        "var(--series-15)",
-        "var(--series-16)",
-        "var(--series-17)",
-        "var(--series-18)",
-    ];
-    COLORS[index % COLORS.len()]
-}
+css_var_palette!(fn stacked_chart_color from "series" [
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18
+]);
