@@ -1,9 +1,9 @@
 mod backfill;
 mod history;
 mod intervals;
+mod tax;
 
 use std::collections::{HashMap, HashSet};
-use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -20,7 +20,7 @@ use crate::market_data::{
 };
 use crate::models::{Asset, Id};
 use crate::portfolio::{
-    collect_change_points, earliest_change_point, AccountSummary, CoalesceStrategy, CollectOptions,
+    collect_change_points, earliest_change_point, CoalesceStrategy, CollectOptions,
     EquityValuationAdjustment, Granularity, Grouping, PortfolioQuery, PortfolioService,
 };
 use crate::staleness::{
@@ -36,8 +36,6 @@ use super::{
     AssetChange, AssetChanges, ChangePointsOutput, HistoryOutput, HistoryPoint,
     StackedHistoryOutput, StackedHistorySeries, TaxImpactOutput, TaxImpactPoint,
 };
-pub use backfill::{fetch_historical_prices, fill_prices_at_date, PriceHistoryRequest};
-
 use backfill::resolve_price_history_scope;
 use history::{
     build_history_point_for_date, build_stacked_history_point_for_date, calculate_history_summary,
@@ -45,6 +43,12 @@ use history::{
     HistoryValueMode, StackedHistoryPointInput,
 };
 use intervals::{history_spec_dates, parse_portfolio_date_bound, DateRangeBound};
+use tax::{
+    apply_latent_tax_virtual_account, decimal_from_f64, parse_decimal_arg,
+    resolve_capital_gains_tax_rate, resolve_equity_valuation_adjustment,
+};
+
+pub use backfill::{fetch_historical_prices, fill_prices_at_date, PriceHistoryRequest};
 
 /// Options for `portfolio_snapshot`. Defaults mirror the CLI defaults:
 /// today, grouped by both asset and account, auto-refreshing stale data.
@@ -175,103 +179,6 @@ pub async fn resolve_portfolio_history_selection(
     Ok(PortfolioHistorySelection::Accounts(
         accounts.into_iter().map(|account| account.id).collect(),
     ))
-}
-
-fn parse_tax_rate_fraction(rate: &str, context: &str) -> Result<Decimal> {
-    Decimal::from_str(rate)
-        .with_context(|| format!("Invalid {context}: {rate}"))
-        .map(|rate| rate / Decimal::from(100))
-}
-
-fn parse_decimal_arg(value: &str, context: &str) -> Result<Decimal> {
-    Decimal::from_str(value).with_context(|| format!("Invalid {context}: {value}"))
-}
-
-fn resolve_equity_valuation_adjustment(
-    equity_change_percent: Option<String>,
-    target_pre_tax_total_value: Option<String>,
-) -> Result<Option<EquityValuationAdjustment>> {
-    match (equity_change_percent, target_pre_tax_total_value) {
-        (Some(_), Some(_)) => anyhow::bail!(
-            "--equity-change-percent and --target-pre-tax-total-value cannot be used together"
-        ),
-        (Some(percent), None) => Ok(Some(EquityValuationAdjustment::PercentChange(
-            parse_decimal_arg(&percent, "equity change percent")?,
-        ))),
-        (None, Some(target)) => Ok(Some(EquityValuationAdjustment::TargetPreTaxTotalValue(
-            parse_decimal_arg(&target, "target pre-tax total value")?,
-        ))),
-        (None, None) => Ok(None),
-    }
-}
-
-fn decimal_from_f64(value: f64, context: &str) -> Result<Decimal> {
-    Decimal::from_str(&value.to_string()).with_context(|| format!("Invalid {context}: {value}"))
-}
-
-fn resolve_capital_gains_tax_rate(
-    config: &ResolvedConfig,
-    cli_percent_rate: Option<String>,
-) -> Result<(Option<Decimal>, bool)> {
-    let latent_tax = &config.portfolio.latent_capital_gains_tax;
-    if let Some(rate) = cli_percent_rate {
-        return Ok((
-            Some(parse_tax_rate_fraction(&rate, "capital gains tax rate")?),
-            latent_tax.enabled,
-        ));
-    }
-
-    if !latent_tax.enabled {
-        return Ok((None, false));
-    }
-
-    let rate = latent_tax
-        .rate
-        .context("portfolio.latent_capital_gains_tax.enabled requires a rate")?;
-    Ok((
-        Some(decimal_from_f64(
-            rate,
-            "portfolio.latent_capital_gains_tax.rate",
-        )?),
-        true,
-    ))
-}
-
-fn apply_latent_tax_virtual_account(
-    snapshot: &mut crate::portfolio::PortfolioSnapshot,
-    config: &ResolvedConfig,
-) -> Result<()> {
-    let Some(tax_str) = &snapshot.prospective_capital_gains_tax else {
-        return Ok(());
-    };
-    let tax = Decimal::from_str(tax_str)
-        .with_context(|| format!("Invalid prospective_capital_gains_tax: {tax_str}"))?;
-    if tax <= Decimal::ZERO {
-        return Ok(());
-    }
-
-    let total_value = Decimal::from_str(&snapshot.total_value)
-        .with_context(|| format!("Invalid total_value: {}", snapshot.total_value))?;
-    snapshot.total_value =
-        format_base_currency_value(total_value - tax, config.display.currency_decimals);
-
-    if let Some(by_account) = snapshot.by_account.as_mut() {
-        by_account.push(AccountSummary {
-            account_id: "virtual:latent_capital_gains_tax".to_string(),
-            account_name: config
-                .portfolio
-                .latent_capital_gains_tax
-                .account_name
-                .clone(),
-            connection_name: "Virtual".to_string(),
-            value_in_base: Some(format_base_currency_value(
-                -tax,
-                config.display.currency_decimals,
-            )),
-        });
-    }
-
-    Ok(())
 }
 
 pub async fn portfolio_snapshot(

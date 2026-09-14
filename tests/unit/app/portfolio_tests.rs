@@ -17,6 +17,7 @@ use chrono::TimeZone;
 use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::str::FromStr;
 use tempfile::TempDir;
 
 fn connection_config(name: &str) -> ConnectionConfig {
