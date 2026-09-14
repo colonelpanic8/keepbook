@@ -1,12 +1,15 @@
 use super::*;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 // The keepbook crate's unit tests share this guard; each test binary is its own
 // process, so each gets its own lock.
 #[path = "../../../../tests/unit/env_guard.rs"]
 mod env_guard;
 
+#[path = "test_support.rs"]
+mod test_support;
+
 use env_guard::EnvGuard;
+use test_support::{remove_test_config, unique_test_config_path, write_test_config};
 
 #[cfg(unix)]
 #[test]
@@ -425,31 +428,6 @@ fn account_portfolio_override_query_decodes_json_param() -> Result<()> {
     assert_eq!(overrides.get("brokerage"), Some(&true));
     assert_eq!(overrides.get("ira"), Some(&true));
     Ok(())
-}
-
-fn unique_test_config_path(name: &str) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time should be after Unix epoch")
-        .as_nanos();
-    std::env::temp_dir().join(format!(
-        "keepbook-server-{name}-{}-{nanos}/keepbook.toml",
-        std::process::id()
-    ))
-}
-
-fn write_test_config(path: &Path, contents: &str) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(path, contents)?;
-    Ok(())
-}
-
-fn remove_test_config(path: PathBuf) {
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::remove_dir_all(parent);
-    }
 }
 
 #[cfg(feature = "http")]
