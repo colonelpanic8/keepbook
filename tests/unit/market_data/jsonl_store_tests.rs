@@ -51,7 +51,7 @@ async fn put_prices_rewrites_year_file_in_chronological_order() -> Result<()> {
     let path = store.price_file(
         &AssetId::from_asset(&Asset::equity("AAPL")),
         NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
-    );
+    )?;
     let lines = fs::read_to_string(&path).await?;
     let parsed: Vec<PricePoint> = lines
         .lines()
@@ -183,7 +183,7 @@ async fn put_prices_orders_by_as_of_date_before_timestamp() -> Result<()> {
     let path = store.price_file(
         &AssetId::from_asset(&Asset::equity("AAPL")),
         NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
-    );
+    )?;
     let lines = fs::read_to_string(&path).await?;
     let parsed: Vec<PricePoint> = lines
         .lines()
@@ -209,7 +209,7 @@ async fn recompact_all_jsonl_resorts_market_data_files() -> Result<()> {
     let store = JsonlMarketDataStore::new(&base_path);
 
     let asset_id = AssetId::from_asset(&Asset::equity("AAPL"));
-    let price_path = store.price_file(&asset_id, NaiveDate::from_ymd_opt(2024, 1, 1).unwrap());
+    let price_path = store.price_file(&asset_id, NaiveDate::from_ymd_opt(2024, 1, 1).unwrap())?;
     store
         .write_jsonl(
             &price_path,

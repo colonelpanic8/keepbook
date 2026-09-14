@@ -59,8 +59,16 @@ impl JsonlMarketDataStore {
         self.base_path.join("assets").join("index.jsonl")
     }
 
-    fn prices_dir(&self, asset_id: &AssetId) -> PathBuf {
-        self.base_path.join("prices").join(asset_id.to_string())
+    fn prices_dir(&self, asset_id: &AssetId) -> Result<PathBuf> {
+        let value = asset_id.as_str();
+        anyhow::ensure!(
+            value.split('/').all(crate::models::Id::is_path_safe)
+                && Path::new(value)
+                    .components()
+                    .all(|part| matches!(part, std::path::Component::Normal(_))),
+            "Invalid asset id for storage: {value:?}"
+        );
+        Ok(self.base_path.join("prices").join(value))
     }
 
     fn fx_dir(&self, base: &str, quote: &str) -> PathBuf {
@@ -68,9 +76,10 @@ impl JsonlMarketDataStore {
         self.base_path.join("fx").join(pair)
     }
 
-    fn price_file(&self, asset_id: &AssetId, date: NaiveDate) -> PathBuf {
-        self.prices_dir(asset_id)
-            .join(format!("{:04}.jsonl", date.year()))
+    fn price_file(&self, asset_id: &AssetId, date: NaiveDate) -> Result<PathBuf> {
+        Ok(self
+            .prices_dir(asset_id)?
+            .join(format!("{:04}.jsonl", date.year())))
     }
 
     fn fx_file(&self, base: &str, quote: &str, date: NaiveDate) -> PathBuf {
@@ -374,13 +383,14 @@ impl JsonlMarketDataStore {
         Ok(())
     }
 
-    fn invalidate_price_dir(&self, asset_id: &AssetId) {
-        let dir = self.prices_dir(asset_id);
+    fn invalidate_price_dir(&self, asset_id: &AssetId) -> Result<()> {
+        let dir = self.prices_dir(asset_id)?;
         self.cache
             .lock()
             .expect("market data cache poisoned")
             .price_dirs
             .remove(&dir);
+        Ok(())
     }
 
     fn invalidate_fx_dir(&self, base: &str, quote: &str) {
@@ -405,13 +415,13 @@ impl MarketDataStore for JsonlMarketDataStore {
         date: NaiveDate,
         kind: PriceKind,
     ) -> Result<Option<PricePoint>> {
-        let path = self.price_file(asset_id, date);
+        let path = self.price_file(asset_id, date)?;
         let prices = self.read_cached_price_file(&path).await?;
         Ok(self.select_latest_price(prices, date, kind))
     }
 
     async fn get_all_prices(&self, asset_id: &AssetId) -> Result<Vec<PricePoint>> {
-        let prices_dir = self.prices_dir(asset_id);
+        let prices_dir = self.prices_dir(asset_id)?;
         let mut all_prices = Vec::new();
 
         for path in self.list_cached_jsonl_files(&prices_dir, false).await? {
@@ -432,6 +442,7 @@ impl MarketDataStore for JsonlMarketDataStore {
             std::collections::HashMap::new();
 
         for price in prices {
+            self.prices_dir(&price.asset_id)?;
             let key = (price.asset_id.to_string(), price.as_of_date.year());
             grouped.entry(key).or_default().push(price.clone());
         }
@@ -440,13 +451,13 @@ impl MarketDataStore for JsonlMarketDataStore {
             let date =
                 NaiveDate::from_ymd_opt(year, 1, 1).context("Invalid price date for storage")?;
             let asset_id = AssetId::from(asset_id);
-            let path = self.price_file(&asset_id, date);
+            let path = self.price_file(&asset_id, date)?;
             let mut all_items = self.read_cached_price_file(&path).await?;
             all_items.extend(items);
             Self::sort_prices(&mut all_items);
             self.write_jsonl(&path, &all_items).await?;
             self.cache_price_file(&path, &all_items).await?;
-            self.invalidate_price_dir(&asset_id);
+            self.invalidate_price_dir(&asset_id)?;
         }
 
         Ok(())
