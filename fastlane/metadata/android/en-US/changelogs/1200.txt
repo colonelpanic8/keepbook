@@ -1,0 +1,3 @@
+* Added: `portfolio snapshot` and `portfolio assets` report the assets left out of a total and why (`valuation_issues` and `value_issue`), so a failed price lookup no longer looks like a holding nobody has priced. The fields are omitted when everything was valued.
+* Added: `sync` output reports `balances_unavailable` and `accounts_partial` when a provider could not return an account's holdings or a complete account list.
+* ...see CHANGELOG.md for the rest.
