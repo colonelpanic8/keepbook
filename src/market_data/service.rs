@@ -125,7 +125,7 @@ impl MarketDataService {
         let asset_id = AssetId::from_asset(&asset);
         debug!(asset_id = %asset_id, date = %date, "looking up price from store only");
 
-        let prices = self.store.get_all_prices(&asset_id).await?;
+        let prices = self.store.all_prices_shared(&asset_id).await?;
 
         if let Some(days) = self.store_lookback_days {
             let start = date - Duration::days(days as i64);
@@ -396,7 +396,7 @@ impl MarketDataService {
         asset_id: &AssetId,
         date: NaiveDate,
     ) -> Result<Option<PricePoint>> {
-        let prices = self.store.get_all_prices(asset_id).await?;
+        let prices = self.store.all_prices_shared(asset_id).await?;
         Ok(select_latest_price_on_date(&prices, date))
     }
 
@@ -549,7 +549,7 @@ impl MarketDataService {
 
         if let Some(days) = self.store_lookback_days {
             let start = date - Duration::days(days as i64);
-            let rates = self.store.get_all_fx_rates(&base, &quote).await?;
+            let rates = self.store.all_fx_rates_shared(&base, &quote).await?;
             if let Some(rate) = select_latest_fx_rate_in_range(&rates, start, date, cutoff) {
                 return Ok(Some(rate));
             }
@@ -557,11 +557,11 @@ impl MarketDataService {
                 return Ok(None);
             }
 
-            let rates = self.store.get_all_fx_rates(&base, &quote).await?;
+            let rates = self.store.all_fx_rates_shared(&base, &quote).await?;
             return Ok(select_earliest_fx_rate_on_or_after(&rates, date));
         }
 
-        let rates = self.store.get_all_fx_rates(&base, &quote).await?;
+        let rates = self.store.all_fx_rates_shared(&base, &quote).await?;
         if let Some(rate) = select_latest_fx_rate_on_or_before(&rates, date, cutoff) {
             return Ok(Some(rate));
         }
@@ -721,38 +721,48 @@ impl MarketDataService {
 /// it, though, so a date's only reading is often written down at its close or
 /// backfilled days later. When nothing was recorded by the cutoff, the ordinary
 /// unbounded choice is used: an approximate value beats no value at all.
-fn select_with_cutoff<'a, T: Clone>(
-    observations: &'a [T],
+fn newest_price<'a>(
+    prices: impl Iterator<Item = &'a PricePoint>,
     cutoff: Option<DateTime<Utc>>,
-    timestamp: impl Fn(&T) -> DateTime<Utc>,
-    newest: impl Fn(&mut dyn Iterator<Item = &'a T>) -> Option<&'a T>,
-) -> Option<T> {
-    if let Some(cutoff) = cutoff {
-        let mut recorded_by_cutoff = observations
-            .iter()
-            .filter(|observation| timestamp(observation) <= cutoff);
-        if let Some(selected) = newest(&mut recorded_by_cutoff) {
-            return Some(selected.clone());
-        }
-    }
-
-    newest(&mut observations.iter()).cloned()
-}
-
-fn newest_price<'a>(prices: &mut dyn Iterator<Item = &'a PricePoint>) -> Option<&'a PricePoint> {
+) -> Option<&'a PricePoint> {
     prices.max_by(|a, b| {
-        a.as_of_date
-            .cmp(&b.as_of_date)
+        recorded_by(*a, cutoff)
+            .cmp(&recorded_by(*b, cutoff))
+            .then_with(|| a.as_of_date.cmp(&b.as_of_date))
             .then_with(|| a.timestamp.cmp(&b.timestamp))
     })
 }
 
-fn newest_fx_rate<'a>(rates: &mut dyn Iterator<Item = &'a FxRatePoint>) -> Option<&'a FxRatePoint> {
+fn newest_fx_rate<'a>(
+    rates: impl Iterator<Item = &'a FxRatePoint>,
+    cutoff: Option<DateTime<Utc>>,
+) -> Option<&'a FxRatePoint> {
     rates.max_by(|a, b| {
-        a.as_of_date
-            .cmp(&b.as_of_date)
+        recorded_by(*a, cutoff)
+            .cmp(&recorded_by(*b, cutoff))
+            .then_with(|| a.as_of_date.cmp(&b.as_of_date))
             .then_with(|| a.timestamp.cmp(&b.timestamp))
     })
+}
+
+trait Recorded {
+    fn recorded_at(&self) -> DateTime<Utc>;
+}
+
+impl Recorded for PricePoint {
+    fn recorded_at(&self) -> DateTime<Utc> {
+        self.timestamp
+    }
+}
+
+impl Recorded for FxRatePoint {
+    fn recorded_at(&self) -> DateTime<Utc> {
+        self.timestamp
+    }
+}
+
+fn recorded_by<T: Recorded>(observation: &T, cutoff: Option<DateTime<Utc>>) -> bool {
+    cutoff.is_none_or(|cutoff| observation.recorded_at() <= cutoff)
 }
 
 fn select_latest_price_on_or_before(
@@ -760,12 +770,7 @@ fn select_latest_price_on_or_before(
     date: NaiveDate,
     cutoff: Option<DateTime<Utc>>,
 ) -> Option<PricePoint> {
-    let eligible: Vec<PricePoint> = prices
-        .iter()
-        .filter(|p| p.as_of_date <= date)
-        .cloned()
-        .collect();
-    select_with_cutoff(&eligible, cutoff, |p| p.timestamp, newest_price)
+    newest_price(prices.iter().filter(|p| p.as_of_date <= date), cutoff).cloned()
 }
 
 fn select_latest_price_on_date(prices: &[PricePoint], date: NaiveDate) -> Option<PricePoint> {
@@ -782,12 +787,13 @@ fn select_latest_price_in_range(
     end: NaiveDate,
     cutoff: Option<DateTime<Utc>>,
 ) -> Option<PricePoint> {
-    let eligible: Vec<PricePoint> = prices
-        .iter()
-        .filter(|p| p.as_of_date >= start && p.as_of_date <= end)
-        .cloned()
-        .collect();
-    select_with_cutoff(&eligible, cutoff, |p| p.timestamp, newest_price)
+    newest_price(
+        prices
+            .iter()
+            .filter(|p| p.as_of_date >= start && p.as_of_date <= end),
+        cutoff,
+    )
+    .cloned()
 }
 
 fn select_earliest_price_on_or_after(prices: &[PricePoint], date: NaiveDate) -> Option<PricePoint> {
@@ -807,12 +813,13 @@ fn select_latest_fx_rate_on_or_before(
     date: NaiveDate,
     cutoff: Option<DateTime<Utc>>,
 ) -> Option<FxRatePoint> {
-    let eligible: Vec<FxRatePoint> = rates
-        .iter()
-        .filter(|r| r.kind == FxRateKind::Close && r.as_of_date <= date)
-        .cloned()
-        .collect();
-    select_with_cutoff(&eligible, cutoff, |r| r.timestamp, newest_fx_rate)
+    newest_fx_rate(
+        rates
+            .iter()
+            .filter(|r| r.kind == FxRateKind::Close && r.as_of_date <= date),
+        cutoff,
+    )
+    .cloned()
 }
 
 fn select_latest_fx_rate_in_range(
@@ -821,12 +828,13 @@ fn select_latest_fx_rate_in_range(
     end: NaiveDate,
     cutoff: Option<DateTime<Utc>>,
 ) -> Option<FxRatePoint> {
-    let eligible: Vec<FxRatePoint> = rates
-        .iter()
-        .filter(|r| r.kind == FxRateKind::Close && r.as_of_date >= start && r.as_of_date <= end)
-        .cloned()
-        .collect();
-    select_with_cutoff(&eligible, cutoff, |r| r.timestamp, newest_fx_rate)
+    newest_fx_rate(
+        rates.iter().filter(|r| {
+            r.kind == FxRateKind::Close && r.as_of_date >= start && r.as_of_date <= end
+        }),
+        cutoff,
+    )
+    .cloned()
 }
 
 fn select_earliest_fx_rate_on_or_after(

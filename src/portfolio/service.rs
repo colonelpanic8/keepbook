@@ -82,12 +82,32 @@ struct ResolvedValuationScenario {
     output: PortfolioValuationScenario,
 }
 
-/// Context loaded from storage for portfolio calculation.
-struct CalculationContext {
-    account_map: HashMap<Id, Account>,
-    connection_map: HashMap<Id, Connection>,
+/// One point in time's view of a [`ValuationHistory`].
+struct CalculationContext<'a> {
+    account_map: &'a HashMap<Id, Account>,
+    connection_map: &'a HashMap<Id, Connection>,
     filtered_snapshots: Vec<(Id, BalanceSnapshot)>,
     zero_accounts: Vec<Id>,
+}
+
+/// One account's complete balance history, ordered oldest first.
+struct AccountHistory {
+    account_id: Id,
+    backfill: BalanceBackfillPolicy,
+    snapshots: Vec<BalanceSnapshot>,
+}
+
+/// Accounts, connections, and balance history read once and reused across a
+/// series of valuations.
+///
+/// Valuing a history point selects one balance snapshot per account. Loading
+/// that per point re-reads and re-copies every account's whole balance log,
+/// which is most of the work in a long history. Prepared once, each point is a
+/// search over sorted snapshots and a copy of only the ones it selects.
+pub struct ValuationHistory {
+    account_map: HashMap<Id, Account>,
+    connection_map: HashMap<Id, Connection>,
+    accounts: Vec<AccountHistory>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -111,10 +131,19 @@ impl PortfolioService {
     }
 
     pub async fn calculate(&self, query: &PortfolioQuery) -> Result<PortfolioSnapshot> {
-        // Load accounts, connections, and balances
-        let ctx = self
-            .load_calculation_context(query.as_of_date, query.as_of_timestamp, &query.account_ids)
-            .await?;
+        let history = self.load_valuation_history(&query.account_ids).await?;
+        self.calculate_with_history(&history, query).await
+    }
+
+    /// Like [`Self::calculate`] but reuses balance history already read for
+    /// another point in time. `query.account_ids` must match the history's
+    /// scope.
+    pub async fn calculate_with_history(
+        &self,
+        history: &ValuationHistory,
+        query: &PortfolioQuery,
+    ) -> Result<PortfolioSnapshot> {
+        let ctx = Self::calculation_context(history, query.as_of_date, query.as_of_timestamp);
 
         // Aggregate balances by asset
         let by_asset_agg = Self::aggregate_by_asset(&ctx.filtered_snapshots)?;
@@ -146,7 +175,7 @@ impl PortfolioService {
         let (mut asset_summaries, total_value, gains_totals) = self.build_asset_summaries(
             &by_asset_agg,
             &effective_price_cache,
-            &ctx.account_map,
+            ctx.account_map,
             query.include_detail,
             query.currency_decimals,
             query.capital_gains_tax_rate,
@@ -157,8 +186,8 @@ impl PortfolioService {
             &ctx.filtered_snapshots,
             &ctx.zero_accounts,
             &effective_price_cache,
-            &ctx.account_map,
-            &ctx.connection_map,
+            ctx.account_map,
+            ctx.connection_map,
             query.currency_decimals,
         )?;
 
@@ -219,9 +248,8 @@ impl PortfolioService {
     /// machinery as `calculate`. `grouping` and `include_detail` on the query
     /// are ignored.
     pub async fn asset_breakdown(&self, query: &PortfolioQuery) -> Result<Vec<AssetBreakdownRow>> {
-        let ctx = self
-            .load_calculation_context(query.as_of_date, query.as_of_timestamp, &query.account_ids)
-            .await?;
+        let history = self.load_valuation_history(&query.account_ids).await?;
+        let ctx = Self::calculation_context(&history, query.as_of_date, query.as_of_timestamp);
 
         let by_key = Self::aggregate_by_asset_liability(&ctx.filtered_snapshots)?;
         let update_metadata = self.asset_update_metadata(query).await?;
@@ -441,13 +469,9 @@ impl PortfolioService {
         Ok(metadata)
     }
 
-    /// Load accounts, connections, and balances from storage.
-    async fn load_calculation_context(
-        &self,
-        as_of_date: NaiveDate,
-        as_of_timestamp: Option<DateTime<Utc>>,
-        account_ids: &[Id],
-    ) -> Result<CalculationContext> {
+    /// Read accounts, connections, and balance history once, for reuse across
+    /// a series of valuations at different instants.
+    pub async fn load_valuation_history(&self, account_ids: &[Id]) -> Result<ValuationHistory> {
         let accounts = self.storage.list_accounts().await?;
         let connections = self.storage.list_connections().await?;
 
@@ -458,9 +482,8 @@ impl PortfolioService {
             .map(|c| (c.id().clone(), c))
             .collect();
 
-        let mut filtered_snapshots = Vec::new();
-        let mut zero_accounts = Vec::new();
         let scoped_account_ids: HashSet<&Id> = account_ids.iter().collect();
+        let mut histories = Vec::new();
 
         for account in account_map.values() {
             if !scoped_account_ids.is_empty() && !scoped_account_ids.contains(&account.id) {
@@ -476,49 +499,72 @@ impl PortfolioService {
                 continue;
             }
 
-            let snapshots = self.storage.get_balance_snapshots(&account.id).await?;
-            let policy = account_config
-                .as_ref()
-                .and_then(|config| config.balance_backfill)
-                .unwrap_or(BalanceBackfillPolicy::None);
+            let mut snapshots = self.storage.get_balance_snapshots(&account.id).await?;
+            snapshots.sort_by_key(|snapshot| snapshot.timestamp);
 
-            if snapshots.is_empty() {
-                if matches!(policy, BalanceBackfillPolicy::Zero) {
-                    zero_accounts.push(account.id.clone());
+            histories.push(AccountHistory {
+                account_id: account.id.clone(),
+                backfill: account_config
+                    .and_then(|config| config.balance_backfill)
+                    .unwrap_or(BalanceBackfillPolicy::None),
+                snapshots,
+            });
+        }
+
+        histories.sort_by(|a, b| a.account_id.as_str().cmp(b.account_id.as_str()));
+
+        Ok(ValuationHistory {
+            account_map,
+            connection_map,
+            accounts: histories,
+        })
+    }
+
+    /// Select each account's balances for one point in time.
+    fn calculation_context<'a>(
+        history: &'a ValuationHistory,
+        as_of_date: NaiveDate,
+        as_of_timestamp: Option<DateTime<Utc>>,
+    ) -> CalculationContext<'a> {
+        let mut filtered_snapshots = Vec::new();
+        let mut zero_accounts = Vec::new();
+
+        for account in &history.accounts {
+            if account.snapshots.is_empty() {
+                if matches!(account.backfill, BalanceBackfillPolicy::Zero) {
+                    zero_accounts.push(account.account_id.clone());
                 }
                 continue;
             }
 
-            let latest_before = snapshots
-                .iter()
-                .filter(|s| snapshot_at_or_before(s, as_of_date, as_of_timestamp))
-                .max_by_key(|s| s.timestamp)
-                .cloned();
+            // Snapshots are ordered by timestamp and both eligibility rules are
+            // monotone in it, so everything eligible is a prefix.
+            let eligible = account.snapshots.partition_point(|snapshot| {
+                snapshot_at_or_before(snapshot, as_of_date, as_of_timestamp)
+            });
 
-            if let Some(snapshot) = latest_before {
-                filtered_snapshots.push((account.id.clone(), snapshot));
+            if let Some(snapshot) = account.snapshots[..eligible].last() {
+                filtered_snapshots.push((account.account_id.clone(), snapshot.clone()));
                 continue;
             }
 
-            match policy {
+            match account.backfill {
                 BalanceBackfillPolicy::CarryEarliest => {
-                    if let Some(earliest) = snapshots.iter().min_by_key(|s| s.timestamp).cloned() {
-                        filtered_snapshots.push((account.id.clone(), earliest));
+                    if let Some(earliest) = account.snapshots.first() {
+                        filtered_snapshots.push((account.account_id.clone(), earliest.clone()));
                     }
                 }
-                BalanceBackfillPolicy::Zero => {
-                    zero_accounts.push(account.id.clone());
-                }
+                BalanceBackfillPolicy::Zero => zero_accounts.push(account.account_id.clone()),
                 BalanceBackfillPolicy::None => {}
             }
         }
 
-        Ok(CalculationContext {
-            account_map,
-            connection_map,
+        CalculationContext {
+            account_map: &history.account_map,
+            connection_map: &history.connection_map,
             filtered_snapshots,
             zero_accounts,
-        })
+        }
     }
 
     /// Aggregate balances by asset, tracking totals and holdings.

@@ -2,10 +2,12 @@ pub(crate) mod file_io;
 mod json_file;
 pub mod lookup;
 mod memory;
+mod read_through;
 
 pub use json_file::JsonFileStorage;
 pub use lookup::{find_account, find_connection};
 pub use memory::MemoryStorage;
+pub use read_through::ReadThroughStorage;
 
 use crate::credentials::CredentialStore;
 use crate::models::{

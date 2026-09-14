@@ -11,19 +11,19 @@ use crate::config::ResolvedConfig;
 use crate::format::format_base_currency_value;
 use crate::market_data::{
     AssetId, FxRateKind, FxRatePoint, JsonlMarketDataStore, MarketDataService,
-    MarketDataServiceBuilder, MarketDataStore, PricePoint,
+    MarketDataServiceBuilder, MarketDataStore, PricePoint, ReadThroughMarketDataStore,
 };
 use crate::models::{Account, Asset, Id};
 use crate::portfolio::{
     collect_change_points, filter_by_date_range, filter_by_granularity, AccountSummary,
     CoalesceStrategy, CollectOptions, EquityValuationAdjustment, Granularity, Grouping,
-    PortfolioQuery, PortfolioService,
+    PortfolioQuery, PortfolioService, ValuationHistory,
 };
 use crate::staleness::{
     check_balance_staleness, check_price_staleness, log_balance_staleness, log_price_staleness,
     resolve_balance_staleness,
 };
-use crate::storage::{find_account, find_connection, Storage};
+use crate::storage::{find_account, find_connection, ReadThroughStorage, Storage};
 
 #[cfg(feature = "sync")]
 use super::sync::build_sync_service;
@@ -587,6 +587,7 @@ struct StackedHistoryPointInput<'a> {
 
 async fn build_history_point_for_date(
     service: &PortfolioService,
+    history: &ValuationHistory,
     config: &ResolvedConfig,
     input: HistoryPointInput<'_>,
     carry_forward_unit_values: &mut HashMap<String, Decimal>,
@@ -603,7 +604,7 @@ async fn build_history_point_for_date(
         account_ids: input.account_ids.to_vec(),
     };
 
-    let snapshot = service.calculate(&query).await?;
+    let snapshot = service.calculate_with_history(history, &query).await?;
     let history_point_value = history_total_value_from_snapshot(
         &snapshot,
         config,
@@ -631,6 +632,7 @@ async fn build_history_point_for_date(
 
 async fn build_stacked_history_point_for_date(
     service: &PortfolioService,
+    history: &ValuationHistory,
     config: &ResolvedConfig,
     input: StackedHistoryPointInput<'_>,
     carry_forward_unit_values: &mut HashMap<String, Decimal>,
@@ -649,7 +651,7 @@ async fn build_stacked_history_point_for_date(
         account_ids: Vec::new(),
     };
 
-    let snapshot = service.calculate(&query).await?;
+    let snapshot = service.calculate_with_history(history, &query).await?;
     let history_point_value = history_total_value_from_snapshot(
         &snapshot,
         config,
@@ -2305,8 +2307,13 @@ pub async fn portfolio_stacked_history(
         ),
     };
 
-    let store: Arc<dyn MarketDataStore> = Arc::new(JsonlMarketDataStore::new(&config.data_dir));
-    let storage_arc: Arc<dyn Storage> = storage;
+    // One history request values many points from the same accounts, balances,
+    // and price histories. These read each of them once for the request and are
+    // dropped with it.
+    let store: Arc<dyn MarketDataStore> = Arc::new(ReadThroughMarketDataStore::new(Arc::new(
+        JsonlMarketDataStore::new(&config.data_dir),
+    )));
+    let storage_arc: Arc<dyn Storage> = Arc::new(ReadThroughStorage::new(storage));
     let options = CollectOptions {
         account_ids: Vec::new(),
         include_prices,
@@ -2340,6 +2347,7 @@ pub async fn portfolio_stacked_history(
     ));
     let service = PortfolioService::new(storage_arc.clone(), market_data);
     let account_ids = Vec::new();
+    let valuation_history = service.load_valuation_history(&account_ids).await?;
     let cost_basis_backfill =
         collect_history_cost_basis_backfill(storage_arc.as_ref(), &account_ids).await?;
     let (capital_gains_tax_rate, include_latent_tax_adjustment) =
@@ -2353,6 +2361,7 @@ pub async fn portfolio_stacked_history(
     for change_point in &filtered {
         let point = build_stacked_history_point_for_date(
             &service,
+            &valuation_history,
             config,
             StackedHistoryPointInput {
                 target_currency: &target_currency,
@@ -2444,9 +2453,12 @@ async fn portfolio_history_scoped(
         ),
     };
 
-    // Setup storage and market data store
-    let store: Arc<dyn MarketDataStore> = Arc::new(JsonlMarketDataStore::new(&config.data_dir));
-    let storage_arc: Arc<dyn Storage> = storage;
+    // Setup storage and market data store. These read each account, balance
+    // log, and price history once for the whole request and are dropped with it.
+    let store: Arc<dyn MarketDataStore> = Arc::new(ReadThroughMarketDataStore::new(Arc::new(
+        JsonlMarketDataStore::new(&config.data_dir),
+    )));
+    let storage_arc: Arc<dyn Storage> = Arc::new(ReadThroughStorage::new(storage));
 
     // Collect change points
     let options = CollectOptions {
@@ -2491,6 +2503,7 @@ async fn portfolio_history_scoped(
 
     // Create portfolio service
     let service = PortfolioService::new(storage_arc, market_data);
+    let valuation_history = service.load_valuation_history(&account_ids).await?;
     let capital_gains_tax_rate = match value_mode {
         HistoryValueMode::LatentCapitalGainsTax => {
             let rate = config
@@ -2540,6 +2553,7 @@ async fn portfolio_history_scoped(
 
         let (history_point, current_total_value) = build_history_point_for_date(
             &service,
+            &valuation_history,
             config,
             HistoryPointInput {
                 target_currency: &target_currency,
@@ -2583,8 +2597,10 @@ pub async fn portfolio_recent_history(
     include_prices: bool,
     anchor_date: NaiveDate,
 ) -> Result<Vec<HistoryPoint>> {
-    let store: Arc<dyn MarketDataStore> = Arc::new(JsonlMarketDataStore::new(&config.data_dir));
-    let storage_arc: Arc<dyn Storage> = storage;
+    let store: Arc<dyn MarketDataStore> = Arc::new(ReadThroughMarketDataStore::new(Arc::new(
+        JsonlMarketDataStore::new(&config.data_dir),
+    )));
+    let storage_arc: Arc<dyn Storage> = Arc::new(ReadThroughStorage::new(storage));
 
     let options = CollectOptions {
         account_ids: Vec::new(),
@@ -2621,6 +2637,7 @@ pub async fn portfolio_recent_history(
     let cost_basis_backfill =
         collect_history_cost_basis_backfill(storage_arc.as_ref(), &account_ids).await?;
     let service = PortfolioService::new(storage_arc, market_data);
+    let valuation_history = service.load_valuation_history(&account_ids).await?;
     let target_currency = currency.unwrap_or_else(|| config.reporting_currency.clone());
     let (capital_gains_tax_rate, include_latent_tax_adjustment) =
         resolve_capital_gains_tax_rate(config, None)?;
@@ -2637,6 +2654,7 @@ pub async fn portfolio_recent_history(
             .to_rfc3339();
         let (history_point, current_total_value) = build_history_point_for_date(
             &service,
+            &valuation_history,
             config,
             HistoryPointInput {
                 target_currency: &target_currency,

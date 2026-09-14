@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use anyhow::Result;
 use chrono::NaiveDate;
@@ -17,6 +18,15 @@ pub trait MarketDataStore: Send + Sync {
     /// Get all prices for an asset across all time.
     async fn get_all_prices(&self, asset_id: &AssetId) -> Result<Vec<PricePoint>>;
 
+    /// A shared view of the same history, for callers that only read it.
+    ///
+    /// Selecting one price copies the whole history otherwise, which a series
+    /// of valuations repeats per point. Stores that already hold the history
+    /// can hand out a share of it instead.
+    async fn all_prices_shared(&self, asset_id: &AssetId) -> Result<Arc<Vec<PricePoint>>> {
+        Ok(Arc::new(self.get_all_prices(asset_id).await?))
+    }
+
     async fn put_prices(&self, prices: &[PricePoint]) -> Result<()>;
 
     async fn get_fx_rate(
@@ -29,6 +39,11 @@ pub trait MarketDataStore: Send + Sync {
 
     /// Get all FX rates for a currency pair across all time.
     async fn get_all_fx_rates(&self, base: &str, quote: &str) -> Result<Vec<FxRatePoint>>;
+
+    /// A shared view of the same history. See [`Self::all_prices_shared`].
+    async fn all_fx_rates_shared(&self, base: &str, quote: &str) -> Result<Arc<Vec<FxRatePoint>>> {
+        Ok(Arc::new(self.get_all_fx_rates(base, quote).await?))
+    }
 
     async fn put_fx_rates(&self, rates: &[FxRatePoint]) -> Result<()>;
 
