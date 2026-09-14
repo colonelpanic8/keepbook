@@ -178,12 +178,11 @@ pub(super) fn StackedHistoryGraphPanel(
     let data = loaded_history
         .map(stacked_history_data_points)
         .unwrap_or_default();
-    let bounds = stacked_date_bounds(&data);
-    let (start_date, end_date) =
-        visible_stacked_date_range(&data, selected_range, &start_text, &end_text);
-    let visible_data = filter_stacked_data_by_date_range(&data, &start_date, &end_date);
-    let resolved_sampling = resolve_stacked_sampling_granularity(selected_sampling, &visible_data);
-    let sampled_data = sample_stacked_data_by_granularity(&visible_data, resolved_sampling);
+    let bounds = date_bounds(&data);
+    let (start_date, end_date) = visible_date_range(&data, selected_range, &start_text, &end_text);
+    let visible_data = filter_data_by_date_range(&data, &start_date, &end_date);
+    let resolved_sampling = resolve_sampling_granularity(selected_sampling, &visible_data);
+    let sampled_data = sample_data_by_granularity(&visible_data, resolved_sampling);
     let sampled_point_count = sampled_data.len();
     let sampling_label = resolved_sampling.label();
     let current_total = sampled_data

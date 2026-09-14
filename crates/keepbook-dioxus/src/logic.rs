@@ -252,58 +252,39 @@ pub(crate) fn coalesce_minor_stacked_series(
     (coalesced_data, major_series)
 }
 
-pub(crate) fn date_bounds(points: &[NetWorthDataPoint]) -> Option<(String, String)> {
-    Some((points.first()?.date.clone(), points.last()?.date.clone()))
+/// A point on a dated series. The range, sampling, and endpoint helpers below
+/// only ever need the date, so they work over this rather than being written
+/// once per concrete point type.
+pub(crate) trait DatedSeriesPoint: Clone {
+    fn date(&self) -> &str;
 }
 
-pub(crate) fn stacked_date_bounds(points: &[StackedHistoryDataPoint]) -> Option<(String, String)> {
-    Some((points.first()?.date.clone(), points.last()?.date.clone()))
+impl DatedSeriesPoint for NetWorthDataPoint {
+    fn date(&self) -> &str {
+        &self.date
+    }
 }
 
-pub(crate) fn visible_date_range(
-    points: &[NetWorthDataPoint],
+impl DatedSeriesPoint for StackedHistoryDataPoint {
+    fn date(&self) -> &str {
+        &self.date
+    }
+}
+
+pub(crate) fn date_bounds<P: DatedSeriesPoint>(points: &[P]) -> Option<(String, String)> {
+    Some((
+        points.first()?.date().to_string(),
+        points.last()?.date().to_string(),
+    ))
+}
+
+pub(crate) fn visible_date_range<P: DatedSeriesPoint>(
+    points: &[P],
     preset: RangePreset,
     start_override: &str,
     end_override: &str,
 ) -> (String, String) {
     let Some((min_date, max_date)) = date_bounds(points) else {
-        return (String::new(), String::new());
-    };
-
-    if preset == RangePreset::Custom {
-        return (
-            if start_override.is_empty() {
-                min_date.clone()
-            } else {
-                start_override.to_string()
-            },
-            if end_override.is_empty() {
-                max_date.clone()
-            } else {
-                end_override.to_string()
-            },
-        );
-    }
-
-    let end = max_date.clone();
-    let start = match preset {
-        RangePreset::OneMonth => offset_months(&end, 1).max(min_date.clone()),
-        RangePreset::NinetyDays => offset_days(&end, 90).max(min_date.clone()),
-        RangePreset::SixMonths => offset_months(&end, 6).max(min_date.clone()),
-        RangePreset::OneYear => offset_years(&end, 1).max(min_date.clone()),
-        RangePreset::TwoYears => offset_years(&end, 2).max(min_date.clone()),
-        RangePreset::Max | RangePreset::Custom => min_date.clone(),
-    };
-    (start, end)
-}
-
-pub(crate) fn visible_stacked_date_range(
-    points: &[StackedHistoryDataPoint],
-    preset: RangePreset,
-    start_override: &str,
-    end_override: &str,
-) -> (String, String) {
-    let Some((min_date, max_date)) = stacked_date_bounds(points) else {
         return (String::new(), String::new());
     };
 
@@ -655,41 +636,25 @@ pub(crate) fn offset_days(date: &str, days: i64) -> String {
     civil_from_days(days_from_civil(year, month, day) - days)
 }
 
-pub(crate) fn filter_data_by_date_range(
-    points: &[NetWorthDataPoint],
+pub(crate) fn filter_data_by_date_range<P: DatedSeriesPoint>(
+    points: &[P],
     start_date: &str,
     end_date: &str,
-) -> Vec<NetWorthDataPoint> {
+) -> Vec<P> {
     if start_date.is_empty() || end_date.is_empty() || start_date > end_date {
         return Vec::new();
     }
 
     points
         .iter()
-        .filter(|point| point.date.as_str() >= start_date && point.date.as_str() <= end_date)
+        .filter(|point| point.date() >= start_date && point.date() <= end_date)
         .cloned()
         .collect()
 }
 
-pub(crate) fn filter_stacked_data_by_date_range(
-    points: &[StackedHistoryDataPoint],
-    start_date: &str,
-    end_date: &str,
-) -> Vec<StackedHistoryDataPoint> {
-    if start_date.is_empty() || end_date.is_empty() || start_date > end_date {
-        return Vec::new();
-    }
-
-    points
-        .iter()
-        .filter(|point| point.date.as_str() >= start_date && point.date.as_str() <= end_date)
-        .cloned()
-        .collect()
-}
-
-pub(crate) fn resolve_sampling_granularity(
+pub(crate) fn resolve_sampling_granularity<P: DatedSeriesPoint>(
     selected: SamplingGranularity,
-    points: &[NetWorthDataPoint],
+    points: &[P],
 ) -> SamplingGranularity {
     if selected != SamplingGranularity::Auto {
         return selected;
@@ -702,7 +667,7 @@ pub(crate) fn resolve_sampling_granularity(
         return SamplingGranularity::Daily;
     };
 
-    match days_between(&first.date, &last.date) {
+    match days_between(first.date(), last.date()) {
         Some(days) if days < 93 => SamplingGranularity::Daily,
         Some(days) if days > 365 * 3 => SamplingGranularity::Monthly,
         Some(_) => SamplingGranularity::Weekly,
@@ -710,33 +675,10 @@ pub(crate) fn resolve_sampling_granularity(
     }
 }
 
-pub(crate) fn resolve_stacked_sampling_granularity(
-    selected: SamplingGranularity,
-    points: &[StackedHistoryDataPoint],
-) -> SamplingGranularity {
-    if selected != SamplingGranularity::Auto {
-        return selected;
-    }
-
-    let Some(first) = points.first() else {
-        return SamplingGranularity::Daily;
-    };
-    let Some(last) = points.last() else {
-        return SamplingGranularity::Daily;
-    };
-
-    match days_between(&first.date, &last.date) {
-        Some(days) if days < 93 => SamplingGranularity::Daily,
-        Some(days) if days > 365 * 3 => SamplingGranularity::Monthly,
-        Some(_) => SamplingGranularity::Weekly,
-        _ => SamplingGranularity::Daily,
-    }
-}
-
-pub(crate) fn sample_data_by_granularity(
-    points: &[NetWorthDataPoint],
+pub(crate) fn sample_data_by_granularity<P: DatedSeriesPoint>(
+    points: &[P],
     granularity: SamplingGranularity,
-) -> Vec<NetWorthDataPoint> {
+) -> Vec<P> {
     if matches!(
         granularity,
         SamplingGranularity::Auto | SamplingGranularity::Daily
@@ -747,10 +689,10 @@ pub(crate) fn sample_data_by_granularity(
 
     let mut sampled = Vec::new();
     let mut current_bucket: Option<String> = None;
-    let mut current_point: Option<NetWorthDataPoint> = None;
+    let mut current_point: Option<P> = None;
 
     for point in points {
-        let bucket = sampling_bucket(&point.date, granularity);
+        let bucket = sampling_bucket(point.date(), granularity);
         if current_bucket.as_deref() != Some(bucket.as_str()) {
             if let Some(point) = current_point.take() {
                 sampled.push(point);
@@ -767,81 +709,31 @@ pub(crate) fn sample_data_by_granularity(
     include_range_endpoints(points, sampled)
 }
 
-pub(crate) fn sample_stacked_data_by_granularity(
-    points: &[StackedHistoryDataPoint],
-    granularity: SamplingGranularity,
-) -> Vec<StackedHistoryDataPoint> {
-    if matches!(
-        granularity,
-        SamplingGranularity::Auto | SamplingGranularity::Daily
-    ) || points.len() <= 2
+pub(crate) fn include_range_endpoints<P: DatedSeriesPoint>(
+    points: &[P],
+    sampled: Vec<P>,
+) -> Vec<P> {
+    let Some(first) = points.first() else {
+        return sampled;
+    };
+    let Some(last) = points.last() else {
+        return sampled;
+    };
+
+    let mut with_endpoints = sampled;
+    if !with_endpoints
+        .iter()
+        .any(|point| point.date() == first.date())
     {
-        return points.to_vec();
-    }
-
-    let mut sampled = Vec::new();
-    let mut current_bucket: Option<String> = None;
-    let mut current_point: Option<StackedHistoryDataPoint> = None;
-
-    for point in points {
-        let bucket = sampling_bucket(&point.date, granularity);
-        if current_bucket.as_deref() != Some(bucket.as_str()) {
-            if let Some(point) = current_point.take() {
-                sampled.push(point);
-            }
-            current_bucket = Some(bucket);
-        }
-        current_point = Some(point.clone());
-    }
-
-    if let Some(point) = current_point {
-        sampled.push(point);
-    }
-
-    include_stacked_range_endpoints(points, sampled)
-}
-
-pub(crate) fn include_stacked_range_endpoints(
-    points: &[StackedHistoryDataPoint],
-    sampled: Vec<StackedHistoryDataPoint>,
-) -> Vec<StackedHistoryDataPoint> {
-    let Some(first) = points.first() else {
-        return sampled;
-    };
-    let Some(last) = points.last() else {
-        return sampled;
-    };
-
-    let mut with_endpoints = sampled;
-    if !with_endpoints.iter().any(|point| point.date == first.date) {
         with_endpoints.push(first.clone());
     }
-    if !with_endpoints.iter().any(|point| point.date == last.date) {
+    if !with_endpoints
+        .iter()
+        .any(|point| point.date() == last.date())
+    {
         with_endpoints.push(last.clone());
     }
-    with_endpoints.sort_by(|a, b| a.date.cmp(&b.date));
-    with_endpoints
-}
-
-pub(crate) fn include_range_endpoints(
-    points: &[NetWorthDataPoint],
-    sampled: Vec<NetWorthDataPoint>,
-) -> Vec<NetWorthDataPoint> {
-    let Some(first) = points.first() else {
-        return sampled;
-    };
-    let Some(last) = points.last() else {
-        return sampled;
-    };
-
-    let mut with_endpoints = sampled;
-    if !with_endpoints.iter().any(|point| point.date == first.date) {
-        with_endpoints.push(first.clone());
-    }
-    if !with_endpoints.iter().any(|point| point.date == last.date) {
-        with_endpoints.push(last.clone());
-    }
-    with_endpoints.sort_by(|a, b| a.date.cmp(&b.date));
+    with_endpoints.sort_by(|a, b| a.date().cmp(b.date()));
     with_endpoints
 }
 
