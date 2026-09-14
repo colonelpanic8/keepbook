@@ -23,8 +23,10 @@ use tokio::sync::mpsc;
 use tracing::{info, warn};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
+mod parse;
 mod tray;
 
+use parse::{parse_price_counts, parse_symlink_counts, parse_sync_counts};
 use tray::{apply_tray_state, DaemonCommand, DaemonStatus, KeepbookTray, KeepbookTrayState};
 
 const CLI_VERSION: &str = concat!(
@@ -120,91 +122,6 @@ struct Cli {
     /// Disable periodic symlink rebuild.
     #[arg(long)]
     no_sync_symlinks: bool,
-}
-#[derive(Debug, Default)]
-struct SyncCounts {
-    total: usize,
-    synced: usize,
-    skipped_manual: usize,
-    skipped_not_stale: usize,
-    failed: usize,
-}
-
-fn parse_sync_counts(value: &serde_json::Value) -> SyncCounts {
-    let mut counts = SyncCounts {
-        total: value
-            .get("total")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(0) as usize,
-        ..Default::default()
-    };
-
-    let Some(results) = value.get("results").and_then(serde_json::Value::as_array) else {
-        return counts;
-    };
-
-    for result in results {
-        let success = result
-            .get("success")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false);
-
-        if !success {
-            counts.failed += 1;
-            continue;
-        }
-
-        let skipped = result
-            .get("skipped")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false);
-
-        if !skipped {
-            counts.synced += 1;
-            continue;
-        }
-
-        match result
-            .get("reason")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("")
-        {
-            "manual" => counts.skipped_manual += 1,
-            "not stale" => counts.skipped_not_stale += 1,
-            _ => counts.skipped_not_stale += 1,
-        }
-    }
-
-    counts
-}
-
-fn parse_price_counts(value: &serde_json::Value) -> (usize, usize, usize) {
-    let result = value.get("result").cloned().unwrap_or_default();
-    let fetched = result
-        .get("fetched")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0) as usize;
-    let skipped = result
-        .get("skipped")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0) as usize;
-    let failed = result
-        .get("failed_count")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0) as usize;
-    (fetched, skipped, failed)
-}
-
-fn parse_symlink_counts(value: &serde_json::Value) -> (usize, usize) {
-    let connection_symlinks = value
-        .get("connection_symlinks_created")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0) as usize;
-    let account_symlinks = value
-        .get("account_symlinks_created")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0) as usize;
-    (connection_symlinks, account_symlinks)
 }
 
 fn compute_next_delay(interval: Duration, jitter: Duration) -> Duration {
