@@ -144,6 +144,12 @@ pub fn default_portfolio_include_prices() -> bool {
     crate::config::default_history_include_prices()
 }
 
+/// True for accounts the portfolio contributes rather than storage, such as
+/// the latent capital gains tax account.
+pub fn is_virtual_account_id(account_id: &str) -> bool {
+    account_id.starts_with("virtual:")
+}
+
 fn is_latent_capital_gains_tax_account(config: &ResolvedConfig, id_or_name: &str) -> bool {
     id_or_name == LATENT_CAPITAL_GAINS_TAX_ACCOUNT_ID
         || id_or_name.eq_ignore_ascii_case(&config.portfolio.latent_capital_gains_tax.account_name)

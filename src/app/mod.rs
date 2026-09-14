@@ -24,7 +24,8 @@ pub use config::config_output;
 #[cfg(feature = "sync")]
 pub use import::import_schwab_transactions;
 pub use list::{
-    list_accounts, list_all, list_balances, list_connections, list_price_sources, list_transactions,
+    account_totals, list_accounts, list_all, list_balances, list_connections, list_price_sources,
+    list_transactions,
 };
 pub use mutations::{
     add_account, add_account_with, add_connection, add_connection_with,
@@ -37,11 +38,11 @@ pub use mutations::{
 pub use portfolio::{
     default_portfolio_change_points_granularity, default_portfolio_history_granularity,
     default_portfolio_include_prices, fetch_historical_prices, fill_prices_at_date,
-    latent_capital_gains_tax_history, portfolio_assets, portfolio_change_points, portfolio_history,
-    portfolio_history_for_accounts, portfolio_recent_history, portfolio_snapshot,
-    portfolio_stacked_history, portfolio_tax_impact, resolve_portfolio_history_selection,
-    PortfolioHistorySelection, PortfolioSnapshotRequest, PortfolioTaxImpactRequest,
-    PriceHistoryRequest, DEFAULT_PORTFOLIO_CHANGE_POINTS_GRANULARITY,
+    is_virtual_account_id, latent_capital_gains_tax_history, portfolio_assets,
+    portfolio_change_points, portfolio_history, portfolio_history_for_accounts,
+    portfolio_recent_history, portfolio_snapshot, portfolio_stacked_history, portfolio_tax_impact,
+    resolve_portfolio_history_selection, PortfolioHistorySelection, PortfolioSnapshotRequest,
+    PortfolioTaxImpactRequest, PriceHistoryRequest, DEFAULT_PORTFOLIO_CHANGE_POINTS_GRANULARITY,
     DEFAULT_PORTFOLIO_HISTORY_GRANULARITY, DEFAULT_PORTFOLIO_INCLUDE_PRICES,
 };
 pub use preflight::{run_preflight, PreflightOptions};
@@ -64,11 +65,11 @@ pub use transaction_rules::{
     ApplyTransactionRulesOptions, TransactionRule, TransactionRuleInput, TransactionRuleMatcher,
 };
 pub use types::{
-    AccountOutput, AllOutput, AssetBreakdownEntry, AssetBreakdownHolding, AssetBreakdownOutput,
-    AssetChange, AssetChanges, AssetInfoOutput, BalanceOutput, ChangePointsOutput,
-    ConnectionOutput, HistoryOutput, HistoryPoint, HistorySummary, PriceHistoryFailure,
-    PriceHistoryOutput, PriceHistoryScopeOutput, PriceHistoryStats, PriceSourceOutput,
-    ProposedTransactionEditOutput, RecurringTransactionAmountOutput,
+    AccountOutput, AccountTotalsOutput, AllOutput, AssetBreakdownEntry, AssetBreakdownHolding,
+    AssetBreakdownOutput, AssetChange, AssetChanges, AssetInfoOutput, BalanceOutput,
+    ChangePointsOutput, ConnectionOutput, HistoryOutput, HistoryPoint, HistorySummary,
+    PriceHistoryFailure, PriceHistoryOutput, PriceHistoryScopeOutput, PriceHistoryStats,
+    PriceSourceOutput, ProposedTransactionEditOutput, RecurringTransactionAmountOutput,
     RecurringTransactionOccurrenceOutput, RecurringTransactionOutput,
     RecurringTransactionReviewOccurrenceOutput, RecurringTransactionReviewOutput,
     RecurringTransactionsOptions, ReviewedRecurringTransactionOutput, SpendingBreakdownEntryOutput,

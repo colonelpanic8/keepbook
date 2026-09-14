@@ -438,6 +438,7 @@ fn Dashboard(
                             defaults: overview.history_defaults.clone(),
                             filter_overrides,
                             onfilterchange,
+                            account_totals: overview.account_totals.clone(),
                             connection_count: overview.connections.len(),
                             onrefresh: move |_| onrefresh.call(()),
                         }

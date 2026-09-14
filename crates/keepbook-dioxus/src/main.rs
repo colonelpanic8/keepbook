@@ -155,8 +155,18 @@ struct Overview {
     filtering: FilteringSettings,
     connections: Vec<Connection>,
     accounts: Vec<Account>,
+    #[serde(default)]
+    account_totals: AccountTotals,
     balances: Vec<Balance>,
     snapshot: PortfolioSnapshot,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+struct AccountTotals {
+    account_count: usize,
+    active_account_count: usize,
+    excluded_account_count: usize,
+    virtual_account_count: usize,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
