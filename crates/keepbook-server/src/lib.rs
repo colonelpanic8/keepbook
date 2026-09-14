@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::{Component, Path, PathBuf};
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -21,7 +20,7 @@ use keepbook::app::tray::{
     build_portfolio_breakdown_lines, format_history_change_for_tray, format_spending_window_label,
     format_tray_currency, normalize_spending_windows_days,
 };
-use keepbook::config::{default_config_path, ResolvedConfig};
+use keepbook::config::ResolvedConfig;
 use keepbook::credentials::CredentialStore;
 use keepbook::format::currency_symbol;
 use keepbook::models::{
@@ -32,7 +31,7 @@ use keepbook::repositories::{self, RepositoryDeclaration, RepositoryEntry, Repos
 use keepbook::storage::{JsonFileStorage, Storage};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
-use toml_edit::{value, DocumentMut, Item, Table};
+use toml_edit::{value, Item, Table};
 #[cfg(feature = "http")]
 use tower_http::cors::CorsLayer;
 #[cfg(feature = "http")]
@@ -40,6 +39,9 @@ use tower_http::trace::TraceLayer;
 
 mod ai_rules;
 mod dto;
+mod settings;
+
+use crate::settings::{load_api_config, load_config_doc, non_empty, write_application_settings};
 
 const DEFAULT_SSH_IDENTITY_FILES: &[&str] = &[
     "id_ed25519",
@@ -66,6 +68,10 @@ pub use dto::{
 };
 pub use keepbook::app::ReviewedRecurringTransactionOutput;
 pub use keepbook::config::WindowDecorationsConfig;
+pub use settings::{
+    default_listen_addr, default_server_config_path, desktop_start_minimized_to_tray,
+    desktop_window_decorations,
+};
 
 #[derive(Clone)]
 pub struct ApiState {
@@ -1732,10 +1738,6 @@ async fn suggest_ai_rules(
     Ok(Json(state.suggest_ai_rules(input).await?))
 }
 
-fn load_api_config(config_path: &Path) -> Result<ResolvedConfig> {
-    ResolvedConfig::load_or_default(config_path)
-}
-
 pub fn default_app_config_path() -> PathBuf {
     repositories::default_app_config_path()
 }
@@ -1793,18 +1795,6 @@ fn repository_registry_output(registry: &RepositoryRegistry) -> Result<Repositor
         active_repository,
         repositories,
     })
-}
-
-fn load_config_doc(config_path: &Path) -> Result<DocumentMut> {
-    if config_path.exists() {
-        let content = std::fs::read_to_string(config_path)
-            .with_context(|| format!("failed to read {}", config_path.display()))?;
-        content
-            .parse::<DocumentMut>()
-            .with_context(|| format!("failed to parse {}", config_path.display()))
-    } else {
-        Ok(DocumentMut::new())
-    }
 }
 
 fn load_git_remote_settings(config_path: &Path) -> Result<GitRemoteSettings> {
@@ -1961,35 +1951,6 @@ fn write_device_ssh_key_path(device_config_path: &Path, ssh_key_path: Option<&st
     std::fs::write(device_config_path, doc.to_string())
         .with_context(|| format!("failed to write {}", device_config_path.display()))?;
     Ok(())
-}
-
-fn write_application_settings(config_path: &Path, input: &ApplicationSettingsInput) -> Result<()> {
-    let window_decorations = WindowDecorationsConfig::from_str(&input.window_decorations)?;
-    let mut doc = load_config_doc(config_path)?;
-    if let Some(parent) = config_path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
-    if doc
-        .get("tray")
-        .is_none_or(|item| item.as_table_like().is_none())
-    {
-        doc.insert("tray", Item::Table(Table::new()));
-    }
-    doc["tray"]["start_minimized"] = value(input.start_minimized_to_tray);
-    doc["tray"]["window_decorations"] = value(window_decorations.as_str());
-
-    std::fs::write(config_path, doc.to_string())
-        .with_context(|| format!("failed to write {}", config_path.display()))?;
-    Ok(())
-}
-
-fn non_empty(value: &str, default: &str) -> String {
-    if value.is_empty() {
-        default.to_string()
-    } else {
-        value.to_string()
-    }
 }
 
 fn resolve_input_data_dir(config_path: &Path, data_dir: &str) -> PathBuf {
@@ -2512,41 +2473,6 @@ async fn remove_repository(
     AxumPath(id): AxumPath<String>,
 ) -> Result<Json<RepositoryRegistryOutput>, ApiError> {
     Ok(Json(state.remove_repository(&id).await?))
-}
-
-pub fn default_listen_addr() -> SocketAddr {
-    SocketAddr::from(([127, 0, 0, 1], 8799))
-}
-
-pub fn default_server_config_path() -> PathBuf {
-    default_config_path()
-}
-
-pub fn desktop_start_minimized_to_tray(config_path: impl AsRef<Path>) -> Result<bool> {
-    if let Some(value) = std::env::var_os("KEEPBOOK_START_MINIMIZED_TO_TRAY") {
-        return parse_bool_setting(&value.to_string_lossy()).with_context(|| {
-            "invalid KEEPBOOK_START_MINIMIZED_TO_TRAY value; use true/false or 1/0"
-        });
-    }
-    Ok(ResolvedConfig::load_or_default(config_path.as_ref())?
-        .tray
-        .start_minimized)
-}
-
-pub fn desktop_window_decorations(
-    config_path: impl AsRef<Path>,
-) -> Result<WindowDecorationsConfig> {
-    Ok(ResolvedConfig::load_or_default(config_path.as_ref())?
-        .tray
-        .window_decorations)
-}
-
-fn parse_bool_setting(value: &str) -> Result<bool> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "1" | "true" | "yes" | "on" => Ok(true),
-        "0" | "false" | "no" | "off" => Ok(false),
-        _ => anyhow::bail!("expected a boolean value, got {value:?}"),
-    }
 }
 
 #[cfg(test)]
