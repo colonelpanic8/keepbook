@@ -9,8 +9,11 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Local, NaiveDate};
 use clap::Parser;
 use keepbook::app;
+use keepbook::app::tray::{
+    build_portfolio_breakdown_lines, format_history_change_for_tray, format_spending_window_label,
+    format_tray_currency, normalize_spending_windows_days,
+};
 use keepbook::config::{default_config_path, ResolvedConfig};
-use keepbook::format::{currency_symbol, format_base_currency_display};
 use keepbook::storage::{JsonFileStorage, Storage};
 use keepbook::sync::TransactionSyncMode;
 use ksni::menu::*;
@@ -18,8 +21,6 @@ use ksni::MenuItem;
 use ksni::TrayMethods;
 use notify::{Config as NotifyConfig, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use rand::Rng;
-use rust_decimal::Decimal;
-use std::str::FromStr;
 use tokio::sync::mpsc::{self, UnboundedSender};
 use tracing::{info, warn};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
@@ -94,21 +95,6 @@ fn parse_nonzero_duration_arg(s: &str) -> Result<Duration, String> {
         return Err("duration must be greater than 0s".to_string());
     }
     Ok(duration)
-}
-
-fn normalize_spending_windows_days(windows: &[u32]) -> Vec<u32> {
-    let mut normalized: Vec<u32> = windows.iter().copied().filter(|days| *days > 0).collect();
-    normalized.sort_unstable();
-    normalized.dedup();
-    normalized
-}
-
-fn format_spending_window_label(days: u32) -> String {
-    match days {
-        365 => "year".to_string(),
-        _ if days.is_multiple_of(365) => format!("{} years", days / 365),
-        _ => format!("{days}d"),
-    }
 }
 
 fn should_refresh_for_fs_event_kind(kind: &EventKind) -> bool {
@@ -645,79 +631,6 @@ fn local_now_plus(duration: Duration) -> DateTime<Local> {
     }
 }
 
-fn format_tray_currency(
-    value: &str,
-    currency: &str,
-    display: &keepbook::config::DisplayConfig,
-) -> String {
-    // The tray is a UI surface: default to sane currency rounding even when the
-    // global config doesn't set `display.currency_decimals`.
-    let dp = display.currency_decimals.or(Some(2));
-    let symbol = display
-        .currency_symbol
-        .as_deref()
-        .or_else(|| currency_symbol(currency));
-    match Decimal::from_str(value) {
-        Ok(d) => {
-            let formatted = format_base_currency_display(
-                d,
-                dp,
-                display.currency_grouping,
-                symbol,
-                display.currency_fixed_decimals,
-            );
-            if symbol.is_some() {
-                formatted
-            } else {
-                format!("{formatted} {currency}")
-            }
-        }
-        Err(_) => value.to_string(),
-    }
-}
-
-fn format_history_change_for_tray(percentage_change: Option<&str>) -> String {
-    match percentage_change {
-        Some("N/A") | None => "N/A".to_string(),
-        Some(value) if value.starts_with('-') => format!("{value}%"),
-        Some(value) => format!("+{value}%"),
-    }
-}
-
-fn build_portfolio_breakdown_lines(
-    snapshot: &keepbook::portfolio::PortfolioSnapshot,
-    config: &ResolvedConfig,
-) -> Vec<String> {
-    let mut lines = vec![format!(
-        "Total: {}",
-        format_tray_currency(&snapshot.total_value, &snapshot.currency, &config.display)
-    )];
-
-    let Some(accounts) = snapshot.by_account.as_ref() else {
-        lines.push("No account breakdown available".to_string());
-        return lines;
-    };
-
-    if accounts.is_empty() {
-        lines.push("No accounts with balances".to_string());
-        return lines;
-    }
-
-    lines.extend(accounts.iter().map(|account| {
-        let value = account
-            .value_in_base
-            .as_deref()
-            .map(|value| format_tray_currency(value, &snapshot.currency, &config.display))
-            .unwrap_or_else(|| "unpriced".to_string());
-        format!(
-            "{} / {}: {}",
-            account.connection_name, account.account_name, value
-        )
-    }));
-
-    lines
-}
-
 fn spawn_detached(program: &str, args: &[&str]) -> Result<()> {
     Command::new(program)
         .args(args)
@@ -1056,7 +969,7 @@ impl Daemon {
         {
             Ok(snapshot) => {
                 state.portfolio_breakdown_lines =
-                    build_portfolio_breakdown_lines(&snapshot, &self.config);
+                    build_portfolio_breakdown_lines(&snapshot, &self.config.display);
             }
             Err(err) => {
                 warn!(error = %err, "unable to refresh tray portfolio breakdown");

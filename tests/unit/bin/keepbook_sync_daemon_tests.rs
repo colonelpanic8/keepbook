@@ -73,32 +73,6 @@ fn parse_sync_counts_handles_mixed_results() {
 }
 
 #[test]
-fn format_tray_currency_uses_usd_symbol_by_default() {
-    let display = keepbook::config::DisplayConfig::default();
-    let formatted = format_tray_currency("1234.5", "USD", &display);
-    assert_eq!(formatted, "$1234.5");
-}
-
-#[test]
-fn format_tray_currency_appends_unknown_currency_code() {
-    let display = keepbook::config::DisplayConfig::default();
-    let formatted = format_tray_currency("1234.5", "CHF", &display);
-    assert_eq!(formatted, "1234.5 CHF");
-}
-
-#[test]
-fn format_history_change_for_tray_defaults_to_na() {
-    assert_eq!(format_history_change_for_tray(None), "N/A");
-    assert_eq!(format_history_change_for_tray(Some("N/A")), "N/A");
-}
-
-#[test]
-fn format_history_change_for_tray_adds_sign_and_percent() {
-    assert_eq!(format_history_change_for_tray(Some("3.25")), "+3.25%");
-    assert_eq!(format_history_change_for_tray(Some("-1.50")), "-1.50%");
-}
-
-#[test]
 fn recent_spending_is_not_rendered_as_submenu() {
     let (cmd_tx, _cmd_rx) = mpsc::unbounded_channel();
     let state = KeepbookTrayState {
@@ -129,21 +103,6 @@ fn recent_spending_is_not_rendered_as_submenu() {
 }
 
 #[test]
-fn normalize_spending_windows_days_sorts_dedupes_and_drops_zero() {
-    assert_eq!(
-        normalize_spending_windows_days(&[30, 0, 365, 7, 30]),
-        vec![7, 30, 365]
-    );
-}
-
-#[test]
-fn format_spending_window_label_uses_year_for_365_days() {
-    assert_eq!(format_spending_window_label(7), "7d");
-    assert_eq!(format_spending_window_label(365), "year");
-    assert_eq!(format_spending_window_label(730), "2 years");
-}
-
-#[test]
 fn dioxus_app_action_is_rendered_top_level() {
     let (cmd_tx, _cmd_rx) = mpsc::unbounded_channel();
     let tray = KeepbookTray::new(KeepbookTrayState::default(), cmd_tx);
@@ -156,49 +115,6 @@ fn dioxus_app_action_is_rendered_top_level() {
                 if label == "Open Dioxus App"
         )
     }));
-}
-
-#[test]
-fn build_portfolio_breakdown_lines_formats_account_values() {
-    let mut config =
-        ResolvedConfig::load_or_default(Path::new("/tmp/keepbook-test/keepbook.toml")).unwrap();
-    config.display = keepbook::config::DisplayConfig {
-        currency_decimals: Some(2),
-        currency_grouping: true,
-        currency_symbol: Some("$".to_string()),
-        currency_fixed_decimals: true,
-    };
-    let snapshot = keepbook::portfolio::PortfolioSnapshot {
-        as_of_date: NaiveDate::from_ymd_opt(2026, 4, 24).unwrap(),
-        currency: "USD".to_string(),
-        total_value: "1250".to_string(),
-        total_cost_basis: None,
-        total_unrealized_gain: None,
-        prospective_capital_gains_tax: None,
-        valuation_scenario: None,
-        by_asset: None,
-        by_account: Some(vec![
-            keepbook::portfolio::AccountSummary {
-                account_id: "acct-1".to_string(),
-                account_name: "Checking".to_string(),
-                connection_name: "Bank".to_string(),
-                value_in_base: Some("1000".to_string()),
-            },
-            keepbook::portfolio::AccountSummary {
-                account_id: "acct-2".to_string(),
-                account_name: "Brokerage".to_string(),
-                connection_name: "Broker".to_string(),
-                value_in_base: None,
-            },
-        ]),
-        valuation_issues: Vec::new(),
-    };
-
-    let lines = build_portfolio_breakdown_lines(&snapshot, &config);
-
-    assert_eq!(lines[0], "Total: $1,250.00");
-    assert_eq!(lines[1], "Bank / Checking: $1,000.00");
-    assert_eq!(lines[2], "Broker / Brokerage: unpriced");
 }
 
 #[test]
