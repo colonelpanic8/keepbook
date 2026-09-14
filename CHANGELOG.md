@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.12.3 - 2026-09-14
+
+### Fixed
+
+- Refreshing prices on Android failed with "Auto-commit failed: lock() not
+  supported". The Git auto-commit path locked a file through the same standard
+  library call that 0.12.2 replaced in storage; both now share one Android-aware
+  helper.
+
 ## 0.12.2 - 2026-09-14
 
 ### Fixed
