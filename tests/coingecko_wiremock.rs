@@ -1,17 +1,29 @@
+use std::sync::Arc;
+
 use anyhow::Result;
-use chrono::{Duration, Utc};
+use chrono::{Duration, TimeZone, Utc};
+use keepbook::clock::{Clock, FixedClock};
 use keepbook::market_data::providers::coingecko::CoinGeckoPriceSource;
 use keepbook::market_data::{AssetId, CryptoPriceSource};
 use keepbook::models::Asset;
 use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+fn fixed_clock() -> Arc<FixedClock> {
+    Arc::new(FixedClock::new(
+        Utc.with_ymd_and_hms(2026, 2, 5, 12, 0, 0).unwrap(),
+    ))
+}
+
 #[tokio::test]
 async fn coingecko_fetch_close_hits_mock_server() -> Result<()> {
     let server = MockServer::start().await;
-    let provider = CoinGeckoPriceSource::new().with_base_url(server.uri());
+    let clock = fixed_clock();
+    let provider = CoinGeckoPriceSource::new()
+        .with_base_url(server.uri())
+        .with_clock(clock.clone());
 
-    let date = Utc::now().date_naive() - Duration::days(1);
+    let date = clock.today() - Duration::days(1);
     let date_str = date.format("%d-%m-%Y").to_string();
 
     let body = r#"
@@ -49,9 +61,12 @@ async fn coingecko_fetch_close_hits_mock_server() -> Result<()> {
 #[tokio::test]
 async fn coingecko_skips_too_old_dates_without_http() -> Result<()> {
     let server = MockServer::start().await;
-    let provider = CoinGeckoPriceSource::new().with_base_url(server.uri());
+    let clock = fixed_clock();
+    let provider = CoinGeckoPriceSource::new()
+        .with_base_url(server.uri())
+        .with_clock(clock.clone());
 
-    let date = Utc::now().date_naive() - Duration::days(400);
+    let date = clock.today() - Duration::days(366);
     let asset = Asset::crypto("BTC");
     let asset_id = AssetId::from_asset(&asset);
     let result = provider.fetch_close(&asset, &asset_id, date).await?;

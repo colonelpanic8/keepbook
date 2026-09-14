@@ -4,11 +4,13 @@
 //! The `/coins/{id}/history` endpoint returns price data for a specific date.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
-use chrono::{Duration, NaiveDate, Utc};
+use chrono::{Duration, NaiveDate};
 use serde::Deserialize;
 
+use crate::clock::{Clock, SystemClock};
 use crate::market_data::{AssetId, CryptoPriceSource, PriceKind, PricePoint};
 use crate::models::Asset;
 
@@ -36,6 +38,7 @@ pub struct CoinGeckoPriceSource {
     quote_currency: String,
     /// Custom symbol to CoinGecko ID mappings (overrides defaults)
     custom_mappings: HashMap<String, String>,
+    clock: Arc<dyn Clock>,
 }
 
 impl CoinGeckoPriceSource {
@@ -46,6 +49,7 @@ impl CoinGeckoPriceSource {
             base_url: COINGECKO_API_BASE.to_string(),
             quote_currency: "usd".to_string(),
             custom_mappings: HashMap::new(),
+            clock: Arc::new(SystemClock),
         }
     }
 
@@ -56,12 +60,19 @@ impl CoinGeckoPriceSource {
             base_url: COINGECKO_API_BASE.to_string(),
             quote_currency: "usd".to_string(),
             custom_mappings: HashMap::new(),
+            clock: Arc::new(SystemClock),
         }
     }
 
     /// Override the base URL (useful for tests).
     pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
         self.base_url = base_url.into();
+        self
+    }
+
+    /// Override the clock used for the historical-window cutoff.
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
         self
     }
 
@@ -226,7 +237,7 @@ impl CryptoPriceSource for CoinGeckoPriceSource {
     ) -> Result<Option<PricePoint>> {
         // CoinGecko public API limits historical queries to the last 365 days.
         // Avoid hammering the API for dates we know it can't satisfy.
-        let oldest_allowed = Utc::now().date_naive() - Duration::days(365);
+        let oldest_allowed = self.clock.today() - Duration::days(365);
         if date < oldest_allowed {
             return Ok(None);
         }
@@ -263,7 +274,7 @@ impl CryptoPriceSource for CoinGeckoPriceSource {
         Ok(Some(PricePoint {
             asset_id: asset_id.clone(),
             as_of_date: date,
-            timestamp: Utc::now(),
+            timestamp: self.clock.now(),
             price: price.to_string(),
             quote_currency: self.quote_currency.to_uppercase(),
             kind: PriceKind::Close,
@@ -321,7 +332,7 @@ impl CryptoPriceSource for CoinGeckoPriceSource {
             return Ok(None);
         };
 
-        let now = Utc::now();
+        let now = self.clock.now();
 
         Ok(Some(PricePoint {
             asset_id: asset_id.clone(),
