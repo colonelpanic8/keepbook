@@ -1307,7 +1307,7 @@ async fn an_intraday_cutoff_excludes_later_balances_on_the_same_day() -> Result<
 }
 
 #[tokio::test]
-async fn an_intraday_cutoff_prefers_readings_recorded_by_that_instant() -> Result<()> {
+async fn an_intraday_cutoff_prefers_same_day_readings_recorded_by_that_instant() -> Result<()> {
     let storage = Arc::new(MemoryStorage::new());
     let connection = Connection::new(ConnectionConfig {
         name: "Test Bank".into(),
@@ -1339,8 +1339,8 @@ async fn an_intraday_cutoff_prefers_readings_recorded_by_that_instant() -> Resul
         kind,
         source: "test".to_string(),
     };
-    // Yesterday's close, recorded this morning: a settled reading for its own
-    // date, so it stays visible however late it was written down.
+    // Yesterday's close, recorded this morning. A same-day reading always
+    // outranks it, however early this one was written down.
     store
         .put_prices(&[price(
             morning.date_naive() - chrono::Duration::days(1),
@@ -1349,14 +1349,13 @@ async fn an_intraday_cutoff_prefers_readings_recorded_by_that_instant() -> Resul
             PriceKind::Close,
         )])
         .await?;
-    // An intraday quote taken this afternoon.
+    // A quote taken this morning, and the day's close written down this
+    // afternoon.
     store
-        .put_prices(&[price(
-            morning.date_naive(),
-            afternoon,
-            "150",
-            PriceKind::Quote,
-        )])
+        .put_prices(&[
+            price(morning.date_naive(), morning, "120", PriceKind::Quote),
+            price(morning.date_naive(), afternoon, "150", PriceKind::Close),
+        ])
         .await?;
 
     let market_data = Arc::new(MarketDataService::new(store, None));
@@ -1375,8 +1374,8 @@ async fn an_intraday_cutoff_prefers_readings_recorded_by_that_instant() -> Resul
 
     assert_eq!(
         service.calculate(&query(Some(morning))).await?.total_value,
-        "100",
-        "an afternoon quote must not price a morning point"
+        "120",
+        "an afternoon quote must not price a morning point that has its own reading"
     );
     assert_eq!(
         service

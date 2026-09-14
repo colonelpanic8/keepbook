@@ -423,3 +423,101 @@ async fn a_cutoff_falls_back_to_the_closest_reading_when_nothing_was_recorded_by
     assert_eq!(price.price, "100");
     Ok(())
 }
+
+#[tokio::test]
+async fn a_cutoff_prefers_a_same_day_reading_recorded_by_then() -> Result<()> {
+    let store = Arc::new(MemoryMarketDataStore::new());
+    let asset = Asset::equity("AAPL");
+    let date = NaiveDate::from_ymd_opt(2026, 2, 2).unwrap();
+    let price = |timestamp, value: &str, kind| PricePoint {
+        asset_id: AssetId::from_asset(&asset),
+        as_of_date: date,
+        timestamp,
+        price: value.to_string(),
+        quote_currency: "USD".to_string(),
+        kind,
+        source: "test".to_string(),
+    };
+    // A quote taken in the morning and the day's close written down after the
+    // market closed.
+    let morning = Utc.with_ymd_and_hms(2026, 2, 2, 9, 0, 0).unwrap();
+    let evening = Utc.with_ymd_and_hms(2026, 2, 2, 21, 0, 0).unwrap();
+    store
+        .put_prices(&[
+            price(morning, "100", PriceKind::Quote),
+            price(evening, "110", PriceKind::Close),
+        ])
+        .await?;
+
+    let service = MarketDataService::new(store, None);
+    let at = |hour| Some(Utc.with_ymd_and_hms(2026, 2, 2, hour, 0, 0).unwrap());
+    let price_at = |cutoff| {
+        let service = &service;
+        let asset = &asset;
+        async move {
+            service
+                .price_from_store_at(asset, date, cutoff)
+                .await
+                .map(|price| price.expect("a reading exists").price)
+        }
+    };
+
+    assert_eq!(
+        price_at(at(12)).await?,
+        "100",
+        "noon only knows the morning reading"
+    );
+    assert_eq!(price_at(at(22)).await?, "110");
+    assert_eq!(
+        price_at(None).await?,
+        "110",
+        "a date query takes the newest reading"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_cutoff_does_not_hide_a_later_recorded_close_behind_an_older_reading() -> Result<()> {
+    let store = Arc::new(MemoryMarketDataStore::new());
+    let asset = Asset::equity("AAPL");
+    let price = |as_of_date, timestamp, value: &str| PricePoint {
+        asset_id: AssetId::from_asset(&asset),
+        as_of_date,
+        timestamp,
+        price: value.to_string(),
+        quote_currency: "USD".to_string(),
+        kind: PriceKind::Close,
+        source: "test".to_string(),
+    };
+    // A price written down during a sync weeks ago, then the point's own close
+    // backfilled after the point's instant. Only the recording time is known,
+    // and it says nothing about when the close was true.
+    let sync_day = NaiveDate::from_ymd_opt(2026, 1, 5).unwrap();
+    let date = NaiveDate::from_ymd_opt(2026, 2, 2).unwrap();
+    store
+        .put_prices(&[
+            price(
+                sync_day,
+                sync_day.and_hms_opt(12, 0, 0).unwrap().and_utc(),
+                "90",
+            ),
+            price(
+                date,
+                Utc.with_ymd_and_hms(2026, 2, 10, 0, 0, 0).unwrap(),
+                "100",
+            ),
+        ])
+        .await?;
+
+    let service = MarketDataService::new(store, None);
+    let cutoff = Utc.with_ymd_and_hms(2026, 2, 2, 9, 0, 0).unwrap();
+    let selected = service
+        .price_from_store_at(&asset, date, Some(cutoff))
+        .await?
+        .expect("a reading exists");
+    assert_eq!(
+        selected.price, "100",
+        "the date's own close beats a stale earlier reading"
+    );
+    Ok(())
+}

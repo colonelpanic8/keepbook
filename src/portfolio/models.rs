@@ -20,11 +20,12 @@ pub struct PortfolioQuery {
     ///
     /// `None` means the end of `as_of_date`: the latest balance recorded on or
     /// before that date, valued with the latest price for it. When set, only
-    /// balances recorded at or before this instant count, and price and FX
-    /// readings recorded by it are preferred, so a morning point cannot pick up
-    /// an afternoon change. Readings recorded later are still used when nothing
-    /// was recorded by the cutoff, since a date's only reading is usually
-    /// written down at its close or backfilled afterwards.
+    /// balances recorded at or before this instant count, so a morning point
+    /// cannot pick up an afternoon balance change. Among price and FX readings
+    /// dated this instant's day, one recorded by it is preferred over one
+    /// recorded after it. Readings for earlier dates, and a day whose readings
+    /// were all recorded later, are used as for a date query, since a reading's
+    /// timestamp is when keepbook stored it rather than a market time.
     pub as_of_timestamp: Option<DateTime<Utc>>,
     pub currency: String,
     /// If set, values denominated in `currency` are rounded to this many

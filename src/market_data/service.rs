@@ -113,8 +113,9 @@ impl MarketDataService {
         self.price_from_store_at(asset, date, None).await
     }
 
-    /// Like [`Self::price_from_store`] but ignores intraday readings recorded
-    /// after `cutoff`. See [`recorded_by`] for which observations that hides.
+    /// Like [`Self::price_from_store`] but bounded by a valuation cutoff: a
+    /// reading dated the cutoff's day and recorded after it loses to one
+    /// recorded by it. See [`newest_price`] for the rule.
     pub async fn price_from_store_at(
         &self,
         asset: &Asset,
@@ -183,9 +184,9 @@ impl MarketDataService {
         self.price_close_at(asset, date, None).await
     }
 
-    /// Like [`Self::price_close`] but bounded by a valuation cutoff: readings
-    /// the cutoff hides are neither returned from the store nor accepted from a
-    /// provider.
+    /// Like [`Self::price_close`] but bounded by a valuation cutoff when
+    /// selecting from the store. A provider is only consulted when the store
+    /// has nothing at all on or before `date`.
     pub async fn price_close_at(
         &self,
         asset: &Asset,
@@ -522,8 +523,8 @@ impl MarketDataService {
         self.fx_from_store_at(base, quote, date, None).await
     }
 
-    /// Like [`Self::fx_from_store`] but ignores intraday readings recorded
-    /// after `cutoff`.
+    /// Like [`Self::fx_from_store`] but bounded by a valuation cutoff. See
+    /// [`newest_price`] for the rule.
     pub async fn fx_from_store_at(
         &self,
         base: &str,
@@ -713,21 +714,29 @@ impl MarketDataService {
     }
 }
 
-/// Selects an observation for a valuation bounded to an instant.
+/// Selects an observation for a valuation, optionally bounded to an instant.
 ///
-/// Readings recorded at or before `cutoff` win, so an intraday reading taken
-/// later in the day cannot price an earlier point. Observation timestamps
+/// Without a cutoff the newest date wins, then the newest recording. A cutoff
+/// only reorders readings dated its own day: one recorded at or before the
+/// cutoff beats one recorded after it, so an afternoon reading cannot price a
+/// morning point when a morning reading exists.
+///
+/// The cutoff deliberately says nothing about readings for earlier dates or
+/// about a day whose readings were all recorded later. Observation timestamps
 /// record when keepbook stored a reading rather than when the market produced
-/// it, though, so a date's only reading is often written down at its close or
-/// backfilled days later. When nothing was recorded by the cutoff, the ordinary
-/// unbounded choice is used: an approximate value beats no value at all.
+/// it: a date's close is usually written down that evening or backfilled days
+/// later, and an earlier date's reading is settled however late it arrived.
+/// Ranking every reading by whether it was recorded by the cutoff would let a
+/// weeks-old sync-time price beat a later-backfilled close for the point's own
+/// date, so the unbounded choice applies whenever no same-day reading was
+/// recorded by the cutoff.
 fn newest_price<'a>(
     prices: impl Iterator<Item = &'a PricePoint>,
     cutoff: Option<DateTime<Utc>>,
 ) -> Option<&'a PricePoint> {
     prices.max_by(|a, b| {
-        recorded_by(*a, cutoff)
-            .cmp(&recorded_by(*b, cutoff))
+        known_same_day(*a, cutoff)
+            .cmp(&known_same_day(*b, cutoff))
             .then_with(|| a.as_of_date.cmp(&b.as_of_date))
             .then_with(|| a.timestamp.cmp(&b.timestamp))
     })
@@ -738,31 +747,44 @@ fn newest_fx_rate<'a>(
     cutoff: Option<DateTime<Utc>>,
 ) -> Option<&'a FxRatePoint> {
     rates.max_by(|a, b| {
-        recorded_by(*a, cutoff)
-            .cmp(&recorded_by(*b, cutoff))
+        known_same_day(*a, cutoff)
+            .cmp(&known_same_day(*b, cutoff))
             .then_with(|| a.as_of_date.cmp(&b.as_of_date))
             .then_with(|| a.timestamp.cmp(&b.timestamp))
     })
 }
 
-trait Recorded {
+trait Observation {
+    fn as_of_date(&self) -> NaiveDate;
     fn recorded_at(&self) -> DateTime<Utc>;
 }
 
-impl Recorded for PricePoint {
+impl Observation for PricePoint {
+    fn as_of_date(&self) -> NaiveDate {
+        self.as_of_date
+    }
+
     fn recorded_at(&self) -> DateTime<Utc> {
         self.timestamp
     }
 }
 
-impl Recorded for FxRatePoint {
+impl Observation for FxRatePoint {
+    fn as_of_date(&self) -> NaiveDate {
+        self.as_of_date
+    }
+
     fn recorded_at(&self) -> DateTime<Utc> {
         self.timestamp
     }
 }
 
-fn recorded_by<T: Recorded>(observation: &T, cutoff: Option<DateTime<Utc>>) -> bool {
-    cutoff.is_none_or(|cutoff| observation.recorded_at() <= cutoff)
+/// Whether `observation` is dated the cutoff's day and was recorded by it.
+/// Without a cutoff every observation ranks equally and date order decides.
+fn known_same_day<T: Observation>(observation: &T, cutoff: Option<DateTime<Utc>>) -> bool {
+    cutoff.is_none_or(|cutoff| {
+        observation.as_of_date() == cutoff.date_naive() && observation.recorded_at() <= cutoff
+    })
 }
 
 fn select_latest_price_on_or_before(
