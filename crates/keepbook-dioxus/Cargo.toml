@@ -35,6 +35,7 @@ serde_urlencoded = "0.7"
 tokio = { version = "1", features = ["net", "rt", "sync", "time"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+# Exact pins: wasm-bindgen must match flake.nix's wasm-bindgen-cli_0_2_118, and the rest ship in lockstep with it.
 js-sys = "=0.3.95"
 wasm-bindgen = "=0.2.118"
 wasm-bindgen-futures = "=0.4.68"
