@@ -828,8 +828,6 @@ enum TransactionSortField {
     Description,
     Tag,
     Account,
-    #[allow(dead_code)]
-    Counted,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -903,19 +903,6 @@ fn spending_transactions_sort_by_each_visible_text_field() {
         .id,
         "bank"
     );
-    assert_eq!(
-        filtered_transactions(
-            &rows,
-            None,
-            None,
-            "",
-            TransactionSortField::Counted,
-            SortDirection::Asc,
-            true,
-        )[0]
-        .id,
-        "bank"
-    );
 }
 
 fn annotation(tags: Option<Vec<&str>>, ignore_spending: Option<bool>) -> TransactionAnnotation {

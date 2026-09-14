@@ -1376,7 +1376,6 @@ pub(crate) fn compare_transactions(
             compare_case_insensitive(&transaction_tags_label(a), &transaction_tags_label(b))
         }
         TransactionSortField::Account => compare_case_insensitive(&a.account_name, &b.account_name),
-        TransactionSortField::Counted => a.ignored_from_spending.cmp(&b.ignored_from_spending),
     };
 
     let primary = match sort_direction {
@@ -1423,8 +1422,7 @@ pub(crate) fn default_transaction_sort_direction(field: TransactionSortField) ->
         TransactionSortField::Date | TransactionSortField::Amount => SortDirection::Desc,
         TransactionSortField::Description
         | TransactionSortField::Tag
-        | TransactionSortField::Account
-        | TransactionSortField::Counted => SortDirection::Asc,
+        | TransactionSortField::Account => SortDirection::Asc,
     }
 }
 
