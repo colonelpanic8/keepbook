@@ -50,6 +50,75 @@ pub struct PriceHistoryRequest<'a> {
     pub include_fx: bool,
 }
 
+/// Options for `portfolio_snapshot`. Defaults mirror the CLI defaults:
+/// today, grouped by both asset and account, auto-refreshing stale data.
+#[derive(Debug, Clone)]
+pub struct PortfolioSnapshotRequest {
+    pub currency: Option<String>,
+    /// `YYYY-MM-DD`; today when absent.
+    pub date: Option<String>,
+    /// `asset`, `account`, or `both`.
+    pub group_by: String,
+    pub detail: bool,
+    pub capital_gains_tax_rate: Option<String>,
+    pub equity_change_percent: Option<String>,
+    pub target_pre_tax_total_value: Option<String>,
+    /// Explicit form of the default refresh behavior; has no extra effect.
+    pub auto: bool,
+    /// Use cached data only.
+    pub offline: bool,
+    /// Log staleness without refreshing.
+    pub dry_run: bool,
+    /// Refresh everything regardless of staleness.
+    pub force_refresh: bool,
+}
+
+impl Default for PortfolioSnapshotRequest {
+    fn default() -> Self {
+        Self {
+            currency: None,
+            date: None,
+            group_by: "both".to_string(),
+            detail: false,
+            capital_gains_tax_rate: None,
+            equity_change_percent: None,
+            target_pre_tax_total_value: None,
+            auto: false,
+            offline: false,
+            dry_run: false,
+            force_refresh: false,
+        }
+    }
+}
+
+/// Options for `portfolio_tax_impact`.
+#[derive(Debug, Clone)]
+pub struct PortfolioTaxImpactRequest {
+    pub currency: Option<String>,
+    /// `YYYY-MM-DD`; today when absent.
+    pub date: Option<String>,
+    pub capital_gains_tax_rate: Option<String>,
+    /// Minimum nominal pre-tax net worth for the curve; half of current when absent.
+    pub min: Option<String>,
+    /// Maximum nominal pre-tax net worth for the curve; current when absent.
+    pub max: Option<String>,
+    /// Number of curve points; must be at least 1.
+    pub points: usize,
+}
+
+impl Default for PortfolioTaxImpactRequest {
+    fn default() -> Self {
+        Self {
+            currency: None,
+            date: None,
+            capital_gains_tax_rate: None,
+            min: None,
+            max: None,
+            points: 25,
+        }
+    }
+}
+
 pub const DEFAULT_PORTFOLIO_HISTORY_GRANULARITY: &str =
     crate::config::DEFAULT_HISTORY_PORTFOLIO_GRANULARITY;
 pub const DEFAULT_PORTFOLIO_CHANGE_POINTS_GRANULARITY: &str =
@@ -1681,22 +1750,25 @@ async fn ensure_fx_rate(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 pub async fn portfolio_snapshot(
     storage: Arc<dyn Storage>,
     config: &ResolvedConfig,
-    currency: Option<String>,
-    date: Option<String>,
-    group_by: String,
-    detail: bool,
-    capital_gains_tax_rate: Option<String>,
-    equity_change_percent: Option<String>,
-    target_pre_tax_total_value: Option<String>,
-    auto: bool,
-    offline: bool,
-    dry_run: bool,
-    force_refresh: bool,
+    request: PortfolioSnapshotRequest,
 ) -> Result<crate::portfolio::PortfolioSnapshot> {
+    let PortfolioSnapshotRequest {
+        currency,
+        date,
+        group_by,
+        detail,
+        capital_gains_tax_rate,
+        equity_change_percent,
+        target_pre_tax_total_value,
+        auto,
+        offline,
+        dry_run,
+        force_refresh,
+    } = request;
+
     // Parse date
     let as_of_date = match date {
         Some(d) => NaiveDate::parse_from_str(&d, "%Y-%m-%d")
@@ -2087,17 +2159,20 @@ fn compute_asset_change(
     })
 }
 
-#[allow(clippy::too_many_arguments)]
 pub async fn portfolio_tax_impact(
     storage: Arc<dyn Storage>,
     config: &ResolvedConfig,
-    currency: Option<String>,
-    date: Option<String>,
-    capital_gains_tax_rate: Option<String>,
-    min: Option<String>,
-    max: Option<String>,
-    points: usize,
+    request: PortfolioTaxImpactRequest,
 ) -> Result<TaxImpactOutput> {
+    let PortfolioTaxImpactRequest {
+        currency,
+        date,
+        capital_gains_tax_rate,
+        min,
+        max,
+        points,
+    } = request;
+
     let as_of_date = match date {
         Some(d) => NaiveDate::parse_from_str(&d, "%Y-%m-%d")
             .with_context(|| format!("Invalid date format: {d}"))?,

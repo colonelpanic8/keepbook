@@ -1,6 +1,6 @@
 use anyhow::Result;
 use chrono::Utc;
-use keepbook::app::portfolio_snapshot;
+use keepbook::app::{portfolio_snapshot, PortfolioSnapshotRequest};
 use keepbook::config::{
     DisplayConfig, GitConfig, IgnoreConfig, RefreshConfig, ResolvedConfig, SpendingConfig,
     TrayConfig,
@@ -80,17 +80,12 @@ async fn portfolio_snapshot_offline_uses_cached_quote() -> Result<()> {
     let snapshot = portfolio_snapshot(
         storage_arc,
         &config,
-        None,
-        Some(Utc::now().date_naive().to_string()),
-        "asset".to_string(),
-        false,
-        None,
-        None,
-        None,
-        false,
-        true,
-        false,
-        false,
+        PortfolioSnapshotRequest {
+            date: Some(Utc::now().date_naive().to_string()),
+            group_by: "asset".to_string(),
+            offline: true,
+            ..Default::default()
+        },
     )
     .await?;
 

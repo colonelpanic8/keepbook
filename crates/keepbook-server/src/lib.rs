@@ -421,17 +421,11 @@ impl ApiState {
         let snapshot = keepbook::app::portfolio_snapshot(
             storage.clone(),
             &effective_config,
-            None,
-            None,
-            "both".to_string(),
-            false,
-            None,
-            None,
-            None,
-            false,
-            true,
-            false,
-            false,
+            keepbook::app::PortfolioSnapshotRequest {
+                group_by: "both".to_string(),
+                offline: true,
+                ..Default::default()
+            },
         )
         .await?;
         let history = if query.include_history {
@@ -483,17 +477,11 @@ impl ApiState {
         let portfolio_result = keepbook::app::portfolio_snapshot(
             state.storage.clone(),
             &state.config,
-            None,
-            None,
-            "account".to_string(),
-            false,
-            None,
-            None,
-            None,
-            false,
-            true,
-            false,
-            false,
+            keepbook::app::PortfolioSnapshotRequest {
+                group_by: "account".to_string(),
+                offline: true,
+                ..Default::default()
+            },
         )
         .await;
 

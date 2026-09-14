@@ -953,17 +953,11 @@ impl Daemon {
         match app::portfolio_snapshot(
             self.storage.clone(),
             &self.config,
-            None,
-            None,
-            "account".to_string(),
-            false,
-            None,
-            None,
-            None,
-            false,
-            true,
-            false,
-            false,
+            app::PortfolioSnapshotRequest {
+                group_by: "account".to_string(),
+                offline: true,
+                ..Default::default()
+            },
         )
         .await
         {

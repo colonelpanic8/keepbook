@@ -40,7 +40,8 @@ pub use portfolio::{
     latent_capital_gains_tax_history, portfolio_assets, portfolio_change_points, portfolio_history,
     portfolio_history_for_accounts, portfolio_recent_history, portfolio_snapshot,
     portfolio_stacked_history, portfolio_tax_impact, resolve_portfolio_history_selection,
-    PortfolioHistorySelection, PriceHistoryRequest, DEFAULT_PORTFOLIO_CHANGE_POINTS_GRANULARITY,
+    PortfolioHistorySelection, PortfolioSnapshotRequest, PortfolioTaxImpactRequest,
+    PriceHistoryRequest, DEFAULT_PORTFOLIO_CHANGE_POINTS_GRANULARITY,
     DEFAULT_PORTFOLIO_HISTORY_GRANULARITY, DEFAULT_PORTFOLIO_INCLUDE_PRICES,
 };
 pub use preflight::{run_preflight, PreflightOptions};

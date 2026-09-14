@@ -1642,17 +1642,19 @@ async fn main() -> Result<()> {
                 let snapshot = app::portfolio_snapshot(
                     storage_arc.clone(),
                     &config,
-                    currency,
-                    date,
-                    group_by,
-                    detail,
-                    capital_gains_tax_rate,
-                    equity_change_percent,
-                    target_pre_tax_total_value,
-                    auto,
-                    offline,
-                    dry_run,
-                    force_refresh,
+                    app::PortfolioSnapshotRequest {
+                        currency,
+                        date,
+                        group_by,
+                        detail,
+                        capital_gains_tax_rate,
+                        equity_change_percent,
+                        target_pre_tax_total_value,
+                        auto,
+                        offline,
+                        dry_run,
+                        force_refresh,
+                    },
                 )
                 .await?;
                 println!("{}", serde_json::to_string_pretty(&snapshot)?);
@@ -1683,12 +1685,14 @@ async fn main() -> Result<()> {
                 let output = app::portfolio_tax_impact(
                     storage_arc.clone(),
                     &config,
-                    currency,
-                    date,
-                    capital_gains_tax_rate,
-                    min,
-                    max,
-                    points,
+                    app::PortfolioTaxImpactRequest {
+                        currency,
+                        date,
+                        capital_gains_tax_rate,
+                        min,
+                        max,
+                        points,
+                    },
                 )
                 .await?;
                 println!("{}", serde_json::to_string_pretty(&output)?);
