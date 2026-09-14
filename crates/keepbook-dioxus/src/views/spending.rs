@@ -1901,9 +1901,9 @@ fn TransactionEditorPanel(
     let has_effective_date = current_effective.is_some();
     let date_value = current_effective.unwrap_or_else(|| posted_date.clone());
 
-    let rule_ignored = rule_ignores_spending(&transaction);
-    let not_spending_shaped = !is_spending_transaction(&transaction);
-    let exclude_checked = rule_ignored || annotation_ignores_spending(&transaction);
+    let rule_ignored = spending_ignore_is_configured(&transaction);
+    let not_spending_shaped = spending_ignore_is_shape(&transaction);
+    let exclude_checked = rule_ignored || spending_ignore_is_annotation(&transaction);
 
     rsx! {
         div { class: "transaction-editor-panel",

@@ -247,24 +247,13 @@ pub(crate) async fn fetch_spending_dashboard(
         fetch_spending_impl(exact_match_query),
         fetch_spending_impl(close_match_query),
     )?;
-    let tx_query = transaction_query_string(
-        &spending.start_date,
-        &spending.end_date,
-        Some(&spending.tz),
-        false,
-    );
-    let counted_transactions = fetch_transactions_impl(tx_query);
-    let all_tx_query = transaction_query_string(
+    let transactions = fetch_transactions_impl(transaction_query_string(
         &spending.start_date,
         &spending.end_date,
         Some(&spending.tz),
         true,
-    );
-    let all_transactions = fetch_transactions_impl(all_tx_query);
-    let (counted_transactions, all_transactions) =
-        futures_util::try_join!(counted_transactions, all_transactions)?;
-    let transactions =
-        mark_transactions_excluded_from_spending(all_transactions, &counted_transactions);
+    ))
+    .await?;
     Ok(SpendingDashboardData {
         spending,
         spending_over_time,

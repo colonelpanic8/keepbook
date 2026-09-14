@@ -777,6 +777,7 @@ fn transaction(id: &str, amount: &str, status: &str) -> Transaction {
         subtags: Vec::new(),
         annotation: None,
         ignored_from_spending: false,
+        spending_ignore_reason: None,
     }
 }
 
@@ -794,24 +795,6 @@ fn transaction_query_omits_empty_timezone() {
         transaction_query_string("2025-04-25", "2026-04-25", None, true),
         "start=2025-04-25&end=2026-04-25&include_ignored=true"
     );
-}
-
-#[test]
-fn spending_transaction_marking_flags_rows_not_counted_in_totals() {
-    let counted = vec![transaction("counted", "-12.50", "posted")];
-    let rows = vec![
-        transaction("counted", "-12.50", "posted"),
-        transaction("ignored", "-8.00", "posted"),
-        transaction("inflow", "9.00", "posted"),
-        transaction("pending", "-4.00", "pending"),
-    ];
-
-    let marked = mark_transactions_excluded_from_spending(rows, &counted);
-
-    assert!(!marked[0].ignored_from_spending);
-    assert!(marked[1].ignored_from_spending);
-    assert!(marked[2].ignored_from_spending);
-    assert!(marked[3].ignored_from_spending);
 }
 
 #[test]
@@ -916,34 +899,6 @@ fn annotation(tags: Option<Vec<&str>>, ignore_spending: Option<bool>) -> Transac
 }
 
 #[test]
-fn annotation_ignore_detects_explicit_flag() {
-    let mut row = transaction("flagged", "-12.50", "posted");
-    row.annotation = Some(annotation(None, Some(true)));
-    assert!(annotation_ignores_spending(&row));
-
-    row.annotation = Some(annotation(None, Some(false)));
-    assert!(!annotation_ignores_spending(&row));
-}
-
-#[test]
-fn annotation_ignore_detects_ignore_spending_tags() {
-    for tag in [
-        "ignore_spending",
-        "ignore-spending",
-        "ignore:spending",
-        "IGNORE_SPENDING",
-    ] {
-        let mut row = transaction("tagged", "-12.50", "posted");
-        row.annotation = Some(annotation(Some(vec![tag]), None));
-        assert!(annotation_ignores_spending(&row), "tag {tag} should ignore");
-    }
-
-    let mut row = transaction("dining", "-12.50", "posted");
-    row.annotation = Some(annotation(Some(vec!["Dining"]), None));
-    assert!(!annotation_ignores_spending(&row));
-}
-
-#[test]
 fn visible_tags_hide_ignore_spending_control_tags() {
     let mut row = transaction("tagged", "-12.50", "posted");
     row.annotation = Some(annotation(Some(vec!["Dining", "ignore_spending"]), None));
@@ -951,35 +906,32 @@ fn visible_tags_hide_ignore_spending_control_tags() {
 }
 
 #[test]
-fn annotation_ignore_false_without_annotation() {
-    let row = transaction("plain", "-12.50", "posted");
-    assert!(!annotation_ignores_spending(&row));
-    assert!(!rule_ignores_spending(&row));
-}
+fn spending_ignore_reason_groups_drive_the_row_editor() {
+    let counted = transaction("counted", "-12.50", "posted");
+    assert!(!spending_ignore_is_annotation(&counted));
+    assert!(!spending_ignore_is_configured(&counted));
+    assert!(!spending_ignore_is_shape(&counted));
 
-#[test]
-fn rule_ignore_distinguishes_config_level_exclusions() {
-    // Excluded overall, but not via annotation -> config rule.
-    let mut rule = transaction("rule", "-12.50", "posted");
-    rule.ignored_from_spending = true;
-    assert!(rule_ignores_spending(&rule));
-    assert!(!annotation_ignores_spending(&rule));
+    let with_reason = |reason: &str| {
+        let mut row = transaction("row", "-12.50", "posted");
+        row.ignored_from_spending = true;
+        row.spending_ignore_reason = Some(reason.to_string());
+        row
+    };
 
-    // Excluded overall AND via annotation -> not a rule-level exclusion.
-    let mut annotated = transaction("annotated", "-12.50", "posted");
-    annotated.ignored_from_spending = true;
-    annotated.annotation = Some(annotation(None, Some(true)));
-    assert!(!rule_ignores_spending(&annotated));
-    assert!(annotation_ignores_spending(&annotated));
-
-    // Excluded only because it is not spending-shaped -> not a rule-level exclusion.
-    let mut credit = transaction("credit", "12.50", "posted");
-    credit.ignored_from_spending = true;
-    assert!(!rule_ignores_spending(&credit));
-
-    let mut pending = transaction("pending", "-12.50", "pending");
-    pending.ignored_from_spending = true;
-    assert!(!rule_ignores_spending(&pending));
+    assert!(spending_ignore_is_annotation(&with_reason("annotation")));
+    for reason in ["rule", "internal_transfer", "account"] {
+        assert!(
+            spending_ignore_is_configured(&with_reason(reason)),
+            "{reason} should lock the toggle"
+        );
+    }
+    for reason in ["not_posted", "not_outflow"] {
+        assert!(
+            spending_ignore_is_shape(&with_reason(reason)),
+            "{reason} should read as never counted"
+        );
+    }
 }
 
 #[test]

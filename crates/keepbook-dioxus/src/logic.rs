@@ -1574,21 +1574,6 @@ pub(crate) fn compare_asset_entries_with_change_metric(
         .then_with(|| a.liability.cmp(&b.liability))
 }
 
-pub(crate) fn mark_transactions_excluded_from_spending(
-    mut transactions: Vec<Transaction>,
-    counted_transactions: &[Transaction],
-) -> Vec<Transaction> {
-    let counted_ids = counted_transactions
-        .iter()
-        .map(transaction_key)
-        .collect::<HashSet<_>>();
-    for transaction in &mut transactions {
-        transaction.ignored_from_spending = !counted_ids.contains(&transaction_key(transaction))
-            || !is_spending_transaction(transaction);
-    }
-    transactions
-}
-
 pub(crate) fn transaction_key(transaction: &Transaction) -> String {
     format!("{}:{}", transaction.account_id, transaction.id)
 }
@@ -1601,11 +1586,29 @@ pub(crate) fn transaction_row_class(transaction: &Transaction) -> &'static str {
     }
 }
 
-pub(crate) fn is_spending_transaction(transaction: &Transaction) -> bool {
-    transaction.status == "posted"
-        && parse_money_input(&transaction.amount)
-            .map(|amount| amount < 0.0)
-            .unwrap_or(false)
+/// Excluded from spending by a per-transaction annotation, which the row
+/// editor can toggle off.
+pub(crate) fn spending_ignore_is_annotation(transaction: &Transaction) -> bool {
+    transaction.spending_ignore_reason.as_deref() == Some("annotation")
+}
+
+/// Excluded from spending by configuration (an ignore rule, an internal-transfer
+/// hint, or an ignored account) rather than by an annotation, so the per-row
+/// toggle cannot change it.
+pub(crate) fn spending_ignore_is_configured(transaction: &Transaction) -> bool {
+    matches!(
+        transaction.spending_ignore_reason.as_deref(),
+        Some("rule" | "internal_transfer" | "account")
+    )
+}
+
+/// Never counted because of the transaction's own shape: only posted outflows
+/// count toward spending.
+pub(crate) fn spending_ignore_is_shape(transaction: &Transaction) -> bool {
+    matches!(
+        transaction.spending_ignore_reason.as_deref(),
+        Some("not_posted" | "not_outflow")
+    )
 }
 
 /// Tag spellings that mark a transaction as ignored-from-spending when present
@@ -1618,22 +1621,6 @@ pub(crate) fn is_ignore_spending_tag(tag: &str) -> bool {
         .any(|candidate| tag.trim().eq_ignore_ascii_case(candidate))
 }
 
-/// True when a transaction is excluded from spending because of a per-transaction
-/// annotation (either the explicit `ignore_spending` flag or an ignore-spending
-/// annotation tag). Distinguished from rule-level ignores, which are driven by
-/// config and are not editable per-transaction. A transaction whose
-/// [`Transaction::ignored_from_spending`] is set but for which this returns
-/// `false` is ignored by a config rule.
-pub(crate) fn annotation_ignores_spending(transaction: &Transaction) -> bool {
-    transaction.annotation.as_ref().is_some_and(|annotation| {
-        annotation.ignore_spending == Some(true)
-            || annotation
-                .tags
-                .as_ref()
-                .is_some_and(|tags| tags.iter().any(|tag| is_ignore_spending_tag(tag)))
-    })
-}
-
 /// Tags to display for a transaction row, hiding the legacy ignore-spending
 /// control tags (the "Not counted" badge communicates that state instead).
 /// Editing surfaces should keep using [`transaction_tags`] so saves round-trip
@@ -1643,16 +1630,6 @@ pub(crate) fn visible_transaction_tags(transaction: &Transaction) -> Vec<String>
         .into_iter()
         .filter(|tag| !is_ignore_spending_tag(tag))
         .collect()
-}
-
-/// True when a transaction is excluded from spending by a config-level ignore
-/// rule rather than a per-transaction annotation, meaning the per-row toggle
-/// cannot change it. Transactions that are merely not spending-shaped
-/// (credits/income, pending) do not count as rule-ignored.
-pub(crate) fn rule_ignores_spending(transaction: &Transaction) -> bool {
-    transaction.ignored_from_spending
-        && is_spending_transaction(transaction)
-        && !annotation_ignores_spending(transaction)
 }
 
 pub(crate) fn normalize_spending_tag_key(tag: &str) -> String {

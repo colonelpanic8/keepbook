@@ -518,6 +518,10 @@ struct Transaction {
     annotation: Option<TransactionAnnotation>,
     #[serde(default)]
     ignored_from_spending: bool,
+    /// Why the app layer leaves this transaction out of spending reports.
+    /// Mirrors `keepbook::app::SpendingIgnoreReason` as its snake_case wire form.
+    #[serde(default)]
+    spending_ignore_reason: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
