@@ -51,7 +51,8 @@ pub(super) fn AssetsView(filter_overrides: FilterOverrides) -> Element {
                 });
                 let liability_count = entries.iter().filter(|entry| entry.liability).count();
                 let asset_count = entries.len() - liability_count;
-                let total_value = parse_money_input(&data.total_value).unwrap_or_default();
+                let total_value = format_money_text(&data.total_value, &currency)
+                    .unwrap_or_else(|| data.total_value.clone());
                 let expanded = expanded_assets();
                 let asset_label = if asset_count == 1 { "asset" } else { "assets" };
                 let liability_label = if liability_count == 1 {
@@ -64,7 +65,7 @@ pub(super) fn AssetsView(filter_overrides: FilterOverrides) -> Element {
                     section { class: "summary-grid assets-summary-grid",
                         MetricCard {
                             label: "Total value",
-                            value: format_full_money(total_value, &currency),
+                            value: total_value,
                             detail: format!(
                                 "As of {} · {} {} · {} {}",
                                 data.as_of_date,
@@ -264,8 +265,7 @@ fn AssetRow(
     let price = entry
         .price
         .as_deref()
-        .and_then(parse_money_input)
-        .map(|value| format_full_money(value, &currency))
+        .and_then(|price| format_money_text(price, &currency))
         .unwrap_or_else(|| "—".to_string());
     let price_title = entry
         .price_date
@@ -276,8 +276,7 @@ fn AssetRow(
     let value = entry
         .value_in_base
         .as_deref()
-        .and_then(parse_money_input)
-        .map(|value| format_full_money(value, &currency))
+        .and_then(|value| format_money_text(value, &currency))
         .unwrap_or_else(|| "—".to_string());
     let row_class = if expanded {
         "table-row asset-row expanded"
@@ -360,8 +359,7 @@ fn AssetRow(
                     let holding_value = holding
                         .value_in_base
                         .as_deref()
-                        .and_then(parse_money_input)
-                        .map(|value| format_full_money(value, &currency))
+                        .and_then(|value| format_money_text(value, &currency))
                         .unwrap_or_else(|| "—".to_string());
                     let connection = holding.connection_name.clone().unwrap_or_default();
                     rsx! {
@@ -407,36 +405,41 @@ fn asset_change_cell(
             }
         };
     };
-    let absolute = parse_money_input(&change.absolute).unwrap_or_default();
-    let absolute_text = format_signed_money(absolute, currency);
+    let absolute_class = change_value_class_text(&change.absolute);
+    let absolute_text = format_signed_money_text(&change.absolute, currency)
+        .unwrap_or_else(|| change.absolute.clone());
     if show_absolute {
         let percentage_title = change
             .percentage
             .as_deref()
-            .and_then(parse_money_input)
-            .map(format_signed_percent)
+            .and_then(format_signed_percent_text)
             .unwrap_or_else(|| "No comparable percentage".to_string());
         return rsx! {
             span {
-                class: "asset-change-cell asset-labeled-cell {change_value_class(absolute)}",
+                class: "asset-change-cell asset-labeled-cell {absolute_class}",
                 title: "{percentage_title}",
                 small { class: "asset-cell-label", "{field.label()}" }
                 span { "{absolute_text}" }
             }
         };
     }
-    match change.percentage.as_deref().and_then(parse_money_input) {
-        Some(percent) => rsx! {
+    match change.percentage.as_deref().and_then(|percent| {
+        Some((
+            change_value_class_text(percent),
+            format_signed_percent_text(percent)?,
+        ))
+    }) {
+        Some((percent_class, percent_text)) => rsx! {
             span {
-                class: "asset-change-cell asset-labeled-cell {change_value_class(percent)}",
+                class: "asset-change-cell asset-labeled-cell {percent_class}",
                 title: "{absolute_text}",
                 small { class: "asset-cell-label", "{field.label()}" }
-                span { "{format_signed_percent(percent)}" }
+                span { "{percent_text}" }
             }
         },
         None => rsx! {
             span {
-                class: "asset-change-cell asset-labeled-cell {change_value_class(absolute)}",
+                class: "asset-change-cell asset-labeled-cell {absolute_class}",
                 title: "No prior value for this period",
                 small { class: "asset-cell-label", "{field.label()}" }
                 span { "{absolute_text}" }

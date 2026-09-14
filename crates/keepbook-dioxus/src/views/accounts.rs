@@ -60,7 +60,9 @@ pub(super) fn AccountsView(
     let selected_graph_selection = selected_graph();
     let selected_graph_current_value = selected_graph_selection
         .as_ref()
-        .and_then(|selection| account_snapshot_value(&selection.id, &account_summaries));
+        .and_then(|selection| account_snapshot_value_text(&selection.id, &account_summaries))
+        .as_deref()
+        .and_then(parse_money_input);
     let _ = balances;
     let is_price_busy = price_busy();
     let price_status_text = price_status();
@@ -373,8 +375,7 @@ fn VirtualAccountRow(
     let value = account
         .value_in_base
         .as_deref()
-        .and_then(parse_money_input)
-        .map(|value| format_full_money(value, &currency))
+        .and_then(|value| format_money_text(value, &currency))
         .unwrap_or_else(|| "N/A".to_string());
     let selection = AccountGraphSelection {
         id: account.account_id.clone(),
@@ -486,8 +487,8 @@ fn AccountRow(
         "status"
     };
     let tags = account.tags.join(", ");
-    let balance = account_snapshot_value(&account.id, &account_summaries)
-        .map(|value| format_full_money(value, &currency))
+    let balance = account_snapshot_value_text(&account.id, &account_summaries)
+        .and_then(|value| format_money_text(&value, &currency))
         .unwrap_or_else(|| "N/A".to_string());
     let account_id = account.id.clone();
     let account_name = account.name.clone();

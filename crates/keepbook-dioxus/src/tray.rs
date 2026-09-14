@@ -331,7 +331,6 @@ fn update_tray_state(
 
 fn tray_lines(
     tray_snapshot: Option<&Result<TraySnapshot, String>>,
-    overview: Option<&Overview>,
 ) -> (Vec<String>, Vec<String>, Vec<String>, Vec<String>) {
     match tray_snapshot {
         Some(Ok(snapshot)) => (
@@ -343,64 +342,19 @@ fn tray_lines(
             fallback_line(&snapshot.spending_lines, "No spending metrics available"),
             fallback_line(&snapshot.transaction_lines, "No recent transactions"),
         ),
-        Some(Err(error)) => {
-            let breakdown = overview
-                .map(overview_breakdown_lines)
-                .unwrap_or_else(|| vec!["No portfolio breakdown available".to_string()]);
-            (
-                vec![format!("History unavailable: {error}")],
-                breakdown,
-                vec![format!("Spending unavailable: {error}")],
-                vec![format!("Transactions unavailable: {error}")],
-            )
-        }
-        None => {
-            let breakdown = overview
-                .map(overview_breakdown_lines)
-                .unwrap_or_else(|| vec!["Portfolio breakdown loading".to_string()]);
-            (
-                vec!["Portfolio history loading".to_string()],
-                breakdown,
-                vec!["Spending metrics loading".to_string()],
-                vec!["Transactions loading".to_string()],
-            )
-        }
+        Some(Err(error)) => (
+            vec![format!("History unavailable: {error}")],
+            vec![format!("Portfolio breakdown unavailable: {error}")],
+            vec![format!("Spending unavailable: {error}")],
+            vec![format!("Transactions unavailable: {error}")],
+        ),
+        None => (
+            vec!["Portfolio history loading".to_string()],
+            vec!["Portfolio breakdown loading".to_string()],
+            vec!["Spending metrics loading".to_string()],
+            vec!["Transactions loading".to_string()],
+        ),
     }
-}
-
-fn overview_breakdown_lines(overview: &Overview) -> Vec<String> {
-    let mut lines = vec![format!(
-        "Total: {}",
-        overview
-            .snapshot
-            .total_value
-            .parse::<f64>()
-            .ok()
-            .filter(|value| value.is_finite())
-            .map(|value| crate::logic::format_full_money(value, &overview.snapshot.currency))
-            .unwrap_or_else(|| overview.snapshot.total_value.clone())
-    )];
-
-    if overview.snapshot.by_account.is_empty() {
-        lines.push("No accounts with balances".to_string());
-        return lines;
-    }
-
-    lines.extend(overview.snapshot.by_account.iter().map(|account| {
-        let value = account
-            .value_in_base
-            .as_deref()
-            .and_then(|raw| raw.parse::<f64>().ok())
-            .filter(|value| value.is_finite())
-            .map(|value| crate::logic::format_full_money(value, &overview.snapshot.currency))
-            .unwrap_or_else(|| "unpriced".to_string());
-        format!(
-            "{} / {}: {}",
-            account.connection_name, account.account_name, value
-        )
-    }));
-
-    lines
 }
 
 fn fallback_line(lines: &[String], fallback: &str) -> Vec<String> {
@@ -618,7 +572,7 @@ impl ksni::Tray for KeepbookTrayItem {
 
     fn menu(&self) -> Vec<MenuItem<Self>> {
         let (history_lines, breakdown_lines, spending_lines, transaction_lines) =
-            tray_lines(self.tray_snapshot.as_ref(), self.overview.as_ref());
+            tray_lines(self.tray_snapshot.as_ref());
 
         let mut items = vec![
             disabled_item(crate::APP_NAME),

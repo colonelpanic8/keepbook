@@ -1271,7 +1271,7 @@ fn TagRow(
     } else {
         "tag-row"
     };
-    let total = parse_money_input(&entry.total).unwrap_or_default();
+    let total = format_money_text(&entry.total, &currency).unwrap_or_else(|| entry.total.clone());
 
     rsx! {
         button {
@@ -1283,7 +1283,7 @@ fn TagRow(
                 aria_hidden: "true",
             }
             span { class: "tag-name", "{entry.key}" }
-            strong { "{format_full_money(total, &currency)}" }
+            strong { "{total}" }
             small { "{entry.transaction_count} tx" }
         }
     }
@@ -1339,12 +1339,12 @@ fn SpendingMatchList(
 
 #[component]
 fn SpendingMatchRow(entry: SpendingBreakdownEntry, currency: String) -> Element {
-    let total = parse_money_input(&entry.total).unwrap_or_default();
+    let total = format_money_text(&entry.total, &currency).unwrap_or_else(|| entry.total.clone());
 
     rsx! {
         div { class: "spending-match-row",
             span { class: "spending-match-name", "{entry.key}" }
-            strong { "{format_full_money(total, &currency)}" }
+            strong { "{total}" }
             small { "{entry.transaction_count} tx" }
         }
     }

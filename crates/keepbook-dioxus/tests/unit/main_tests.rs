@@ -1146,10 +1146,13 @@ fn account_value_uses_portfolio_snapshot_account_total() {
     }];
 
     assert_eq!(
-        account_snapshot_value("empower", &account_summaries),
-        Some(113738.71)
+        account_snapshot_value_text("empower", &account_summaries).as_deref(),
+        Some("113738.71")
     );
-    assert_eq!(account_snapshot_value("missing", &account_summaries), None);
+    assert_eq!(
+        account_snapshot_value_text("missing", &account_summaries),
+        None
+    );
 }
 
 #[test]
@@ -1163,6 +1166,74 @@ fn money_formatting_uses_usd_symbol() {
 #[test]
 fn money_formatting_keeps_unknown_currency_code() {
     assert_eq!(format_full_money(1571.17, "CHF"), "CHF 1,571.17");
+}
+
+#[test]
+fn decimal_text_money_matches_the_float_formatter() {
+    for (text, value) in [
+        ("1571.17", 1571.17),
+        ("-1571.17", -1571.17),
+        ("1.999", 1.999),
+        ("0", 0.0),
+        ("1234567.89", 1234567.89),
+    ] {
+        assert_eq!(
+            format_money_text(text, "USD").as_deref(),
+            Some(format_full_money(value, "USD").as_str()),
+            "{text}"
+        );
+        assert_eq!(
+            format_signed_money_text(text, "USD").as_deref(),
+            Some(format_signed_money(value, "USD").as_str()),
+            "{text}"
+        );
+    }
+    assert_eq!(
+        format_money_text("113738.71", "CHF").as_deref(),
+        Some("CHF 113,738.71")
+    );
+    assert_eq!(format_money_text("N/A", "USD"), None);
+    // Exact decimal rounding, unlike the f64 path where 1234567.005 is stored
+    // just below the halfway point and rounds down.
+    assert_eq!(
+        format_money_text("1234567.005", "USD").as_deref(),
+        Some("$1,234,567.01")
+    );
+}
+
+#[test]
+fn decimal_text_rounds_half_away_from_zero_and_trims_zeros() {
+    assert_eq!(format_decimal_text("1.005", 2).as_deref(), Some("1.01"));
+    assert_eq!(format_decimal_text("-1.005", 2).as_deref(), Some("-1.01"));
+    assert_eq!(format_decimal_text("9.999", 2).as_deref(), Some("10"));
+    assert_eq!(format_decimal_text("2.50000", 4).as_deref(), Some("2.5"));
+    assert_eq!(format_decimal_text("-0.0004", 2).as_deref(), Some("0"));
+    assert_eq!(
+        format_signed_percent_text("12.3").as_deref(),
+        Some("+12.3%")
+    );
+    assert_eq!(
+        format_signed_percent_text("-4.50").as_deref(),
+        Some("-4.5%")
+    );
+}
+
+#[test]
+fn signed_percent_text_uses_signed_money_sign_convention() {
+    assert_eq!(
+        format_signed_percent_text("5.26").as_deref(),
+        Some("+5.26%")
+    );
+    assert_eq!(format_signed_percent_text("-3.1").as_deref(), Some("-3.1%"));
+    assert_eq!(format_signed_percent_text("0").as_deref(), Some("+0%"));
+}
+
+#[test]
+fn decimal_text_change_class_keeps_zero_neutral() {
+    assert_eq!(change_value_class_text("12.5"), "change-positive");
+    assert_eq!(change_value_class_text("-12.5"), "change-negative");
+    assert_eq!(change_value_class_text("0.00"), "");
+    assert_eq!(change_value_class_text("N/A"), "");
 }
 
 #[test]
@@ -1347,20 +1418,6 @@ fn asset_display_names_cover_all_asset_kinds() {
     assert_eq!(asset_kind_label(&crypto), "Crypto");
     assert_eq!(asset_kind_label(&manual), "Manual");
     assert_eq!(asset_kind_label(&unknown), "Asset");
-}
-
-#[test]
-fn signed_percent_uses_signed_money_sign_convention() {
-    assert_eq!(format_signed_percent(5.26), "+5.26%");
-    assert_eq!(format_signed_percent(-3.1), "-3.1%");
-    assert_eq!(format_signed_percent(0.0), "+0%");
-}
-
-#[test]
-fn change_value_class_keeps_zero_neutral() {
-    assert_eq!(change_value_class(4.2), "change-positive");
-    assert_eq!(change_value_class(-4.2), "change-negative");
-    assert_eq!(change_value_class(0.0), "");
 }
 
 #[test]

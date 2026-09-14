@@ -839,15 +839,16 @@ pub(crate) fn parse_money_input(value: &str) -> Option<f64> {
     }
 }
 
-pub(crate) fn account_snapshot_value(
+/// The app's decimal text for an account's snapshot value, kept as text so
+/// display sites format it without an f64 round trip.
+pub(crate) fn account_snapshot_value_text(
     account_id: &str,
     account_summaries: &[AccountSummary],
-) -> Option<f64> {
+) -> Option<String> {
     account_summaries
         .iter()
         .find(|summary| summary.account_id == account_id)
-        .and_then(|summary| summary.value_in_base.as_deref())
-        .and_then(parse_money_input)
+        .and_then(|summary| summary.value_in_base.clone())
 }
 
 pub(crate) fn virtual_account_summaries(snapshot: &PortfolioSnapshot) -> Vec<AccountSummary> {
@@ -895,7 +896,6 @@ pub(crate) fn format_full_money(value: f64, currency: &str) -> String {
 }
 
 fn format_money_display(value: f64, currency: &str, decimals: usize, suffix: &str) -> String {
-    let sign = if value < 0.0 { "-" } else { "" };
     let rounded = format!("{:.*}", decimals, value.abs());
     let amount = match rounded.split_once('.') {
         Some((integer, fraction)) => {
@@ -907,6 +907,11 @@ fn format_money_display(value: f64, currency: &str, decimals: usize, suffix: &st
         None => format!("{}{suffix}", format_digit_string_with_commas(&rounded)),
     };
 
+    apply_currency_display(&amount, currency, value < 0.0)
+}
+
+fn apply_currency_display(amount: &str, currency: &str, negative: bool) -> String {
+    let sign = if negative { "-" } else { "" };
     match currency_display_symbol(currency) {
         Some(symbol) => format!("{sign}{symbol}{amount}"),
         None => {
@@ -957,6 +962,144 @@ pub(crate) fn format_number(value: f64, decimals: usize) -> String {
         }
     }
     formatted
+}
+
+/// Canonical decimal text as produced by the app layer: an optional sign, then
+/// integer and fraction digit runs. Keeping money in this form lets the UI
+/// render app values without an f64 round trip.
+struct DecimalText<'a> {
+    negative: bool,
+    integer: &'a str,
+    fraction: &'a str,
+}
+
+fn parse_decimal_text(value: &str) -> Option<DecimalText<'_>> {
+    let trimmed = value.trim();
+    let (negative, digits) = match trimmed.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, trimmed.strip_prefix('+').unwrap_or(trimmed)),
+    };
+    let (integer, fraction) = digits.split_once('.').unwrap_or((digits, ""));
+    if integer.is_empty() && fraction.is_empty() {
+        return None;
+    }
+    if !integer.bytes().all(|byte| byte.is_ascii_digit())
+        || !fraction.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return None;
+    }
+    Some(DecimalText {
+        negative,
+        integer,
+        fraction,
+    })
+}
+
+/// Round the digits of a [`DecimalText`] to `decimals` places, half away from
+/// zero, returning the integer and fraction digit runs.
+fn round_decimal_digits(value: &DecimalText<'_>, decimals: usize) -> (String, String) {
+    let mut digits: Vec<u8> = value
+        .integer
+        .bytes()
+        .chain(value.fraction.bytes())
+        .map(|byte| byte - b'0')
+        .collect();
+    let keep = value.integer.len() + decimals;
+    let round_up = digits.get(keep).is_some_and(|digit| *digit >= 5);
+    digits.truncate(keep);
+    digits.resize(keep, 0);
+    if round_up {
+        let mut index = digits.len();
+        loop {
+            if index == 0 {
+                digits.insert(0, 1);
+                break;
+            }
+            index -= 1;
+            if digits[index] == 9 {
+                digits[index] = 0;
+            } else {
+                digits[index] += 1;
+                break;
+            }
+        }
+    }
+
+    let split = digits.len() - decimals;
+    let render = |run: &[u8]| run.iter().map(|digit| (digit + b'0') as char).collect();
+    let integer: String = render(&digits[..split]);
+    let fraction: String = render(&digits[split..]);
+    let trimmed = integer.trim_start_matches('0');
+    (
+        if trimmed.is_empty() {
+            "0".to_string()
+        } else {
+            trimmed.to_string()
+        },
+        fraction,
+    )
+}
+
+fn is_zero_digits(integer: &str, fraction: &str) -> bool {
+    integer.bytes().chain(fraction.bytes()).all(|b| b == b'0')
+}
+
+/// Round app decimal text to `decimals` places and strip trailing fraction
+/// zeros: the string-domain counterpart of [`format_number`].
+pub(crate) fn format_decimal_text(value: &str, decimals: usize) -> Option<String> {
+    let parsed = parse_decimal_text(value)?;
+    let (integer, fraction) = round_decimal_digits(&parsed, decimals);
+    let fraction = fraction.trim_end_matches('0');
+    let sign = if parsed.negative && !is_zero_digits(&integer, fraction) {
+        "-"
+    } else {
+        ""
+    };
+    Some(if fraction.is_empty() {
+        format!("{sign}{integer}")
+    } else {
+        format!("{sign}{integer}.{fraction}")
+    })
+}
+
+/// Currency text for app decimal money, matching [`format_full_money`] without
+/// the f64 round trip. `None` when the text is not a decimal.
+pub(crate) fn format_money_text(value: &str, currency: &str) -> Option<String> {
+    let parsed = parse_decimal_text(value)?;
+    let (integer, fraction) = round_decimal_digits(&parsed, 2);
+    let amount = format!("{}.{fraction}", format_digit_string_with_commas(&integer));
+    Some(apply_currency_display(&amount, currency, parsed.negative))
+}
+
+/// [`format_money_text`] with an explicit `+` on non-negative amounts.
+pub(crate) fn format_signed_money_text(value: &str, currency: &str) -> Option<String> {
+    let formatted = format_money_text(value, currency)?;
+    Some(if parse_decimal_text(value)?.negative {
+        formatted
+    } else {
+        format!("+{formatted}")
+    })
+}
+
+/// Signed percentage text for app decimal percentages, using the same sign
+/// convention as [`format_signed_money_text`]: non-negative values get a `+`.
+pub(crate) fn format_signed_percent_text(value: &str) -> Option<String> {
+    let formatted = format_decimal_text(value, 2)?;
+    Some(if formatted.starts_with('-') {
+        format!("{formatted}%")
+    } else {
+        format!("+{formatted}%")
+    })
+}
+
+/// Gain/loss coloring class for app decimal text. Zero stays neutral.
+pub(crate) fn change_value_class_text(value: &str) -> &'static str {
+    match parse_decimal_text(value) {
+        Some(parsed) if is_zero_digits(parsed.integer, parsed.fraction) => "",
+        Some(parsed) if parsed.negative => "change-negative",
+        Some(_) => "change-positive",
+        None => "",
+    }
 }
 
 pub(crate) fn enabled_label(value: bool) -> &'static str {
@@ -1386,33 +1529,10 @@ pub(crate) fn asset_kind_label(asset: &serde_json::Value) -> &'static str {
     }
 }
 
-/// Signed percentage text using the same sign convention as
-/// `format_signed_money`: non-negative values get an explicit `+`.
-pub(crate) fn format_signed_percent(value: f64) -> String {
-    if value >= 0.0 {
-        format!("+{}%", format_number(value, 2))
-    } else {
-        format!("{}%", format_number(value, 2))
-    }
-}
-
-/// Gain/loss coloring class for a change value. Zero stays neutral.
-pub(crate) fn change_value_class(value: f64) -> &'static str {
-    if value > 0.0 {
-        "change-positive"
-    } else if value < 0.0 {
-        "change-negative"
-    } else {
-        ""
-    }
-}
-
-/// Display form of an asset holding amount: parsed and trimmed like the rest
+/// Display form of an asset holding amount: rounded and trimmed like the rest
 /// of the app's decimal output, keeping the raw text when unparseable.
 pub(crate) fn format_asset_amount(amount: &str) -> String {
-    parse_money_input(amount)
-        .map(|value| format_number(value, 4))
-        .unwrap_or_else(|| amount.to_string())
+    format_decimal_text(amount, 4).unwrap_or_else(|| amount.to_string())
 }
 
 /// Expansion-state key for an asset breakdown row. Asset and liability rows
@@ -1825,9 +1945,7 @@ pub(crate) fn normalize_tags(tags: Vec<String>) -> Vec<String> {
 }
 
 pub(crate) fn format_transaction_amount(transaction: &Transaction, currency: &str) -> String {
-    parse_money_input(&transaction.amount)
-        .map(|amount| format_full_money(amount, currency))
-        .unwrap_or_else(|| transaction.amount.clone())
+    format_money_text(&transaction.amount, currency).unwrap_or_else(|| transaction.amount.clone())
 }
 
 pub(crate) fn git_settings_from_remote(remote: &str) -> Result<(String, String, String), String> {
