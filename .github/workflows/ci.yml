@@ -52,6 +52,9 @@ jobs:
       - name: Clippy
         run: nix develop --command cargo clippy --all-targets --all-features -- -D warnings
 
+      - name: Check feature matrix
+        run: nix develop --command ./scripts/check-feature-matrix.sh
+
       - name: Build
         run: nix develop --command cargo build --all-targets
 

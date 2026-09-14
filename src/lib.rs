@@ -7,7 +7,6 @@ pub mod storage;
 #[cfg(feature = "config")]
 pub mod config;
 
-#[cfg(feature = "credentials")]
 pub mod credentials;
 
 #[cfg(feature = "app")]

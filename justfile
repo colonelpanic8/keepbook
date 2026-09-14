@@ -92,6 +92,10 @@ dioxus-android-build *args:
 dioxus-android-release *args:
     nix run .#dioxus-android-release -- "$@"
 
+# Build the library under each declared feature in isolation.
+check-feature-matrix:
+    ./scripts/check-feature-matrix.sh
+
 # Regenerate fastlane store changelogs from CHANGELOG.md.
 # Pass --check to verify the committed files are current (what CI runs).
 fdroid-changelogs *args:

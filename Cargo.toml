@@ -62,16 +62,24 @@ cli = [
   "dep:tracing-subscriber",
 ]
 
-# Fine-grained feature gates for consumers that want a subset.
-app = []
+# Fine-grained feature gates for consumers that want a subset. Each entry lists
+# the other modules its code actually imports, so any single feature builds on
+# its own. `scripts/check-feature-matrix.sh` enforces that.
+app = ["config", "git", "market_data", "portfolio", "staleness", "sync"]
 tui = ["app", "config", "dep:dialoguer", "dep:ratatui", "dep:crossterm", "dep:reqwest"]
 config = []
+# The credential interface and its configuration types are always compiled;
+# this feature adds the age-encrypted backend, which needs the `age` crate.
 credentials = ["dep:age"]
 git = ["config", "dep:git2"]
 market_data = ["dep:reqwest"]
-portfolio = []
-staleness = []
+portfolio = ["market_data"]
+staleness = ["config", "market_data"]
 sync = [
+  "config",
+  "git",
+  "market_data",
+  "staleness",
   "dep:reqwest",
   "dep:base64",
   "dep:chromiumoxide",

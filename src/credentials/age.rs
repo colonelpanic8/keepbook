@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::io::BufReader;
 use std::path::PathBuf;
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -132,7 +131,10 @@ impl AgeCredentialStore {
         Ok(paths)
     }
 
+    #[cfg(feature = "credentials")]
     fn decrypt_with_identity(&self, ciphertext: &[u8], identity_path: &PathBuf) -> Result<Vec<u8>> {
+        use std::io::BufReader;
+
         let identity_pem = std::fs::read_to_string(identity_path).with_context(|| {
             format!(
                 "Failed to read age SSH identity {}",
@@ -148,6 +150,15 @@ impl AgeCredentialStore {
 
         ::age::decrypt(&identity, ciphertext)
             .with_context(|| format!("Failed to decrypt with {}", identity_path.display()))
+    }
+
+    #[cfg(not(feature = "credentials"))]
+    fn decrypt_with_identity(
+        &self,
+        _ciphertext: &[u8],
+        _identity_path: &PathBuf,
+    ) -> Result<Vec<u8>> {
+        bail!("age credential backend requires the `credentials` feature")
     }
 
     fn read_entry(&self) -> Result<FieldEntry> {
