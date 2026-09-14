@@ -11,7 +11,7 @@ use crate::models::{Account, AssetBalance, BalanceSnapshot, Connection, Connecti
 use crate::storage::JsonFileStorage;
 use crate::storage::MemoryStorage;
 use chrono::TimeZone;
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use tempfile::TempDir;
