@@ -545,12 +545,18 @@ impl ChaseSynchronizer {
             // Chase reports holdings through account-type-specific detail
             // endpoints. When one fails, or the account kind has no detail
             // endpoint yet, nothing was learned about the balance.
+            let unavailable_reason = match account_kind {
+                ChaseAccountKind::Other => format!(
+                    "Chase balances are only fetched for cards and mortgages; account {} was skipped",
+                    acct.mask
+                ),
+                ChaseAccountKind::Mortgage | ChaseAccountKind::CreditCard => {
+                    format!("Chase returned no balance for account {}", acct.mask)
+                }
+            };
             balances.push((
                 account_id.clone(),
-                AccountBalances::snapshot_or_unavailable(
-                    account_balances,
-                    format!("Chase returned no balance for account {}", acct.mask),
-                ),
+                AccountBalances::snapshot_or_unavailable(account_balances, unavailable_reason),
             ));
             transactions.push((account_id, acct_txns));
         }
