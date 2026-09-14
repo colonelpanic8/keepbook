@@ -3,5 +3,7 @@
   "currency": "USD",
   "change_mode": "price_only",
   "total_value": "0",
+  "asset_count": 0,
+  "liability_count": 0,
   "assets": []
 }

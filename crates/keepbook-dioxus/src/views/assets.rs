@@ -49,8 +49,8 @@ pub(super) fn AssetsView(filter_overrides: FilterOverrides) -> Element {
                         show_absolute_changes(),
                     )
                 });
-                let liability_count = entries.iter().filter(|entry| entry.liability).count();
-                let asset_count = entries.len() - liability_count;
+                let asset_count = data.asset_count;
+                let liability_count = data.liability_count;
                 let total_value = format_money_text(&data.total_value, &currency)
                     .unwrap_or_else(|| data.total_value.clone());
                 let expanded = expanded_assets();

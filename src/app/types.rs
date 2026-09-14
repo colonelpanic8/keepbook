@@ -12,6 +12,10 @@ pub struct ConnectionOutput {
     pub synchronizer: String,
     pub status: String,
     pub account_count: usize,
+    /// How many of `account_count` accounts are active.
+    pub active_account_count: usize,
+    /// How many of `account_count` accounts are configured out of the portfolio.
+    pub excluded_account_count: usize,
     pub last_sync: Option<String>,
 }
 
@@ -373,6 +377,10 @@ pub struct AssetBreakdownOutput {
     pub change_mode: String,
     /// Sum of all rows' value_in_base; rows with missing values contribute 0.
     pub total_value: String,
+    /// How many rows hold a positive amount of an asset.
+    pub asset_count: usize,
+    /// How many rows aggregate negative-amount holdings.
+    pub liability_count: usize,
     pub assets: Vec<AssetBreakdownEntry>,
 }
 

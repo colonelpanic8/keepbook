@@ -2121,6 +2121,8 @@ pub async fn portfolio_assets(
             "price_only".to_string()
         },
         total_value: format_base_currency_value(total_value, currency_decimals),
+        asset_count: entries.iter().filter(|(_, entry)| !entry.liability).count(),
+        liability_count: entries.iter().filter(|(_, entry)| entry.liability).count(),
         assets: entries.into_iter().map(|(_, entry)| entry).collect(),
     })
 }

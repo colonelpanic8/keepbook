@@ -407,17 +407,14 @@ fn AccountGroup(
     onselect: EventHandler<AccountGraphSelection>,
     onfilterchange: EventHandler<FilterOverrides>,
 ) -> Element {
-    let active_count = accounts.iter().filter(|account| account.active).count();
-    let ignored_count = accounts
-        .iter()
-        .filter(|account| account.exclude_from_portfolio)
-        .count();
+    let active_count = connection.active_account_count;
+    let ignored_count = connection.excluded_account_count;
     let status_text = if ignored_count == 0 {
-        format!("{active_count}/{} active", accounts.len())
+        format!("{active_count}/{} active", connection.account_count)
     } else {
         format!(
             "{active_count}/{} active, {ignored_count} ignored",
-            accounts.len()
+            connection.account_count
         )
     };
 

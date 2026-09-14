@@ -36,6 +36,54 @@ async fn list_accounts_marks_portfolio_excluded_accounts() -> Result<()> {
 }
 
 #[tokio::test]
+async fn list_connections_counts_active_and_excluded_accounts() -> Result<()> {
+    let storage = MemoryStorage::new();
+    let created_at = Utc.with_ymd_and_hms(2026, 2, 5, 12, 0, 0).unwrap();
+    let connection = crate::models::Connection::new(crate::models::ConnectionConfig {
+        name: "Bank".to_string(),
+        synchronizer: "manual".to_string(),
+        credentials: None,
+        balance_staleness: None,
+    });
+    storage.save_connection(&connection).await?;
+
+    let account = |id: &str, name: &str| {
+        Account::new_with(
+            Id::from_string(id),
+            created_at,
+            name,
+            connection.id().clone(),
+        )
+    };
+    let mut closed = account("acct-closed", "Closed");
+    closed.active = false;
+    for account in [
+        account("acct-checking", "Checking"),
+        account("acct-mortgage", "Mortgage"),
+        closed,
+    ] {
+        storage.save_account(&account).await?;
+    }
+    storage
+        .save_account_config(
+            &Id::from_string("acct-mortgage"),
+            &AccountConfig {
+                exclude_from_portfolio: Some(true),
+                ..AccountConfig::default()
+            },
+        )
+        .await?;
+
+    let connections = list_connections(&storage).await?;
+
+    assert_eq!(connections.len(), 1);
+    assert_eq!(connections[0].account_count, 3);
+    assert_eq!(connections[0].active_account_count, 2);
+    assert_eq!(connections[0].excluded_account_count, 1);
+    Ok(())
+}
+
+#[tokio::test]
 async fn list_transactions_includes_annotation_when_present() -> Result<()> {
     let storage = MemoryStorage::new();
     let clock = FixedClock::new(Utc.with_ymd_and_hms(2026, 2, 5, 12, 0, 0).unwrap());

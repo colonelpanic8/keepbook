@@ -244,6 +244,10 @@ struct Connection {
     synchronizer: String,
     status: String,
     account_count: usize,
+    #[serde(default)]
+    active_account_count: usize,
+    #[serde(default)]
+    excluded_account_count: usize,
     last_sync: Option<String>,
 }
 
@@ -403,6 +407,10 @@ struct AssetBreakdown {
     #[serde(default)]
     change_mode: String,
     total_value: String,
+    #[serde(default)]
+    asset_count: usize,
+    #[serde(default)]
+    liability_count: usize,
     assets: Vec<AssetBreakdownEntry>,
 }
 

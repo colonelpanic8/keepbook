@@ -82,7 +82,13 @@ pub async fn list_connections(storage: &dyn Storage) -> Result<Vec<ConnectionOut
     let connections = storage.list_connections().await?;
     let accounts = storage.list_accounts().await?;
     let mut accounts_by_connection: HashMap<Id, HashSet<Id>> = HashMap::new();
+    let mut account_states: HashMap<Id, (bool, bool)> = HashMap::new();
     for account in accounts {
+        let exclude_from_portfolio = storage
+            .get_account_config(&account.id)?
+            .and_then(|config| config.exclude_from_portfolio)
+            .unwrap_or(false);
+        account_states.insert(account.id.clone(), (account.active, exclude_from_portfolio));
         accounts_by_connection
             .entry(account.connection_id.clone())
             .or_default()
@@ -106,12 +112,21 @@ pub async fn list_connections(storage: &dyn Storage) -> Result<Vec<ConnectionOut
             account_ids.insert(account_id);
         }
 
+        let count_where = |predicate: fn(&(bool, bool)) -> bool| {
+            account_ids
+                .iter()
+                .filter(|id| account_states.get(*id).is_some_and(predicate))
+                .count()
+        };
+
         output.push(ConnectionOutput {
             id: c.id().to_string(),
             name: c.config.name.clone(),
             synchronizer: c.config.synchronizer.clone(),
             status: c.state.status.to_string(),
             account_count: account_ids.len(),
+            active_account_count: count_where(|(active, _)| *active),
+            excluded_account_count: count_where(|(_, excluded)| *excluded),
             last_sync: c.state.last_sync.as_ref().map(|ls| ls.at.to_rfc3339()),
         });
     }

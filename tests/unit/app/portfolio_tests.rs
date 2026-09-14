@@ -1870,6 +1870,8 @@ async fn portfolio_assets_sorts_by_absolute_value_descending() -> anyhow::Result
         ]
     );
 
+    assert_eq!((output.asset_count, output.liability_count), (3, 1));
+
     let unpriced = &output.assets[3];
     assert_eq!(unpriced.value_in_base, None);
     assert!(unpriced.changes.day.is_none());

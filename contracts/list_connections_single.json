@@ -5,6 +5,8 @@
     "synchronizer": "manual",
     "status": "active",
     "account_count": 1,
+    "active_account_count": 1,
+    "excluded_account_count": 0,
     "last_sync": null
   }
 ]

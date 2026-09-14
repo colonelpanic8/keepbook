@@ -3,6 +3,8 @@
   "currency": "USD",
   "change_mode": "price_only",
   "total_value": "60.25",
+  "asset_count": 1,
+  "liability_count": 1,
   "assets": [
     {
       "asset": { "type": "currency", "iso_code": "USD" },
