@@ -81,6 +81,13 @@ importer. Pages: `colors.html`, `typography.html` (Foundations);
   carrying one are marked `setting-row-stacked` and stack below 520px, handing
   the control the row width rather than squeezing both halves. Repository rows
   and their label/value pairs stack at the same width for the same reason.
+- A chart's empty state (`chart-empty`) holds the footprint of the chart it
+  replaces, so a panel does not resize as data appears or disappears. The base
+  ratio matches the 720x260 net worth chart; the spending over-time chart is
+  720x300, so `spending-over-time-empty` restates that ratio. Empty states that
+  stand in for a table or list (`spending-empty`, `transaction-empty`,
+  `proposal-empty`) have no chart to match, so they drop the ratio for a
+  `min-height` instead.
 - Actions and clear/reset controls do not belong inside an option group — they
   change its column count without being one of the choices. Put them in their
   own row, and prefer a contextual chip (`filter-clear-chip`) that only exists
