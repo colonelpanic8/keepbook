@@ -3,9 +3,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
+use super::file_io;
 use anyhow::{Context, Result};
 use tokio::fs;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tracing::warn;
 
 use super::{dedupe_transactions_last_write_wins, Storage};
@@ -232,15 +232,6 @@ impl JsonFileStorage {
         }
     }
 
-    async fn ensure_dir(&self, path: &Path) -> Result<()> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .await
-                .with_context(|| format!("Failed to create directory: {}", parent.display()))?;
-        }
-        Ok(())
-    }
-
     async fn fs_cache_key(path: &Path) -> Result<Option<FsCacheKey>> {
         match fs::metadata(path).await {
             Ok(metadata) => Ok(Some(FsCacheKey {
@@ -304,11 +295,8 @@ impl JsonFileStorage {
     }
 
     async fn write_json<T: serde::Serialize>(&self, path: &Path, value: &T) -> Result<()> {
-        self.ensure_dir(path).await?;
-        let content = serde_json::to_string_pretty(value).context("Failed to serialize JSON")?;
-        fs::write(path, content)
-            .await
-            .context("Failed to write file")?;
+        let content = serde_json::to_vec_pretty(value).context("Failed to serialize JSON")?;
+        file_io::write(path, content).await?;
         Ok(())
     }
 
@@ -327,66 +315,15 @@ impl JsonFileStorage {
         }
     }
 
-    async fn read_jsonl<T: for<'de> serde::Deserialize<'de>>(&self, path: &Path) -> Result<Vec<T>> {
-        let file = match fs::File::open(path).await {
-            Ok(f) => f,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(e) => return Err(e).context("Failed to open file"),
-        };
-
-        let reader = BufReader::new(file);
-        let mut lines = reader.lines();
-        let mut items = Vec::new();
-
-        while let Some(line) = lines.next_line().await.context("Failed to read line")? {
-            if line.trim().is_empty() {
-                continue;
-            }
-            let item: T = serde_json::from_str(&line)
-                .with_context(|| format!("Failed to parse JSONL line: {line}"))?;
-            items.push(item);
-        }
-
-        Ok(items)
+    async fn read_jsonl<T: serde::de::DeserializeOwned + Send + 'static>(
+        &self,
+        path: &Path,
+    ) -> Result<Vec<T>> {
+        file_io::read_jsonl(path).await
     }
 
     async fn append_jsonl<T: serde::Serialize>(&self, path: &Path, items: &[T]) -> Result<()> {
-        if items.is_empty() {
-            return Ok(());
-        }
-
-        self.ensure_dir(path).await?;
-
-        let mut file = fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-            .await
-            .context("Failed to open file for append")?;
-
-        for item in items {
-            let line = serde_json::to_string(item).context("Failed to serialize item")?;
-            file.write_all(line.as_bytes()).await?;
-            file.write_all(b"\n").await?;
-        }
-
-        Ok(())
-    }
-
-    async fn write_jsonl<T: serde::Serialize>(&self, path: &Path, items: &[T]) -> Result<()> {
-        self.ensure_dir(path).await?;
-
-        let mut content = String::new();
-        for item in items {
-            let line = serde_json::to_string(item).context("Failed to serialize item")?;
-            content.push_str(&line);
-            content.push('\n');
-        }
-
-        fs::write(path, content)
-            .await
-            .with_context(|| format!("Failed to write JSONL file {}", path.display()))?;
-        Ok(())
+        file_io::append_jsonl(path, items).await
     }
 
     async fn list_dirs(&self, path: &Path) -> Result<Vec<Id>> {
@@ -777,43 +714,55 @@ impl JsonFileStorage {
         for account_id in account_ids {
             let balances_path = self.balances_file(&account_id)?;
             if balances_path.exists() {
-                let mut snapshots = self.read_jsonl::<BalanceSnapshot>(&balances_path).await?;
-                stats.balance_snapshots_before += snapshots.len();
-                snapshots.sort_by_key(|s| s.timestamp);
-                stats.balance_snapshots_after += snapshots.len();
-                self.write_jsonl(&balances_path, &snapshots).await?;
+                let count = file_io::update_jsonl(
+                    &balances_path,
+                    |snapshots: &mut Vec<BalanceSnapshot>| {
+                        snapshots.sort_by_key(|s| s.timestamp);
+                        Ok((snapshots.len(), true))
+                    },
+                )
+                .await?;
+                stats.balance_snapshots_before += count;
+                stats.balance_snapshots_after += count;
                 stats.files_rewritten += 1;
             }
 
             let tx_path = self.transactions_file(&account_id)?;
             if tx_path.exists() {
-                let raw: Vec<Transaction> = self
-                    .read_jsonl::<Transaction>(&tx_path)
-                    .await?
-                    .into_iter()
-                    .map(Transaction::backfill_standardized_metadata)
-                    .collect();
-                stats.transactions_before += raw.len();
-                let mut compacted = dedupe_transactions_last_write_wins(raw);
-                compacted.sort_by(|a, b| {
-                    a.timestamp
-                        .cmp(&b.timestamp)
-                        .then_with(|| a.id.as_str().cmp(b.id.as_str()))
-                });
-                stats.transactions_after += compacted.len();
-                self.write_jsonl(&tx_path, &compacted).await?;
+                let (before, after) =
+                    file_io::update_jsonl(&tx_path, |transactions: &mut Vec<Transaction>| {
+                        let before = transactions.len();
+                        let raw = std::mem::take(transactions)
+                            .into_iter()
+                            .map(Transaction::backfill_standardized_metadata)
+                            .collect();
+                        *transactions = dedupe_transactions_last_write_wins(raw);
+                        transactions.sort_by(|a, b| {
+                            a.timestamp
+                                .cmp(&b.timestamp)
+                                .then_with(|| a.id.as_str().cmp(b.id.as_str()))
+                        });
+                        Ok(((before, transactions.len()), true))
+                    })
+                    .await?;
+                stats.transactions_before += before;
+                stats.transactions_after += after;
                 stats.files_rewritten += 1;
             }
 
             let ann_path = self.transaction_annotations_file(&account_id)?;
             if ann_path.exists() {
-                let raw = self
-                    .read_jsonl::<TransactionAnnotationPatch>(&ann_path)
-                    .await?;
-                stats.annotation_patches_before += raw.len();
-                let compacted = compact_transaction_annotation_patches(raw);
-                stats.annotation_patches_after += compacted.len();
-                self.write_jsonl(&ann_path, &compacted).await?;
+                let (before, after) = file_io::update_jsonl(
+                    &ann_path,
+                    |patches: &mut Vec<TransactionAnnotationPatch>| {
+                        let before = patches.len();
+                        *patches = compact_transaction_annotation_patches(std::mem::take(patches));
+                        Ok(((before, patches.len()), true))
+                    },
+                )
+                .await?;
+                stats.annotation_patches_before += before;
+                stats.annotation_patches_after += after;
                 stats.files_rewritten += 1;
             }
         }
@@ -837,27 +786,27 @@ impl JsonFileStorage {
                 continue;
             }
 
-            let raw = self.read_jsonl::<Transaction>(&tx_path).await?;
-            stats.transactions_examined += raw.len();
-
-            let mut updated = 0usize;
-            let backfilled: Vec<Transaction> = raw
-                .into_iter()
-                .map(|tx| {
-                    let before = tx.standardized_metadata.clone();
-                    let next = tx.backfill_standardized_metadata();
-                    if next.standardized_metadata != before {
-                        updated += 1;
-                    }
-                    next
+            let (examined, updated) =
+                file_io::update_jsonl(&tx_path, |transactions: &mut Vec<Transaction>| {
+                    let examined = transactions.len();
+                    let mut updated = 0;
+                    *transactions = std::mem::take(transactions)
+                        .into_iter()
+                        .map(|transaction| {
+                            let before = transaction.standardized_metadata.clone();
+                            let next = transaction.backfill_standardized_metadata();
+                            if next.standardized_metadata != before {
+                                updated += 1;
+                            }
+                            next
+                        })
+                        .collect();
+                    Ok(((examined, updated), updated > 0))
                 })
-                .collect();
-
-            if updated > 0 {
-                self.write_jsonl(&tx_path, &backfilled).await?;
-                stats.files_rewritten += 1;
-                stats.transactions_updated += updated;
-            }
+                .await?;
+            stats.transactions_examined += examined;
+            stats.transactions_updated += updated;
+            stats.files_rewritten += usize::from(updated > 0);
         }
 
         self.clear_cache();
@@ -975,10 +924,9 @@ impl Storage for JsonFileStorage {
 
     async fn save_connection_config(&self, id: &Id, config: &ConnectionConfig) -> Result<()> {
         let path = self.connection_config_file(id)?;
-        self.ensure_dir(&path).await?;
         let config_toml =
             toml::to_string_pretty(config).context("Failed to serialize connection config")?;
-        fs::write(&path, config_toml)
+        file_io::write(&path, config_toml.into_bytes())
             .await
             .with_context(|| format!("Failed to write {}", path.display()))?;
         self.clear_cache();
@@ -1064,10 +1012,9 @@ impl Storage for JsonFileStorage {
 
     async fn save_account_config(&self, id: &Id, config: &AccountConfig) -> Result<()> {
         let path = self.account_config_file(id)?;
-        self.ensure_dir(&path).await?;
         let config_toml =
             toml::to_string_pretty(config).context("Failed to serialize account config")?;
-        fs::write(&path, config_toml)
+        file_io::write(&path, config_toml.into_bytes())
             .await
             .with_context(|| format!("Failed to write {}", path.display()))?;
         self.clear_cache();

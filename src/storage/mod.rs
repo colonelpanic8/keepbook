@@ -1,3 +1,4 @@
+pub(crate) mod file_io;
 mod json_file;
 pub mod lookup;
 mod memory;

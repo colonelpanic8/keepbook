@@ -78,7 +78,6 @@ sync = [
   "dep:futures",
   "dep:p256",
   "dep:rand",
-  "dep:tempfile",
   "dep:urlencoding",
 ]
 tray = ["dep:ksni", "dep:image", "dep:notify"]
@@ -135,7 +134,7 @@ async-trait = "0.1"
 # Chrome DevTools Protocol for browser automation
 chromiumoxide = { version = "0.9.1", default-features = false, optional = true }
 futures = { version = "0.3", optional = true }
-tempfile = { version = "3", optional = true }
+tempfile = "3"
 urlencoding = { version = "2", optional = true }
 
 # Structured logging

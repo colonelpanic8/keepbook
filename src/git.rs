@@ -196,13 +196,45 @@ fn open_data_repo(data_dir: &Path) -> Result<DataRepo> {
         });
     }
 
+    ensure_storage_files_ignored(&repo)?;
     Ok(DataRepo::Found(repo))
+}
+
+fn ensure_storage_files_ignored(repo: &Repository) -> Result<()> {
+    use std::io::{Read, Write};
+    let path = repo.commondir().join("info").join("exclude");
+    std::fs::create_dir_all(path.parent().context("Missing Git info directory")?)?;
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .append(true)
+        .create(true)
+        .open(&path)?;
+    file.lock()?;
+    let mut content = String::new();
+    file.read_to_string(&mut content)?;
+    let mut additions = String::new();
+    for pattern in [".keepbook-lock-*", ".keepbook-tmp-*"] {
+        if !content.lines().any(|line| line == pattern) {
+            if additions.is_empty() && !content.is_empty() && !content.ends_with('\n') {
+                additions.push('\n');
+            }
+            additions.push_str(pattern);
+            additions.push('\n');
+        }
+    }
+    if !additions.is_empty() {
+        file.write_all(additions.as_bytes())?;
+        file.sync_all()?;
+    }
+    Ok(())
 }
 
 fn data_changes_present(repo: &Repository) -> Result<bool> {
     for entry in statuses(repo, true)?.iter() {
         let path = entry.path().context("git status path is not valid UTF-8")?;
-        if path != AUTO_COMMIT_EXCLUDED_PATH {
+        if path != AUTO_COMMIT_EXCLUDED_PATH
+            && !crate::storage::file_io::is_internal_file(Path::new(path))
+        {
             return Ok(true);
         }
     }
@@ -215,7 +247,12 @@ fn stage_data_changes(repo: &Repository) -> Result<()> {
         .add_all(
             ["."],
             IndexAddOption::DEFAULT,
-            Some(&mut |path, _matched| i32::from(path == Path::new(AUTO_COMMIT_EXCLUDED_PATH))),
+            Some(&mut |path, _matched| {
+                i32::from(
+                    path == Path::new(AUTO_COMMIT_EXCLUDED_PATH)
+                        || crate::storage::file_io::is_internal_file(path),
+                )
+            }),
         )
         .context("git add failed")?;
     index.write().context("failed to write git index")?;
@@ -223,7 +260,11 @@ fn stage_data_changes(repo: &Repository) -> Result<()> {
 }
 
 fn ensure_clean_worktree(repo: &Repository, action: &str) -> Result<()> {
-    if statuses(repo, true)?.is_empty() {
+    if statuses(repo, true)?.iter().all(|entry| {
+        entry
+            .path()
+            .is_ok_and(|path| crate::storage::file_io::is_internal_file(Path::new(path)))
+    }) {
         Ok(())
     } else {
         anyhow::bail!("git working tree is not clean; {action}");

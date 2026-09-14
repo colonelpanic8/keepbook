@@ -535,3 +535,39 @@ fn test_merge_origin_master_aborts_on_conflicts() -> Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn storage_lock_and_temporary_files_are_not_data_changes() -> Result<()> {
+    if !git_available() {
+        return Ok(());
+    }
+    let dir = TempDir::new()?;
+    init_repo(dir.path())?;
+    fs::write(dir.path().join("account.json"), "{}\n")?;
+    commit_all(dir.path(), "initial")?;
+    let exclude = dir.path().join(".git/info/exclude");
+    fs::write(&exclude, "local.note")?;
+    fs::write(dir.path().join("local.note"), "local-only")?;
+    fs::write(dir.path().join(".keepbook-lock-account.json.lock"), "")?;
+    fs::write(dir.path().join(".keepbook-tmp-interrupted"), "partial")?;
+    assert_eq!(
+        try_auto_commit(dir.path(), "sync", &GitConfig::default())?,
+        AutoCommitOutcome::SkippedNoChanges
+    );
+    ensure_clean_worktree(&Repository::open(dir.path())?, "test")?;
+
+    fs::write(dir.path().join("account.json"), "{\"name\":\"Checking\"}\n")?;
+    assert_eq!(
+        try_auto_commit(dir.path(), "sync", &GitConfig::default())?,
+        AutoCommitOutcome::Committed
+    );
+    let show = run_git(dir.path(), &["show", "--name-only", "--pretty=", "HEAD"])?;
+    assert_eq!(String::from_utf8_lossy(&show.stdout).trim(), "account.json");
+    let status = run_git(dir.path(), &["status", "--porcelain"])?;
+    assert!(String::from_utf8_lossy(&status.stdout).trim().is_empty());
+    assert_eq!(
+        fs::read_to_string(exclude)?,
+        "local.note\n.keepbook-lock-*\n.keepbook-tmp-*\n"
+    );
+    Ok(())
+}

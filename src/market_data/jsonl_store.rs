@@ -3,11 +3,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
+use crate::storage::file_io;
 use anyhow::{Context, Result};
 use chrono::{Datelike, NaiveDate};
 use serde::Serialize;
 use tokio::fs;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use super::{
     AssetId, AssetRegistryEntry, FxRateKind, FxRatePoint, MarketDataStore, PriceKind, PricePoint,
@@ -87,15 +87,6 @@ impl JsonlMarketDataStore {
             .join(format!("{:04}.jsonl", date.year()))
     }
 
-    async fn ensure_dir(&self, path: &Path) -> Result<()> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .await
-                .context("Failed to create directory")?;
-        }
-        Ok(())
-    }
-
     async fn fs_cache_key(path: &Path) -> Result<Option<FsCacheKey>> {
         match fs::metadata(path).await {
             Ok(metadata) => Ok(Some(FsCacheKey {
@@ -107,66 +98,11 @@ impl JsonlMarketDataStore {
         }
     }
 
-    async fn read_jsonl<T: for<'de> serde::Deserialize<'de>>(&self, path: &Path) -> Result<Vec<T>> {
-        let file = match fs::File::open(path).await {
-            Ok(f) => f,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(e) => return Err(e).context("Failed to open file"),
-        };
-
-        let reader = BufReader::new(file);
-        let mut lines = reader.lines();
-        let mut items = Vec::new();
-
-        while let Some(line) = lines.next_line().await.context("Failed to read line")? {
-            if line.trim().is_empty() {
-                continue;
-            }
-            let item: T = serde_json::from_str(&line)
-                .with_context(|| format!("Failed to parse JSONL line: {line}"))?;
-            items.push(item);
-        }
-
-        Ok(items)
-    }
-
-    async fn append_jsonl<T: serde::Serialize>(&self, path: &Path, items: &[T]) -> Result<()> {
-        if items.is_empty() {
-            return Ok(());
-        }
-
-        self.ensure_dir(path).await?;
-
-        let mut file = fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-            .await
-            .context("Failed to open file for append")?;
-
-        for item in items {
-            let line = serde_json::to_string(item).context("Failed to serialize item")?;
-            file.write_all(line.as_bytes()).await?;
-            file.write_all(b"\n").await?;
-        }
-
-        Ok(())
-    }
-
-    async fn write_jsonl<T: serde::Serialize>(&self, path: &Path, items: &[T]) -> Result<()> {
-        self.ensure_dir(path).await?;
-
-        let mut content = String::new();
-        for item in items {
-            let line = serde_json::to_string(item).context("Failed to serialize item")?;
-            content.push_str(&line);
-            content.push('\n');
-        }
-
-        fs::write(path, content)
-            .await
-            .context("Failed to write JSONL file")?;
-        Ok(())
+    async fn read_jsonl<T: serde::de::DeserializeOwned + Send + 'static>(
+        &self,
+        path: &Path,
+    ) -> Result<Vec<T>> {
+        file_io::read_jsonl(path).await
     }
 
     fn price_kind_rank(kind: PriceKind) -> u8 {
@@ -351,38 +287,6 @@ impl JsonlMarketDataStore {
         Ok(by_id)
     }
 
-    async fn cache_price_file(&self, path: &Path, prices: &[PricePoint]) -> Result<()> {
-        let key = Self::fs_cache_key(path).await?;
-        self.cache
-            .lock()
-            .expect("market data cache poisoned")
-            .price_files
-            .insert(
-                path.to_path_buf(),
-                CachedRead {
-                    key,
-                    value: prices.to_vec(),
-                },
-            );
-        Ok(())
-    }
-
-    async fn cache_fx_file(&self, path: &Path, rates: &[FxRatePoint]) -> Result<()> {
-        let key = Self::fs_cache_key(path).await?;
-        self.cache
-            .lock()
-            .expect("market data cache poisoned")
-            .fx_files
-            .insert(
-                path.to_path_buf(),
-                CachedRead {
-                    key,
-                    value: rates.to_vec(),
-                },
-            );
-        Ok(())
-    }
-
     fn invalidate_price_dir(&self, asset_id: &AssetId) -> Result<()> {
         let dir = self.prices_dir(asset_id)?;
         self.cache
@@ -452,11 +356,17 @@ impl MarketDataStore for JsonlMarketDataStore {
                 NaiveDate::from_ymd_opt(year, 1, 1).context("Invalid price date for storage")?;
             let asset_id = AssetId::from(asset_id);
             let path = self.price_file(&asset_id, date)?;
-            let mut all_items = self.read_cached_price_file(&path).await?;
-            all_items.extend(items);
-            Self::sort_prices(&mut all_items);
-            self.write_jsonl(&path, &all_items).await?;
-            self.cache_price_file(&path, &all_items).await?;
+            file_io::update_jsonl(&path, move |all_items: &mut Vec<PricePoint>| {
+                all_items.extend(items);
+                Self::sort_prices(all_items);
+                Ok(((), true))
+            })
+            .await?;
+            self.cache
+                .lock()
+                .expect("market data cache poisoned")
+                .price_files
+                .remove(&path);
             self.invalidate_price_dir(&asset_id)?;
         }
 
@@ -509,11 +419,17 @@ impl MarketDataStore for JsonlMarketDataStore {
             let date =
                 NaiveDate::from_ymd_opt(year, 1, 1).context("Invalid FX date for storage")?;
             let path = self.fx_file(&base, &quote, date);
-            let mut all_items = self.read_cached_fx_file(&path).await?;
-            all_items.extend(items);
-            Self::sort_fx_rates(&mut all_items);
-            self.write_jsonl(&path, &all_items).await?;
-            self.cache_fx_file(&path, &all_items).await?;
+            file_io::update_jsonl(&path, move |all_items: &mut Vec<FxRatePoint>| {
+                all_items.extend(items);
+                Self::sort_fx_rates(all_items);
+                Ok(((), true))
+            })
+            .await?;
+            self.cache
+                .lock()
+                .expect("market data cache poisoned")
+                .fx_files
+                .remove(&path);
             self.invalidate_fx_dir(&base, &quote);
         }
 
@@ -526,7 +442,7 @@ impl MarketDataStore for JsonlMarketDataStore {
 
     async fn upsert_asset_entry(&self, entry: &AssetRegistryEntry) -> Result<()> {
         let path = self.assets_index_file();
-        self.append_jsonl(&path, &[entry]).await?;
+        file_io::append_jsonl(&path, &[entry]).await?;
         self.cache
             .lock()
             .expect("market data cache poisoned")
@@ -565,18 +481,22 @@ impl JsonlMarketDataStore {
         let mut stats = MarketDataJsonlNormalizationStats::default();
 
         for path in Self::collect_jsonl_files(&self.base_path.join("prices")).await? {
-            let mut prices = self.read_jsonl::<PricePoint>(&path).await?;
-            stats.price_points_sorted += prices.len();
-            Self::sort_prices(&mut prices);
-            self.write_jsonl(&path, &prices).await?;
+            stats.price_points_sorted +=
+                file_io::update_jsonl(&path, |prices: &mut Vec<PricePoint>| {
+                    Self::sort_prices(prices);
+                    Ok((prices.len(), true))
+                })
+                .await?;
             stats.price_files_rewritten += 1;
         }
 
         for path in Self::collect_jsonl_files(&self.base_path.join("fx")).await? {
-            let mut rates = self.read_jsonl::<FxRatePoint>(&path).await?;
-            stats.fx_rate_points_sorted += rates.len();
-            Self::sort_fx_rates(&mut rates);
-            self.write_jsonl(&path, &rates).await?;
+            stats.fx_rate_points_sorted +=
+                file_io::update_jsonl(&path, |rates: &mut Vec<FxRatePoint>| {
+                    Self::sort_fx_rates(rates);
+                    Ok((rates.len(), true))
+                })
+                .await?;
             stats.fx_files_rewritten += 1;
         }
 

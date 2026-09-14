@@ -1,7 +1,14 @@
 use super::*;
 use crate::models::Asset;
 use chrono::{TimeZone, Utc};
+use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
+
+impl JsonlMarketDataStore {
+    async fn write_jsonl<T: serde::Serialize>(&self, path: &Path, items: &[T]) -> Result<()> {
+        file_io::write(path, file_io::serialize_jsonl(items)?).await
+    }
+}
 
 fn make_price(as_of_date: &str, timestamp: chrono::DateTime<Utc>, price: &str) -> PricePoint {
     let asset = Asset::equity("AAPL");
