@@ -3963,7 +3963,6 @@ dependencies = [
  "keepbook",
  "libgit2-sys",
  "reqwest 0.12.28",
- "rust_decimal",
  "secrecy",
  "serde",
  "serde_json",
