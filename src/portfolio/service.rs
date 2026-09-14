@@ -288,11 +288,6 @@ impl PortfolioService {
         type AssetKey = (Asset, bool);
         type AccountAmounts = HashMap<AssetKey, Decimal>;
 
-        let cutoff = query
-            .as_of_date
-            .and_hms_opt(23, 59, 59)
-            .expect("end-of-day time should be valid")
-            .and_utc();
         let scoped_account_ids: HashSet<&Id> = query.account_ids.iter().collect();
         let mut events: Vec<(DateTime<Utc>, Id, AccountAmounts)> = Vec::new();
 
@@ -314,7 +309,7 @@ impl PortfolioService {
             snapshots.sort_by_key(|snapshot| snapshot.timestamp);
             let mut eligible: Vec<BalanceSnapshot> = snapshots
                 .iter()
-                .filter(|snapshot| snapshot.timestamp <= cutoff)
+                .filter(|snapshot| snapshot.timestamp.date_naive() <= query.as_of_date)
                 .cloned()
                 .collect();
             if eligible.is_empty()
@@ -419,7 +414,6 @@ impl PortfolioService {
             .map(|c| (c.id().clone(), c))
             .collect();
 
-        let as_of_datetime = as_of_date.and_hms_opt(23, 59, 59).unwrap().and_utc();
         let mut filtered_snapshots = Vec::new();
         let mut zero_accounts = Vec::new();
         let scoped_account_ids: HashSet<&Id> = account_ids.iter().collect();
@@ -453,7 +447,7 @@ impl PortfolioService {
 
             let latest_before = snapshots
                 .iter()
-                .filter(|s| s.timestamp <= as_of_datetime)
+                .filter(|s| s.timestamp.date_naive() <= as_of_date)
                 .max_by_key(|s| s.timestamp)
                 .cloned();
 

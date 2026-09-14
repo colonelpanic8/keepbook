@@ -70,6 +70,59 @@ fn build_account_summaries_errors_on_missing_price_cache_entry() {
 }
 
 #[tokio::test]
+async fn date_queries_include_the_entire_last_second() -> Result<()> {
+    let storage = Arc::new(MemoryStorage::new());
+    let connection = Connection::new(ConnectionConfig {
+        name: "Test Bank".into(),
+        synchronizer: "manual".into(),
+        credentials: None,
+        balance_staleness: None,
+    });
+    storage.save_connection(&connection).await?;
+    let account = Account::new("Checking", connection.id().clone());
+    storage.save_account(&account).await?;
+    let last_second = Utc.with_ymd_and_hms(2026, 2, 1, 23, 59, 59).unwrap();
+    let last_instant = last_second + chrono::Duration::nanoseconds(999_999_999);
+    for (timestamp, amount) in [
+        (last_second, "10"),
+        (last_instant, "20"),
+        (last_second + chrono::Duration::seconds(1), "30"),
+    ] {
+        storage
+            .append_balance_snapshot(
+                &account.id,
+                &BalanceSnapshot::new(
+                    timestamp,
+                    vec![AssetBalance::new(Asset::currency("USD"), amount)],
+                ),
+            )
+            .await?;
+    }
+    let market_data = Arc::new(MarketDataService::new(
+        Arc::new(MemoryMarketDataStore::new()),
+        None,
+    ));
+    let service = PortfolioService::new(storage, market_data);
+    let query = PortfolioQuery {
+        as_of_date: last_second.date_naive(),
+        currency: "USD".into(),
+        currency_decimals: None,
+        grouping: Grouping::Both,
+        include_detail: false,
+        capital_gains_tax_rate: None,
+        equity_valuation_adjustment: None,
+        account_ids: Vec::new(),
+    };
+    assert_eq!(service.calculate(&query).await?.total_value, "20");
+    let rows = service.asset_breakdown(&query).await?;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].total_amount, Decimal::from(20));
+    assert_eq!(rows[0].amount_last_checked_at, Some(last_instant));
+    assert_eq!(rows[0].amount_last_changed_at, Some(last_instant));
+    Ok(())
+}
+
+#[tokio::test]
 async fn calculate_single_currency_holding() -> Result<()> {
     // Setup storage with one account holding USD
     let storage = Arc::new(MemoryStorage::new());
