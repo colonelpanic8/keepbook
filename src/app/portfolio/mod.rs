@@ -2906,5 +2906,5 @@ pub async fn portfolio_change_points(
 }
 
 #[cfg(test)]
-#[path = "../../tests/unit/app/portfolio_tests.rs"]
+#[path = "../../../tests/unit/app/portfolio_tests.rs"]
 mod portfolio_tests;
