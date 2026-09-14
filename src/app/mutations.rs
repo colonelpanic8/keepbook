@@ -1137,3 +1137,7 @@ pub fn parse_asset(s: &str) -> Result<Asset> {
     // Assume it's a currency code
     Ok(Asset::currency(trimmed))
 }
+
+#[cfg(test)]
+#[path = "../../tests/unit/app/mutations_tests.rs"]
+mod mutations_tests;
