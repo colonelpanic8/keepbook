@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.12.2 - 2026-09-14
+
+### Fixed
+
+- The Android app failed to load, reporting "lock_shared() not supported" for
+  every stored file. Rust's standard library does not implement file locking on
+  Android, so storage now calls `flock(2)` directly there.
+
 ## 0.12.1 - 2026-09-14
 
 ### Changed
