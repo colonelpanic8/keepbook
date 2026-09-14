@@ -112,7 +112,6 @@ pub(super) fn AccountGraphPanel(
                     defaults,
                     filter_overrides,
                     account: Some(selected_id),
-                    current_value: None,
                     show_header: false,
                 }
             }
@@ -366,7 +365,6 @@ pub(super) fn HistoryGraphPanel(
     defaults: HistoryDefaults,
     filter_overrides: FilterOverrides,
     account: Option<String>,
-    current_value: Option<f64>,
     show_header: bool,
 ) -> Element {
     let initial_range_preset = range_preset_from_config(&defaults.graph_range);
@@ -412,10 +410,15 @@ pub(super) fn HistoryGraphPanel(
         _ => None,
     };
     let local_today = current_date_string();
+    let current_point = loaded_history.and_then(|history| history.current.as_ref());
     let data = loaded_history
-        .map(|history| match current_value {
-            Some(value) => history_data_points_with_current_snapshot(history, &local_today, value),
-            None => history_data_points(history),
+        .map(|history| {
+            match current_point.and_then(|point| parse_money_input(&point.total_value)) {
+                Some(value) => {
+                    history_data_points_with_current_snapshot(history, &local_today, value)
+                }
+                None => history_data_points(history),
+            }
         })
         .unwrap_or_default();
     let bounds = date_bounds(&data);
@@ -431,20 +434,15 @@ pub(super) fn HistoryGraphPanel(
     let y_domain = parse_y_domain(&y_min_text, &y_max_text);
     let has_date_error = !start_date.is_empty() && !end_date.is_empty() && start_date > end_date;
     let has_y_error = !y_min_text.is_empty() && !y_max_text.is_empty() && y_domain.is_none();
-    let current_value = sampled_data
-        .last()
-        .map(|point| point.value)
+    let current_value_text = current_point
+        .or_else(|| loaded_history.and_then(|history| history.points.last()))
+        .map(|point| point.total_value.clone())
         .unwrap_or_default();
-    let start_value = sampled_data
-        .first()
-        .map(|point| point.value)
-        .unwrap_or_default();
-    let absolute_change = current_value - start_value;
-    let percentage_change = if start_value == 0.0 {
-        None
-    } else {
-        Some((absolute_change / start_value) * 100.0)
-    };
+    let current_label = format_money_text(&current_value_text, &currency).unwrap_or_default();
+    let change_summary = history_change_summary(
+        loaded_history.and_then(|history| history.summary.as_ref()),
+        &currency,
+    );
     let data_y_range = visible_value_bounds
         .map(|(min, max)| {
             format!(
@@ -463,14 +461,6 @@ pub(super) fn HistoryGraphPanel(
             )
         })
         .unwrap_or_else(|| "Auto".to_string());
-    let change_class = if absolute_change >= 0.0 {
-        "change-positive"
-    } else {
-        "change-negative"
-    };
-    let percent_text = percentage_change
-        .map(|value| format!("{}%", format_number(value, 2)))
-        .unwrap_or_else(|| "N/A".to_string());
     let min_date = bounds
         .as_ref()
         .map(|bounds| bounds.0.clone())
@@ -548,6 +538,8 @@ pub(super) fn HistoryGraphPanel(
                     y_domain,
                     empty_title: empty_title.clone(),
                     empty_detail: empty_detail.clone(),
+                    current_value_text: current_value_text.clone(),
+                    change_summary: change_summary.clone(),
                     onselectrange: move |(start, end): (String, String)| {
                         start_override.set(start);
                         end_override.set(end);
@@ -556,10 +548,8 @@ pub(super) fn HistoryGraphPanel(
                 }
                 if !sampled_data.is_empty() {
                     div { class: "chart-stats",
-                        strong { "{format_full_money(current_value, &currency)}" }
-                        span { class: "{change_class}",
-                            "{format_signed_money(absolute_change, &currency)} ({percent_text})"
-                        }
+                        strong { "{current_label}" }
+                        span { class: "{change_summary.class}", "{change_summary.text}" }
                     }
                 }
             }
@@ -620,6 +610,10 @@ fn NetWorthChart(
     y_domain: Option<(f64, f64)>,
     empty_title: String,
     empty_detail: String,
+    /// App decimal text for the last plotted point.
+    current_value_text: String,
+    /// App-computed change across the requested range.
+    change_summary: HistoryChangeSummary,
     onselectrange: EventHandler<(String, String)>,
 ) -> Element {
     let mut drag_start = use_signal(|| None::<usize>);
@@ -759,27 +753,13 @@ fn NetWorthChart(
         };
     };
     let y_mid = y_min + y_range / 2.0;
-    let latest_value = format_compact_money(latest.value, &currency);
+    let latest_value = format_compact_money_text(&current_value_text, &currency)
+        .unwrap_or_else(|| format_compact_money(latest.value, &currency));
     let min_label = format_compact_money(y_min, &currency);
     let mid_label = format_compact_money(y_mid, &currency);
     let max_label = format_compact_money(y_max, &currency);
     let first_date = first.date.clone();
     let latest_date = latest.date.clone();
-    let absolute_change = latest.value - first.value;
-    let percentage_change = if first.value == 0.0 {
-        None
-    } else {
-        Some((absolute_change / first.value) * 100.0)
-    };
-    let summary = percentage_change
-        .map(|percentage| {
-            format!(
-                "{} ({}%)",
-                format_signed_money(absolute_change, &currency),
-                format_number(percentage, 2)
-            )
-        })
-        .unwrap_or_else(|| "No range change".to_string());
 
     rsx! {
         div { class: "chart-card",
@@ -790,7 +770,7 @@ fn NetWorthChart(
                 }
                 div {
                     span { class: "metric-label", "Range change" }
-                    strong { "{summary}" }
+                    strong { "{change_summary.text}" }
                 }
             }
             svg {

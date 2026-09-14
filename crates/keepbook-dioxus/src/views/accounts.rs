@@ -55,14 +55,10 @@ pub(super) fn AccountsView(
     let virtual_accounts = virtual_account_summaries(&snapshot);
     let account_count = accounts.len() + virtual_accounts.len();
     let active_accounts = accounts.iter().filter(|account| account.active).count();
-    let net_worth = current_net_worth_from_snapshot(&snapshot);
+    let net_worth = format_money_text(&snapshot.total_value, &currency)
+        .unwrap_or_else(|| snapshot.total_value.clone());
     let account_summaries = snapshot.by_account.clone();
     let selected_graph_selection = selected_graph();
-    let selected_graph_current_value = selected_graph_selection
-        .as_ref()
-        .and_then(|selection| account_snapshot_value_text(&selection.id, &account_summaries))
-        .as_deref()
-        .and_then(parse_money_input);
     let _ = balances;
     let is_price_busy = price_busy();
     let price_status_text = price_status();
@@ -134,7 +130,7 @@ pub(super) fn AccountsView(
                 section { class: "summary-grid",
                     MetricCard {
                         label: "Net worth",
-                        value: format_full_money(net_worth, &currency),
+                        value: net_worth,
                         detail: snapshot.as_of_date.clone()
                     }
                     MetricCard {
@@ -170,7 +166,6 @@ pub(super) fn AccountsView(
                             defaults: defaults.clone(),
                             filter_overrides: filter_overrides.clone(),
                             account: Some(selection.id.clone()),
-                            current_value: selected_graph_current_value,
                             show_header: false,
                         }
                     }

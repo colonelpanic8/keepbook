@@ -68,15 +68,6 @@ pub(crate) fn normalize_config_key(value: &str) -> String {
         .collect()
 }
 
-pub(crate) fn current_net_worth_from_snapshot(snapshot: &PortfolioSnapshot) -> f64 {
-    snapshot
-        .total_value
-        .parse::<f64>()
-        .ok()
-        .filter(|value| value.is_finite())
-        .unwrap_or_default()
-}
-
 pub(crate) fn history_data_points(history: &History) -> Vec<NetWorthDataPoint> {
     let mut points = history
         .points
@@ -1090,6 +1081,75 @@ pub(crate) fn format_signed_percent_text(value: &str) -> Option<String> {
     } else {
         format!("+{formatted}%")
     })
+}
+
+/// The chart's "Range change" readout, rendered from the app's history summary.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct HistoryChangeSummary {
+    pub(crate) class: &'static str,
+    pub(crate) text: String,
+}
+
+pub(crate) fn history_change_summary(
+    summary: Option<&HistorySummary>,
+    currency: &str,
+) -> HistoryChangeSummary {
+    let Some(summary) = summary else {
+        return HistoryChangeSummary {
+            class: "",
+            text: "No range change".to_string(),
+        };
+    };
+    let absolute = format_signed_money_text(&summary.absolute_change, currency)
+        .unwrap_or_else(|| summary.absolute_change.clone());
+    // The app reports "N/A" when the range starts at zero; pass that through
+    // rather than inventing a percentage.
+    let percentage = format_decimal_text(&summary.percentage_change, 2)
+        .map(|percentage| format!("{percentage}%"))
+        .unwrap_or_else(|| summary.percentage_change.clone());
+    HistoryChangeSummary {
+        class: signed_change_class_text(&summary.absolute_change),
+        text: format!("{absolute} ({percentage})"),
+    }
+}
+
+/// Gain/loss coloring class for a change readout that always takes a side, the
+/// way the chart's range change does: zero reads as a gain.
+pub(crate) fn signed_change_class_text(value: &str) -> &'static str {
+    if change_value_class_text(value) == "change-negative" {
+        "change-negative"
+    } else {
+        "change-positive"
+    }
+}
+
+/// Compact currency text (`$1.6K`) for app decimal money, matching
+/// [`format_compact_money`] without the f64 round trip.
+pub(crate) fn format_compact_money_text(value: &str, currency: &str) -> Option<String> {
+    let parsed = parse_decimal_text(value)?;
+    let integer = parsed.integer.trim_start_matches('0');
+    let (shift, suffix) = match integer.len() {
+        digits if digits > 9 => (9, "B"),
+        digits if digits > 6 => (6, "M"),
+        digits if digits > 3 => (3, "K"),
+        _ => (0, ""),
+    };
+    let split = integer.len() - shift;
+    let scaled_integer = &integer[..split];
+    let scaled_fraction = format!("{}{}", &integer[split..], parsed.fraction);
+    let (integer, fraction) = round_decimal_digits(
+        &DecimalText {
+            negative: parsed.negative,
+            integer: scaled_integer,
+            fraction: &scaled_fraction,
+        },
+        1,
+    );
+    let amount = format!(
+        "{}.{fraction}{suffix}",
+        format_digit_string_with_commas(&integer)
+    );
+    Some(apply_currency_display(&amount, currency, parsed.negative))
 }
 
 /// Gain/loss coloring class for app decimal text. Zero stays neutral.

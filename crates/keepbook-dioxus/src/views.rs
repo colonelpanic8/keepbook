@@ -419,7 +419,6 @@ fn Dashboard(
                             currency: overview.reporting_currency.clone(),
                             defaults: overview.history_defaults.clone(),
                             filter_overrides,
-                            current_value: current_net_worth_from_snapshot(&overview.snapshot),
                         }
                     },
                     ActiveView::NetWorthBreakdown => rsx! {

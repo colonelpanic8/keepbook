@@ -350,6 +350,10 @@ struct RecurringTransactionReviewInput {
 struct History {
     currency: String,
     points: Vec<HistoryPoint>,
+    /// Portfolio value at request time, present when the request asked for it
+    /// and the range runs through today. `summary` covers `points` plus this.
+    #[serde(default)]
+    current: Option<HistoryPoint>,
     summary: Option<HistorySummary>,
 }
 

@@ -318,6 +318,11 @@ pub struct HistoryOutput {
     pub end_date: Option<String>,
     pub granularity: String,
     pub points: Vec<HistoryPoint>,
+    /// Portfolio value right now, valued past the last change point. Only
+    /// present when the request opted in and the range runs through today;
+    /// `summary` covers `points` followed by this point when it is set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current: Option<HistoryPoint>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary: Option<HistorySummary>,
 }

@@ -1734,6 +1734,7 @@ async fn main() -> Result<()> {
                             end,
                             granularity,
                             include_prices,
+                            false,
                         )
                         .await?
                     }
@@ -1746,6 +1747,7 @@ async fn main() -> Result<()> {
                             end,
                             granularity,
                             include_prices,
+                            false,
                             account_ids,
                         )
                         .await?
@@ -1759,6 +1761,7 @@ async fn main() -> Result<()> {
                             end,
                             granularity,
                             include_prices,
+                            false,
                         )
                         .await?
                     }

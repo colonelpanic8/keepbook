@@ -224,7 +224,9 @@ pub(crate) async fn fetch_overview_impl(overrides: FilterOverrides) -> Result<Ov
 }
 
 pub(crate) async fn fetch_history(query: String) -> Result<History, String> {
-    fetch_history_impl(query).await
+    // Charts always plot through now, so ask the app to value the current
+    // point rather than deriving it from a separate snapshot.
+    fetch_history_impl(format!("{query}&include_current=true")).await
 }
 
 pub(crate) async fn fetch_stacked_history(query: String) -> Result<StackedHistory, String> {

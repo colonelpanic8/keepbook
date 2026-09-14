@@ -605,14 +605,15 @@ fn configure_history_market_data(
     market_data.with_future_projection(config.history.allow_future_projection)
 }
 
-fn calculate_history_summary(history_points: &[HistoryPoint]) -> Option<HistorySummary> {
-    if history_points.len() < 2 {
-        return None;
-    }
+fn calculate_history_summary<'a>(
+    history_points: impl IntoIterator<Item = &'a HistoryPoint>,
+) -> Option<HistorySummary> {
+    let mut history_points = history_points.into_iter();
+    let first = history_points.next()?;
+    let last = history_points.last()?;
 
-    let initial = Decimal::from_str(&history_points[0].total_value).unwrap_or(Decimal::ZERO);
-    let final_val = Decimal::from_str(&history_points[history_points.len() - 1].total_value)
-        .unwrap_or(Decimal::ZERO);
+    let initial = Decimal::from_str(&first.total_value).unwrap_or(Decimal::ZERO);
+    let final_val = Decimal::from_str(&last.total_value).unwrap_or(Decimal::ZERO);
     let absolute_change = final_val - initial;
     let percentage_change = if initial != Decimal::ZERO {
         ((final_val - initial) / initial * Decimal::from(100))
@@ -2304,6 +2305,7 @@ pub async fn portfolio_history(
     end: Option<String>,
     granularity: String,
     include_prices: bool,
+    include_current: bool,
 ) -> Result<HistoryOutput> {
     portfolio_history_scoped(
         storage,
@@ -2313,6 +2315,7 @@ pub async fn portfolio_history(
         end,
         granularity,
         include_prices,
+        include_current,
         Vec::new(),
         HistoryValueMode::Portfolio {
             include_latent_tax_adjustment: resolve_capital_gains_tax_rate(config, None)?.1,
@@ -2321,6 +2324,7 @@ pub async fn portfolio_history(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn portfolio_history_for_accounts(
     storage: Arc<dyn Storage>,
     config: &ResolvedConfig,
@@ -2329,6 +2333,7 @@ pub async fn portfolio_history_for_accounts(
     end: Option<String>,
     granularity: String,
     include_prices: bool,
+    include_current: bool,
     account_ids: Vec<Id>,
 ) -> Result<HistoryOutput> {
     portfolio_history_scoped(
@@ -2339,6 +2344,7 @@ pub async fn portfolio_history_for_accounts(
         end,
         granularity,
         include_prices,
+        include_current,
         account_ids,
         HistoryValueMode::Portfolio {
             include_latent_tax_adjustment: false,
@@ -2475,6 +2481,7 @@ pub async fn latent_capital_gains_tax_history(
     end: Option<String>,
     granularity: String,
     include_prices: bool,
+    include_current: bool,
 ) -> Result<HistoryOutput> {
     portfolio_history_scoped(
         storage,
@@ -2484,12 +2491,14 @@ pub async fn latent_capital_gains_tax_history(
         end,
         granularity,
         include_prices,
+        include_current,
         Vec::new(),
         HistoryValueMode::LatentCapitalGainsTax,
     )
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn portfolio_history_scoped(
     storage: Arc<dyn Storage>,
     config: &ResolvedConfig,
@@ -2498,6 +2507,7 @@ async fn portfolio_history_scoped(
     end: Option<String>,
     granularity: String,
     include_prices: bool,
+    include_current: bool,
     account_ids: Vec<Id>,
     value_mode: HistoryValueMode,
 ) -> Result<HistoryOutput> {
@@ -2549,13 +2559,17 @@ async fn portfolio_history_scoped(
 
     let filtered = collect_change_points(&storage_arc, &store, &options).await?;
 
-    if filtered.is_empty() {
+    // A current point still needs valuing when the range holds no change
+    // points, so only bail out early when the caller did not ask for one.
+    let want_current = include_current && !end_date.is_some_and(|end| end < today);
+    if filtered.is_empty() && !want_current {
         return Ok(HistoryOutput {
             currency: currency.unwrap_or_else(|| config.reporting_currency.clone()),
             start_date: start_date_output,
             end_date: end_date_output,
             granularity,
             points: Vec::new(),
+            current: None,
             summary: None,
         });
     }
@@ -2650,7 +2664,33 @@ async fn portfolio_history_scoped(
         previous_total_value = current_total_value;
     }
 
-    let summary = calculate_history_summary(&history_points);
+    let current = if want_current {
+        let now = Utc::now();
+        let (point, _) = build_history_point_for_date(
+            &service,
+            &valuation_history,
+            config,
+            HistoryPointInput {
+                target_currency: &target_currency,
+                as_of_date: now.date_naive(),
+                as_of_timestamp: Some(now),
+                timestamp: now.to_rfc3339(),
+                change_triggers: None,
+                previous_total_value,
+                capital_gains_tax_rate,
+                value_mode,
+                cost_basis_backfill: &cost_basis_backfill,
+                account_ids: &account_ids,
+            },
+            &mut carry_forward_unit_values,
+        )
+        .await?;
+        Some(point)
+    } else {
+        None
+    };
+
+    let summary = calculate_history_summary(history_points.iter().chain(current.iter()));
 
     Ok(HistoryOutput {
         currency: target_currency,
@@ -2658,6 +2698,7 @@ async fn portfolio_history_scoped(
         end_date: end_date_output,
         granularity,
         points: history_points,
+        current,
         summary,
     })
 }

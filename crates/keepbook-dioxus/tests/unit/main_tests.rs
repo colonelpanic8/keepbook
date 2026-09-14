@@ -1119,18 +1119,6 @@ fn sampled_series_preserves_range_endpoints() {
 }
 
 #[test]
-fn current_net_worth_uses_portfolio_snapshot_total() {
-    let snapshot = PortfolioSnapshot {
-        as_of_date: "2026-04-25".to_string(),
-        currency: "USD".to_string(),
-        total_value: "1234.56".to_string(),
-        by_account: Vec::new(),
-    };
-
-    assert_eq!(current_net_worth_from_snapshot(&snapshot), 1234.56);
-}
-
-#[test]
 fn current_snapshot_replaces_utc_tomorrow_history_point_on_local_today() {
     let history = History {
         currency: "USD".to_string(),
@@ -1151,6 +1139,7 @@ fn current_snapshot_replaces_utc_tomorrow_history_point_on_local_today() {
                 percentage_change_from_previous: None,
             },
         ],
+        current: None,
         summary: None,
     };
 
@@ -1169,6 +1158,7 @@ fn current_snapshot_appends_local_today_when_history_has_no_today_point() {
             total_value: "100".to_string(),
             percentage_change_from_previous: None,
         }],
+        current: None,
         summary: None,
     };
 
@@ -1258,6 +1248,64 @@ fn decimal_text_rounds_half_away_from_zero_and_trims_zeros() {
         format_signed_percent_text("-4.50").as_deref(),
         Some("-4.5%")
     );
+}
+
+#[test]
+fn history_change_summary_reads_the_app_summary() {
+    let summary = HistorySummary {
+        initial_value: "1000".to_string(),
+        final_value: "1500".to_string(),
+        absolute_change: "500".to_string(),
+        percentage_change: "50.00".to_string(),
+    };
+    let rendered = history_change_summary(Some(&summary), "USD");
+    assert_eq!(rendered.text, "+$500.00 (50%)");
+    assert_eq!(rendered.class, "change-positive");
+
+    let loss = HistorySummary {
+        initial_value: "1000".to_string(),
+        final_value: "900".to_string(),
+        absolute_change: "-100".to_string(),
+        percentage_change: "-10.00".to_string(),
+    };
+    let rendered = history_change_summary(Some(&loss), "USD");
+    assert_eq!(rendered.text, "-$100.00 (-10%)");
+    assert_eq!(rendered.class, "change-negative");
+
+    // The app reports "N/A" when the range starts at zero.
+    let from_zero = HistorySummary {
+        initial_value: "0".to_string(),
+        final_value: "25".to_string(),
+        absolute_change: "25".to_string(),
+        percentage_change: "N/A".to_string(),
+    };
+    assert_eq!(
+        history_change_summary(Some(&from_zero), "USD").text,
+        "+$25.00 (N/A)"
+    );
+
+    assert_eq!(
+        history_change_summary(None, "USD").text,
+        "No range change".to_string()
+    );
+}
+
+#[test]
+fn compact_money_text_matches_the_float_formatter() {
+    for (text, value) in [
+        ("1571.17", 1571.17),
+        ("-1571.17", -1571.17),
+        ("1882543.57", 1882543.57),
+        ("2500000000", 2_500_000_000.0),
+        ("123.45", 123.45),
+        ("0", 0.0),
+    ] {
+        assert_eq!(
+            format_compact_money_text(text, "USD").as_deref(),
+            Some(format_compact_money(value, "USD").as_str()),
+            "{text}"
+        );
+    }
 }
 
 #[test]

@@ -1734,6 +1734,7 @@ async fn load_net_worth(
         None,
         interval.as_granularity().to_string(),
         true,
+        false,
     )
     .await?;
     Ok(output.points)

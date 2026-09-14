@@ -120,6 +120,7 @@ async fn time_portfolio_history_over_a_representative_dataset() -> Result<()> {
             end.map(str::to_string),
             granularity.to_string(),
             include_prices,
+            false,
         )
         .await?;
         let elapsed = began.elapsed();

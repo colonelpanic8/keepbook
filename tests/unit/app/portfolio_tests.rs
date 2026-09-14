@@ -337,6 +337,7 @@ async fn portfolio_history_carries_forward_previous_valuation_when_price_missing
         None,
         "none".to_string(),
         false,
+        false,
     )
     .await?;
 
@@ -406,6 +407,7 @@ async fn portfolio_history_values_each_point_at_its_own_instant() -> anyhow::Res
         None,
         "none".to_string(),
         false,
+        false,
     )
     .await?;
 
@@ -421,6 +423,7 @@ async fn portfolio_history_values_each_point_at_its_own_instant() -> anyhow::Res
         None,
         None,
         "daily".to_string(),
+        false,
         false,
     )
     .await?;
@@ -492,6 +495,7 @@ async fn portfolio_history_subtracts_configured_latent_capital_gains_tax() -> an
         None,
         None,
         "none".to_string(),
+        false,
         false,
     )
     .await?;
@@ -585,6 +589,7 @@ async fn portfolio_history_backfills_latest_cost_basis_for_latent_tax() -> anyho
         None,
         "none".to_string(),
         false,
+        false,
     )
     .await?;
 
@@ -671,6 +676,7 @@ async fn portfolio_history_projects_future_prices_when_configured() -> anyhow::R
         Some("2024-01-15".to_string()),
         Some("2024-01-15".to_string()),
         "none".to_string(),
+        false,
         false,
     )
     .await?;
@@ -831,6 +837,7 @@ async fn portfolio_history_prefers_same_day_quotes_over_older_closes() -> anyhow
         Some("2024-01-03".to_string()),
         "none".to_string(),
         true,
+        false,
     )
     .await?;
 
@@ -924,6 +931,7 @@ async fn portfolio_history_can_jump_when_missing_asset_prices_arrive_late() -> a
         Some("2025-01-10".to_string()),
         "monthly".to_string(),
         true,
+        false,
     )
     .await?;
 
@@ -951,6 +959,7 @@ async fn portfolio_history_can_jump_when_missing_asset_prices_arrive_late() -> a
         Some("2024-09-01".to_string()),
         Some("2025-01-10".to_string()),
         "monthly".to_string(),
+        false,
         false,
     )
     .await?;
@@ -1881,6 +1890,106 @@ async fn portfolio_assets_sorts_by_absolute_value_descending() -> anyhow::Result
 
     // total_value counts only priced rows: 100 - 5000 + 2000.
     assert_eq!(output.total_value, "-2900");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn portfolio_history_can_append_a_current_point() -> anyhow::Result<()> {
+    let dir = TempDir::new()?;
+    let config = assets_test_config(dir.path().to_path_buf());
+
+    let storage = Arc::new(MemoryStorage::new());
+    let connection = Connection::new(connection_config("Test Broker"));
+    storage.save_connection(&connection).await?;
+    let account = Account::new("Trading", connection.id().clone());
+    storage.save_account(&account).await?;
+
+    let asset = Asset::equity("AAPL");
+    let today = Utc::now().date_naive();
+    let opened = Utc::now() - chrono::Duration::days(30);
+    storage
+        .append_balance_snapshot(
+            &account.id,
+            &BalanceSnapshot::new(opened, vec![AssetBalance::new(asset.clone(), "10")]),
+        )
+        .await?;
+
+    let store = JsonlMarketDataStore::new(&config.data_dir);
+    store
+        .put_prices(&[
+            close_price(&asset, opened.date_naive(), "100"),
+            PricePoint {
+                asset_id: AssetId::from_asset(&asset),
+                as_of_date: today,
+                timestamp: Utc::now() - chrono::Duration::hours(1),
+                price: "150".to_string(),
+                quote_currency: "USD".to_string(),
+                kind: PriceKind::Close,
+                source: "test".to_string(),
+            },
+        ])
+        .await?;
+
+    let history = |start: Option<String>, end: Option<String>, include_current: bool| {
+        let storage = storage.clone();
+        let config = &config;
+        async move {
+            portfolio_history(
+                storage,
+                config,
+                None,
+                start,
+                end,
+                "none".to_string(),
+                false,
+                include_current,
+            )
+            .await
+        }
+    };
+
+    // Balance changes give one point; the current point values the same
+    // holding at today's price, and the summary runs through it.
+    let output = history(None, None, true).await?;
+    assert_eq!(
+        output
+            .points
+            .iter()
+            .map(|p| p.total_value.as_str())
+            .collect::<Vec<_>>(),
+        vec!["1000"]
+    );
+    let current = output.current.expect("current point");
+    assert_eq!(current.date, today.to_string());
+    assert_eq!(current.total_value, "1500");
+    let summary = output.summary.expect("summary");
+    assert_eq!(summary.initial_value, "1000");
+    assert_eq!(summary.final_value, "1500");
+    assert_eq!(summary.absolute_change, "500");
+    assert_eq!(summary.percentage_change, "50.00");
+
+    // Opting out leaves the output exactly as it was.
+    let without = history(None, None, false).await?;
+    assert!(without.current.is_none());
+    assert!(without.summary.is_none());
+
+    // A range with no change points still gets its current point.
+    let empty_range = history(Some(today.to_string()), None, true).await?;
+    assert!(empty_range.points.is_empty());
+    assert_eq!(
+        empty_range.current.map(|point| point.total_value),
+        Some("1500".to_string())
+    );
+
+    // A range that ends before today gets no current point.
+    let past = history(
+        None,
+        Some((today - chrono::Duration::days(1)).to_string()),
+        true,
+    )
+    .await?;
+    assert!(past.current.is_none());
 
     Ok(())
 }

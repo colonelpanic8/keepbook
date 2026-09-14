@@ -446,6 +446,7 @@ impl ApiState {
                     history_end,
                     history_granularity,
                     include_prices,
+                    false,
                 )
                 .await?,
             )?)
@@ -744,6 +745,7 @@ impl ApiState {
         let include_prices = query
             .include_prices
             .unwrap_or(effective_config.history.include_prices);
+        let include_current = query.include_current.unwrap_or(false);
         let selection = keepbook::app::resolve_portfolio_history_selection(
             storage.as_ref(),
             &effective_config,
@@ -761,6 +763,7 @@ impl ApiState {
                     query.end,
                     granularity,
                     include_prices,
+                    include_current,
                 )
                 .await?
             }
@@ -773,6 +776,7 @@ impl ApiState {
                     query.end,
                     granularity,
                     include_prices,
+                    include_current,
                     account_ids,
                 )
                 .await?
@@ -786,6 +790,7 @@ impl ApiState {
                     query.end,
                     granularity,
                     include_prices,
+                    include_current,
                 )
                 .await?
             }
@@ -1416,6 +1421,9 @@ pub struct HistoryQuery {
     pub end: Option<String>,
     pub granularity: Option<String>,
     pub include_prices: Option<bool>,
+    /// Ask for a `current` point valued at request time on top of the range's
+    /// change points.
+    pub include_current: Option<bool>,
     pub include_latent_capital_gains_tax: Option<bool>,
     pub account_portfolio_overrides: Option<String>,
     pub account: Option<String>,
