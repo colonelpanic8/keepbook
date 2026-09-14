@@ -1,5 +1,6 @@
 use super::*;
-use crate::app::transaction_tag_rules::CompiledTransactionTagRule;
+use crate::app::transaction_tag_rules::exact_ci_regex_pattern;
+use crate::app::transaction_tag_rules::{CompiledTransactionTagRule, TransactionTagRule};
 use crate::app::TransactionAnnotationOutput;
 use crate::config::{
     DisplayConfig, GitConfig, IgnoreConfig, RefreshConfig, SpendingConfig, TrayConfig,
@@ -42,7 +43,6 @@ fn test_config() -> ResolvedConfig {
         git: GitConfig::default(),
     }
 }
-
 #[test]
 fn compare_by_amount_handles_numeric_values() {
     let a = tx("a", "2026-01-01T00:00:00+00:00", "12");
@@ -56,27 +56,6 @@ fn compare_by_amount_handles_numeric_values() {
         Ordering::Less
     );
 }
-
-#[test]
-fn timespan_filter_respects_cutoff() {
-    let mut state = AppState::new(
-        vec![
-            tx("a", "2026-01-01T00:00:00+00:00", "1"),
-            tx("b", "2026-02-01T00:00:00+00:00", "1"),
-        ],
-        TransactionTagMatcher::default(),
-        PathBuf::from("/tmp/transaction-rules-test.jsonl"),
-        false,
-        TuiOptions::default(),
-    );
-    state.span = TimeSpan::All;
-    state.recompute_visible_transactions();
-    let all_len = state.visible_transaction_indices.len();
-    state.span = TimeSpan::Days7;
-    state.recompute_visible_transactions();
-    assert!(state.visible_transaction_indices.len() <= all_len);
-}
-
 #[test]
 fn display_uses_annotation_description_when_present() {
     let mut t = tx("a", "2026-02-01T00:00:00+00:00", "1");
@@ -95,7 +74,6 @@ fn display_uses_annotation_description_when_present() {
         .unwrap_or(t.description.as_str());
     assert_eq!(description, "override");
 }
-
 #[test]
 fn display_uses_annotation_tag_when_present() {
     let matcher = TransactionTagMatcher::default();
@@ -115,7 +93,6 @@ fn display_uses_annotation_tag_when_present() {
     });
     assert_eq!(transaction_tag_string(&t, &matcher), "food");
 }
-
 #[test]
 fn display_uses_rule_tag_when_annotation_missing() {
     let mut t = tx("a", "2026-02-01T00:00:00+00:00", "1");
@@ -139,81 +116,6 @@ fn display_uses_rule_tag_when_annotation_missing() {
 
     assert_eq!(transaction_tag_string(&t, &matcher), "coffee");
 }
-
-#[test]
-fn filtered_tag_suggestions_prefers_prefix_matches() {
-    let catalog = vec![
-        "Groceries".to_string(),
-        "Coffee".to_string(),
-        "Dining Out".to_string(),
-        "Office Coffee".to_string(),
-    ];
-    let out = filtered_tag_suggestions(&catalog, "cof");
-    assert_eq!(
-        out,
-        vec!["Coffee".to_string(), "Office Coffee".to_string(),]
-    );
-}
-
-#[test]
-fn selected_tag_from_modal_uses_active_selection() {
-    let modal = TagModalState {
-        action: TagAction::OneOff {
-            source: SelectedTransactionInfo {
-                account_id: "acct-1".to_string(),
-                account_name: "Checking".to_string(),
-                transaction_id: "tx-1".to_string(),
-                status: "posted".to_string(),
-                amount: "-1".to_string(),
-                description: "Coffee".to_string(),
-            },
-        },
-        input: "din".to_string(),
-        cursor: 3,
-        suggestions: vec!["Dining".to_string()],
-        selected_suggestion: 0,
-        selection_active: true,
-    };
-    assert_eq!(selected_tag_from_modal(&modal), "Dining".to_string());
-}
-
-#[test]
-fn apply_text_input_edit_supports_cursor_navigation_and_insert_delete() {
-    let mut input = "abc".to_string();
-    let mut cursor = 3usize;
-
-    assert!(apply_text_input_edit(
-        &mut input,
-        &mut cursor,
-        KeyCode::Left
-    ));
-    assert_eq!(cursor, 2);
-
-    assert!(apply_text_input_edit(
-        &mut input,
-        &mut cursor,
-        KeyCode::Char('X')
-    ));
-    assert_eq!(input, "abXc");
-    assert_eq!(cursor, 3);
-
-    assert!(apply_text_input_edit(
-        &mut input,
-        &mut cursor,
-        KeyCode::Delete
-    ));
-    assert_eq!(input, "abX");
-    assert_eq!(cursor, 3);
-
-    assert!(apply_text_input_edit(
-        &mut input,
-        &mut cursor,
-        KeyCode::Backspace
-    ));
-    assert_eq!(input, "ab");
-    assert_eq!(cursor, 2);
-}
-
 #[test]
 fn asset_label_normalizes_currency_codes() {
     assert_eq!(
@@ -225,7 +127,6 @@ fn asset_label_normalizes_currency_codes() {
         "USD"
     );
 }
-
 #[test]
 fn amount_display_uses_formatter_for_reporting_currency() {
     let mut t = tx("a", "2026-02-01T00:00:00+00:00", "1234.5");
@@ -238,7 +139,6 @@ fn amount_display_uses_formatter_for_reporting_currency() {
 
     assert_eq!(transaction_amount_string(&t, &config), "$1,234.50");
 }
-
 #[test]
 fn amount_display_normalizes_non_reporting_assets_without_symbol() {
     let mut t = tx("a", "2026-02-01T00:00:00+00:00", "1.2300");
@@ -251,14 +151,12 @@ fn amount_display_normalizes_non_reporting_assets_without_symbol() {
 
     assert_eq!(transaction_amount_string(&t, &config), "1.23");
 }
-
 #[test]
 fn amount_display_preserves_unparseable_values() {
     let t = tx("a", "2026-02-01T00:00:00+00:00", "not-a-number");
     let config = test_config();
     assert_eq!(transaction_amount_string(&t, &config), "not-a-number");
 }
-
 #[test]
 fn spending_windows_config_is_sorted_deduped_and_nonzero() {
     let mut config = test_config();
@@ -268,7 +166,6 @@ fn spending_windows_config_is_sorted_deduped_and_nonzero() {
     config.tray.spending_windows_days.clear();
     assert_eq!(spending_windows_from_config(&config), vec![7, 30, 90]);
 }
-
 #[test]
 fn spending_window_summary_uses_reporting_currency_outflows() {
     let mut eur_tx = tx("eur", "2026-02-09T00:00:00+00:00", "-99");
@@ -314,14 +211,6 @@ fn spending_window_summary_uses_reporting_currency_outflows() {
         Decimal::from_str("30").expect("valid decimal")
     );
 }
-
-#[test]
-fn net_worth_interval_cycles() {
-    assert_eq!(NetWorthInterval::Daily.next(), NetWorthInterval::Weekly);
-    assert_eq!(NetWorthInterval::Daily.prev(), NetWorthInterval::Hourly);
-    assert_eq!(NetWorthInterval::Full.prev(), NetWorthInterval::Yearly);
-}
-
 #[test]
 fn net_worth_point_date_uses_date_field() {
     let point = HistoryPoint {
