@@ -99,7 +99,7 @@ impl PortfolioService {
     pub async fn calculate(&self, query: &PortfolioQuery) -> Result<PortfolioSnapshot> {
         // Load accounts, connections, and balances
         let ctx = self
-            .load_calculation_context(query.as_of_date, &query.account_ids)
+            .load_calculation_context(query.as_of_date, query.as_of_timestamp, &query.account_ids)
             .await?;
 
         // Aggregate balances by asset
@@ -107,7 +107,12 @@ impl PortfolioService {
 
         // Fetch valuations for all unique assets (cached)
         let price_cache = self
-            .fetch_asset_valuations(&by_asset_agg, &query.currency, query.as_of_date)
+            .fetch_asset_valuations(
+                &by_asset_agg,
+                &query.currency,
+                query.as_of_date,
+                query.as_of_timestamp,
+            )
             .await?;
 
         let valuation_scenario = Self::resolve_equity_valuation_scenario(
@@ -186,7 +191,7 @@ impl PortfolioService {
     /// are ignored.
     pub async fn asset_breakdown(&self, query: &PortfolioQuery) -> Result<Vec<AssetBreakdownRow>> {
         let ctx = self
-            .load_calculation_context(query.as_of_date, &query.account_ids)
+            .load_calculation_context(query.as_of_date, query.as_of_timestamp, &query.account_ids)
             .await?;
 
         let by_key = Self::aggregate_by_asset_liability(&ctx.filtered_snapshots)?;
@@ -198,7 +203,13 @@ impl PortfolioService {
         for (asset, _liability) in by_key.keys() {
             if !price_cache.contains_key(asset) {
                 let valuation = self
-                    .value_asset(asset, Decimal::ONE, &query.currency, query.as_of_date)
+                    .value_asset(
+                        asset,
+                        Decimal::ONE,
+                        &query.currency,
+                        query.as_of_date,
+                        query.as_of_timestamp,
+                    )
                     .await?;
                 price_cache.insert(asset.clone(), valuation);
             }
@@ -270,7 +281,7 @@ impl PortfolioService {
         let mut values = HashMap::with_capacity(assets.len());
         for asset in assets {
             let valuation = self
-                .value_asset(asset, Decimal::ONE, target_currency, as_of_date)
+                .value_asset(asset, Decimal::ONE, target_currency, as_of_date, None)
                 .await?;
             values.insert(asset.clone(), valuation.value);
         }
@@ -309,7 +320,9 @@ impl PortfolioService {
             snapshots.sort_by_key(|snapshot| snapshot.timestamp);
             let mut eligible: Vec<BalanceSnapshot> = snapshots
                 .iter()
-                .filter(|snapshot| snapshot.timestamp.date_naive() <= query.as_of_date)
+                .filter(|snapshot| {
+                    snapshot_at_or_before(snapshot, query.as_of_date, query.as_of_timestamp)
+                })
                 .cloned()
                 .collect();
             if eligible.is_empty()
@@ -402,6 +415,7 @@ impl PortfolioService {
     async fn load_calculation_context(
         &self,
         as_of_date: NaiveDate,
+        as_of_timestamp: Option<DateTime<Utc>>,
         account_ids: &[Id],
     ) -> Result<CalculationContext> {
         let accounts = self.storage.list_accounts().await?;
@@ -447,7 +461,7 @@ impl PortfolioService {
 
             let latest_before = snapshots
                 .iter()
-                .filter(|s| s.timestamp.date_naive() <= as_of_date)
+                .filter(|s| snapshot_at_or_before(s, as_of_date, as_of_timestamp))
                 .max_by_key(|s| s.timestamp)
                 .cloned();
 
@@ -576,12 +590,19 @@ impl PortfolioService {
         by_asset: &HashMap<Asset, AssetAggregate>,
         target_currency: &str,
         as_of_date: NaiveDate,
+        as_of_timestamp: Option<DateTime<Utc>>,
     ) -> Result<HashMap<Asset, AssetValuation>> {
         let mut cache = HashMap::new();
 
         for asset in by_asset.keys() {
             let valuation = self
-                .value_asset(asset, Decimal::ONE, target_currency, as_of_date)
+                .value_asset(
+                    asset,
+                    Decimal::ONE,
+                    target_currency,
+                    as_of_date,
+                    as_of_timestamp,
+                )
                 .await?;
             cache.insert(asset.clone(), valuation);
         }
@@ -923,6 +944,7 @@ impl PortfolioService {
         amount: Decimal,
         target_currency: &str,
         as_of_date: NaiveDate,
+        as_of_timestamp: Option<DateTime<Utc>>,
     ) -> Result<AssetValuation> {
         match asset {
             Asset::Currency { iso_code } => {
@@ -940,7 +962,7 @@ impl PortfolioService {
                     // Need FX conversion
                     match self
                         .market_data
-                        .fx_close(iso_code, target_currency, as_of_date)
+                        .fx_close_at(iso_code, target_currency, as_of_date, as_of_timestamp)
                         .await
                     {
                         Ok(rate) => {
@@ -981,7 +1003,7 @@ impl PortfolioService {
                 } else {
                     match self
                         .market_data
-                        .fx_close(currency, target_currency, as_of_date)
+                        .fx_close_at(currency, target_currency, as_of_date, as_of_timestamp)
                         .await
                     {
                         Ok(rate) => {
@@ -1009,16 +1031,23 @@ impl PortfolioService {
             Asset::Equity { .. } | Asset::Crypto { .. } => {
                 // Use live pricing for today. Historical valuation uses cached/fetched prices
                 // at or before the requested date without special-casing price kind.
-                let price_result = if as_of_date == self.clock.today() {
+                // A live quote is the price *now*, so it can only stand in for
+                // a valuation that is not bounded to an earlier instant.
+                let price_result = if as_of_timestamp.is_none() && as_of_date == self.clock.today()
+                {
                     self.market_data.price_latest(asset, as_of_date).await
                 } else {
                     match self
                         .market_data
-                        .valuation_price_from_store(asset, as_of_date)
+                        .valuation_price_from_store_at(asset, as_of_date, as_of_timestamp)
                         .await?
                     {
                         Some(price) => Ok(price),
-                        None => self.market_data.price_close(asset, as_of_date).await,
+                        None => {
+                            self.market_data
+                                .price_close_at(asset, as_of_date, as_of_timestamp)
+                                .await
+                        }
                     }
                 };
                 let price_point = match price_result {
@@ -1054,7 +1083,12 @@ impl PortfolioService {
                 } else {
                     match self
                         .market_data
-                        .fx_close(&price_point.quote_currency, target_currency, as_of_date)
+                        .fx_close_at(
+                            &price_point.quote_currency,
+                            target_currency,
+                            as_of_date,
+                            as_of_timestamp,
+                        )
                         .await
                     {
                         Ok(rate) => {
@@ -1083,6 +1117,22 @@ impl PortfolioService {
                 }
             }
         }
+    }
+}
+
+/// Whether a balance snapshot counts towards a valuation.
+///
+/// Without a cutoff this is every snapshot recorded on or before `as_of_date`,
+/// end of day included. With one, only snapshots recorded at or before that
+/// instant, so a point earlier in the day cannot see a later change.
+fn snapshot_at_or_before(
+    snapshot: &BalanceSnapshot,
+    as_of_date: NaiveDate,
+    as_of_timestamp: Option<DateTime<Utc>>,
+) -> bool {
+    match as_of_timestamp {
+        Some(cutoff) => snapshot.timestamp <= cutoff,
+        None => snapshot.timestamp.date_naive() <= as_of_date,
     }
 }
 

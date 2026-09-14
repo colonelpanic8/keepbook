@@ -105,6 +105,7 @@ async fn date_queries_include_the_entire_last_second() -> Result<()> {
     let service = PortfolioService::new(storage, market_data);
     let query = PortfolioQuery {
         as_of_date: last_second.date_naive(),
+        as_of_timestamp: None,
         currency: "USD".into(),
         currency_decimals: None,
         grouping: Grouping::Both,
@@ -153,6 +154,7 @@ async fn calculate_single_currency_holding() -> Result<()> {
     let service = PortfolioService::new(storage, market_data);
     let query = PortfolioQuery {
         as_of_date: chrono::NaiveDate::from_ymd_opt(2026, 2, 2).unwrap(),
+        as_of_timestamp: None,
         currency: "USD".to_string(),
         currency_decimals: None,
         grouping: Grouping::Both,
@@ -228,6 +230,7 @@ async fn calculate_with_equity_and_fx() -> Result<()> {
     let service = PortfolioService::new(storage, market_data);
     let query = PortfolioQuery {
         as_of_date: chrono::NaiveDate::from_ymd_opt(2026, 2, 2).unwrap(),
+        as_of_timestamp: None,
         currency: "EUR".to_string(),
         currency_decimals: None,
         grouping: Grouping::Asset,
@@ -293,6 +296,7 @@ async fn calculate_reports_unrealized_gain_and_tax_from_cost_basis() -> Result<(
     let service = PortfolioService::new(storage, market_data);
     let query = PortfolioQuery {
         as_of_date: chrono::NaiveDate::from_ymd_opt(2026, 2, 2).unwrap(),
+        as_of_timestamp: None,
         currency: "USD".to_string(),
         currency_decimals: None,
         grouping: Grouping::Asset,
@@ -366,6 +370,7 @@ async fn calculate_can_scale_equities_to_target_pre_tax_total_value() -> Result<
     let service = PortfolioService::new(storage, market_data);
     let query = PortfolioQuery {
         as_of_date: chrono::NaiveDate::from_ymd_opt(2026, 2, 2).unwrap(),
+        as_of_timestamp: None,
         currency: "USD".to_string(),
         currency_decimals: None,
         grouping: Grouping::Both,
@@ -449,6 +454,7 @@ async fn calculate_with_detail() -> Result<()> {
     let service = PortfolioService::new(storage, market_data);
     let query = PortfolioQuery {
         as_of_date: chrono::NaiveDate::from_ymd_opt(2026, 2, 2).unwrap(),
+        as_of_timestamp: None,
         currency: "USD".to_string(),
         currency_decimals: None,
         grouping: Grouping::Asset,
@@ -520,6 +526,7 @@ async fn calculate_merges_case_insensitive_assets() -> Result<()> {
 
     let query = PortfolioQuery {
         as_of_date: chrono::NaiveDate::from_ymd_opt(2026, 2, 2).unwrap(),
+        as_of_timestamp: None,
         currency: "USD".to_string(),
         currency_decimals: None,
         grouping: Grouping::Asset,
@@ -576,6 +583,7 @@ async fn calculate_uses_latest_snapshot_before_date() -> Result<()> {
 
     let query = PortfolioQuery {
         as_of_date: chrono::NaiveDate::from_ymd_opt(2026, 2, 2).unwrap(),
+        as_of_timestamp: None,
         currency: "USD".to_string(),
         currency_decimals: None,
         grouping: Grouping::Both,
@@ -627,6 +635,7 @@ async fn calculate_zero_backfill() -> Result<()> {
 
     let query = PortfolioQuery {
         as_of_date: chrono::NaiveDate::from_ymd_opt(2026, 2, 1).unwrap(),
+        as_of_timestamp: None,
         currency: "USD".to_string(),
         currency_decimals: None,
         grouping: Grouping::Account,
@@ -691,6 +700,7 @@ async fn calculate_excludes_accounts_marked_from_portfolio() -> Result<()> {
 
     let query = PortfolioQuery {
         as_of_date: chrono::NaiveDate::from_ymd_opt(2026, 2, 2).unwrap(),
+        as_of_timestamp: None,
         currency: "USD".to_string(),
         currency_decimals: None,
         grouping: Grouping::Both,
@@ -747,6 +757,7 @@ async fn calculate_carry_back_earliest_balance() -> Result<()> {
 
     let query = PortfolioQuery {
         as_of_date: chrono::NaiveDate::from_ymd_opt(2026, 2, 1).unwrap(),
+        as_of_timestamp: None,
         currency: "USD".to_string(),
         currency_decimals: None,
         grouping: Grouping::Both,
@@ -799,6 +810,7 @@ async fn manual_value_carries_back_without_becoming_currency() -> Result<()> {
 
     let query = PortfolioQuery {
         as_of_date: chrono::NaiveDate::from_ymd_opt(2021, 10, 31).unwrap(),
+        as_of_timestamp: None,
         currency: "USD".to_string(),
         currency_decimals: None,
         grouping: Grouping::Asset,
@@ -889,7 +901,7 @@ async fn historical_snapshot_does_not_fetch_live_quote_for_past_date() -> Result
 
     let service = PortfolioService::new(Arc::new(MemoryStorage::new()), market_data);
     let valuation = service
-        .value_asset(&asset, Decimal::ONE, "USD", as_of_date)
+        .value_asset(&asset, Decimal::ONE, "USD", as_of_date, None)
         .await?;
 
     assert_eq!(valuation.price.as_deref(), Some("100"));
@@ -933,7 +945,7 @@ async fn historical_snapshot_prefers_same_day_quote_over_older_close() -> Result
     let market_data = Arc::new(MarketDataService::new(store, None));
     let service = PortfolioService::new(storage, market_data);
     let valuation = service
-        .value_asset(&asset, Decimal::ONE, "USD", as_of_date)
+        .value_asset(&asset, Decimal::ONE, "USD", as_of_date, None)
         .await?;
 
     assert_eq!(valuation.price.as_deref(), Some("110"));
@@ -984,6 +996,7 @@ async fn asset_breakdown_aggregates_same_asset_across_accounts() -> Result<()> {
 
     let query = PortfolioQuery {
         as_of_date: chrono::NaiveDate::from_ymd_opt(2026, 2, 2).unwrap(),
+        as_of_timestamp: None,
         currency: "USD".to_string(),
         currency_decimals: None,
         grouping: Grouping::Asset,
@@ -1057,6 +1070,7 @@ async fn asset_breakdown_partitions_liabilities_without_netting() -> Result<()> 
 
     let query = PortfolioQuery {
         as_of_date: chrono::NaiveDate::from_ymd_opt(2026, 2, 2).unwrap(),
+        as_of_timestamp: None,
         currency: "USD".to_string(),
         currency_decimals: None,
         grouping: Grouping::Asset,
@@ -1143,6 +1157,7 @@ async fn asset_breakdown_respects_exclude_from_portfolio() -> Result<()> {
 
     let query = PortfolioQuery {
         as_of_date: chrono::NaiveDate::from_ymd_opt(2026, 2, 2).unwrap(),
+        as_of_timestamp: None,
         currency: "USD".to_string(),
         currency_decimals: None,
         grouping: Grouping::Asset,
@@ -1192,6 +1207,7 @@ async fn asset_breakdown_missing_price_yields_none_values() -> Result<()> {
 
     let query = PortfolioQuery {
         as_of_date: chrono::NaiveDate::from_ymd_opt(2026, 2, 2).unwrap(),
+        as_of_timestamp: None,
         currency: "USD".to_string(),
         currency_decimals: None,
         grouping: Grouping::Asset,
@@ -1208,6 +1224,177 @@ async fn asset_breakdown_missing_price_yields_none_values() -> Result<()> {
     assert_eq!(rows[0].price, None);
     assert_eq!(rows[0].holdings.len(), 1);
     assert_eq!(rows[0].holdings[0].value_in_base, None);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_intraday_cutoff_excludes_later_balances_on_the_same_day() -> Result<()> {
+    let storage = Arc::new(MemoryStorage::new());
+    let connection = Connection::new(ConnectionConfig {
+        name: "Test Bank".into(),
+        synchronizer: "manual".into(),
+        credentials: None,
+        balance_staleness: None,
+    });
+    storage.save_connection(&connection).await?;
+    let morning_account = Account::new("Morning", connection.id().clone());
+    let afternoon_account = Account::new("Afternoon", connection.id().clone());
+    storage.save_account(&morning_account).await?;
+    storage.save_account(&afternoon_account).await?;
+
+    let morning = Utc.with_ymd_and_hms(2026, 2, 1, 9, 0, 0).unwrap();
+    let afternoon = Utc.with_ymd_and_hms(2026, 2, 1, 16, 0, 0).unwrap();
+    storage
+        .append_balance_snapshot(
+            &morning_account.id,
+            &BalanceSnapshot::new(
+                morning,
+                vec![AssetBalance::new(Asset::currency("USD"), "10")],
+            ),
+        )
+        .await?;
+    storage
+        .append_balance_snapshot(
+            &afternoon_account.id,
+            &BalanceSnapshot::new(
+                afternoon,
+                vec![AssetBalance::new(Asset::currency("USD"), "90")],
+            ),
+        )
+        .await?;
+
+    let market_data = Arc::new(MarketDataService::new(
+        Arc::new(MemoryMarketDataStore::new()),
+        None,
+    ));
+    let service = PortfolioService::new(storage, market_data);
+    let query = |as_of_timestamp| PortfolioQuery {
+        as_of_date: morning.date_naive(),
+        as_of_timestamp,
+        currency: "USD".into(),
+        currency_decimals: None,
+        grouping: Grouping::Both,
+        include_detail: false,
+        capital_gains_tax_rate: None,
+        equity_valuation_adjustment: None,
+        account_ids: Vec::new(),
+    };
+
+    assert_eq!(
+        service.calculate(&query(Some(morning))).await?.total_value,
+        "10",
+        "a morning point must not include an afternoon balance"
+    );
+    assert_eq!(
+        service
+            .calculate(&query(Some(afternoon)))
+            .await?
+            .total_value,
+        "100"
+    );
+    assert_eq!(
+        service.calculate(&query(None)).await?.total_value,
+        "100",
+        "a date query still values at the end of the day"
+    );
+
+    let rows = service.asset_breakdown(&query(Some(morning))).await?;
+    assert_eq!(rows[0].total_amount, Decimal::from(10));
+    assert_eq!(rows[0].amount_last_checked_at, Some(morning));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_intraday_cutoff_prefers_readings_recorded_by_that_instant() -> Result<()> {
+    let storage = Arc::new(MemoryStorage::new());
+    let connection = Connection::new(ConnectionConfig {
+        name: "Test Bank".into(),
+        synchronizer: "manual".into(),
+        credentials: None,
+        balance_staleness: None,
+    });
+    storage.save_connection(&connection).await?;
+    let account = Account::new("Brokerage", connection.id().clone());
+    storage.save_account(&account).await?;
+
+    let morning = Utc.with_ymd_and_hms(2026, 2, 2, 9, 0, 0).unwrap();
+    let afternoon = Utc.with_ymd_and_hms(2026, 2, 2, 16, 0, 0).unwrap();
+    let asset = Asset::equity("AAPL");
+    storage
+        .append_balance_snapshot(
+            &account.id,
+            &BalanceSnapshot::new(morning, vec![AssetBalance::new(asset.clone(), "1")]),
+        )
+        .await?;
+
+    let store = Arc::new(MemoryMarketDataStore::new());
+    let price = |as_of_date, timestamp, value: &str, kind| PricePoint {
+        asset_id: AssetId::from_asset(&asset),
+        as_of_date,
+        timestamp,
+        price: value.to_string(),
+        quote_currency: "USD".to_string(),
+        kind,
+        source: "test".to_string(),
+    };
+    // Yesterday's close, recorded this morning: a settled reading for its own
+    // date, so it stays visible however late it was written down.
+    store
+        .put_prices(&[price(
+            morning.date_naive() - chrono::Duration::days(1),
+            morning,
+            "100",
+            PriceKind::Close,
+        )])
+        .await?;
+    // An intraday quote taken this afternoon.
+    store
+        .put_prices(&[price(
+            morning.date_naive(),
+            afternoon,
+            "150",
+            PriceKind::Quote,
+        )])
+        .await?;
+
+    let market_data = Arc::new(MarketDataService::new(store, None));
+    let service = PortfolioService::new(storage, market_data);
+    let query = |as_of_timestamp| PortfolioQuery {
+        as_of_date: morning.date_naive(),
+        as_of_timestamp,
+        currency: "USD".into(),
+        currency_decimals: None,
+        grouping: Grouping::Asset,
+        include_detail: false,
+        capital_gains_tax_rate: None,
+        equity_valuation_adjustment: None,
+        account_ids: Vec::new(),
+    };
+
+    assert_eq!(
+        service.calculate(&query(Some(morning))).await?.total_value,
+        "100",
+        "an afternoon quote must not price a morning point"
+    );
+    assert_eq!(
+        service
+            .calculate(&query(Some(afternoon)))
+            .await?
+            .total_value,
+        "150"
+    );
+    assert_eq!(service.calculate(&query(None)).await?.total_value, "150");
+
+    // Before the account reported anything, it holds nothing.
+    let dawn = Utc.with_ymd_and_hms(2026, 2, 2, 5, 0, 0).unwrap();
+    assert_eq!(
+        service.calculate(&query(Some(dawn))).await?.total_value,
+        "0"
+    );
+    let rows = service.asset_breakdown(&query(Some(dawn))).await?;
+    assert!(rows.is_empty(), "no balance had been recorded by then");
 
     Ok(())
 }

@@ -352,6 +352,85 @@ async fn portfolio_history_carries_forward_previous_valuation_when_price_missing
 }
 
 #[tokio::test]
+async fn portfolio_history_values_each_point_at_its_own_instant() -> anyhow::Result<()> {
+    let dir = TempDir::new()?;
+    let config = ResolvedConfig {
+        data_dir: dir.path().to_path_buf(),
+        reporting_currency: "USD".to_string(),
+        display: DisplayConfig::default(),
+        refresh: RefreshConfig::default(),
+        history: HistoryConfig::default(),
+        tray: TrayConfig::default(),
+        spending: SpendingConfig::default(),
+        tags: Default::default(),
+        portfolio: crate::config::PortfolioConfig::default(),
+        ignore: crate::config::IgnoreConfig::default(),
+        ai: crate::config::AiConfig::default(),
+        git: GitConfig::default(),
+    };
+
+    let storage = Arc::new(MemoryStorage::new());
+    let connection = Connection::new(connection_config("Test Bank"));
+    storage.save_connection(&connection).await?;
+    let morning_account = Account::new("Morning", connection.id().clone());
+    let afternoon_account = Account::new("Afternoon", connection.id().clone());
+    storage.save_account(&morning_account).await?;
+    storage.save_account(&afternoon_account).await?;
+
+    // Two changes on the same day. Before valuation carried an instant, the
+    // morning point reported the day's closing total.
+    storage
+        .append_balance_snapshot(
+            &morning_account.id,
+            &BalanceSnapshot::new(
+                Utc.with_ymd_and_hms(2024, 3, 1, 9, 0, 0).unwrap(),
+                vec![AssetBalance::new(Asset::currency("USD"), "10")],
+            ),
+        )
+        .await?;
+    storage
+        .append_balance_snapshot(
+            &afternoon_account.id,
+            &BalanceSnapshot::new(
+                Utc.with_ymd_and_hms(2024, 3, 1, 16, 0, 0).unwrap(),
+                vec![AssetBalance::new(Asset::currency("USD"), "90")],
+            ),
+        )
+        .await?;
+
+    let output = portfolio_history(
+        storage.clone(),
+        &config,
+        None,
+        None,
+        None,
+        "none".to_string(),
+        false,
+    )
+    .await?;
+
+    assert_eq!(output.points.len(), 2);
+    assert_eq!(output.points[0].total_value, "10");
+    assert_eq!(output.points[1].total_value, "100");
+
+    // Coalescing to one point a day still reports the day's closing total.
+    let daily = portfolio_history(
+        storage,
+        &config,
+        None,
+        None,
+        None,
+        "daily".to_string(),
+        false,
+    )
+    .await?;
+    assert_eq!(daily.points.len(), 1);
+    assert_eq!(daily.points[0].total_value, "100");
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn portfolio_history_subtracts_configured_latent_capital_gains_tax() -> anyhow::Result<()> {
     let dir = TempDir::new()?;
     let config = ResolvedConfig {

@@ -3,7 +3,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use chrono::{Datelike, Days, Duration, Months, NaiveDate, Utc};
+use chrono::{DateTime, Datelike, Days, Duration, Months, NaiveDate, Utc};
 use rust_decimal::Decimal;
 use tracing::warn;
 
@@ -563,6 +563,9 @@ fn calculate_history_summary(history_points: &[HistoryPoint]) -> Option<HistoryS
 struct HistoryPointInput<'a> {
     target_currency: &'a str,
     as_of_date: NaiveDate,
+    /// Instant this point is valued at. `None` values at the end of
+    /// `as_of_date`, which is what sampled (non change point) history wants.
+    as_of_timestamp: Option<DateTime<Utc>>,
     timestamp: String,
     change_triggers: Option<Vec<String>>,
     previous_total_value: Option<Decimal>,
@@ -575,6 +578,7 @@ struct HistoryPointInput<'a> {
 struct StackedHistoryPointInput<'a> {
     target_currency: &'a str,
     as_of_date: NaiveDate,
+    as_of_timestamp: Option<DateTime<Utc>>,
     timestamp: String,
     capital_gains_tax_rate: Option<Decimal>,
     include_latent_tax_adjustment: bool,
@@ -589,6 +593,7 @@ async fn build_history_point_for_date(
 ) -> Result<(HistoryPoint, Option<Decimal>)> {
     let query = PortfolioQuery {
         as_of_date: input.as_of_date,
+        as_of_timestamp: input.as_of_timestamp,
         currency: input.target_currency.to_string(),
         currency_decimals: config.display.currency_decimals,
         grouping: Grouping::Asset,
@@ -634,6 +639,7 @@ async fn build_stacked_history_point_for_date(
 ) -> Result<StackedHistoryPoint> {
     let query = PortfolioQuery {
         as_of_date: input.as_of_date,
+        as_of_timestamp: input.as_of_timestamp,
         currency: input.target_currency.to_string(),
         currency_decimals: config.display.currency_decimals,
         grouping: Grouping::Both,
@@ -1728,6 +1734,7 @@ pub async fn portfolio_snapshot(
     // Build query
     let query = PortfolioQuery {
         as_of_date,
+        as_of_timestamp: None,
         currency: currency.unwrap_or_else(|| config.reporting_currency.clone()),
         currency_decimals: config.display.currency_decimals,
         grouping,
@@ -1884,6 +1891,7 @@ pub async fn portfolio_assets(
 
     let breakdown_query = |as_of: NaiveDate| PortfolioQuery {
         as_of_date: as_of,
+        as_of_timestamp: None,
         currency: currency.clone(),
         currency_decimals,
         grouping: Grouping::Asset,
@@ -2118,6 +2126,7 @@ pub async fn portfolio_tax_impact(
     let service = PortfolioService::new(storage, market_data);
     let base_query = PortfolioQuery {
         as_of_date,
+        as_of_timestamp: None,
         currency: currency.clone(),
         currency_decimals: config.display.currency_decimals,
         grouping: Grouping::Asset,
@@ -2347,6 +2356,7 @@ pub async fn portfolio_stacked_history(
             StackedHistoryPointInput {
                 target_currency: &target_currency,
                 as_of_date: change_point.timestamp.date_naive(),
+                as_of_timestamp: Some(change_point.timestamp),
                 timestamp: change_point.timestamp.to_rfc3339(),
                 capital_gains_tax_rate,
                 include_latent_tax_adjustment,
@@ -2533,6 +2543,7 @@ async fn portfolio_history_scoped(
             HistoryPointInput {
                 target_currency: &target_currency,
                 as_of_date,
+                as_of_timestamp: Some(change_point.timestamp),
                 timestamp: change_point.timestamp.to_rfc3339(),
                 change_triggers: if trigger_descriptions.is_empty() {
                     None
@@ -2629,6 +2640,7 @@ pub async fn portfolio_recent_history(
             HistoryPointInput {
                 target_currency: &target_currency,
                 as_of_date,
+                as_of_timestamp: None,
                 timestamp,
                 change_triggers: None,
                 previous_total_value,

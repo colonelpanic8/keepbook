@@ -16,6 +16,16 @@ pub enum Grouping {
 #[derive(Debug, Clone)]
 pub struct PortfolioQuery {
     pub as_of_date: NaiveDate,
+    /// Optional instant to value at, for points within a day.
+    ///
+    /// `None` means the end of `as_of_date`: the latest balance recorded on or
+    /// before that date, valued with the latest price for it. When set, only
+    /// balances recorded at or before this instant count, and price and FX
+    /// readings recorded by it are preferred, so a morning point cannot pick up
+    /// an afternoon change. Readings recorded later are still used when nothing
+    /// was recorded by the cutoff, since a date's only reading is usually
+    /// written down at its close or backfilled afterwards.
+    pub as_of_timestamp: Option<DateTime<Utc>>,
     pub currency: String,
     /// If set, values denominated in `currency` are rounded to this many
     /// decimal places before being rendered as strings.

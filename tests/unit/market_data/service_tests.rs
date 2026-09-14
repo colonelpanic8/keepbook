@@ -393,3 +393,33 @@ async fn future_projection_uses_earliest_later_fx_rate_when_bounded_lookback_mis
     );
     Ok(())
 }
+
+#[tokio::test]
+async fn a_cutoff_falls_back_to_the_closest_reading_when_nothing_was_recorded_by_then() -> Result<()>
+{
+    let store = Arc::new(MemoryMarketDataStore::new());
+    let asset = Asset::equity("AAPL");
+    let date = NaiveDate::from_ymd_opt(2026, 2, 2).unwrap();
+    // The only close for this date was written down at the end of it, which is
+    // the normal case for daily prices.
+    store
+        .put_prices(&[PricePoint {
+            asset_id: AssetId::from_asset(&asset),
+            as_of_date: date,
+            timestamp: Utc.with_ymd_and_hms(2026, 2, 2, 23, 0, 0).unwrap(),
+            price: "100".to_string(),
+            quote_currency: "USD".to_string(),
+            kind: PriceKind::Close,
+            source: "test".to_string(),
+        }])
+        .await?;
+
+    let service = MarketDataService::new(store, None);
+    let cutoff = Utc.with_ymd_and_hms(2026, 2, 2, 9, 0, 0).unwrap();
+    let price = service
+        .price_from_store_at(&asset, date, Some(cutoff))
+        .await?
+        .expect("a date's only reading still values that date");
+    assert_eq!(price.price, "100");
+    Ok(())
+}

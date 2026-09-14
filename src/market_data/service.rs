@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use chrono::{Duration, NaiveDate};
+use chrono::{DateTime, Duration, NaiveDate, Utc};
 use tracing::{debug, info};
 
 use crate::clock::{Clock, SystemClock};
@@ -96,6 +96,17 @@ impl MarketDataService {
         asset: &Asset,
         date: NaiveDate,
     ) -> Result<Option<PricePoint>> {
+        self.price_from_store_at(asset, date, None).await
+    }
+
+    /// Like [`Self::price_from_store`] but ignores intraday readings recorded
+    /// after `cutoff`. See [`recorded_by`] for which observations that hides.
+    pub async fn price_from_store_at(
+        &self,
+        asset: &Asset,
+        date: NaiveDate,
+        cutoff: Option<DateTime<Utc>>,
+    ) -> Result<Option<PricePoint>> {
         let asset = asset.normalized();
         let asset_id = AssetId::from_asset(&asset);
         debug!(asset_id = %asset_id, date = %date, "looking up price from store only");
@@ -104,7 +115,7 @@ impl MarketDataService {
 
         if let Some(days) = self.store_lookback_days {
             let start = date - Duration::days(days as i64);
-            if let Some(price) = select_latest_price_in_range(&prices, start, date) {
+            if let Some(price) = select_latest_price_in_range(&prices, start, date, cutoff) {
                 debug!(
                     asset_id = %asset_id,
                     date = %price.as_of_date,
@@ -121,7 +132,7 @@ impl MarketDataService {
             return Ok(select_earliest_price_on_or_after(&prices, date));
         }
 
-        if let Some(price) = select_latest_price_on_or_before(&prices, date) {
+        if let Some(price) = select_latest_price_on_or_before(&prices, date, cutoff) {
             return Ok(Some(price));
         }
 
@@ -143,12 +154,35 @@ impl MarketDataService {
         self.price_from_store(asset, date).await
     }
 
+    /// Like [`Self::valuation_price_from_store`] but bounded by a valuation
+    /// cutoff.
+    pub async fn valuation_price_from_store_at(
+        &self,
+        asset: &Asset,
+        date: NaiveDate,
+        cutoff: Option<DateTime<Utc>>,
+    ) -> Result<Option<PricePoint>> {
+        self.price_from_store_at(asset, date, cutoff).await
+    }
+
     pub async fn price_close(&self, asset: &Asset, date: NaiveDate) -> Result<PricePoint> {
+        self.price_close_at(asset, date, None).await
+    }
+
+    /// Like [`Self::price_close`] but bounded by a valuation cutoff: readings
+    /// the cutoff hides are neither returned from the store nor accepted from a
+    /// provider.
+    pub async fn price_close_at(
+        &self,
+        asset: &Asset,
+        date: NaiveDate,
+        cutoff: Option<DateTime<Utc>>,
+    ) -> Result<PricePoint> {
         let asset = asset.normalized();
         let asset_id = AssetId::from_asset(&asset);
         debug!(asset_id = %asset_id, date = %date, "looking up historical price");
 
-        if let Some(price) = self.price_from_store(&asset, date).await? {
+        if let Some(price) = self.price_from_store_at(&asset, date, cutoff).await? {
             debug!(
                 asset_id = %asset_id,
                 date = %price.as_of_date,
@@ -353,6 +387,17 @@ impl MarketDataService {
     }
 
     pub async fn fx_close(&self, base: &str, quote: &str, date: NaiveDate) -> Result<FxRatePoint> {
+        self.fx_close_at(base, quote, date, None).await
+    }
+
+    /// Like [`Self::fx_close`] but bounded by a valuation cutoff.
+    pub async fn fx_close_at(
+        &self,
+        base: &str,
+        quote: &str,
+        date: NaiveDate,
+        cutoff: Option<DateTime<Utc>>,
+    ) -> Result<FxRatePoint> {
         let base = base.trim().to_uppercase();
         let quote = quote.trim().to_uppercase();
         debug!(base = %base, quote = %quote, date = %date, "looking up FX rate");
@@ -369,7 +414,7 @@ impl MarketDataService {
             });
         }
 
-        if let Some(rate) = self.fx_from_store(&base, &quote, date).await? {
+        if let Some(rate) = self.fx_from_store_at(&base, &quote, date, cutoff).await? {
             debug!(
                 base = %base,
                 quote = %quote,
@@ -460,6 +505,18 @@ impl MarketDataService {
         quote: &str,
         date: NaiveDate,
     ) -> Result<Option<FxRatePoint>> {
+        self.fx_from_store_at(base, quote, date, None).await
+    }
+
+    /// Like [`Self::fx_from_store`] but ignores intraday readings recorded
+    /// after `cutoff`.
+    pub async fn fx_from_store_at(
+        &self,
+        base: &str,
+        quote: &str,
+        date: NaiveDate,
+        cutoff: Option<DateTime<Utc>>,
+    ) -> Result<Option<FxRatePoint>> {
         let base = base.trim().to_uppercase();
         let quote = quote.trim().to_uppercase();
         debug!(base = %base, quote = %quote, date = %date, "looking up FX rate from store only");
@@ -477,15 +534,10 @@ impl MarketDataService {
         }
 
         if let Some(days) = self.store_lookback_days {
-            for offset in 0..=days {
-                let target_date = date - Duration::days(offset as i64);
-                if let Some(rate) = self
-                    .store
-                    .get_fx_rate(&base, &quote, target_date, FxRateKind::Close)
-                    .await?
-                {
-                    return Ok(Some(rate));
-                }
+            let start = date - Duration::days(days as i64);
+            let rates = self.store.get_all_fx_rates(&base, &quote).await?;
+            if let Some(rate) = select_latest_fx_rate_in_range(&rates, start, date, cutoff) {
+                return Ok(Some(rate));
             }
             if !self.allow_future_projection {
                 return Ok(None);
@@ -496,7 +548,7 @@ impl MarketDataService {
         }
 
         let rates = self.store.get_all_fx_rates(&base, &quote).await?;
-        if let Some(rate) = select_latest_fx_rate_on_or_before(&rates, date) {
+        if let Some(rate) = select_latest_fx_rate_on_or_before(&rates, date, cutoff) {
             return Ok(Some(rate));
         }
 
@@ -647,16 +699,59 @@ impl MarketDataService {
     }
 }
 
-fn select_latest_price_on_or_before(prices: &[PricePoint], date: NaiveDate) -> Option<PricePoint> {
-    prices
+/// Selects an observation for a valuation bounded to an instant.
+///
+/// Readings recorded at or before `cutoff` win, so an intraday reading taken
+/// later in the day cannot price an earlier point. Observation timestamps
+/// record when keepbook stored a reading rather than when the market produced
+/// it, though, so a date's only reading is often written down at its close or
+/// backfilled days later. When nothing was recorded by the cutoff, the ordinary
+/// unbounded choice is used: an approximate value beats no value at all.
+fn select_with_cutoff<'a, T: Clone>(
+    observations: &'a [T],
+    cutoff: Option<DateTime<Utc>>,
+    timestamp: impl Fn(&T) -> DateTime<Utc>,
+    newest: impl Fn(&mut dyn Iterator<Item = &'a T>) -> Option<&'a T>,
+) -> Option<T> {
+    if let Some(cutoff) = cutoff {
+        let mut recorded_by_cutoff = observations
+            .iter()
+            .filter(|observation| timestamp(observation) <= cutoff);
+        if let Some(selected) = newest(&mut recorded_by_cutoff) {
+            return Some(selected.clone());
+        }
+    }
+
+    newest(&mut observations.iter()).cloned()
+}
+
+fn newest_price<'a>(prices: &mut dyn Iterator<Item = &'a PricePoint>) -> Option<&'a PricePoint> {
+    prices.max_by(|a, b| {
+        a.as_of_date
+            .cmp(&b.as_of_date)
+            .then_with(|| a.timestamp.cmp(&b.timestamp))
+    })
+}
+
+fn newest_fx_rate<'a>(rates: &mut dyn Iterator<Item = &'a FxRatePoint>) -> Option<&'a FxRatePoint> {
+    rates.max_by(|a, b| {
+        a.as_of_date
+            .cmp(&b.as_of_date)
+            .then_with(|| a.timestamp.cmp(&b.timestamp))
+    })
+}
+
+fn select_latest_price_on_or_before(
+    prices: &[PricePoint],
+    date: NaiveDate,
+    cutoff: Option<DateTime<Utc>>,
+) -> Option<PricePoint> {
+    let eligible: Vec<PricePoint> = prices
         .iter()
         .filter(|p| p.as_of_date <= date)
-        .max_by(|a, b| {
-            a.as_of_date
-                .cmp(&b.as_of_date)
-                .then_with(|| a.timestamp.cmp(&b.timestamp))
-        })
         .cloned()
+        .collect();
+    select_with_cutoff(&eligible, cutoff, |p| p.timestamp, newest_price)
 }
 
 fn select_latest_price_on_date(prices: &[PricePoint], date: NaiveDate) -> Option<PricePoint> {
@@ -671,16 +766,14 @@ fn select_latest_price_in_range(
     prices: &[PricePoint],
     start: NaiveDate,
     end: NaiveDate,
+    cutoff: Option<DateTime<Utc>>,
 ) -> Option<PricePoint> {
-    prices
+    let eligible: Vec<PricePoint> = prices
         .iter()
         .filter(|p| p.as_of_date >= start && p.as_of_date <= end)
-        .max_by(|a, b| {
-            a.as_of_date
-                .cmp(&b.as_of_date)
-                .then_with(|| a.timestamp.cmp(&b.timestamp))
-        })
         .cloned()
+        .collect();
+    select_with_cutoff(&eligible, cutoff, |p| p.timestamp, newest_price)
 }
 
 fn select_earliest_price_on_or_after(prices: &[PricePoint], date: NaiveDate) -> Option<PricePoint> {
@@ -698,16 +791,28 @@ fn select_earliest_price_on_or_after(prices: &[PricePoint], date: NaiveDate) -> 
 fn select_latest_fx_rate_on_or_before(
     rates: &[FxRatePoint],
     date: NaiveDate,
+    cutoff: Option<DateTime<Utc>>,
 ) -> Option<FxRatePoint> {
-    rates
+    let eligible: Vec<FxRatePoint> = rates
         .iter()
         .filter(|r| r.kind == FxRateKind::Close && r.as_of_date <= date)
-        .max_by(|a, b| {
-            a.as_of_date
-                .cmp(&b.as_of_date)
-                .then_with(|| a.timestamp.cmp(&b.timestamp))
-        })
         .cloned()
+        .collect();
+    select_with_cutoff(&eligible, cutoff, |r| r.timestamp, newest_fx_rate)
+}
+
+fn select_latest_fx_rate_in_range(
+    rates: &[FxRatePoint],
+    start: NaiveDate,
+    end: NaiveDate,
+    cutoff: Option<DateTime<Utc>>,
+) -> Option<FxRatePoint> {
+    let eligible: Vec<FxRatePoint> = rates
+        .iter()
+        .filter(|r| r.kind == FxRateKind::Close && r.as_of_date >= start && r.as_of_date <= end)
+        .cloned()
+        .collect();
+    select_with_cutoff(&eligible, cutoff, |r| r.timestamp, newest_fx_rate)
 }
 
 fn select_earliest_fx_rate_on_or_after(
