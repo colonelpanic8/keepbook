@@ -466,8 +466,7 @@ async fn collect_change_points_orders_same_timestamp_price_triggers_by_asset_id(
         &CollectOptions {
             account_ids: vec![account_id],
             include_prices: true,
-            include_fx: false,
-            target_currency: None,
+            ..Default::default()
         },
     )
     .await?;
@@ -554,8 +553,7 @@ async fn collect_change_points_preserves_intraday_quote_timestamps() -> Result<(
         &CollectOptions {
             account_ids: vec![account_id],
             include_prices: true,
-            include_fx: false,
-            target_currency: None,
+            ..Default::default()
         },
     )
     .await?;
@@ -572,6 +570,220 @@ async fn collect_change_points_preserves_intraday_quote_timestamps() -> Result<(
         .expect("quote-triggered change point should exist");
 
     assert_eq!(price_point.timestamp, quote_ts);
+
+    Ok(())
+}
+
+fn price_at(asset: &Asset, timestamp: DateTime<Utc>) -> PricePoint {
+    PricePoint {
+        asset_id: AssetId::from_asset(asset),
+        as_of_date: timestamp.date_naive(),
+        timestamp,
+        price: "100".to_string(),
+        quote_currency: "USD".to_string(),
+        kind: PriceKind::Close,
+        source: "test".to_string(),
+    }
+}
+
+/// Accounts with balances before, inside, and after a window, one asset held
+/// only before it and one only after, and prices spanning the whole range.
+async fn seed_windowed_portfolio() -> Result<(Arc<dyn Storage>, Arc<dyn MarketDataStore>)> {
+    let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new());
+    let market_data: Arc<dyn MarketDataStore> = Arc::new(MemoryMarketDataStore::new());
+
+    let conn_id = Id::from_string("conn-1");
+    storage
+        .save_connection(&Connection {
+            config: ConnectionConfig {
+                name: "Test".to_string(),
+                synchronizer: "manual".to_string(),
+                credentials: None,
+                balance_staleness: None,
+            },
+            state: ConnectionState::new_with(conn_id.clone(), make_ts(2024, 1, 1, 0, 0)),
+        })
+        .await?;
+
+    let held = Asset::equity("AAPL");
+    let other = Asset::equity("MSFT");
+    let only_before = Asset::equity("OLD");
+    let only_after = Asset::equity("NEW");
+
+    let accounts = [
+        (
+            "acct-1",
+            vec![
+                (
+                    make_ts(2024, 5, 20, 9, 0),
+                    vec![
+                        AssetBalance::new(held.clone(), "1"),
+                        AssetBalance::new(only_before.clone(), "5"),
+                    ],
+                ),
+                (
+                    make_ts(2024, 6, 10, 9, 0),
+                    vec![AssetBalance::new(held.clone(), "2")],
+                ),
+                (
+                    make_ts(2024, 6, 10, 15, 0),
+                    vec![AssetBalance::new(held.clone(), "3")],
+                ),
+                (
+                    make_ts(2024, 6, 12, 11, 0),
+                    vec![AssetBalance::new(held.clone(), "4")],
+                ),
+                (
+                    make_ts(2024, 7, 1, 10, 0),
+                    vec![
+                        AssetBalance::new(held.clone(), "5"),
+                        AssetBalance::new(only_after.clone(), "6"),
+                    ],
+                ),
+            ],
+        ),
+        (
+            "acct-2",
+            vec![
+                (
+                    make_ts(2024, 6, 11, 8, 0),
+                    vec![AssetBalance::new(other.clone(), "7")],
+                ),
+                (
+                    make_ts(2024, 6, 16, 23, 0),
+                    vec![AssetBalance::new(other.clone(), "8")],
+                ),
+                (
+                    make_ts(2024, 8, 2, 9, 0),
+                    vec![AssetBalance::new(other.clone(), "9")],
+                ),
+            ],
+        ),
+    ];
+
+    for (name, snapshots) in accounts {
+        let account_id = Id::from_string(name);
+        storage
+            .save_account(&Account::new_with(
+                account_id.clone(),
+                make_ts(2024, 1, 1, 0, 0),
+                name,
+                conn_id.clone(),
+            ))
+            .await?;
+        for (timestamp, balances) in snapshots {
+            storage
+                .append_balance_snapshot(
+                    &account_id,
+                    &crate::models::BalanceSnapshot::new(timestamp, balances),
+                )
+                .await?;
+        }
+    }
+
+    let quote_times = [
+        make_ts(2024, 5, 15, 16, 0),
+        make_ts(2024, 6, 9, 16, 0),
+        make_ts(2024, 6, 10, 16, 0),
+        make_ts(2024, 6, 13, 16, 0),
+        make_ts(2024, 6, 16, 16, 0),
+        make_ts(2024, 6, 20, 16, 0),
+        make_ts(2024, 7, 15, 16, 0),
+    ];
+    for asset in [&held, &other, &only_before, &only_after] {
+        let prices: Vec<PricePoint> = quote_times
+            .iter()
+            .map(|timestamp| price_at(asset, *timestamp))
+            .collect();
+        market_data.put_prices(&prices).await?;
+    }
+
+    Ok((storage, market_data))
+}
+
+#[tokio::test]
+async fn bounded_collection_matches_filtering_an_unbounded_one() -> Result<()> {
+    let (storage, market_data) = seed_windowed_portfolio().await?;
+
+    let start = NaiveDate::from_ymd_opt(2024, 6, 10).unwrap();
+    let end = NaiveDate::from_ymd_opt(2024, 6, 16).unwrap();
+
+    let unbounded = collect_change_points(
+        &storage,
+        &market_data,
+        &CollectOptions {
+            include_prices: true,
+            ..Default::default()
+        },
+    )
+    .await?;
+
+    let granularities = [
+        ("full", Granularity::Full),
+        ("daily", Granularity::Daily),
+        ("weekly", Granularity::Weekly),
+        ("monthly", Granularity::Monthly),
+    ];
+    let strategies = [
+        ("first", CoalesceStrategy::First),
+        ("last", CoalesceStrategy::Last),
+    ];
+
+    for (granularity_name, granularity) in granularities {
+        for (strategy_name, strategy) in strategies {
+            let bounded = collect_change_points(
+                &storage,
+                &market_data,
+                &CollectOptions {
+                    include_prices: true,
+                    start: Some(start),
+                    end: Some(end),
+                    granularity,
+                    strategy,
+                    ..Default::default()
+                },
+            )
+            .await?;
+
+            let expected = filter_by_granularity(
+                filter_by_date_range(unbounded.clone(), Some(start), Some(end)),
+                granularity,
+                strategy,
+            );
+
+            assert!(!expected.is_empty(), "{granularity_name} window is empty");
+            assert_eq!(
+                serde_json::to_value(&bounded)?,
+                serde_json::to_value(&expected)?,
+                "{granularity_name}/{strategy_name} bounded collection diverged"
+            );
+        }
+    }
+
+    let earliest = earliest_change_point(
+        &storage,
+        &market_data,
+        &CollectOptions {
+            include_prices: true,
+            ..Default::default()
+        },
+    )
+    .await?;
+    assert_eq!(earliest, Some(unbounded[0].timestamp));
+
+    let earliest_in_window = earliest_change_point(
+        &storage,
+        &market_data,
+        &CollectOptions {
+            include_prices: true,
+            start: Some(start),
+            end: Some(end),
+            ..Default::default()
+        },
+    )
+    .await?;
+    let first_in_window = filter_by_date_range(unbounded, Some(start), Some(end))[0].timestamp;
+    assert_eq!(earliest_in_window, Some(first_in_window));
 
     Ok(())
 }

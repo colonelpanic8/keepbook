@@ -16,9 +16,9 @@ use crate::market_data::{
 };
 use crate::models::{Account, Asset, Id};
 use crate::portfolio::{
-    collect_change_points, filter_by_date_range, filter_by_granularity, AccountSummary,
-    CoalesceStrategy, CollectOptions, EquityValuationAdjustment, Granularity, Grouping,
-    PortfolioQuery, PortfolioService, ValuationHistory,
+    collect_change_points, earliest_change_point, AccountSummary, CoalesceStrategy, CollectOptions,
+    EquityValuationAdjustment, Granularity, Grouping, PortfolioQuery, PortfolioService,
+    ValuationHistory,
 };
 use crate::staleness::{
     check_balance_staleness, check_price_staleness, log_balance_staleness, log_price_staleness,
@@ -2390,11 +2390,12 @@ pub async fn portfolio_stacked_history(
         include_prices,
         include_fx: false,
         target_currency: currency.clone(),
+        start: start_date,
+        end: end_date,
+        granularity: granularity_enum,
+        strategy: CoalesceStrategy::Last,
     };
-    let change_points = collect_change_points(&storage_arc, &store, &options).await?;
-    let filtered_by_date = filter_by_date_range(change_points, start_date, end_date);
-    let filtered =
-        filter_by_granularity(filtered_by_date, granularity_enum, CoalesceStrategy::Last);
+    let filtered = collect_change_points(&storage_arc, &store, &options).await?;
     let target_currency = currency.unwrap_or_else(|| config.reporting_currency.clone());
 
     if filtered.is_empty() {
@@ -2531,22 +2532,20 @@ async fn portfolio_history_scoped(
     )));
     let storage_arc: Arc<dyn Storage> = Arc::new(ReadThroughStorage::new(storage));
 
-    // Collect change points
+    // Collect change points already bounded to the requested window and
+    // granularity, so out-of-range observations are never materialized.
     let options = CollectOptions {
         account_ids: account_ids.clone(),
         include_prices,
         include_fx: false,
         target_currency: currency.clone(),
+        start: start_date,
+        end: end_date,
+        granularity: granularity_enum,
+        strategy: CoalesceStrategy::Last,
     };
 
-    let change_points = collect_change_points(&storage_arc, &store, &options).await?;
-
-    // Filter by date range
-    let filtered_by_date = filter_by_date_range(change_points, start_date, end_date);
-
-    // Filter by granularity
-    let filtered =
-        filter_by_granularity(filtered_by_date, granularity_enum, CoalesceStrategy::Last);
+    let filtered = collect_change_points(&storage_arc, &store, &options).await?;
 
     if filtered.is_empty() {
         return Ok(HistoryOutput {
@@ -2678,15 +2677,13 @@ pub async fn portfolio_recent_history(
         include_prices,
         include_fx: false,
         target_currency: currency.clone(),
+        ..Default::default()
     };
-    let change_points = collect_change_points(&storage_arc, &store, &options).await?;
-    let Some(earliest_date) = change_points
-        .iter()
-        .map(|point| point.timestamp.date_naive())
-        .min()
-    else {
+    // Only the first change point's date matters here, so don't build the rest.
+    let Some(earliest) = earliest_change_point(&storage_arc, &store, &options).await? else {
         return Ok(Vec::new());
     };
+    let earliest_date = earliest.date_naive();
 
     let sample_dates: Vec<NaiveDate> = history_spec_dates(anchor_date, &config.tray.history_spec)?
         .into_iter()
@@ -2795,16 +2792,13 @@ pub async fn portfolio_change_points(
         include_prices,
         include_fx: false,
         target_currency: None,
+        start: start_date,
+        end: end_date,
+        granularity: granularity_enum,
+        strategy: CoalesceStrategy::Last,
     };
 
-    let change_points = collect_change_points(&storage_arc, &store, &options).await?;
-
-    // Filter by date range
-    let filtered_by_date = filter_by_date_range(change_points, start_date, end_date);
-
-    // Filter by granularity
-    let filtered =
-        filter_by_granularity(filtered_by_date, granularity_enum, CoalesceStrategy::Last);
+    let filtered = collect_change_points(&storage_arc, &store, &options).await?;
 
     Ok(ChangePointsOutput {
         start_date: start_date_output,
