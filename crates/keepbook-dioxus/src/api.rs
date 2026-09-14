@@ -863,51 +863,12 @@ pub(crate) async fn fetch_recurring_transactions_impl(
 pub(crate) async fn review_recurring_transaction_impl(
     input: RecurringTransactionReviewInput,
 ) -> Result<(), String> {
+    let input: keepbook_server::RecurringTransactionReviewInput =
+        from_native_output(input, "recurring transaction review")?;
     let state = native_api_state()?.clone();
     run_native_worker(async move {
         state
-            .review_recurring_transaction(keepbook_server::RecurringTransactionReviewInput {
-                status: input.status,
-                candidate: keepbook_server::ReviewedRecurringTransactionOutput {
-                    candidate_key: input.candidate.candidate_key,
-                    review_status: input.candidate.review_status,
-                    name: input.candidate.name,
-                    normalized_name: input.candidate.normalized_name,
-                    status: input.candidate.status,
-                    cadence: input.candidate.cadence,
-                    estimated_interval_days: input.candidate.estimated_interval_days,
-                    estimated_recurring_cost: input.candidate.estimated_recurring_cost,
-                    estimated_annual_cost: input.candidate.estimated_annual_cost,
-                    confidence: input.candidate.confidence,
-                    cadence_score: input.candidate.cadence_score,
-                    occurrence_count: input.candidate.occurrence_count,
-                    first_seen: input.candidate.first_seen,
-                    last_seen: input.candidate.last_seen,
-                    next_expected: input.candidate.next_expected,
-                    amount: keepbook_server::ReviewedRecurringTransactionAmountOutput {
-                        typical: input.candidate.amount.typical,
-                        min: input.candidate.amount.min,
-                        max: input.candidate.amount.max,
-                        asset: input.candidate.amount.asset,
-                    },
-                    reason_codes: input.candidate.reason_codes,
-                    transactions: input
-                        .candidate
-                        .transactions
-                        .into_iter()
-                        .map(|occurrence| {
-                            keepbook_server::ReviewedRecurringTransactionOccurrenceOutput {
-                                id: occurrence.id,
-                                account_id: occurrence.account_id,
-                                account_name: occurrence.account_name,
-                                date: occurrence.date,
-                                description: occurrence.description,
-                                amount: occurrence.amount,
-                            }
-                        })
-                        .collect(),
-                },
-            })
+            .review_recurring_transaction(input)
             .await
             .map_err(|error| format!("Could not review recurring transaction: {error:#}"))?;
         Ok(())

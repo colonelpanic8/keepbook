@@ -53,6 +53,7 @@ const DEFAULT_SSH_IDENTITY_FILES: &[&str] = &[
 pub use ai_rules::{
     AiRuleSuggestionInput, AiRuleSuggestionsOutput, AiRuleToolCallOutput, AiRuleTransactionInput,
 };
+pub use keepbook::app::ReviewedRecurringTransactionOutput;
 pub use keepbook::config::WindowDecorationsConfig;
 
 #[derive(Clone)]
@@ -562,7 +563,7 @@ impl ApiState {
         query: RecurringTransactionsQuery,
     ) -> Result<Vec<ReviewedRecurringTransactionOutput>> {
         let state = self.snapshot().await;
-        let candidates = keepbook::app::list_recurring_transactions(
+        keepbook::app::list_reviewed_recurring_transactions(
             state.storage.as_ref(),
             keepbook::app::RecurringTransactionsOptions {
                 start: query.start,
@@ -571,41 +572,10 @@ impl ApiState {
                 include_possible: query.include_possible,
                 min_confidence: query.min_confidence.unwrap_or(0.70),
             },
+            query.include_dismissed,
             &state.config,
         )
-        .await?;
-        let reviews =
-            keepbook::app::list_recurring_transaction_reviews(state.storage.as_ref()).await?;
-
-        let mut out = Vec::new();
-        for candidate in candidates {
-            let candidate_key = keepbook::app::recurring_transaction_candidate_key(&candidate);
-            // Cadence can become more accurate as history accumulates. Preserve
-            // the user's latest decision when the merchant, amount, and asset
-            // still identify the same cost even if the candidate key changed.
-            let exact_review = reviews
-                .iter()
-                .rev()
-                .find(|review| review.candidate_key == candidate_key);
-            let compatible_review = reviews.iter().rev().find(|review| {
-                review.normalized_name == candidate.normalized_name
-                    && review.amount_typical == candidate.amount.typical
-                    && review.asset == candidate.amount.asset
-            });
-            let review_status = exact_review
-                .or(compatible_review)
-                .map(|review| review.status.clone())
-                .unwrap_or_else(|| "proposed".to_string());
-            if review_status == "dismissed" && !query.include_dismissed {
-                continue;
-            }
-            out.push(ReviewedRecurringTransactionOutput::from_app(
-                candidate_key,
-                review_status,
-                candidate,
-            ));
-        }
-        Ok(out)
+        .await
     }
 
     pub async fn review_recurring_transaction(
@@ -618,13 +588,12 @@ impl ApiState {
             "dismissed" => keepbook::models::RecurringTransactionReviewStatus::Dismissed,
             other => anyhow::bail!("unknown recurring transaction review status: {other}"),
         };
-        let candidate = input.candidate.to_app();
         keepbook::app::set_recurring_transaction_review(
             state.storage.as_ref(),
             &state.config,
             input.candidate.candidate_key,
             status,
-            &candidate,
+            &input.candidate.candidate,
         )
         .await
     }
@@ -1378,134 +1347,6 @@ pub struct RecurringTransactionsQuery {
     pub min_confidence: Option<f64>,
     #[serde(default)]
     pub include_dismissed: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReviewedRecurringTransactionAmountOutput {
-    pub typical: String,
-    pub min: String,
-    pub max: String,
-    pub asset: serde_json::Value,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReviewedRecurringTransactionOccurrenceOutput {
-    pub id: String,
-    pub account_id: String,
-    pub account_name: String,
-    pub date: String,
-    pub description: String,
-    pub amount: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReviewedRecurringTransactionOutput {
-    pub candidate_key: String,
-    pub review_status: String,
-    pub name: String,
-    pub normalized_name: String,
-    pub status: String,
-    pub cadence: String,
-    #[serde(default)]
-    pub estimated_interval_days: String,
-    #[serde(default)]
-    pub estimated_recurring_cost: String,
-    #[serde(default)]
-    pub estimated_annual_cost: String,
-    pub confidence: String,
-    pub cadence_score: String,
-    pub occurrence_count: usize,
-    pub first_seen: String,
-    pub last_seen: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub next_expected: Option<String>,
-    pub amount: ReviewedRecurringTransactionAmountOutput,
-    pub reason_codes: Vec<String>,
-    pub transactions: Vec<ReviewedRecurringTransactionOccurrenceOutput>,
-}
-
-impl ReviewedRecurringTransactionOutput {
-    fn from_app(
-        candidate_key: String,
-        review_status: String,
-        candidate: keepbook::app::RecurringTransactionOutput,
-    ) -> Self {
-        Self {
-            candidate_key,
-            review_status,
-            name: candidate.name,
-            normalized_name: candidate.normalized_name,
-            status: candidate.status,
-            cadence: candidate.cadence,
-            estimated_interval_days: candidate.estimated_interval_days,
-            estimated_recurring_cost: candidate.estimated_recurring_cost,
-            estimated_annual_cost: candidate.estimated_annual_cost,
-            confidence: candidate.confidence,
-            cadence_score: candidate.cadence_score,
-            occurrence_count: candidate.occurrence_count,
-            first_seen: candidate.first_seen,
-            last_seen: candidate.last_seen,
-            next_expected: candidate.next_expected,
-            amount: ReviewedRecurringTransactionAmountOutput {
-                typical: candidate.amount.typical,
-                min: candidate.amount.min,
-                max: candidate.amount.max,
-                asset: candidate.amount.asset,
-            },
-            reason_codes: candidate.reason_codes,
-            transactions: candidate
-                .transactions
-                .into_iter()
-                .map(|occurrence| ReviewedRecurringTransactionOccurrenceOutput {
-                    id: occurrence.id,
-                    account_id: occurrence.account_id,
-                    account_name: occurrence.account_name,
-                    date: occurrence.date,
-                    description: occurrence.description,
-                    amount: occurrence.amount,
-                })
-                .collect(),
-        }
-    }
-
-    fn to_app(&self) -> keepbook::app::RecurringTransactionOutput {
-        keepbook::app::RecurringTransactionOutput {
-            name: self.name.clone(),
-            normalized_name: self.normalized_name.clone(),
-            status: self.status.clone(),
-            cadence: self.cadence.clone(),
-            estimated_interval_days: self.estimated_interval_days.clone(),
-            estimated_recurring_cost: self.estimated_recurring_cost.clone(),
-            estimated_annual_cost: self.estimated_annual_cost.clone(),
-            confidence: self.confidence.clone(),
-            cadence_score: self.cadence_score.clone(),
-            occurrence_count: self.occurrence_count,
-            first_seen: self.first_seen.clone(),
-            last_seen: self.last_seen.clone(),
-            next_expected: self.next_expected.clone(),
-            amount: keepbook::app::RecurringTransactionAmountOutput {
-                typical: self.amount.typical.clone(),
-                min: self.amount.min.clone(),
-                max: self.amount.max.clone(),
-                asset: self.amount.asset.clone(),
-            },
-            reason_codes: self.reason_codes.clone(),
-            transactions: self
-                .transactions
-                .iter()
-                .map(
-                    |occurrence| keepbook::app::RecurringTransactionOccurrenceOutput {
-                        id: occurrence.id.clone(),
-                        account_id: occurrence.account_id.clone(),
-                        account_name: occurrence.account_name.clone(),
-                        date: occurrence.date.clone(),
-                        description: occurrence.description.clone(),
-                        amount: occurrence.amount.clone(),
-                    },
-                )
-                .collect(),
-        }
-    }
 }
 
 #[derive(Debug, Deserialize)]
