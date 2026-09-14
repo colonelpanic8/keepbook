@@ -527,5 +527,71 @@
       ]
     },
     "command": ["portfolio", "snapshot", "--date", "2024-06-15", "--offline"]
+  },
+  {
+    "name": "list_recurring_transactions_carries_review_status",
+    "reporting_currency": "USD",
+    "seed": {
+      "connections": [
+        {
+          "id": "conn-1",
+          "name": "Bank",
+          "synchronizer": "manual",
+          "status": "active",
+          "account_ids": ["acct-1"]
+        }
+      ],
+      "accounts": [
+        {
+          "id": "acct-1",
+          "name": "Checking",
+          "connection_id": "conn-1",
+          "tags": [],
+          "active": true
+        }
+      ],
+      "transactions": [
+        {
+          "account_id": "acct-1",
+          "id": "tx-1",
+          "timestamp": "2026-01-14T12:00:00Z",
+          "amount": "-11.99",
+          "asset": { "type": "currency", "iso_code": "USD" },
+          "description": "SPOTIFY USA 1234"
+        },
+        {
+          "account_id": "acct-1",
+          "id": "tx-2",
+          "timestamp": "2026-02-14T12:00:00Z",
+          "amount": "-11.99",
+          "asset": { "type": "currency", "iso_code": "USD" },
+          "description": "Spotify.com"
+        },
+        {
+          "account_id": "acct-1",
+          "id": "tx-3",
+          "timestamp": "2026-03-15T12:00:00Z",
+          "amount": "-11.99",
+          "asset": { "type": "currency", "iso_code": "USD" },
+          "description": "SPOTIFY USA 5678"
+        },
+        {
+          "account_id": "acct-1",
+          "id": "tx-4",
+          "timestamp": "2026-04-14T12:00:00Z",
+          "amount": "-11.99",
+          "asset": { "type": "currency", "iso_code": "USD" },
+          "description": "Spotify.com"
+        }
+      ]
+    },
+    "command": [
+      "list",
+      "recurring-transactions",
+      "--start",
+      "2026-01-01",
+      "--end",
+      "2026-05-01"
+    ]
   }
 ]

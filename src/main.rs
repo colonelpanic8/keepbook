@@ -873,6 +873,10 @@ enum ListCommand {
         /// Minimum confidence score from 0.0 to 1.0
         #[arg(long, default_value_t = 0.70)]
         min_confidence: f64,
+
+        /// Include candidates that have been dismissed in review
+        #[arg(long, default_value_t = false)]
+        include_dismissed: bool,
     },
 
     /// List everything
@@ -1578,8 +1582,9 @@ async fn main() -> Result<()> {
                 include_ignored,
                 include_possible,
                 min_confidence,
+                include_dismissed,
             } => {
-                let recurring = app::list_recurring_transactions(
+                let recurring = app::list_reviewed_recurring_transactions(
                     storage_arc.as_ref(),
                     app::RecurringTransactionsOptions {
                         start,
@@ -1588,6 +1593,7 @@ async fn main() -> Result<()> {
                         include_possible,
                         min_confidence,
                     },
+                    include_dismissed,
                     &config,
                 )
                 .await?;

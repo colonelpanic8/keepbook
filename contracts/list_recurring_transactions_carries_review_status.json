@@ -1,0 +1,67 @@
+[
+  {
+    "candidate_key": "v1|spotify|monthly|-11.99|{\"iso_code\":\"USD\",\"type\":\"currency\"}",
+    "review_status": "proposed",
+    "name": "Spotify.com",
+    "normalized_name": "spotify",
+    "status": "confirmed",
+    "cadence": "monthly",
+    "estimated_interval_days": "30.44",
+    "estimated_recurring_cost": "11.99",
+    "estimated_annual_cost": "143.88",
+    "confidence": "0.92",
+    "cadence_score": "0.97",
+    "occurrence_count": 4,
+    "first_seen": "2026-01-14",
+    "last_seen": "2026-04-14",
+    "next_expected": "2026-05-14",
+    "amount": {
+      "typical": "-11.99",
+      "min": "-11.99",
+      "max": "-11.99",
+      "asset": { "iso_code": "USD", "type": "currency" }
+    },
+    "reason_codes": [
+      "similar_merchant_name",
+      "monthly_cadence",
+      "strong_cadence",
+      "stable_amount",
+      "multiple_occurrences",
+      "active_pattern"
+    ],
+    "transactions": [
+      {
+        "id": "tx-1",
+        "account_id": "acct-1",
+        "account_name": "Checking",
+        "date": "2026-01-14",
+        "description": "SPOTIFY USA 1234",
+        "amount": "-11.99"
+      },
+      {
+        "id": "tx-2",
+        "account_id": "acct-1",
+        "account_name": "Checking",
+        "date": "2026-02-14",
+        "description": "Spotify.com",
+        "amount": "-11.99"
+      },
+      {
+        "id": "tx-3",
+        "account_id": "acct-1",
+        "account_name": "Checking",
+        "date": "2026-03-15",
+        "description": "SPOTIFY USA 5678",
+        "amount": "-11.99"
+      },
+      {
+        "id": "tx-4",
+        "account_id": "acct-1",
+        "account_name": "Checking",
+        "date": "2026-04-14",
+        "description": "Spotify.com",
+        "amount": "-11.99"
+      }
+    ]
+  }
+]
