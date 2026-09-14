@@ -214,6 +214,7 @@ fn android_private_state_is_outside_data_repo() {
 
 #[test]
 fn prepare_git_ssh_environment_creates_known_hosts_and_home_when_missing() -> Result<()> {
+    let _env = lock_process_env();
     let config_path = unique_test_config_path("prepare-git-ssh-env");
     write_test_config(&config_path, "data_dir = \".\"\n")?;
 
@@ -303,6 +304,7 @@ fn missing_configured_ssh_key_path_is_not_returned() {
 
 #[test]
 fn activate_age_identity_prefers_saved_keepbook_sync_key() -> Result<()> {
+    let _env = lock_process_env();
     let config_path = unique_test_config_path("age-identity-saved-key");
     write_test_config(&config_path, "data_dir = \".\"\n")?;
 
@@ -456,6 +458,14 @@ fn write_test_config(path: &Path, contents: &str) -> Result<()> {
     }
     std::fs::write(path, contents)?;
     Ok(())
+}
+
+/// Serializes the tests that swap process-wide environment variables. Cargo runs
+/// tests in one process on many threads, so without this they observe each
+/// other's `HOME` and `XDG_STATE_HOME`.
+fn lock_process_env() -> std::sync::MutexGuard<'static, ()> {
+    static PROCESS_ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    PROCESS_ENV.lock().unwrap_or_else(|err| err.into_inner())
 }
 
 fn remove_test_config(path: PathBuf) {
