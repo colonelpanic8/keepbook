@@ -9,6 +9,44 @@ use serde::{de::DeserializeOwned, Serialize};
 const LOCK_PREFIX: &str = ".keepbook-lock-";
 const TEMP_PREFIX: &str = ".keepbook-tmp-";
 
+/// `std`'s file locks report `ErrorKind::Unsupported` on Android because it has
+/// no `target_os = "android"` branch, even though bionic provides `flock(2)`.
+#[cfg(target_os = "android")]
+mod locking {
+    use std::fs::File;
+    use std::io;
+    use std::os::fd::AsRawFd;
+
+    fn flock(file: &File, operation: libc::c_int) -> io::Result<()> {
+        if unsafe { libc::flock(file.as_raw_fd(), operation) } == -1 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    pub(super) fn exclusive(file: &File) -> io::Result<()> {
+        flock(file, libc::LOCK_EX)
+    }
+
+    pub(super) fn shared(file: &File) -> io::Result<()> {
+        flock(file, libc::LOCK_SH)
+    }
+}
+
+#[cfg(not(target_os = "android"))]
+mod locking {
+    use std::fs::File;
+    use std::io;
+
+    pub(super) fn exclusive(file: &File) -> io::Result<()> {
+        file.lock()
+    }
+
+    pub(super) fn shared(file: &File) -> io::Result<()> {
+        file.lock_shared()
+    }
+}
+
 #[cfg(feature = "git")]
 pub(crate) fn is_internal_file(path: &Path) -> bool {
     path.file_name()
@@ -35,7 +73,7 @@ fn with_writer_lock<R>(path: &Path, action: impl FnOnce() -> Result<R>) -> Resul
         .truncate(false)
         .open(parent(path).join(lock_name))?;
     // Never unlink the sidecar: waiters must keep locking the same inode.
-    lock.lock()?;
+    locking::exclusive(&lock)?;
     action()
 }
 
@@ -102,7 +140,7 @@ pub(crate) async fn append_jsonl<T: Serialize>(path: &Path, items: &[T]) -> Resu
                 .create(true)
                 .open(&path)?;
             // Readers lock this file, so they cannot see a partially appended batch.
-            file.lock()?;
+            locking::exclusive(&file)?;
             let original_len = file.metadata()?.len();
             let result = (|| -> Result<()> {
                 if original_len > 0 {
@@ -136,7 +174,7 @@ fn read_jsonl_sync<T: DeserializeOwned>(path: &Path) -> Result<Vec<T>> {
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(err) => return Err(err.into()),
     };
-    file.lock_shared()?;
+    locking::shared(&file)?;
     let mut items = Vec::new();
     for (index, line) in BufReader::new(file).lines().enumerate() {
         let line = line?;

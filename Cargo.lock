@@ -3903,6 +3903,7 @@ dependencies = [
  "git2 0.21.0",
  "image",
  "ksni",
+ "libc",
  "notify",
  "p256",
  "rand 0.8.5",

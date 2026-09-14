@@ -151,6 +151,10 @@ image = { version = "0.25", optional = true, default-features = false, features 
 notify = { version = "8", optional = true }
 git2 = { version = "0.21", optional = true, default-features = false, features = ["cred", "ssh"] }
 
+# `std`'s file locking has no Android branch; `storage::file_io` calls flock(2).
+[target.'cfg(target_os = "android")'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 wiremock = "0.6"
 
