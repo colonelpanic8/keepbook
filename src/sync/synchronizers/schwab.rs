@@ -1136,3 +1136,7 @@ fn find_chrome() -> Option<String> {
     }
     None
 }
+
+#[cfg(test)]
+#[path = "../../../tests/unit/sync/synchronizers/schwab_tests.rs"]
+mod schwab_tests;
