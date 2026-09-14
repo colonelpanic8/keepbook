@@ -18,16 +18,19 @@ use axum::routing::{get, post};
 #[cfg(feature = "http")]
 use axum::{Json, Router};
 use chrono::{Local, Utc};
+use keepbook::app::tray::{
+    build_portfolio_breakdown_lines, format_history_change_for_tray, format_spending_window_label,
+    format_tray_currency, normalize_spending_windows_days,
+};
 use keepbook::config::{default_config_path, ResolvedConfig};
 use keepbook::credentials::CredentialStore;
-use keepbook::format::{currency_symbol, format_base_currency_display};
+use keepbook::format::currency_symbol;
 use keepbook::models::{
     Account, AccountConfig, Asset, BalanceSnapshot, Connection, ConnectionConfig, Id,
     ProposedTransactionEdit, RecurringTransactionReview, Transaction, TransactionAnnotationPatch,
 };
 use keepbook::repositories::{self, RepositoryDeclaration, RepositoryEntry, RepositoryRegistry};
 use keepbook::storage::{JsonFileStorage, Storage};
-use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use toml_edit::{value, DocumentMut, Item, Table};
@@ -495,9 +498,13 @@ impl ApiState {
 
         let (total_label, as_of_date, portfolio_breakdown_lines) = match portfolio_result {
             Ok(snapshot) => (
-                format_tray_currency(&snapshot.total_value, &snapshot.currency, &state.config),
+                format_tray_currency(
+                    &snapshot.total_value,
+                    &snapshot.currency,
+                    &state.config.display,
+                ),
                 snapshot.as_of_date.to_string(),
-                build_portfolio_breakdown_lines(&snapshot, &state.config),
+                build_portfolio_breakdown_lines(&snapshot, &state.config.display),
             ),
             Err(err) => (
                 "unavailable".to_string(),
@@ -1662,93 +1669,10 @@ fn reporting_currency_symbol(config: &ResolvedConfig) -> Option<String> {
         .map(str::to_string)
 }
 
-fn format_tray_currency(value: &str, currency: &str, config: &ResolvedConfig) -> String {
-    let dp = config.display.currency_decimals.or(Some(2));
-    let symbol = config
-        .display
-        .currency_symbol
-        .as_deref()
-        .or_else(|| currency_symbol(currency));
-    match Decimal::from_str(value) {
-        Ok(d) => {
-            let formatted = format_base_currency_display(
-                d,
-                dp,
-                config.display.currency_grouping,
-                symbol,
-                config.display.currency_fixed_decimals,
-            );
-            if symbol.is_some() {
-                formatted
-            } else {
-                format!("{formatted} {currency}")
-            }
-        }
-        Err(_) => value.to_string(),
-    }
-}
-
-fn format_history_change_for_tray(percentage_change: Option<&str>) -> String {
-    match percentage_change {
-        Some("N/A") | None => "N/A".to_string(),
-        Some(value) if value.starts_with('-') => format!("{value}%"),
-        Some(value) => format!("+{value}%"),
-    }
-}
-
-fn normalize_spending_windows_days(windows: &[u32]) -> Vec<u32> {
-    let mut normalized: Vec<u32> = windows.iter().copied().filter(|days| *days > 0).collect();
-    normalized.sort_unstable();
-    normalized.dedup();
-    normalized
-}
-
-fn format_spending_window_label(days: u32) -> String {
-    match days {
-        365 => "year".to_string(),
-        _ if days.is_multiple_of(365) => format!("{} years", days / 365),
-        _ => format!("{days}d"),
-    }
-}
-
 fn last_n_days_range(days: u32) -> (chrono::NaiveDate, chrono::NaiveDate) {
     let end = Local::now().date_naive();
     let start = end - chrono::Duration::days(days.saturating_sub(1) as i64);
     (start, end)
-}
-
-fn build_portfolio_breakdown_lines(
-    snapshot: &keepbook::portfolio::PortfolioSnapshot,
-    config: &ResolvedConfig,
-) -> Vec<String> {
-    let mut lines = vec![format!(
-        "Total: {}",
-        format_tray_currency(&snapshot.total_value, &snapshot.currency, config)
-    )];
-
-    let Some(accounts) = snapshot.by_account.as_ref() else {
-        lines.push("No account breakdown available".to_string());
-        return lines;
-    };
-
-    if accounts.is_empty() {
-        lines.push("No accounts with balances".to_string());
-        return lines;
-    }
-
-    lines.extend(accounts.iter().map(|account| {
-        let value = account
-            .value_in_base
-            .as_deref()
-            .map(|value| format_tray_currency(value, &snapshot.currency, config))
-            .unwrap_or_else(|| "unpriced".to_string());
-        format!(
-            "{} / {}: {}",
-            account.connection_name, account.account_name, value
-        )
-    }));
-
-    lines
 }
 
 async fn tray_history_lines(storage: Arc<dyn Storage>, config: &ResolvedConfig) -> Vec<String> {
@@ -1770,7 +1694,7 @@ async fn tray_history_lines(storage: Arc<dyn Storage>, config: &ResolvedConfig) 
                     let value = format_tray_currency(
                         &point.total_value,
                         &config.reporting_currency,
-                        config,
+                        &config.display,
                     );
                     let percentage_change = format_history_change_for_tray(
                         point.percentage_change_from_previous.as_deref(),
@@ -1817,7 +1741,7 @@ async fn tray_spending_line_for_days(
 
     match keepbook::app::spending_report(storage.as_ref(), config, opts).await {
         Ok(report) => {
-            let value = format_tray_currency(&report.total, &report.currency, config);
+            let value = format_tray_currency(&report.total, &report.currency, &config.display);
             let tx_label = if report.transaction_count == 1 {
                 "txn"
             } else {
@@ -1911,7 +1835,7 @@ async fn tray_transaction_lines(storage: Arc<dyn Storage>, config: &ResolvedConf
                     Asset::Equity { ticker, .. } => ticker.as_str(),
                     Asset::Crypto { symbol, .. } => symbol.as_str(),
                 };
-                let amount = format_tray_currency(&row.amount, currency, config);
+                let amount = format_tray_currency(&row.amount, currency, &config.display);
                 let desc = if row.description.chars().count() > 30 {
                     let truncated: String = row.description.chars().take(27).collect();
                     format!("{truncated}...")
