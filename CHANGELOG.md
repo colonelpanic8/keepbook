@@ -43,9 +43,10 @@
 - Portfolio history loads accounts, balances, and prices once per request
   rather than once per point, and only collects change points inside the
   requested window.
-- The app's spending, accounts, assets, and chart pages take their totals,
-  counts, and formatted amounts from the keepbook API instead of recomputing
-  them, so figures match the CLI exactly.
+- The app's spending, accounts, assets, recurring, and chart pages take their
+  totals, counts, and formatted amounts from the keepbook API instead of
+  recomputing them, so figures match the CLI exactly. Recurring amounts in
+  particular round the way the CLI does rather than the way binary floats do.
 - The spending over-time panel keeps its height when it has no data.
 
 ### Fixed

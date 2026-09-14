@@ -1295,6 +1295,39 @@ fn decimal_text_rounds_half_away_from_zero_and_trims_zeros() {
 }
 
 #[test]
+fn absolute_money_range_text_orders_by_magnitude() {
+    // Recurring spend is stored negative, and the range reads as a magnitude
+    // ordered smallest first however the app ordered min and max.
+    assert_eq!(
+        format_absolute_money_range_text("-19.99", "-9.99", "USD").as_deref(),
+        Some("$9.99\u{2013}$19.99")
+    );
+    assert_eq!(
+        format_absolute_money_range_text("-9.99", "-19.99", "USD").as_deref(),
+        Some("$9.99\u{2013}$19.99")
+    );
+    // Magnitude ordering is by value, not by digit text.
+    assert_eq!(
+        format_absolute_money_range_text("-100", "-9.5", "USD").as_deref(),
+        Some("$9.50\u{2013}$100.00")
+    );
+    assert_eq!(
+        format_absolute_money_range_text("-9.5", "-9.45", "USD").as_deref(),
+        Some("$9.45\u{2013}$9.50")
+    );
+    // Amounts that render the same collapse to one.
+    assert_eq!(
+        format_absolute_money_range_text("-9.99", "9.99", "USD").as_deref(),
+        Some("$9.99")
+    );
+    assert_eq!(
+        format_absolute_money_range_text("12.5", "12.5", "CHF").as_deref(),
+        Some("CHF 12.50")
+    );
+    assert_eq!(format_absolute_money_range_text("N/A", "1", "USD"), None);
+}
+
+#[test]
 fn history_change_summary_reads_the_app_summary() {
     let summary = HistorySummary {
         initial_value: "1000".to_string(),
