@@ -1,0 +1,25 @@
+{
+  "as_of_date": "2024-06-15",
+  "currency": "USD",
+  "total_value": "0",
+  "by_asset": [
+    {
+      "asset": { "type": "equity", "ticker": "AAPL" },
+      "total_amount": "10",
+      "amount_date": "2024-01-15"
+    }
+  ],
+  "by_account": [
+    {
+      "account_id": "acct-1",
+      "account_name": "Taxable",
+      "connection_name": "Brokerage"
+    }
+  ],
+  "valuation_issues": [
+    {
+      "asset": { "type": "equity", "ticker": "AAPL" },
+      "reason": "missing_price"
+    }
+  ]
+}

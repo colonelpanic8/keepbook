@@ -2,6 +2,7 @@ use chrono::NaiveDate;
 use serde::Serialize;
 
 use crate::models::{Asset, TransactionStandardizedMetadata};
+use crate::portfolio::ValuationIssue;
 
 /// JSON output for connections
 #[derive(Serialize)]
@@ -363,6 +364,9 @@ pub struct AssetBreakdownEntry {
     /// Value in base currency. None if price data unavailable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value_in_base: Option<String>,
+    /// Why `value_in_base` is absent, when it is.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value_issue: Option<ValuationIssue>,
     pub changes: AssetChanges,
     pub holdings: Vec<AssetBreakdownHolding>,
 }

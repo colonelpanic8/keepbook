@@ -1398,3 +1398,151 @@ async fn an_intraday_cutoff_prefers_readings_recorded_by_that_instant() -> Resul
 
     Ok(())
 }
+
+/// Fails every read, standing in for a corrupt or unreadable price store.
+struct UnreadableMarketDataStore;
+
+#[async_trait::async_trait]
+impl MarketDataStore for UnreadableMarketDataStore {
+    async fn get_price(
+        &self,
+        _asset_id: &AssetId,
+        _date: chrono::NaiveDate,
+        _kind: PriceKind,
+    ) -> Result<Option<PricePoint>> {
+        anyhow::bail!("price store is unreadable")
+    }
+
+    async fn get_all_prices(&self, _asset_id: &AssetId) -> Result<Vec<PricePoint>> {
+        anyhow::bail!("price store is unreadable")
+    }
+
+    async fn put_prices(&self, _prices: &[PricePoint]) -> Result<()> {
+        anyhow::bail!("price store is unreadable")
+    }
+
+    async fn get_fx_rate(
+        &self,
+        _base: &str,
+        _quote: &str,
+        _date: chrono::NaiveDate,
+        _kind: crate::market_data::FxRateKind,
+    ) -> Result<Option<crate::market_data::FxRatePoint>> {
+        anyhow::bail!("price store is unreadable")
+    }
+
+    async fn get_all_fx_rates(
+        &self,
+        _base: &str,
+        _quote: &str,
+    ) -> Result<Vec<crate::market_data::FxRatePoint>> {
+        anyhow::bail!("price store is unreadable")
+    }
+
+    async fn put_fx_rates(&self, _rates: &[crate::market_data::FxRatePoint]) -> Result<()> {
+        anyhow::bail!("price store is unreadable")
+    }
+
+    async fn get_asset_entry(
+        &self,
+        _asset_id: &AssetId,
+    ) -> Result<Option<crate::market_data::AssetRegistryEntry>> {
+        Ok(None)
+    }
+
+    async fn upsert_asset_entry(
+        &self,
+        _entry: &crate::market_data::AssetRegistryEntry,
+    ) -> Result<()> {
+        Ok(())
+    }
+}
+
+async fn unvalued_asset_storage() -> Result<(Arc<MemoryStorage>, Asset)> {
+    let storage = Arc::new(MemoryStorage::new());
+    let connection = Connection::new(ConnectionConfig {
+        name: "Test Broker".into(),
+        synchronizer: "manual".into(),
+        credentials: None,
+        balance_staleness: None,
+    });
+    storage.save_connection(&connection).await?;
+    let account = Account::new("Trading", connection.id().clone());
+    storage.save_account(&account).await?;
+    let asset = Asset::equity("AAPL");
+    storage
+        .append_balance_snapshot(
+            &account.id,
+            &BalanceSnapshot::new(
+                Utc.with_ymd_and_hms(2026, 2, 1, 12, 0, 0).unwrap(),
+                vec![AssetBalance::new(asset.clone(), "10")],
+            ),
+        )
+        .await?;
+    Ok((storage, asset))
+}
+
+fn unvalued_query() -> PortfolioQuery {
+    PortfolioQuery {
+        as_of_date: chrono::NaiveDate::from_ymd_opt(2026, 2, 1).unwrap(),
+        as_of_timestamp: None,
+        currency: "USD".into(),
+        currency_decimals: None,
+        grouping: Grouping::Asset,
+        include_detail: false,
+        capital_gains_tax_rate: None,
+        equity_valuation_adjustment: None,
+        account_ids: Vec::new(),
+    }
+}
+
+#[tokio::test]
+async fn an_unpriced_asset_reports_that_no_price_is_recorded() -> Result<()> {
+    let (storage, _asset) = unvalued_asset_storage().await?;
+    let market_data = Arc::new(MarketDataService::new(
+        Arc::new(MemoryMarketDataStore::new()),
+        None,
+    ));
+    let service = PortfolioService::new(storage, market_data);
+
+    let snapshot = service.calculate(&unvalued_query()).await?;
+    assert_eq!(snapshot.total_value, "0");
+    assert_eq!(snapshot.valuation_issues.len(), 1);
+    assert_eq!(
+        snapshot.valuation_issues[0].reason,
+        crate::portfolio::ValuationIssueReason::MissingPrice
+    );
+    assert!(snapshot.valuation_issues[0].message.is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_failed_price_lookup_is_reported_separately_from_missing_data() -> Result<()> {
+    let (storage, _asset) = unvalued_asset_storage().await?;
+    let market_data = Arc::new(MarketDataService::new(
+        Arc::new(UnreadableMarketDataStore),
+        None,
+    ));
+    let service = PortfolioService::new(storage, market_data);
+
+    let snapshot = service.calculate(&unvalued_query()).await?;
+    // The asset is still left out of the total, but the total now says why.
+    assert_eq!(snapshot.total_value, "0");
+    assert_eq!(snapshot.valuation_issues.len(), 1);
+    assert_eq!(
+        snapshot.valuation_issues[0].reason,
+        crate::portfolio::ValuationIssueReason::PriceLookupFailed
+    );
+    assert!(snapshot.valuation_issues[0]
+        .message
+        .as_deref()
+        .unwrap()
+        .contains("unreadable"));
+
+    let rows = service.asset_breakdown(&unvalued_query()).await?;
+    assert_eq!(
+        rows[0].value_issue.as_ref().map(|issue| issue.reason),
+        Some(crate::portfolio::ValuationIssueReason::PriceLookupFailed)
+    );
+    Ok(())
+}

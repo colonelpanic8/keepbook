@@ -54,6 +54,33 @@ pub enum EquityValuationAdjustment {
     TargetPreTaxTotalValue(rust_decimal::Decimal),
 }
 
+/// Why an asset could not be valued.
+///
+/// A total only sums the assets that could be valued, so an operational failure
+/// would otherwise look the same as a holding nobody has priced yet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ValuationIssueReason {
+    /// No price is recorded for the asset at this date.
+    MissingPrice,
+    /// No FX rate is recorded for the conversion at this date.
+    MissingFxRate,
+    /// Looking the price up failed.
+    PriceLookupFailed,
+    /// Looking the FX rate up failed.
+    FxLookupFailed,
+}
+
+/// An asset left out of a total, and why.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ValuationIssue {
+    pub asset: Asset,
+    pub reason: ValuationIssueReason,
+    /// The underlying failure, for the lookup-failed reasons.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PortfolioSnapshot {
     pub as_of_date: NaiveDate,
@@ -71,6 +98,10 @@ pub struct PortfolioSnapshot {
     pub by_asset: Option<Vec<AssetSummary>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub by_account: Option<Vec<AccountSummary>>,
+    /// Assets that could not be valued and are therefore missing from
+    /// `total_value`. Omitted when everything was valued.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub valuation_issues: Vec<ValuationIssue>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -150,6 +181,8 @@ pub struct AssetBreakdownRow {
     pub amount_last_changed_at: Option<DateTime<Utc>>,
     pub fx_rate: Option<String>,
     pub fx_date: Option<NaiveDate>,
+    /// Why `value_in_base` is absent, when it is.
+    pub value_issue: Option<ValuationIssue>,
     pub holdings: Vec<AssetBreakdownAccountHolding>,
 }
 

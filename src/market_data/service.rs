@@ -12,6 +12,20 @@ use super::{
 };
 use crate::models::Asset;
 
+/// Nothing is recorded for a lookup, as opposed to a failure to read it.
+///
+/// Returned inside the error from the price and FX lookups so callers can tell
+/// "there is no such price" apart from "the store or provider failed", which
+/// otherwise both arrive as a missing value.
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+pub struct MarketDataMissing(String);
+
+/// Whether an error means the data is simply not recorded.
+pub fn is_market_data_missing(error: &anyhow::Error) -> bool {
+    error.downcast_ref::<MarketDataMissing>().is_some()
+}
+
 pub struct MarketDataService {
     store: Arc<dyn MarketDataStore>,
     provider: Option<Arc<dyn MarketDataSource>>,
@@ -210,9 +224,9 @@ impl MarketDataService {
             }
         }
 
-        Err(anyhow::anyhow!(
+        Err(anyhow::Error::new(MarketDataMissing(format!(
             "No price found for asset {asset_id} on or before {date}"
-        ))
+        ))))
     }
 
     /// Like [`Self::price_close`] but tries to fetch from sources first, even if the store already
@@ -444,9 +458,9 @@ impl MarketDataService {
             }
         }
 
-        Err(anyhow::anyhow!(
+        Err(anyhow::Error::new(MarketDataMissing(format!(
             "No FX rate found for {base}->{quote} on or before {date}"
-        ))
+        ))))
     }
 
     /// Like [`Self::fx_close`] but tries to fetch from sources first, even if the store already

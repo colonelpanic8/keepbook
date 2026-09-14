@@ -15,7 +15,7 @@ pub use jsonl_store::{JsonlMarketDataStore, MarketDataJsonlNormalizationStats};
 pub use models::{AssetRegistryEntry, FxRateKind, FxRatePoint, PriceKind, PricePoint};
 pub use provider::{MarketDataSource, NoopSource};
 pub use registry::PriceSourceRegistry;
-pub use service::MarketDataService;
+pub use service::{is_market_data_missing, MarketDataMissing, MarketDataService};
 pub use source_config::{AssetCategory, LoadedPriceSource, PriceSourceConfig, PriceSourceType};
 pub use sources::{
     CryptoPriceRouter, CryptoPriceSource, EquityPriceRouter, EquityPriceSource, FxRateRouter,

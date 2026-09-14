@@ -191,6 +191,7 @@ fn build_portfolio_breakdown_lines_formats_account_values() {
                 value_in_base: None,
             },
         ]),
+        valuation_issues: Vec::new(),
     };
 
     let lines = build_portfolio_breakdown_lines(&snapshot, &config);

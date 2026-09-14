@@ -9,14 +9,14 @@ use rust_decimal::Decimal;
 
 use crate::clock::{Clock, SystemClock};
 use crate::format::format_base_currency_value;
-use crate::market_data::{AssetId, MarketDataService};
+use crate::market_data::{is_market_data_missing, AssetId, MarketDataService};
 use crate::models::{Account, Asset, BalanceBackfillPolicy, BalanceSnapshot, Connection, Id};
 use crate::storage::Storage;
 
 use super::{
     AccountHolding, AccountSummary, AssetBreakdownAccountHolding, AssetBreakdownRow, AssetSummary,
     EquityValuationAdjustment, Grouping, PortfolioQuery, PortfolioSnapshot,
-    PortfolioValuationScenario,
+    PortfolioValuationScenario, ValuationIssue, ValuationIssueReason,
 };
 
 pub struct PortfolioService {
@@ -30,11 +30,25 @@ pub struct PortfolioService {
 struct AssetValuation {
     /// The value in target currency. None if price data unavailable.
     value: Option<Decimal>,
+    /// Why `value` is absent, when it is.
+    issue: Option<ValuationIssueReason>,
+    /// The underlying failure behind a lookup-failed issue.
+    issue_message: Option<String>,
     price: Option<String>,
     price_date: Option<NaiveDate>,
     price_timestamp: Option<DateTime<Utc>>,
     fx_rate: Option<String>,
     fx_date: Option<NaiveDate>,
+}
+
+impl AssetValuation {
+    fn issue(&self, asset: &Asset) -> Option<ValuationIssue> {
+        self.issue.map(|reason| ValuationIssue {
+            asset: asset.clone(),
+            reason,
+            message: self.issue_message.clone(),
+        })
+    }
 }
 
 /// Represents a single asset holding from a snapshot.
@@ -156,6 +170,8 @@ impl PortfolioService {
             a_id.as_str().cmp(b_id.as_str())
         });
 
+        let valuation_issues = Self::collect_valuation_issues(&effective_price_cache);
+
         // Build snapshot based on grouping
         let (by_asset, by_account) = match query.grouping {
             Grouping::Asset => (Some(asset_summaries), None),
@@ -179,7 +195,20 @@ impl PortfolioService {
             valuation_scenario: valuation_scenario.map(|s| s.output),
             by_asset,
             by_account,
+            valuation_issues,
         })
+    }
+
+    /// Assets left out of the total, sorted for stable output.
+    fn collect_valuation_issues(
+        price_cache: &HashMap<Asset, AssetValuation>,
+    ) -> Vec<ValuationIssue> {
+        let mut issues: Vec<ValuationIssue> = price_cache
+            .iter()
+            .filter_map(|(asset, valuation)| valuation.issue(asset))
+            .collect();
+        issues.sort_by_key(|issue| AssetId::from_asset(&issue.asset).to_string());
+        issues
     }
 
     /// Per-asset portfolio breakdown, split into liability and non-liability
@@ -261,6 +290,7 @@ impl PortfolioService {
                     .and_then(|metadata| metadata.amount_last_changed_at),
                 fx_rate: valuation.fx_rate.clone(),
                 fx_date: valuation.fx_date,
+                value_issue: valuation.issue(asset),
                 holdings,
             });
         }
@@ -952,6 +982,8 @@ impl PortfolioService {
                     // Same currency, no conversion needed
                     Ok(AssetValuation {
                         value: Some(amount),
+                        issue: None,
+                        issue_message: None,
                         price: None,
                         price_date: None,
                         price_timestamp: None,
@@ -969,6 +1001,8 @@ impl PortfolioService {
                             let fx_rate = Decimal::from_str(&rate.rate)?;
                             Ok(AssetValuation {
                                 value: Some(amount * fx_rate),
+                                issue: None,
+                                issue_message: None,
                                 price: None,
                                 price_date: None,
                                 price_timestamp: None,
@@ -976,10 +1010,12 @@ impl PortfolioService {
                                 fx_date: Some(rate.as_of_date),
                             })
                         }
-                        Err(_) => {
-                            // No FX rate available
+                        Err(error) => {
+                            let (issue, issue_message) = fx_issue(asset, &error);
                             Ok(AssetValuation {
                                 value: None,
+                                issue: Some(issue),
+                                issue_message,
                                 price: None,
                                 price_date: None,
                                 price_timestamp: None,
@@ -994,6 +1030,8 @@ impl PortfolioService {
                 if currency.eq_ignore_ascii_case(target_currency) {
                     Ok(AssetValuation {
                         value: Some(amount),
+                        issue: None,
+                        issue_message: None,
                         price: None,
                         price_date: None,
                         price_timestamp: None,
@@ -1010,6 +1048,8 @@ impl PortfolioService {
                             let fx_rate = Decimal::from_str(&rate.rate)?;
                             Ok(AssetValuation {
                                 value: Some(amount * fx_rate),
+                                issue: None,
+                                issue_message: None,
                                 price: None,
                                 price_date: None,
                                 price_timestamp: None,
@@ -1017,14 +1057,19 @@ impl PortfolioService {
                                 fx_date: Some(rate.as_of_date),
                             })
                         }
-                        Err(_) => Ok(AssetValuation {
-                            value: None,
-                            price: None,
-                            price_date: None,
-                            price_timestamp: None,
-                            fx_rate: None,
-                            fx_date: None,
-                        }),
+                        Err(error) => {
+                            let (issue, issue_message) = fx_issue(asset, &error);
+                            Ok(AssetValuation {
+                                value: None,
+                                issue: Some(issue),
+                                issue_message,
+                                price: None,
+                                price_date: None,
+                                price_timestamp: None,
+                                fx_rate: None,
+                                fx_date: None,
+                            })
+                        }
                     }
                 }
             }
@@ -1037,25 +1082,30 @@ impl PortfolioService {
                 {
                     self.market_data.price_latest(asset, as_of_date).await
                 } else {
+                    // Not `?`: a failed read is reported as a valuation issue
+                    // rather than failing every other asset's valuation too.
                     match self
                         .market_data
                         .valuation_price_from_store_at(asset, as_of_date, as_of_timestamp)
-                        .await?
+                        .await
                     {
-                        Some(price) => Ok(price),
-                        None => {
+                        Ok(Some(price)) => Ok(price),
+                        Ok(None) => {
                             self.market_data
                                 .price_close_at(asset, as_of_date, as_of_timestamp)
                                 .await
                         }
+                        Err(error) => Err(error),
                     }
                 };
                 let price_point = match price_result {
                     Ok(p) => p,
-                    Err(_) => {
-                        // No price available
+                    Err(error) => {
+                        let (issue, issue_message) = price_issue(asset, &error);
                         return Ok(AssetValuation {
                             value: None,
+                            issue: Some(issue),
+                            issue_message,
                             price: None,
                             price_date: None,
                             price_timestamp: None,
@@ -1074,6 +1124,8 @@ impl PortfolioService {
                 {
                     Ok(AssetValuation {
                         value: Some(value_in_quote),
+                        issue: None,
+                        issue_message: None,
                         price: Some(price.normalize().to_string()),
                         price_date: Some(price_point.as_of_date),
                         price_timestamp: Some(price_point.timestamp),
@@ -1095,6 +1147,8 @@ impl PortfolioService {
                             let fx_rate = Decimal::from_str(&rate.rate)?;
                             Ok(AssetValuation {
                                 value: Some(value_in_quote * fx_rate),
+                                issue: None,
+                                issue_message: None,
                                 price: Some(price.normalize().to_string()),
                                 price_date: Some(price_point.as_of_date),
                                 price_timestamp: Some(price_point.timestamp),
@@ -1102,10 +1156,13 @@ impl PortfolioService {
                                 fx_date: Some(rate.as_of_date),
                             })
                         }
-                        Err(_) => {
+                        Err(error) => {
                             // Have price but no FX rate
+                            let (issue, issue_message) = fx_issue(asset, &error);
                             Ok(AssetValuation {
                                 value: None,
+                                issue: Some(issue),
+                                issue_message,
                                 price: Some(price.normalize().to_string()),
                                 price_date: Some(price_point.as_of_date),
                                 price_timestamp: Some(price_point.timestamp),
@@ -1118,6 +1175,46 @@ impl PortfolioService {
             }
         }
     }
+}
+
+/// Classifies a failed lookup as absent data or an operational failure, and
+/// logs the latter: a total that quietly omits an asset because the store or a
+/// provider failed is indistinguishable from one nobody has priced.
+fn classify_lookup_error(
+    asset: &Asset,
+    error: &anyhow::Error,
+    missing: ValuationIssueReason,
+    failed: ValuationIssueReason,
+) -> (ValuationIssueReason, Option<String>) {
+    if is_market_data_missing(error) {
+        return (missing, None);
+    }
+
+    let message = format!("{error:#}");
+    tracing::warn!(
+        asset_id = %AssetId::from_asset(asset),
+        error = %message,
+        "valuation lookup failed; asset left out of the total"
+    );
+    (failed, Some(message))
+}
+
+fn price_issue(asset: &Asset, error: &anyhow::Error) -> (ValuationIssueReason, Option<String>) {
+    classify_lookup_error(
+        asset,
+        error,
+        ValuationIssueReason::MissingPrice,
+        ValuationIssueReason::PriceLookupFailed,
+    )
+}
+
+fn fx_issue(asset: &Asset, error: &anyhow::Error) -> (ValuationIssueReason, Option<String>) {
+    classify_lookup_error(
+        asset,
+        error,
+        ValuationIssueReason::MissingFxRate,
+        ValuationIssueReason::FxLookupFailed,
+    )
 }
 
 /// Whether a balance snapshot counts towards a valuation.

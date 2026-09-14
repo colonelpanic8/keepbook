@@ -2019,6 +2019,7 @@ pub async fn portfolio_assets(
                 value_in_base: row
                     .value_in_base
                     .map(|value| format_base_currency_value(value, currency_decimals)),
+                value_issue: row.value_issue,
                 changes,
                 holdings,
             },
