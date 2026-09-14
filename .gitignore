@@ -27,3 +27,7 @@ Thumbs.db
 
 # Generated ad-hoc graph/report outputs
 /artifacts/
+
+# Personal documents and Python caches
+/*.pdf
+__pycache__/
