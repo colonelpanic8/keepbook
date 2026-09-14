@@ -86,7 +86,6 @@ sync = [
   "dep:futures",
   "dep:p256",
   "dep:rand",
-  "dep:urlencoding",
 ]
 tray = ["dep:ksni", "dep:image", "dep:notify"]
 
@@ -143,7 +142,6 @@ async-trait = "0.1"
 chromiumoxide = { version = "0.9.1", default-features = false, optional = true }
 futures = { version = "0.3", optional = true }
 tempfile = "3"
-urlencoding = { version = "2", optional = true }
 
 # Structured logging
 tracing = "0.1"
@@ -155,8 +153,6 @@ git2 = { version = "0.21", optional = true, default-features = false, features =
 
 [dev-dependencies]
 wiremock = "0.6"
-
-[profile]
 
 [profile.release]
 # Cargo defaults to keeping the symbol table and DWARF info, which dominated the
