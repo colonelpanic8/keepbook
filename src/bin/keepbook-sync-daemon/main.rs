@@ -33,17 +33,17 @@ const CLI_VERSION: &str = concat!(
 );
 
 // --- Embedded icon PNGs (compiled into the binary) ---
-const ICON_32_PNG: &[u8] = include_bytes!("../../assets/keepbook-icon-32.png");
-const ICON_48_PNG: &[u8] = include_bytes!("../../assets/keepbook-icon-48.png");
-const ICON_64_PNG: &[u8] = include_bytes!("../../assets/keepbook-icon-64.png");
+const ICON_32_PNG: &[u8] = include_bytes!("../../../assets/keepbook-icon-32.png");
+const ICON_48_PNG: &[u8] = include_bytes!("../../../assets/keepbook-icon-48.png");
+const ICON_64_PNG: &[u8] = include_bytes!("../../../assets/keepbook-icon-64.png");
 
-const OVERLAY_SYNC_32: &[u8] = include_bytes!("../../assets/overlay-sync-32.png");
-const OVERLAY_SYNC_48: &[u8] = include_bytes!("../../assets/overlay-sync-48.png");
-const OVERLAY_SYNC_64: &[u8] = include_bytes!("../../assets/overlay-sync-64.png");
+const OVERLAY_SYNC_32: &[u8] = include_bytes!("../../../assets/overlay-sync-32.png");
+const OVERLAY_SYNC_48: &[u8] = include_bytes!("../../../assets/overlay-sync-48.png");
+const OVERLAY_SYNC_64: &[u8] = include_bytes!("../../../assets/overlay-sync-64.png");
 
-const OVERLAY_ERROR_32: &[u8] = include_bytes!("../../assets/overlay-error-32.png");
-const OVERLAY_ERROR_48: &[u8] = include_bytes!("../../assets/overlay-error-48.png");
-const OVERLAY_ERROR_64: &[u8] = include_bytes!("../../assets/overlay-error-64.png");
+const OVERLAY_ERROR_32: &[u8] = include_bytes!("../../../assets/overlay-error-32.png");
+const OVERLAY_ERROR_48: &[u8] = include_bytes!("../../../assets/overlay-error-48.png");
+const OVERLAY_ERROR_64: &[u8] = include_bytes!("../../../assets/overlay-error-64.png");
 const DATA_WATCH_DEBOUNCE: Duration = Duration::from_millis(500);
 #[cfg(unix)]
 const DIOXUS_ACTIVATION_SOCKET_NAME: &str = "keepbook-dioxus.activate.sock";
@@ -1252,5 +1252,5 @@ async fn main() -> Result<()> {
 }
 
 #[cfg(test)]
-#[path = "../../tests/unit/bin/keepbook_sync_daemon_tests.rs"]
+#[path = "../../../tests/unit/bin/keepbook_sync_daemon_tests.rs"]
 mod keepbook_sync_daemon_tests;

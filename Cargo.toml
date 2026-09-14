@@ -24,7 +24,7 @@ required-features = ["cli"]
 
 [[bin]]
 name = "keepbook-sync-daemon"
-path = "src/bin/keepbook-sync-daemon.rs"
+path = "src/bin/keepbook-sync-daemon/main.rs"
 required-features = ["cli", "tray"]
 
 [[example]]
