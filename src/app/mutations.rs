@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 
 use anyhow::{Context, Result};
+use chrono::{DateTime, Utc};
 
 use crate::clock::{Clock, SystemClock};
 use crate::config::ResolvedConfig;
@@ -341,69 +342,130 @@ pub async fn set_account_config(
     Ok(result)
 }
 
-#[allow(clippy::too_many_arguments)]
+/// Field-level edits to a transaction annotation.
+///
+/// Each field has a set form and a clear form; supplying both is an error.
+/// `tags_empty`/`subtags_empty` set the list to `[]`, while `clear_*` remove
+/// the override entirely.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TransactionAnnotationInput {
+    pub description: Option<String>,
+    pub clear_description: bool,
+    pub note: Option<String>,
+    pub clear_note: bool,
+    pub tags: Vec<String>,
+    pub tags_empty: bool,
+    pub clear_tags: bool,
+    pub subtags: Vec<String>,
+    pub subtags_empty: bool,
+    pub clear_subtags: bool,
+    pub effective_date: Option<String>,
+    pub clear_effective_date: bool,
+}
+
+impl TransactionAnnotationInput {
+    fn into_patch(
+        self,
+        transaction_id: Id,
+        timestamp: DateTime<Utc>,
+    ) -> Result<TransactionAnnotationPatch> {
+        if self.clear_description && self.description.is_some() {
+            anyhow::bail!("Cannot use --description and --clear-description together");
+        }
+        if self.clear_note && self.note.is_some() {
+            anyhow::bail!("Cannot use --note and --clear-note together");
+        }
+        if self.clear_tags && (self.tags_empty || !self.tags.is_empty()) {
+            anyhow::bail!("Cannot use --clear-tags with --tag/--tags-empty");
+        }
+        if self.clear_subtags && (self.subtags_empty || !self.subtags.is_empty()) {
+            anyhow::bail!("Cannot use --clear-subtags with --subtag/--subtags-empty");
+        }
+        if self.clear_effective_date && self.effective_date.is_some() {
+            anyhow::bail!("Cannot use --effective-date and --clear-effective-date together");
+        }
+
+        let parsed_effective_date = self
+            .effective_date
+            .as_deref()
+            .map(|s| {
+                chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")
+                    .with_context(|| format!("Invalid effective date: {s}"))
+            })
+            .transpose()?;
+
+        let has_change = self.description.is_some()
+            || self.clear_description
+            || self.note.is_some()
+            || self.clear_note
+            || !self.tags.is_empty()
+            || self.tags_empty
+            || self.clear_tags
+            || !self.subtags.is_empty()
+            || self.subtags_empty
+            || self.clear_subtags
+            || self.effective_date.is_some()
+            || self.clear_effective_date;
+        if !has_change {
+            anyhow::bail!("No annotation fields specified");
+        }
+
+        let mut patch = TransactionAnnotationPatch {
+            transaction_id,
+            timestamp,
+            description: None,
+            note: None,
+            tags: None,
+            subtags: None,
+            effective_date: None,
+            ignore_spending: None,
+        };
+        if self.clear_description {
+            patch.description = Some(None);
+        } else if let Some(v) = self.description {
+            patch.description = Some(Some(v));
+        }
+        if self.clear_note {
+            patch.note = Some(None);
+        } else if let Some(v) = self.note {
+            patch.note = Some(Some(v));
+        }
+        if self.clear_tags {
+            patch.tags = Some(None);
+        } else if self.tags_empty {
+            patch.tags = Some(Some(Vec::new()));
+        } else if !self.tags.is_empty() {
+            patch.tags = Some(Some(normalize_tags(self.tags)));
+        }
+        if self.clear_subtags {
+            patch.subtags = Some(None);
+        } else if self.subtags_empty {
+            patch.subtags = Some(Some(Vec::new()));
+        } else if !self.subtags.is_empty() {
+            patch.subtags = Some(Some(normalize_tags(self.subtags)));
+        }
+        if self.clear_effective_date {
+            patch.effective_date = Some(None);
+        } else if let Some(v) = parsed_effective_date {
+            patch.effective_date = Some(Some(v));
+        }
+
+        Ok(patch)
+    }
+}
+
 pub async fn set_transaction_annotation(
     storage: &dyn Storage,
     config: &ResolvedConfig,
     account_id: &str,
     transaction_id: &str,
-    description: Option<String>,
-    clear_description: bool,
-    note: Option<String>,
-    clear_note: bool,
-    tags: Vec<String>,
-    tags_empty: bool,
-    clear_tags: bool,
-    subtags: Vec<String>,
-    subtags_empty: bool,
-    clear_subtags: bool,
-    effective_date: Option<String>,
-    clear_effective_date: bool,
+    input: TransactionAnnotationInput,
 ) -> Result<serde_json::Value> {
-    if clear_description && description.is_some() {
-        anyhow::bail!("Cannot use --description and --clear-description together");
-    }
-    if clear_note && note.is_some() {
-        anyhow::bail!("Cannot use --note and --clear-note together");
-    }
-    if clear_tags && (tags_empty || !tags.is_empty()) {
-        anyhow::bail!("Cannot use --clear-tags with --tag/--tags-empty");
-    }
-    if clear_subtags && (subtags_empty || !subtags.is_empty()) {
-        anyhow::bail!("Cannot use --clear-subtags with --subtag/--subtags-empty");
-    }
-    if clear_effective_date && effective_date.is_some() {
-        anyhow::bail!("Cannot use --effective-date and --clear-effective-date together");
-    }
-
     let acct_id = Id::from_string_checked(account_id)
         .with_context(|| format!("Invalid account id: {account_id}"))?;
     let tx_id = Id::from_string_checked(transaction_id)
         .with_context(|| format!("Invalid transaction id: {transaction_id}"))?;
-
-    let has_change = description.is_some()
-        || clear_description
-        || note.is_some()
-        || clear_note
-        || !tags.is_empty()
-        || tags_empty
-        || clear_tags
-        || !subtags.is_empty()
-        || subtags_empty
-        || clear_subtags
-        || effective_date.is_some()
-        || clear_effective_date;
-    if !has_change {
-        anyhow::bail!("No annotation fields specified");
-    }
-
-    let parsed_effective_date = effective_date
-        .as_deref()
-        .map(|s| {
-            chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")
-                .with_context(|| format!("Invalid effective date: {s}"))
-        })
-        .transpose()?;
+    let patch = input.into_patch(tx_id.clone(), Utc::now())?;
 
     // Verify account exists.
     storage
@@ -417,49 +479,8 @@ pub async fn set_transaction_annotation(
         anyhow::bail!("Transaction not found for account");
     }
 
-    let mut patch = TransactionAnnotationPatch {
-        transaction_id: tx_id.clone(),
-        timestamp: chrono::Utc::now(),
-        description: None,
-        note: None,
-        tags: None,
-        subtags: None,
-        effective_date: None,
-        ignore_spending: None,
-    };
-
-    if clear_description {
-        patch.description = Some(None);
-    } else if let Some(v) = description {
-        patch.description = Some(Some(v));
-    }
-    if clear_note {
-        patch.note = Some(None);
-    } else if let Some(v) = note {
-        patch.note = Some(Some(v));
-    }
-    if clear_tags {
-        patch.tags = Some(None);
-    } else if tags_empty {
-        patch.tags = Some(Some(Vec::new()));
-    } else if !tags.is_empty() {
-        patch.tags = Some(Some(normalize_tags(tags)));
-    }
-    if clear_subtags {
-        patch.subtags = Some(None);
-    } else if subtags_empty {
-        patch.subtags = Some(Some(Vec::new()));
-    } else if !subtags.is_empty() {
-        patch.subtags = Some(Some(normalize_tags(subtags)));
-    }
-    if clear_effective_date {
-        patch.effective_date = Some(None);
-    } else if let Some(v) = parsed_effective_date {
-        patch.effective_date = Some(Some(v));
-    }
-
     storage
-        .append_transaction_annotation_patches(&acct_id, &[patch.clone()])
+        .append_transaction_annotation_patches(&acct_id, std::slice::from_ref(&patch))
         .await?;
 
     // Materialize current annotation state for the transaction.
@@ -608,7 +629,7 @@ async fn set_transaction_label_list(
         }
     }
 
-    let timestamp = chrono::Utc::now();
+    let timestamp = Utc::now();
     let mut updated_count = 0usize;
     for (account_id, transaction_ids) in by_account {
         storage
@@ -721,7 +742,7 @@ pub async fn set_transaction_ignore(
         }
     }
 
-    let timestamp = chrono::Utc::now();
+    let timestamp = Utc::now();
     let mut updated_count = 0usize;
     for (account_id, transaction_ids) in by_account {
         storage
@@ -817,88 +838,40 @@ pub async fn set_transaction_subtags(
     set_transaction_label_list(storage, config, targets, "subtags", subtags, clear_subtags).await
 }
 
-#[allow(clippy::too_many_arguments)]
 pub async fn propose_transaction_edit(
     storage: &dyn Storage,
     config: &ResolvedConfig,
     account_id: &str,
     transaction_id: &str,
-    description: Option<String>,
-    clear_description: bool,
-    note: Option<String>,
-    clear_note: bool,
-    tags: Vec<String>,
-    tags_empty: bool,
-    clear_tags: bool,
-    subtags: Vec<String>,
-    subtags_empty: bool,
-    clear_subtags: bool,
-    effective_date: Option<String>,
-    clear_effective_date: bool,
+    input: TransactionAnnotationInput,
 ) -> Result<serde_json::Value> {
     propose_transaction_edit_with(
         storage,
         config,
         account_id,
         transaction_id,
-        description,
-        clear_description,
-        note,
-        clear_note,
-        tags,
-        tags_empty,
-        clear_tags,
-        subtags,
-        subtags_empty,
-        clear_subtags,
-        effective_date,
-        clear_effective_date,
+        input,
         &UuidIdGenerator,
         &SystemClock,
     )
     .await
 }
 
-#[allow(clippy::too_many_arguments)]
 pub async fn propose_transaction_edit_with(
     storage: &dyn Storage,
     config: &ResolvedConfig,
     account_id: &str,
     transaction_id: &str,
-    description: Option<String>,
-    clear_description: bool,
-    note: Option<String>,
-    clear_note: bool,
-    tags: Vec<String>,
-    tags_empty: bool,
-    clear_tags: bool,
-    subtags: Vec<String>,
-    subtags_empty: bool,
-    clear_subtags: bool,
-    effective_date: Option<String>,
-    clear_effective_date: bool,
+    input: TransactionAnnotationInput,
     ids: &dyn IdGenerator,
     clock: &dyn Clock,
 ) -> Result<serde_json::Value> {
-    let patch = build_transaction_annotation_patch(
-        description,
-        clear_description,
-        note,
-        clear_note,
-        tags,
-        tags_empty,
-        clear_tags,
-        subtags,
-        subtags_empty,
-        clear_subtags,
-        effective_date,
-        clear_effective_date,
-    )?;
-
     let acct_id = Id::from_string_checked(account_id)
         .with_context(|| format!("Invalid account id: {account_id}"))?;
     let tx_id = Id::from_string_checked(transaction_id)
         .with_context(|| format!("Invalid transaction id: {transaction_id}"))?;
+    let now = clock.now();
+    let patch = input.into_patch(tx_id.clone(), now)?;
 
     storage
         .get_account(&acct_id)
@@ -909,7 +882,6 @@ pub async fn propose_transaction_edit_with(
         anyhow::bail!("Transaction not found for account");
     }
 
-    let now = clock.now();
     let edit = ProposedTransactionEdit {
         id: ids.new_id(),
         account_id: acct_id,
@@ -1022,7 +994,7 @@ async fn decide_proposed_transaction_edit(
         anyhow::bail!("Proposed transaction edit is already decided");
     }
 
-    let now = chrono::Utc::now();
+    let now = Utc::now();
     if status == ProposedTransactionEditStatus::Approved {
         let patch = edit.to_annotation_patch(now);
         storage
@@ -1044,104 +1016,6 @@ async fn decide_proposed_transaction_edit(
         &format!("decide proposed transaction edit {proposal_id}"),
     );
     Ok(result)
-}
-
-#[allow(clippy::too_many_arguments)]
-fn build_transaction_annotation_patch(
-    description: Option<String>,
-    clear_description: bool,
-    note: Option<String>,
-    clear_note: bool,
-    tags: Vec<String>,
-    tags_empty: bool,
-    clear_tags: bool,
-    subtags: Vec<String>,
-    subtags_empty: bool,
-    clear_subtags: bool,
-    effective_date: Option<String>,
-    clear_effective_date: bool,
-) -> Result<TransactionAnnotationPatch> {
-    if clear_description && description.is_some() {
-        anyhow::bail!("Cannot use --description and --clear-description together");
-    }
-    if clear_note && note.is_some() {
-        anyhow::bail!("Cannot use --note and --clear-note together");
-    }
-    if clear_tags && (tags_empty || !tags.is_empty()) {
-        anyhow::bail!("Cannot use --clear-tags with --tag/--tags-empty");
-    }
-    if clear_subtags && (subtags_empty || !subtags.is_empty()) {
-        anyhow::bail!("Cannot use --clear-subtags with --subtag/--subtags-empty");
-    }
-    if clear_effective_date && effective_date.is_some() {
-        anyhow::bail!("Cannot use --effective-date and --clear-effective-date together");
-    }
-
-    let parsed_effective_date = effective_date
-        .as_deref()
-        .map(|s| {
-            chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")
-                .with_context(|| format!("Invalid effective date: {s}"))
-        })
-        .transpose()?;
-
-    let has_change = description.is_some()
-        || clear_description
-        || note.is_some()
-        || clear_note
-        || !tags.is_empty()
-        || tags_empty
-        || clear_tags
-        || !subtags.is_empty()
-        || subtags_empty
-        || clear_subtags
-        || effective_date.is_some()
-        || clear_effective_date;
-    if !has_change {
-        anyhow::bail!("No annotation fields specified");
-    }
-
-    let mut patch = TransactionAnnotationPatch {
-        transaction_id: Id::from("pending"),
-        timestamp: chrono::Utc::now(),
-        description: None,
-        note: None,
-        tags: None,
-        subtags: None,
-        effective_date: None,
-        ignore_spending: None,
-    };
-    if clear_description {
-        patch.description = Some(None);
-    } else if let Some(v) = description {
-        patch.description = Some(Some(v));
-    }
-    if clear_note {
-        patch.note = Some(None);
-    } else if let Some(v) = note {
-        patch.note = Some(Some(v));
-    }
-    if clear_tags {
-        patch.tags = Some(None);
-    } else if tags_empty {
-        patch.tags = Some(Some(Vec::new()));
-    } else if !tags.is_empty() {
-        patch.tags = Some(Some(normalize_tags(tags)));
-    }
-    if clear_subtags {
-        patch.subtags = Some(None);
-    } else if subtags_empty {
-        patch.subtags = Some(Some(Vec::new()));
-    } else if !subtags.is_empty() {
-        patch.subtags = Some(Some(normalize_tags(subtags)));
-    }
-    if clear_effective_date {
-        patch.effective_date = Some(None);
-    } else if let Some(v) = parsed_effective_date {
-        patch.effective_date = Some(Some(v));
-    }
-
-    Ok(patch)
 }
 
 fn proposal_to_json(edit: &ProposedTransactionEdit) -> Result<serde_json::Value> {

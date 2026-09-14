@@ -701,18 +701,11 @@ impl ApiState {
             &state.config,
             &input.account_id,
             &input.transaction_id,
-            None,
-            false,
-            None,
-            false,
-            Vec::new(),
-            false,
-            false,
-            Vec::new(),
-            false,
-            false,
-            input.effective_date,
-            input.clear_effective_date,
+            keepbook::app::TransactionAnnotationInput {
+                effective_date: input.effective_date,
+                clear_effective_date: input.clear_effective_date,
+                ..Default::default()
+            },
         )
         .await
     }

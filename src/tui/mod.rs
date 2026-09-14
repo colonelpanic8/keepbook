@@ -1032,18 +1032,11 @@ async fn handle_tag_modal_key(
                         config,
                         &source.account_id,
                         &source.transaction_id,
-                        None,
-                        false,
-                        None,
-                        false,
-                        tags,
-                        false,
-                        clear_tag,
-                        vec![],
-                        false,
-                        false,
-                        None,
-                        false,
+                        app::TransactionAnnotationInput {
+                            tags,
+                            clear_tags: clear_tag,
+                            ..Default::default()
+                        },
                     )
                     .await?;
                     refresh_transactions_and_rules(app_state, storage.as_ref(), config).await?;

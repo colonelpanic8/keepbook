@@ -32,7 +32,7 @@ pub use mutations::{
     propose_transaction_edit, propose_transaction_edit_with, reject_proposed_transaction_edit,
     remove_connection, remove_proposed_transaction_edit, set_account_config, set_balance,
     set_transaction_annotation, set_transaction_ignore, set_transaction_subtags,
-    set_transaction_tags,
+    set_transaction_tags, TransactionAnnotationInput,
 };
 pub use portfolio::{
     default_portfolio_change_points_granularity, default_portfolio_history_granularity,
