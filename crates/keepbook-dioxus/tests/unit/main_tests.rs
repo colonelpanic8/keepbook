@@ -645,6 +645,68 @@ fn spending_tags_read_the_range_report_breakdown() {
 }
 
 #[test]
+fn spending_tags_keep_a_literal_untagged_tag_apart_from_the_synthetic_one() {
+    let breakdown = |keys: &[(&str, &str)]| {
+        keys.iter()
+            .map(|(key, total)| SpendingBreakdownEntry {
+                key: (*key).to_string(),
+                total: (*total).to_string(),
+                transaction_count: 1,
+            })
+            .collect::<Vec<_>>()
+    };
+    let spending = |breakdown: Vec<SpendingBreakdownEntry>| SpendingOutput {
+        currency: "USD".to_string(),
+        tz: "local".to_string(),
+        start_date: "2026-01-01".to_string(),
+        end_date: "2026-02-28".to_string(),
+        period: "range".to_string(),
+        total: "60".to_string(),
+        transaction_count: 3,
+        periods: vec![SpendingPeriod {
+            start_date: "2026-01-01".to_string(),
+            end_date: "2026-02-28".to_string(),
+            total: "60".to_string(),
+            transaction_count: 3,
+            breakdown,
+        }],
+        skipped_transaction_count: 0,
+        missing_price_transaction_count: 0,
+        missing_fx_transaction_count: 0,
+    };
+
+    // A tag literally named "Untagged" is a different bucket from the app's
+    // synthetic "untagged" one, so neither is renamed onto the other: two app
+    // keys stay two rows the page can tell apart and select separately.
+    let colliding = spending(breakdown(&[
+        ("untagged", "15"),
+        ("Untagged", "45"),
+        ("food", "30"),
+    ]));
+    assert_eq!(
+        spending_tags(&colliding)
+            .iter()
+            .map(|entry| entry.key.clone())
+            .collect::<Vec<_>>(),
+        vec!["Untagged", "food", "untagged"]
+    );
+    // The over-time segments use the same keys, so narrowing to a row still
+    // finds its own bucket.
+    assert_eq!(
+        spending_over_time_points(&colliding)[0]
+            .segments
+            .iter()
+            .map(|segment| segment.key.clone())
+            .collect::<Vec<_>>(),
+        vec!["Untagged", "food", "untagged"]
+    );
+    assert_eq!(
+        narrow_spending_points_to_tag(&spending_over_time_points(&colliding), "untagged")[0].total,
+        15.0
+    );
+}
+
+#[test]
 fn spending_over_time_visible_points_keep_empty_periods() {
     let spending = SpendingOutput {
         currency: "USD".to_string(),

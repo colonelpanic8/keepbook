@@ -61,6 +61,9 @@
   timestamp, and asset identifiers can no longer escape the price directory.
 - Building the library without default features works again; every feature
   now declares the modules it uses.
+- The app's spending page no longer labels a tag literally named `Untagged` the
+  same as the untagged bucket, which made the two rows indistinguishable and
+  made selecting either one focus the same bucket.
 
 ## 0.11.0 - 2026-08-17
 

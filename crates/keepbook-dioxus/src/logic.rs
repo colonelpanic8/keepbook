@@ -1255,12 +1255,13 @@ fn spending_entry_order(entry: &SpendingBreakdownEntry) -> f64 {
 /// period's breakdown already holds the range total for each key, so this only
 /// relabels and orders it.
 pub(crate) fn spending_tags(spending: &SpendingOutput) -> Vec<SpendingBreakdownEntry> {
+    let rename_untagged = can_rename_untagged(spending);
     let mut totals = spending
         .periods
         .iter()
         .flat_map(|period| &period.breakdown)
         .map(|entry| SpendingBreakdownEntry {
-            key: normalize_spending_tag_key(&entry.key),
+            key: spending_tag_key(&entry.key, rename_untagged),
             total: entry.total.clone(),
             transaction_count: entry.transaction_count,
         })
@@ -1298,6 +1299,7 @@ pub(crate) fn spending_breakdown_entries(spending: &SpendingOutput) -> Vec<Spend
 }
 
 pub(crate) fn spending_over_time_points(spending: &SpendingOutput) -> Vec<SpendingBarChartPoint> {
+    let rename_untagged = can_rename_untagged(spending);
     spending
         .periods
         .iter()
@@ -1311,7 +1313,7 @@ pub(crate) fn spending_over_time_points(spending: &SpendingOutput) -> Vec<Spendi
                         return None;
                     }
                     Some(SpendingBarSegment {
-                        key: normalize_spending_tag_key(&entry.key),
+                        key: spending_tag_key(&entry.key, rename_untagged),
                         value,
                         transaction_count: entry.transaction_count,
                     })
@@ -1441,8 +1443,9 @@ pub(crate) fn transaction_tag_options(
     let mut options = tags
         .iter()
         .map(|entry| entry.key.clone())
+        .filter(|key| !is_untagged_spending_key(key))
         .chain(transactions.iter().flat_map(transaction_tags))
-        .filter(|tag| tag != "Untagged" && !is_ignore_spending_tag(tag))
+        .filter(|tag| !is_ignore_spending_tag(tag))
         .collect::<Vec<_>>();
     options.sort_by(|a, b| compare_case_insensitive(a, b));
     options.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
@@ -1845,13 +1848,38 @@ pub(crate) fn visible_transaction_tags(transaction: &Transaction) -> Vec<String>
         .collect()
 }
 
-pub(crate) fn normalize_spending_tag_key(tag: &str) -> String {
-    let trimmed = tag.trim();
-    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("untagged") {
+/// True for a breakdown key that stands for the app's catch-all bucket of
+/// transactions with no tags, however it is spelled.
+pub(crate) fn is_untagged_spending_key(key: &str) -> bool {
+    let trimmed = key.trim();
+    trimmed.is_empty() || trimmed.eq_ignore_ascii_case("untagged")
+}
+
+/// The app's synthetic `untagged` key reads as `Untagged` beside real tags.
+/// `rename_untagged` is false when the report also holds a literal tag of that
+/// name: renaming would then give two buckets one label and one selection, so
+/// both keep the app's spelling and stay two distinguishable rows.
+fn spending_tag_key(key: &str, rename_untagged: bool) -> String {
+    let trimmed = key.trim();
+    if rename_untagged && is_untagged_spending_key(trimmed) {
         "Untagged".to_string()
     } else {
         trimmed.to_string()
     }
+}
+
+/// False when a report holds more than one key standing for the untagged
+/// bucket, which [`spending_tag_key`] would otherwise collapse into one row.
+fn can_rename_untagged(spending: &SpendingOutput) -> bool {
+    spending
+        .periods
+        .iter()
+        .flat_map(|period| &period.breakdown)
+        .map(|entry| entry.key.trim())
+        .filter(|key| is_untagged_spending_key(key))
+        .collect::<HashSet<_>>()
+        .len()
+        < 2
 }
 
 /// Defines `fn $name(index: usize) -> &'static str` over the numbered CSS
@@ -1972,8 +2000,8 @@ pub(crate) fn transaction_subtags(transaction: &Transaction) -> Vec<String> {
         .and_then(|annotation| annotation.subtags.clone())
         .unwrap_or_else(|| transaction.subtags.clone())
         .into_iter()
-        .map(|value| normalize_spending_tag_key(&value))
-        .filter(|value| !value.is_empty() && value != "Untagged")
+        .map(|value| value.trim().to_string())
+        .filter(|value| !is_untagged_spending_key(value))
         .fold(Vec::<String>::new(), |mut acc, subtag| {
             if !acc
                 .iter()
