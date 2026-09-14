@@ -456,3 +456,7 @@ impl FxRateRouter {
         Ok(None)
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/unit/market_data/sources_tests.rs"]
+mod sources_tests;
