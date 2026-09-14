@@ -12,7 +12,7 @@ const TEMP_PREFIX: &str = ".keepbook-tmp-";
 /// `std`'s file locks report `ErrorKind::Unsupported` on Android because it has
 /// no `target_os = "android"` branch, even though bionic provides `flock(2)`.
 #[cfg(target_os = "android")]
-mod locking {
+pub(crate) mod locking {
     use std::fs::File;
     use std::io;
     use std::os::fd::AsRawFd;
@@ -24,25 +24,25 @@ mod locking {
         Ok(())
     }
 
-    pub(super) fn exclusive(file: &File) -> io::Result<()> {
+    pub(crate) fn exclusive(file: &File) -> io::Result<()> {
         flock(file, libc::LOCK_EX)
     }
 
-    pub(super) fn shared(file: &File) -> io::Result<()> {
+    pub(crate) fn shared(file: &File) -> io::Result<()> {
         flock(file, libc::LOCK_SH)
     }
 }
 
 #[cfg(not(target_os = "android"))]
-mod locking {
+pub(crate) mod locking {
     use std::fs::File;
     use std::io;
 
-    pub(super) fn exclusive(file: &File) -> io::Result<()> {
+    pub(crate) fn exclusive(file: &File) -> io::Result<()> {
         file.lock()
     }
 
-    pub(super) fn shared(file: &File) -> io::Result<()> {
+    pub(crate) fn shared(file: &File) -> io::Result<()> {
         file.lock_shared()
     }
 }

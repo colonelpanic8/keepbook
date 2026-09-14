@@ -210,7 +210,7 @@ fn ensure_storage_files_ignored(repo: &Repository) -> Result<()> {
         .append(true)
         .create(true)
         .open(&path)?;
-    file.lock()?;
+    crate::storage::file_io::locking::exclusive(&file)?;
     let mut content = String::new();
     file.read_to_string(&mut content)?;
     let mut additions = String::new();
