@@ -66,12 +66,96 @@ impl SyncedAssetBalance {
     }
 }
 
+/// What a synchronizer learned about one account's balances.
+///
+/// An empty balance list is ambiguous on its own: it can mean the account holds
+/// nothing, or that the request for its holdings failed. Recording the first as
+/// a zero balance would erase real holdings after a transient error, so the two
+/// are distinct cases here and only a snapshot is ever written.
+#[derive(Debug, Clone)]
+pub enum AccountBalances {
+    /// Everything the account holds at sync time. An empty snapshot means the
+    /// account holds nothing and is recorded as such.
+    Snapshot(Vec<SyncedAssetBalance>),
+    /// Holdings could not be retrieved. Stored history is left untouched.
+    Unavailable { reason: String },
+}
+
+impl AccountBalances {
+    pub fn snapshot(balances: Vec<SyncedAssetBalance>) -> Self {
+        Self::Snapshot(balances)
+    }
+
+    pub fn unavailable(reason: impl Into<String>) -> Self {
+        Self::Unavailable {
+            reason: reason.into(),
+        }
+    }
+
+    /// A complete snapshot, or `Unavailable` when the list is empty.
+    ///
+    /// For adapters that cannot yet tell "holds nothing" apart from "the
+    /// request came back without a figure", which is the safe reading.
+    pub fn snapshot_or_unavailable(
+        balances: Vec<SyncedAssetBalance>,
+        reason: impl Into<String>,
+    ) -> Self {
+        if balances.is_empty() {
+            Self::unavailable(reason)
+        } else {
+            Self::Snapshot(balances)
+        }
+    }
+
+    /// The retrieved balances, or an empty slice when they are unavailable.
+    pub fn balances(&self) -> &[SyncedAssetBalance] {
+        match self {
+            Self::Snapshot(balances) => balances,
+            Self::Unavailable { .. } => &[],
+        }
+    }
+
+    pub fn unavailable_reason(&self) -> Option<&str> {
+        match self {
+            Self::Snapshot(_) => None,
+            Self::Unavailable { reason } => Some(reason),
+        }
+    }
+}
+
+/// Whether a sync enumerated every account a connection has.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum AccountListing {
+    /// Every account the connection holds is present in the result. Stored
+    /// accounts missing from it have genuinely gone away.
+    #[default]
+    Complete,
+    /// Only some accounts could be listed. Missing accounts say nothing about
+    /// whether they still exist, so none are deactivated.
+    Partial { reason: String },
+}
+
+impl AccountListing {
+    pub fn partial(reason: impl Into<String>) -> Self {
+        Self::Partial {
+            reason: reason.into(),
+        }
+    }
+
+    pub fn is_complete(&self) -> bool {
+        matches!(self, Self::Complete)
+    }
+}
+
 /// Result of a sync operation.
 #[derive(Debug)]
 pub struct SyncResult {
     pub connection: Connection,
     pub accounts: Vec<Account>,
-    pub balances: Vec<(Id, Vec<SyncedAssetBalance>)>,
+    /// Whether `accounts` is the connection's full account list. Accounts
+    /// stored but missing from a complete listing are deactivated.
+    pub account_listing: AccountListing,
+    pub balances: Vec<(Id, AccountBalances)>,
     pub transactions: Vec<(Id, Vec<Transaction>)>,
 }
 
@@ -92,32 +176,45 @@ impl SyncResult {
             storage.save_account(account).await?;
         }
 
-        for account in storage.list_accounts().await? {
-            if account.connection_id == *self.connection.id()
-                && account.active
-                && !synced_account_ids.contains(&account.id)
-            {
-                let mut inactive_account = account.clone();
-                inactive_account.active = false;
-                storage.save_account(&inactive_account).await?;
+        // Only a complete listing proves a stored account is gone. After a
+        // partial listing, an absent account may simply not have been reached.
+        if self.account_listing.is_complete() {
+            for account in storage.list_accounts().await? {
+                if account.connection_id == *self.connection.id()
+                    && account.active
+                    && !synced_account_ids.contains(&account.id)
+                {
+                    let mut inactive_account = account.clone();
+                    inactive_account.active = false;
+                    storage.save_account(&inactive_account).await?;
 
-                let snapshot = BalanceSnapshot::now_with(clock, Vec::new());
-                storage
-                    .append_balance_snapshot(&inactive_account.id, &snapshot)
-                    .await?;
+                    let snapshot = BalanceSnapshot::now_with(clock, Vec::new());
+                    storage
+                        .append_balance_snapshot(&inactive_account.id, &snapshot)
+                        .await?;
+                }
             }
         }
 
-        for (account_id, synced_balances) in &self.balances {
-            if !synced_balances.is_empty() {
-                let asset_balances: Vec<AssetBalance> = synced_balances
-                    .iter()
-                    .map(|sb| sb.asset_balance.clone())
-                    .collect();
-                let snapshot = BalanceSnapshot::now_with(clock, asset_balances);
-                storage
-                    .append_balance_snapshot(account_id, &snapshot)
-                    .await?;
+        for (account_id, account_balances) in &self.balances {
+            match account_balances {
+                AccountBalances::Snapshot(synced_balances) => {
+                    let asset_balances: Vec<AssetBalance> = synced_balances
+                        .iter()
+                        .map(|sb| sb.asset_balance.clone())
+                        .collect();
+                    let snapshot = BalanceSnapshot::now_with(clock, asset_balances);
+                    storage
+                        .append_balance_snapshot(account_id, &snapshot)
+                        .await?;
+                }
+                AccountBalances::Unavailable { reason } => {
+                    tracing::warn!(
+                        account_id = %account_id,
+                        reason = %reason,
+                        "balances unavailable; leaving stored history unchanged"
+                    );
+                }
             }
         }
 

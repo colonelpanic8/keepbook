@@ -27,8 +27,8 @@ use crate::sync::chase::api::{
     ChaseClient, MortgageDetailResponse, TransactionsResponse, DEFAULT_CARD_TXN_PAGE_SIZE,
 };
 use crate::sync::{
-    AuthStatus, InteractiveAuth, SyncOptions, SyncResult, SyncedAssetBalance, Synchronizer,
-    TransactionSyncMode,
+    AccountBalances, AccountListing, AuthStatus, InteractiveAuth, SyncOptions, SyncResult,
+    SyncedAssetBalance, Synchronizer, TransactionSyncMode,
 };
 
 /// Chase synchronizer using API-based data fetching.
@@ -408,7 +408,7 @@ impl ChaseSynchronizer {
         eprintln!("Chase: found {} accounts", chase_accounts.len());
 
         let mut accounts = Vec::new();
-        let mut balances: Vec<(Id, Vec<SyncedAssetBalance>)> = Vec::new();
+        let mut balances: Vec<(Id, AccountBalances)> = Vec::new();
         let mut transactions: Vec<(Id, Vec<Transaction>)> = Vec::new();
 
         for acct in &chase_accounts {
@@ -542,7 +542,16 @@ impl ChaseSynchronizer {
             }
 
             accounts.push(account);
-            balances.push((account_id.clone(), account_balances));
+            // Chase reports holdings through account-type-specific detail
+            // endpoints. When one fails, or the account kind has no detail
+            // endpoint yet, nothing was learned about the balance.
+            balances.push((
+                account_id.clone(),
+                AccountBalances::snapshot_or_unavailable(
+                    account_balances,
+                    format!("Chase returned no balance for account {}", acct.mask),
+                ),
+            ));
             transactions.push((account_id, acct_txns));
         }
 
@@ -596,6 +605,7 @@ impl ChaseSynchronizer {
         Ok(SyncResult {
             connection: connection.clone(),
             accounts,
+            account_listing: AccountListing::Complete,
             balances,
             transactions,
         })

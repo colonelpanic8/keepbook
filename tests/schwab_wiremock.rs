@@ -130,19 +130,19 @@ async fn schwab_sync_uses_cached_session_and_base_url_override() -> Result<()> {
     assert_eq!(account.name, "Schwab Brokerage");
 
     let (_, balances) = &result.balances[0];
-    let aapl_balance = balances.iter().find(|b| {
+    let aapl_balance = balances.balances().iter().find(|b| {
         matches!(
             b.asset_balance.asset,
             Asset::Equity { ref ticker, .. } if ticker == "AAPL"
         )
     });
-    let has_cash = balances.iter().any(|b| {
+    let has_cash = balances.balances().iter().any(|b| {
         matches!(
             b.asset_balance.asset,
             Asset::Currency { ref iso_code } if iso_code == "USD"
         )
     });
-    let has_cash_position = balances.iter().any(|b| {
+    let has_cash_position = balances.balances().iter().any(|b| {
         matches!(
             b.asset_balance.asset,
             Asset::Equity { ref ticker, .. } if ticker == "CASH"

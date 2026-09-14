@@ -2,7 +2,7 @@ mod support;
 
 use anyhow::Result;
 use keepbook::storage::{JsonFileStorage, Storage};
-use keepbook::sync::Synchronizer;
+use keepbook::sync::{AccountBalances, AccountListing, Synchronizer};
 use support::{mock_connection, MockSynchronizer};
 use tempfile::TempDir;
 
@@ -156,6 +156,119 @@ async fn test_sync_result_creates_account_symlink() -> Result<()> {
         .join("Mock Checking");
     let metadata = std::fs::symlink_metadata(&link_path)?;
     assert!(metadata.file_type().is_symlink());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn unavailable_balances_leave_stored_history_untouched() -> Result<()> {
+    let dir = TempDir::new()?;
+    let storage = JsonFileStorage::new(dir.path());
+    let mut connection = mock_connection("Mock Bank");
+    storage
+        .save_connection_config(connection.id(), &connection.config)
+        .await?;
+    storage.save_connection(&connection).await?;
+
+    let result = MockSynchronizer::new()
+        .sync(&mut connection, &storage)
+        .await?;
+    result.save(&storage).await?;
+    let account_id = result.accounts[0].id.clone();
+    let stored = storage.get_balance_snapshots(&account_id).await?;
+    assert_eq!(stored.len(), 1);
+
+    // A failed balance fetch must not be recorded as "holds nothing".
+    let mut failed = MockSynchronizer::new()
+        .sync(&mut connection, &storage)
+        .await?;
+    failed.balances = vec![(
+        account_id.clone(),
+        AccountBalances::unavailable("detail request failed"),
+    )];
+    failed.save(&storage).await?;
+
+    let after = storage.get_balance_snapshots(&account_id).await?;
+    assert_eq!(after.len(), 1, "unavailable balances must not be appended");
+    assert_eq!(after[0].balances[0].amount, stored[0].balances[0].amount);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_empty_snapshot_records_that_the_account_holds_nothing() -> Result<()> {
+    let dir = TempDir::new()?;
+    let storage = JsonFileStorage::new(dir.path());
+    let mut connection = mock_connection("Mock Bank");
+    storage
+        .save_connection_config(connection.id(), &connection.config)
+        .await?;
+    storage.save_connection(&connection).await?;
+
+    let result = MockSynchronizer::new()
+        .sync(&mut connection, &storage)
+        .await?;
+    result.save(&storage).await?;
+    let account_id = result.accounts[0].id.clone();
+
+    let mut emptied = MockSynchronizer::new()
+        .sync(&mut connection, &storage)
+        .await?;
+    emptied.balances = vec![(account_id.clone(), AccountBalances::snapshot(Vec::new()))];
+    emptied.save(&storage).await?;
+
+    let latest = storage
+        .get_latest_balance_snapshot(&account_id)
+        .await?
+        .expect("empty snapshot should be recorded");
+    assert!(latest.balances.is_empty());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_partial_account_listing_does_not_deactivate_missing_accounts() -> Result<()> {
+    let dir = TempDir::new()?;
+    let storage = JsonFileStorage::new(dir.path());
+    let mut connection = mock_connection("Mock Bank");
+    storage
+        .save_connection_config(connection.id(), &connection.config)
+        .await?;
+    storage.save_connection(&connection).await?;
+
+    let result = MockSynchronizer::new()
+        .sync(&mut connection, &storage)
+        .await?;
+    result.save(&storage).await?;
+    let account_id = result.accounts[0].id.clone();
+
+    let mut partial = MockSynchronizer::new()
+        .sync(&mut connection, &storage)
+        .await?;
+    partial.accounts.clear();
+    partial.balances.clear();
+    partial.transactions.clear();
+    partial.account_listing = AccountListing::partial("account list request failed");
+    partial.save(&storage).await?;
+
+    let account = storage.get_account(&account_id).await?.unwrap();
+    assert!(
+        account.active,
+        "a partial listing says nothing about missing accounts"
+    );
+    assert_eq!(storage.get_balance_snapshots(&account_id).await?.len(), 1);
+
+    // A complete listing that omits the account still deactivates it.
+    let mut complete = MockSynchronizer::new()
+        .sync(&mut connection, &storage)
+        .await?;
+    complete.accounts.clear();
+    complete.balances.clear();
+    complete.transactions.clear();
+    complete.save(&storage).await?;
+
+    let account = storage.get_account(&account_id).await?.unwrap();
+    assert!(!account.active);
 
     Ok(())
 }

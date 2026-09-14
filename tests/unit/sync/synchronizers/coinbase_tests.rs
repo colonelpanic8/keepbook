@@ -87,12 +87,15 @@ async fn sync_works_against_wiremock() -> Result<()> {
     assert_eq!(result.accounts.len(), 1);
     assert_eq!(result.accounts[0].name, "BTC Wallet");
     assert_eq!(result.balances.len(), 1);
-    assert_eq!(result.balances[0].1.len(), 1);
+    assert_eq!(result.balances[0].1.balances().len(), 1);
     assert!(matches!(
-        result.balances[0].1[0].asset_balance.asset,
+        result.balances[0].1.balances()[0].asset_balance.asset,
         Asset::Crypto { .. }
     ));
-    assert_eq!(result.balances[0].1[0].asset_balance.amount, "0.5");
+    assert_eq!(
+        result.balances[0].1.balances()[0].asset_balance.amount,
+        "0.5"
+    );
     assert_eq!(result.transactions.len(), 1);
     assert!(result.transactions[0].1.is_empty());
 
@@ -173,15 +176,21 @@ async fn sync_preserves_coinbase_cash_positions() -> Result<()> {
     assert_eq!(result.accounts[1].tags[1], "ACCOUNT_TYPE_CRYPTO");
     assert_eq!(result.balances.len(), 2);
     assert!(matches!(
-        result.balances[0].1[0].asset_balance.asset,
+        result.balances[0].1.balances()[0].asset_balance.asset,
         Asset::Currency { .. }
     ));
-    assert_eq!(result.balances[0].1[0].asset_balance.amount, "123.45");
+    assert_eq!(
+        result.balances[0].1.balances()[0].asset_balance.amount,
+        "123.45"
+    );
     assert!(matches!(
-        result.balances[1].1[0].asset_balance.asset,
+        result.balances[1].1.balances()[0].asset_balance.asset,
         Asset::Crypto { .. }
     ));
-    assert_eq!(result.balances[1].1[0].asset_balance.amount, "0.013745");
+    assert_eq!(
+        result.balances[1].1.balances()[0].asset_balance.amount,
+        "0.013745"
+    );
 
     Ok(())
 }

@@ -24,8 +24,8 @@ use crate::sync::schwab::{
     TransactionHistoryTimeFrame,
 };
 use crate::sync::{
-    AuthStatus, InteractiveAuth, SyncOptions, SyncResult, SyncedAssetBalance, Synchronizer,
-    TransactionSyncMode,
+    AccountBalances, AccountListing, AuthStatus, InteractiveAuth, SyncOptions, SyncResult,
+    SyncedAssetBalance, Synchronizer, TransactionSyncMode,
 };
 
 const SCHWAB_LOGIN_URL: &str = "https://client.schwab.com/Login/SignOn/CustomerCenterLogin.aspx";
@@ -229,7 +229,7 @@ impl SchwabSynchronizer {
 
         // Build sync result
         let mut accounts = Vec::new();
-        let mut balances: Vec<(Id, Vec<SyncedAssetBalance>)> = Vec::new();
+        let mut balances: Vec<(Id, AccountBalances)> = Vec::new();
         let mut transactions: Vec<(Id, Vec<crate::models::Transaction>)> = Vec::new();
 
         for schwab_account in accounts_resp.accounts {
@@ -427,7 +427,15 @@ impl SchwabSynchronizer {
             }
 
             accounts.push(account);
-            balances.push((account_id, account_balances));
+            // A Schwab account always holds cash or positions, so nothing at
+            // all means the balance and position payloads were missing.
+            balances.push((
+                account_id,
+                AccountBalances::snapshot_or_unavailable(
+                    account_balances,
+                    "Schwab returned no positions or balances for this account",
+                ),
+            ));
         }
 
         // Update connection state
@@ -442,6 +450,7 @@ impl SchwabSynchronizer {
         Ok(SyncResult {
             connection: connection.clone(),
             accounts,
+            account_listing: AccountListing::Complete,
             balances,
             transactions,
         })

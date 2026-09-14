@@ -4,7 +4,7 @@ use keepbook::market_data::JsonlMarketDataStore;
 use keepbook::market_data::{AssetId, MarketDataStore, PriceKind, PricePoint};
 use keepbook::models::{Account, Asset, Connection, ConnectionConfig};
 use keepbook::sync::store_sync_prices;
-use keepbook::sync::{SyncResult, SyncedAssetBalance};
+use keepbook::sync::{AccountBalances, AccountListing, SyncResult, SyncedAssetBalance};
 use tempfile::TempDir;
 
 #[tokio::test]
@@ -39,7 +39,8 @@ async fn store_sync_prices_persists_price_points() -> Result<()> {
     let result = SyncResult {
         connection: connection.clone(),
         accounts: vec![account.clone()],
-        balances: vec![(account.id.clone(), vec![balance])],
+        account_listing: AccountListing::Complete,
+        balances: vec![(account.id.clone(), AccountBalances::snapshot(vec![balance]))],
         transactions: Vec::new(),
     };
 

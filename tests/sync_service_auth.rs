@@ -8,8 +8,8 @@ use keepbook::market_data::{MarketDataService, NullMarketDataStore};
 use keepbook::models::{Connection, ConnectionConfig};
 use keepbook::storage::{JsonFileStorage, Storage};
 use keepbook::sync::{
-    AuthStatus, FixedAuthPrompter, NoopAutoCommitter, SyncContext, SyncOutcome, SyncResult,
-    SyncService, Synchronizer, SynchronizerFactory,
+    AccountListing, AuthStatus, FixedAuthPrompter, NoopAutoCommitter, SyncContext, SyncOutcome,
+    SyncResult, SyncService, Synchronizer, SynchronizerFactory,
 };
 use tempfile::TempDir;
 
@@ -39,6 +39,7 @@ impl Synchronizer for InteractiveMock {
         Ok(SyncResult {
             connection: connection.clone(),
             accounts: Vec::new(),
+            account_listing: AccountListing::Complete,
             balances: Vec::new(),
             transactions: Vec::new(),
         })

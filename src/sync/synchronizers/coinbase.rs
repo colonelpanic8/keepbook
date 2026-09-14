@@ -20,7 +20,7 @@ use crate::models::{
     Transaction,
 };
 use crate::storage::Storage;
-use crate::sync::{SyncResult, SyncedAssetBalance, Synchronizer};
+use crate::sync::{AccountBalances, AccountListing, SyncResult, SyncedAssetBalance, Synchronizer};
 
 const CDP_API_BASE: &str = "https://api.coinbase.com";
 
@@ -431,7 +431,7 @@ impl CoinbaseSynchronizer {
         }
 
         let mut accounts = Vec::new();
-        let mut balances: Vec<(Id, Vec<SyncedAssetBalance>)> = Vec::new();
+        let mut balances: Vec<(Id, AccountBalances)> = Vec::new();
         let mut transactions: Vec<(Id, Vec<Transaction>)> = Vec::new();
 
         for cb_account in coinbase_accounts {
@@ -548,7 +548,7 @@ impl CoinbaseSynchronizer {
             accounts.push(account);
             balances.push((
                 account_id.clone(),
-                vec![SyncedAssetBalance::new(asset_balance)],
+                AccountBalances::snapshot(vec![SyncedAssetBalance::new(asset_balance)]),
             ));
             transactions.push((account_id, account_transactions));
         }
@@ -565,6 +565,7 @@ impl CoinbaseSynchronizer {
         Ok(SyncResult {
             connection: connection.clone(),
             accounts,
+            account_listing: AccountListing::Complete,
             balances,
             transactions,
         })

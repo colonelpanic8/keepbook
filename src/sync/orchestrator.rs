@@ -455,8 +455,8 @@ impl SyncOrchestrator {
 
         // 3. Store any prices the synchronizer provided
         let mut stored_prices = 0;
-        for (_, synced_balances) in &result.balances {
-            for sb in synced_balances {
+        for (_, account_balances) in &result.balances {
+            for sb in account_balances.balances() {
                 if let Some(price) = &sb.price {
                     self.market_data.store_price(price).await?;
                     stored_prices += 1;
@@ -468,7 +468,12 @@ impl SyncOrchestrator {
         let assets: HashSet<Asset> = result
             .balances
             .iter()
-            .flat_map(|(_, sbs)| sbs.iter().map(|sb| sb.asset_balance.asset.clone()))
+            .flat_map(|(_, account_balances)| {
+                account_balances
+                    .balances()
+                    .iter()
+                    .map(|sb| sb.asset_balance.asset.clone())
+            })
             .collect();
 
         // 5. Fetch missing prices

@@ -126,12 +126,12 @@ async fn coinbase_sync_filters_zero_balances_and_preserves_cash_positions() -> R
     );
 
     assert!(result.balances.iter().any(|(_, balances)| {
-        balances.iter().any(|b| {
+        balances.balances().iter().any(|b| {
             matches!(b.asset_balance.asset, Asset::Crypto { ref symbol, .. } if symbol == "ETH")
         })
     }));
     assert!(result.balances.iter().any(|(_, balances)| {
-        balances.iter().any(|b| {
+        balances.balances().iter().any(|b| {
             matches!(b.asset_balance.asset, Asset::Currency { ref iso_code } if iso_code == "USD")
                 && b.asset_balance.amount == "25.0"
         })

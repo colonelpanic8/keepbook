@@ -17,7 +17,7 @@ use crate::models::{
     Transaction, TransactionStatus,
 };
 use crate::storage::Storage;
-use crate::sync::{SyncResult, SyncedAssetBalance, Synchronizer};
+use crate::sync::{AccountBalances, AccountListing, SyncResult, SyncedAssetBalance, Synchronizer};
 
 const PLAID_SANDBOX_BASE: &str = "https://sandbox.plaid.com";
 const PLAID_DEVELOPMENT_BASE: &str = "https://development.plaid.com";
@@ -357,7 +357,7 @@ impl PlaidSynchronizer {
             .collect();
 
         let mut accounts = Vec::new();
-        let mut balances: Vec<(Id, Vec<SyncedAssetBalance>)> = Vec::new();
+        let mut balances: Vec<(Id, AccountBalances)> = Vec::new();
         let mut account_ids_by_plaid: HashMap<String, Id> = HashMap::new();
         let mut account_currency_by_plaid: HashMap<String, String> = HashMap::new();
 
@@ -408,7 +408,10 @@ impl PlaidSynchronizer {
             );
 
             accounts.push(account);
-            balances.push((account_id, vec![SyncedAssetBalance::new(asset_balance)]));
+            balances.push((
+                account_id,
+                AccountBalances::snapshot(vec![SyncedAssetBalance::new(asset_balance)]),
+            ));
         }
 
         let existing_plaid_transactions = self
@@ -520,6 +523,7 @@ impl PlaidSynchronizer {
         Ok(SyncResult {
             connection: connection.clone(),
             accounts,
+            account_listing: AccountListing::Complete,
             balances,
             transactions,
         })

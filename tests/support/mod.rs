@@ -14,7 +14,9 @@ use keepbook::models::{
     Account, Asset, AssetBalance, Connection, ConnectionConfig, Id, Transaction,
 };
 use keepbook::storage::Storage;
-use keepbook::sync::{SyncResult, SyncedAssetBalance, Synchronizer};
+use keepbook::sync::{
+    AccountBalances, AccountListing, SyncResult, SyncedAssetBalance, Synchronizer,
+};
 
 pub fn git_available() -> bool {
     Command::new("git")
@@ -172,7 +174,8 @@ impl Synchronizer for MockSynchronizer {
         Ok(SyncResult {
             connection: connection.clone(),
             accounts: vec![account.clone()],
-            balances: vec![(account.id.clone(), vec![balance])],
+            account_listing: AccountListing::Complete,
+            balances: vec![(account.id.clone(), AccountBalances::snapshot(vec![balance]))],
             transactions: vec![(account.id.clone(), vec![transaction])],
         })
     }

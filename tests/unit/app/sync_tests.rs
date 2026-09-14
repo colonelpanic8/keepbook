@@ -10,7 +10,7 @@ use crate::config::{
 };
 use crate::models::{Account, Asset, Connection, ConnectionConfig, Id, Transaction};
 use crate::storage::{MemoryStorage, Storage};
-use crate::sync::{PriceRefreshResult, SyncResult, SyncWithPricesResult};
+use crate::sync::{AccountListing, PriceRefreshResult, SyncResult, SyncWithPricesResult};
 
 use super::*;
 
@@ -105,6 +105,7 @@ async fn post_sync_rule_application_scopes_to_synced_connection() -> Result<()> 
             result: SyncResult {
                 connection: connection.clone(),
                 accounts: vec![],
+                account_listing: AccountListing::Complete,
                 balances: vec![],
                 transactions: vec![],
             },

@@ -9,8 +9,8 @@ use crate::market_data::{JsonlMarketDataStore, MarketDataServiceBuilder};
 use crate::models::{Connection, Id};
 use crate::storage::{CompactionStorage, MetadataBackfillStorage, Storage, SymlinkStorage};
 use crate::sync::{
-    AuthPrompter, DefaultSynchronizerFactory, FixedAuthPrompter, GitAutoCommitter, SyncContext,
-    SyncOptions, SyncOutcome, SyncService, TransactionSyncMode,
+    AccountListing, AuthPrompter, DefaultSynchronizerFactory, FixedAuthPrompter, GitAutoCommitter,
+    SyncContext, SyncOptions, SyncOutcome, SyncService, TransactionSyncMode,
 };
 
 use super::{
@@ -105,6 +105,27 @@ fn sync_outcome_to_json(outcome: SyncOutcome) -> serde_json::Value {
             });
             if connection.config.synchronizer == "chase" {
                 output["downloaded"] = connection.state.synchronizer_data.clone();
+            }
+            // Only reported when something was incomplete, so a clean sync keeps
+            // the existing output shape.
+            let balances_unavailable: Vec<serde_json::Value> = report
+                .result
+                .balances
+                .iter()
+                .filter_map(|(account_id, balances)| {
+                    balances.unavailable_reason().map(|reason| {
+                        serde_json::json!({
+                            "account_id": account_id.to_string(),
+                            "reason": reason,
+                        })
+                    })
+                })
+                .collect();
+            if !balances_unavailable.is_empty() {
+                output["balances_unavailable"] = serde_json::json!(balances_unavailable);
+            }
+            if let AccountListing::Partial { reason } = &report.result.account_listing {
+                output["accounts_partial"] = serde_json::json!({ "reason": reason });
             }
             output
         }

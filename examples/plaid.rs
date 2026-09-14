@@ -14,7 +14,7 @@ use keepbook::models::{
     SyncStatus, Transaction, TransactionStatus,
 };
 use keepbook::storage::{JsonFileStorage, Storage};
-use keepbook::sync::{SyncResult, SyncedAssetBalance};
+use keepbook::sync::{AccountBalances, AccountListing, SyncResult, SyncedAssetBalance};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
@@ -321,7 +321,7 @@ impl PlaidSynchronizer {
             });
 
         let mut accounts = Vec::new();
-        let mut balances: Vec<(Id, Vec<SyncedAssetBalance>)> = Vec::new();
+        let mut balances: Vec<(Id, AccountBalances)> = Vec::new();
         let mut transactions: Vec<(Id, Vec<Transaction>)> = Vec::new();
 
         // Build a map of account_id -> transactions
@@ -418,7 +418,7 @@ impl PlaidSynchronizer {
             accounts.push(account);
             balances.push((
                 account_id.clone(),
-                vec![SyncedAssetBalance::new(asset_balance)],
+                AccountBalances::snapshot(vec![SyncedAssetBalance::new(asset_balance)]),
             ));
             transactions.push((account_id, account_transactions));
         }
@@ -435,6 +435,7 @@ impl PlaidSynchronizer {
         Ok(SyncResult {
             connection: connection.clone(),
             accounts,
+            account_listing: AccountListing::Complete,
             balances,
             transactions,
         })
