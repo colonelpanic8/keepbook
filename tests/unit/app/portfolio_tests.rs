@@ -1,4 +1,6 @@
+use super::backfill::{resolve_cached_fx, resolve_cached_price, upsert_price_cache};
 use super::history::compute_percentage_change_from_previous;
+use super::intervals::{advance_interval_date, align_start_date, PriceHistoryInterval};
 use super::*;
 use crate::app::*;
 use crate::clock::{Clock, FixedClock};
@@ -6,7 +8,7 @@ use crate::config::{
     DisplayConfig, GitConfig, HistoryConfig, LatentCapitalGainsTaxConfig, PortfolioConfig,
     RefreshConfig, ResolvedConfig, SpendingConfig, TrayConfig,
 };
-use crate::market_data::PriceKind;
+use crate::market_data::{FxRateKind, FxRatePoint, PriceKind, PricePoint};
 use crate::models::FixedIdGenerator;
 use crate::models::{Account, AssetBalance, BalanceSnapshot, Connection, ConnectionConfig};
 use crate::storage::JsonFileStorage;
