@@ -1077,9 +1077,65 @@ pub(crate) fn format_decimal_text(value: &str, decimals: usize) -> Option<String
 /// the f64 round trip. `None` when the text is not a decimal.
 pub(crate) fn format_money_text(value: &str, currency: &str) -> Option<String> {
     let parsed = parse_decimal_text(value)?;
-    let (integer, fraction) = round_decimal_digits(&parsed, 2);
+    Some(money_text(&parsed, currency, parsed.negative))
+}
+
+/// [`format_money_text`] on an amount's magnitude, dropping the sign.
+fn format_absolute_money_text(value: &str, currency: &str) -> Option<String> {
+    let parsed = parse_decimal_text(value)?;
+    Some(money_text(&parsed, currency, false))
+}
+
+fn money_text(parsed: &DecimalText<'_>, currency: &str, negative: bool) -> String {
+    let (integer, fraction) = round_decimal_digits(parsed, 2);
     let amount = format!("{}.{fraction}", format_digit_string_with_commas(&integer));
-    Some(apply_currency_display(&amount, currency, parsed.negative))
+    apply_currency_display(&amount, currency, negative)
+}
+
+/// Money range text (`$1.00–$2.00`) over two app decimal amounts' magnitudes,
+/// ordered smallest first and collapsed to one amount when both render the
+/// same. `None` when either text is not a decimal.
+pub(crate) fn format_absolute_money_range_text(
+    left: &str,
+    right: &str,
+    currency: &str,
+) -> Option<String> {
+    let left_text = format_absolute_money_text(left, currency)?;
+    let right_text = format_absolute_money_text(right, currency)?;
+    let (low, high) =
+        if compare_money_text_magnitude(left, right).is_some_and(std::cmp::Ordering::is_gt) {
+            (right_text, left_text)
+        } else {
+            (left_text, right_text)
+        };
+    Some(if low == high {
+        low
+    } else {
+        format!("{low}\u{2013}{high}")
+    })
+}
+
+/// Orders two app decimal amounts by magnitude, ignoring sign.
+fn compare_money_text_magnitude(left: &str, right: &str) -> Option<std::cmp::Ordering> {
+    let left = parse_decimal_text(left)?;
+    let right = parse_decimal_text(right)?;
+    let left_integer = left.integer.trim_start_matches('0');
+    let right_integer = right.integer.trim_start_matches('0');
+    Some(
+        left_integer
+            .len()
+            .cmp(&right_integer.len())
+            .then_with(|| left_integer.cmp(right_integer))
+            .then_with(|| compare_fraction_digits(left.fraction, right.fraction)),
+    )
+}
+
+fn compare_fraction_digits(left: &str, right: &str) -> std::cmp::Ordering {
+    let digit = |run: &str, index: usize| run.as_bytes().get(index).copied().unwrap_or(b'0');
+    (0..left.len().max(right.len()))
+        .map(|index| digit(left, index).cmp(&digit(right, index)))
+        .find(|ordering| ordering.is_ne())
+        .unwrap_or(std::cmp::Ordering::Equal)
 }
 
 /// [`format_money_text`] with an explicit `+` on non-negative amounts.

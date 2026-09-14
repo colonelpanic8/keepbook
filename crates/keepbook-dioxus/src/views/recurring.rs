@@ -264,46 +264,29 @@ fn cadence_display(cadence: &str) -> String {
     }
 }
 
-fn format_recurring_money(raw: &str, asset: &serde_json::Value) -> String {
-    let currency = asset
+fn recurring_currency(asset: &serde_json::Value) -> &str {
+    asset
         .get("iso_code")
         .and_then(serde_json::Value::as_str)
-        .unwrap_or_default();
-    raw.parse::<f64>()
-        .map(|amount| format_full_money(amount, currency))
-        .unwrap_or_else(|_| {
-            if currency.is_empty() {
-                raw.to_string()
-            } else {
-                format!("{raw} {currency}")
-            }
-        })
+        .unwrap_or_default()
+}
+
+fn format_recurring_money(raw: &str, asset: &serde_json::Value) -> String {
+    let currency = recurring_currency(asset);
+    format_money_text(raw, currency).unwrap_or_else(|| {
+        if currency.is_empty() {
+            raw.to_string()
+        } else {
+            format!("{raw} {currency}")
+        }
+    })
 }
 
 fn format_observed_cost_range(amount: &RecurringTransactionAmount) -> String {
-    let parsed = amount
-        .min
-        .parse::<f64>()
-        .ok()
-        .zip(amount.max.parse::<f64>().ok());
-    let Some((left, right)) = parsed else {
-        return "Observed amount unavailable".to_string();
-    };
-    let low = left.abs().min(right.abs());
-    let high = left.abs().max(right.abs());
-    let currency = amount
-        .asset
-        .get("iso_code")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default();
-    if (high - low).abs() < 0.005 {
-        format!("Observed {}", format_full_money(low, currency))
-    } else {
-        format!(
-            "Observed {}–{}",
-            format_full_money(low, currency),
-            format_full_money(high, currency)
-        )
+    let currency = recurring_currency(&amount.asset);
+    match format_absolute_money_range_text(&amount.min, &amount.max, currency) {
+        Some(range) => format!("Observed {range}"),
+        None => "Observed amount unavailable".to_string(),
     }
 }
 
