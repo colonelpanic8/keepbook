@@ -487,3 +487,7 @@ impl SyncOrchestrator {
         })
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/unit/sync/orchestrator_tests.rs"]
+mod orchestrator_tests;
