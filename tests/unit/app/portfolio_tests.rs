@@ -1,3 +1,4 @@
+use super::history::compute_percentage_change_from_previous;
 use super::*;
 use crate::app::*;
 use crate::clock::{Clock, FixedClock};
