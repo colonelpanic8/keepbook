@@ -750,8 +750,14 @@ fn NetWorthChart(
         })
         .collect::<Vec<_>>()
         .join("\n");
-    let latest = chart_points.last().expect("values is non-empty");
-    let first = chart_points.first().expect("values is non-empty");
+    let (Some(first), Some(latest)) = (chart_points.first(), chart_points.last()) else {
+        return rsx! {
+            div { class: "chart-empty",
+                strong { "{empty_title}" }
+                small { "{empty_detail}" }
+            }
+        };
+    };
     let y_mid = y_min + y_range / 2.0;
     let latest_value = format_compact_money(latest.value, &currency);
     let min_label = format_compact_money(y_min, &currency);
