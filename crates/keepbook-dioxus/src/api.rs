@@ -1,7 +1,8 @@
 use super::logic::*;
 use super::*;
+use serde::Deserialize;
 #[cfg(not(target_arch = "wasm32"))]
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 #[cfg(target_arch = "wasm32")]
 use gloo_net::http::Request;
