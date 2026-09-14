@@ -1,5 +1,5 @@
 use chrono::NaiveDate;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::models::{Asset, TransactionStandardizedMetadata};
 use crate::portfolio::ValuationIssue;
@@ -88,7 +88,7 @@ pub struct RecurringTransactionsOptions {
 }
 
 /// Summary of the amount pattern for a recurring transaction candidate.
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecurringTransactionAmountOutput {
     pub typical: String,
     pub min: String,
@@ -97,7 +97,7 @@ pub struct RecurringTransactionAmountOutput {
 }
 
 /// One transaction supporting a recurring transaction candidate.
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecurringTransactionOccurrenceOutput {
     pub id: String,
     pub account_id: String,
@@ -108,32 +108,45 @@ pub struct RecurringTransactionOccurrenceOutput {
 }
 
 /// A detected recurring transaction candidate.
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecurringTransactionOutput {
     pub name: String,
     pub normalized_name: String,
     pub status: String,
     pub cadence: String,
     /// Canonical interval length used for projections, in days.
+    #[serde(default)]
     pub estimated_interval_days: String,
     /// Positive estimated cost for one occurrence.
+    #[serde(default)]
     pub estimated_recurring_cost: String,
     /// Positive projected cost over one year.
+    #[serde(default)]
     pub estimated_annual_cost: String,
     pub confidence: String,
     pub cadence_score: String,
     pub occurrence_count: usize,
     pub first_seen: String,
     pub last_seen: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next_expected: Option<String>,
     pub amount: RecurringTransactionAmountOutput,
     pub reason_codes: Vec<String>,
     pub transactions: Vec<RecurringTransactionOccurrenceOutput>,
 }
 
+/// A recurring transaction candidate paired with the review decision that applies to it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReviewedRecurringTransactionOutput {
+    pub candidate_key: String,
+    /// `verified`, `dismissed`, or `proposed` when no review applies.
+    pub review_status: String,
+    #[serde(flatten)]
+    pub candidate: RecurringTransactionOutput,
+}
+
 /// A persisted user decision for a recurring transaction candidate.
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct RecurringTransactionReviewOutput {
     pub candidate_key: String,
     pub updated_at: String,
@@ -146,7 +159,7 @@ pub struct RecurringTransactionReviewOutput {
     pub transactions: Vec<RecurringTransactionReviewOccurrenceOutput>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct RecurringTransactionReviewOccurrenceOutput {
     pub account_id: String,
     pub transaction_id: String,

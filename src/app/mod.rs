@@ -46,6 +46,7 @@ pub use portfolio::{
 pub use preflight::{run_preflight, PreflightOptions};
 pub use recurring::{
     list_recurring_transaction_reviews, list_recurring_transactions,
+    list_reviewed_recurring_transactions, reconcile_recurring_transaction_reviews,
     recurring_transaction_candidate_key, set_recurring_transaction_review,
 };
 pub use spending::{spending_report, SpendingReportOptions};
@@ -69,10 +70,11 @@ pub use types::{
     ProposedTransactionEditOutput, RecurringTransactionAmountOutput,
     RecurringTransactionOccurrenceOutput, RecurringTransactionOutput,
     RecurringTransactionReviewOccurrenceOutput, RecurringTransactionReviewOutput,
-    RecurringTransactionsOptions, SpendingBreakdownEntryOutput, SpendingOutput,
-    SpendingPeriodOutput, SpendingScopeOutput, StackedHistoryComponent, StackedHistoryOutput,
-    StackedHistoryPoint, StackedHistorySeries, TaxImpactOutput, TaxImpactPoint,
-    TransactionAnnotationOutput, TransactionAnnotationPatchOutput, TransactionOutput,
+    RecurringTransactionsOptions, ReviewedRecurringTransactionOutput, SpendingBreakdownEntryOutput,
+    SpendingOutput, SpendingPeriodOutput, SpendingScopeOutput, StackedHistoryComponent,
+    StackedHistoryOutput, StackedHistoryPoint, StackedHistorySeries, TaxImpactOutput,
+    TaxImpactPoint, TransactionAnnotationOutput, TransactionAnnotationPatchOutput,
+    TransactionOutput,
 };
 
 fn env_disabled(key: &str) -> bool {

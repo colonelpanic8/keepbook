@@ -17,7 +17,8 @@ use super::list::list_transactions;
 use super::{
     RecurringTransactionAmountOutput, RecurringTransactionOccurrenceOutput,
     RecurringTransactionOutput, RecurringTransactionReviewOccurrenceOutput,
-    RecurringTransactionReviewOutput, RecurringTransactionsOptions, TransactionOutput,
+    RecurringTransactionReviewOutput, RecurringTransactionsOptions,
+    ReviewedRecurringTransactionOutput, TransactionOutput,
 };
 
 const DEFAULT_RECURRING_START: &str = "1900-01-01";
@@ -129,6 +130,62 @@ pub async fn list_recurring_transaction_reviews(
 ) -> Result<Vec<RecurringTransactionReviewOutput>> {
     let reviews = storage.get_recurring_transaction_reviews().await?;
     Ok(reviews.into_iter().map(recurring_review_output).collect())
+}
+
+pub async fn list_reviewed_recurring_transactions(
+    storage: &dyn Storage,
+    options: RecurringTransactionsOptions,
+    include_dismissed: bool,
+    config: &ResolvedConfig,
+) -> Result<Vec<ReviewedRecurringTransactionOutput>> {
+    let candidates = list_recurring_transactions(storage, options, config).await?;
+    let reviews = list_recurring_transaction_reviews(storage).await?;
+    Ok(reconcile_recurring_transaction_reviews(
+        candidates,
+        &reviews,
+        include_dismissed,
+    ))
+}
+
+/// Pairs each candidate with the review that applies to it and drops dismissed
+/// candidates unless `include_dismissed` is set.
+///
+/// A review with the exact candidate key wins. Cadence can become more accurate
+/// as history accumulates, so otherwise the latest review for the same merchant,
+/// typical amount, and asset still applies even though the key changed.
+pub fn reconcile_recurring_transaction_reviews(
+    candidates: Vec<RecurringTransactionOutput>,
+    reviews: &[RecurringTransactionReviewOutput],
+    include_dismissed: bool,
+) -> Vec<ReviewedRecurringTransactionOutput> {
+    candidates
+        .into_iter()
+        .filter_map(|candidate| {
+            let candidate_key = recurring_transaction_candidate_key(&candidate);
+            let review = reviews
+                .iter()
+                .rev()
+                .find(|review| review.candidate_key == candidate_key)
+                .or_else(|| {
+                    reviews.iter().rev().find(|review| {
+                        review.normalized_name == candidate.normalized_name
+                            && review.amount_typical == candidate.amount.typical
+                            && review.asset == candidate.amount.asset
+                    })
+                });
+            let review_status = review
+                .map(|review| review.status.clone())
+                .unwrap_or_else(|| "proposed".to_string());
+            if review_status == "dismissed" && !include_dismissed {
+                return None;
+            }
+            Some(ReviewedRecurringTransactionOutput {
+                candidate_key,
+                review_status,
+                candidate,
+            })
+        })
+        .collect()
 }
 
 pub async fn set_recurring_transaction_review(

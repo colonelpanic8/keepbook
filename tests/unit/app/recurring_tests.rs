@@ -339,3 +339,167 @@ async fn stores_recurring_transaction_reviews_by_candidate_key() -> Result<()> {
     assert_eq!(reviews[0].transactions.len(), 4);
     Ok(())
 }
+
+fn candidate(name: &str, cadence: &str, typical: &str) -> RecurringTransactionOutput {
+    RecurringTransactionOutput {
+        name: name.to_string(),
+        normalized_name: name.to_lowercase(),
+        status: "confirmed".to_string(),
+        cadence: cadence.to_string(),
+        estimated_interval_days: "30.44".to_string(),
+        estimated_recurring_cost: typical.trim_start_matches('-').to_string(),
+        estimated_annual_cost: "0".to_string(),
+        confidence: "0.90".to_string(),
+        cadence_score: "0.90".to_string(),
+        occurrence_count: 4,
+        first_seen: "2026-01-14".to_string(),
+        last_seen: "2026-04-14".to_string(),
+        next_expected: Some("2026-05-14".to_string()),
+        amount: RecurringTransactionAmountOutput {
+            typical: typical.to_string(),
+            min: typical.to_string(),
+            max: typical.to_string(),
+            asset: serde_json::json!({"type": "currency", "iso_code": "USD"}),
+        },
+        reason_codes: Vec::new(),
+        transactions: Vec::new(),
+    }
+}
+
+fn review(
+    candidate: &RecurringTransactionOutput,
+    status: &str,
+) -> RecurringTransactionReviewOutput {
+    RecurringTransactionReviewOutput {
+        candidate_key: recurring_transaction_candidate_key(candidate),
+        updated_at: "2026-05-01T00:00:00+00:00".to_string(),
+        status: status.to_string(),
+        name: candidate.name.clone(),
+        normalized_name: candidate.normalized_name.clone(),
+        cadence: candidate.cadence.clone(),
+        amount_typical: candidate.amount.typical.clone(),
+        asset: candidate.amount.asset.clone(),
+        transactions: Vec::new(),
+    }
+}
+
+#[test]
+fn reconciliation_prefers_exact_candidate_key_over_compatible_reviews() {
+    let monthly = candidate("Spotify", "monthly", "-11.99");
+    let reviews = vec![
+        review(&monthly, "verified"),
+        review(&candidate("Spotify", "weekly", "-11.99"), "dismissed"),
+    ];
+
+    let out = reconcile_recurring_transaction_reviews(
+        vec![monthly, candidate("Netflix", "monthly", "-15.49")],
+        &reviews,
+        false,
+    );
+
+    assert_eq!(out.len(), 2);
+    assert_eq!(out[0].review_status, "verified");
+    assert_eq!(out[0].candidate_key, reviews[0].candidate_key);
+    assert_eq!(out[1].review_status, "proposed");
+    assert_eq!(out[1].candidate.name, "Netflix");
+}
+
+#[test]
+fn reconciliation_falls_back_to_same_cost_when_cadence_changed() {
+    let monthly = candidate("Spotify", "monthly", "-11.99");
+    let reviews = vec![
+        review(&candidate("Spotify", "weekly", "-12.99"), "dismissed"),
+        review(&candidate("Spotify", "weekly", "-11.99"), "verified"),
+    ];
+
+    let out = reconcile_recurring_transaction_reviews(vec![monthly.clone()], &reviews, false);
+
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].review_status, "verified");
+    assert_eq!(
+        out[0].candidate_key,
+        recurring_transaction_candidate_key(&monthly)
+    );
+}
+
+#[test]
+fn reconciliation_uses_the_latest_review() {
+    let monthly = candidate("Spotify", "monthly", "-11.99");
+    let verified = review(&monthly, "verified");
+    let dismissed = review(&monthly, "dismissed");
+
+    let out = reconcile_recurring_transaction_reviews(
+        vec![monthly.clone()],
+        &[verified.clone(), dismissed.clone()],
+        true,
+    );
+    assert_eq!(out[0].review_status, "dismissed");
+
+    let out = reconcile_recurring_transaction_reviews(vec![monthly], &[dismissed, verified], true);
+    assert_eq!(out[0].review_status, "verified");
+}
+
+#[test]
+fn reconciliation_hides_dismissed_candidates_unless_included() {
+    let spotify = candidate("Spotify", "monthly", "-11.99");
+    let netflix = candidate("Netflix", "monthly", "-15.49");
+    let reviews = vec![review(&spotify, "dismissed")];
+
+    let out = reconcile_recurring_transaction_reviews(
+        vec![spotify.clone(), netflix.clone()],
+        &reviews,
+        false,
+    );
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].candidate.name, "Netflix");
+
+    let out = reconcile_recurring_transaction_reviews(vec![spotify, netflix], &reviews, true);
+    assert_eq!(out.len(), 2);
+    assert_eq!(out[0].review_status, "dismissed");
+    assert_eq!(out[1].review_status, "proposed");
+}
+
+#[tokio::test]
+async fn reviewed_output_flattens_candidate_fields() -> Result<()> {
+    let storage = storage_with_transactions(&[
+        tx("tx-1", (2026, 1, 14), "-11.99", "SPOTIFY USA 1234"),
+        tx("tx-2", (2026, 2, 14), "-11.99", "Spotify.com"),
+        tx("tx-3", (2026, 3, 15), "-11.99", "SPOTIFY USA 5678"),
+        tx("tx-4", (2026, 4, 14), "-11.99", "Spotify.com"),
+    ])
+    .await?;
+    let config = test_config();
+    let options = || RecurringTransactionsOptions {
+        start: Some("2026-01-01".to_string()),
+        end: Some("2026-05-01".to_string()),
+        include_ignored: false,
+        include_possible: false,
+        min_confidence: 0.70,
+    };
+    let candidates = list_recurring_transactions(&storage, options(), &config).await?;
+    let candidate = candidates.first().context("expected recurring candidate")?;
+    let key = recurring_transaction_candidate_key(candidate);
+    set_recurring_transaction_review(
+        &storage,
+        &config,
+        key.clone(),
+        RecurringTransactionReviewStatus::Verified,
+        candidate,
+    )
+    .await?;
+
+    let out = list_reviewed_recurring_transactions(&storage, options(), false, &config).await?;
+    assert_eq!(out.len(), 1);
+
+    let json = serde_json::to_value(&out[0])?;
+    assert_eq!(json["candidate_key"], key);
+    assert_eq!(json["review_status"], "verified");
+    assert_eq!(json["normalized_name"], "spotify");
+    assert_eq!(json["amount"]["typical"], "-11.99");
+    assert!(json.get("candidate").is_none());
+
+    let decoded: ReviewedRecurringTransactionOutput = serde_json::from_value(json)?;
+    assert_eq!(decoded.candidate_key, key);
+    assert_eq!(decoded.candidate.transactions.len(), 4);
+    Ok(())
+}
