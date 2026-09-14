@@ -8,8 +8,8 @@ Keepbook is a local-first personal finance toolkit. Data is stored in plain JSON
 
 - **CLI command structure**: command names, flags, arguments, help text
 - **JSON output format**: field names (snake_case), field types, null vs omitted semantics
-- **Timestamp formatting**: `+00:00` suffix for app output types (`formatRfc3339`), `Z` suffix for library types (`formatChronoSerde`)
-- **Decimal formatting**: trailing zeros stripped (Rust `Decimal::normalize().to_string()`, TS `decStr()`)
+- **Timestamp formatting**: `+00:00` suffix for app output types, `Z` suffix for library types
+- **Decimal formatting**: trailing zeros stripped (`Decimal::normalize().to_string()`)
 - **Asset serialization**: tagged union with `type` field, snake_case fields, optional fields omitted when absent
 - **Storage format**: JSON/JSONL file structure, field names, serialization rules
 - **Business logic**: portfolio valuation, change point collection, balance aggregation, account counting
@@ -68,7 +68,7 @@ src/                    # Rust implementation
 
 ## CLI Commands
 
-Both CLIs emit JSON. Command structure:
+The CLI emits JSON. Command structure:
 
 - `config`
 - `add connection|account`
