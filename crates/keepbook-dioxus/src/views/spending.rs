@@ -145,12 +145,12 @@ pub(super) fn SpendingView(currency: String) -> Element {
         .map(|data| transaction_tag_options(&data.transactions, &tags))
         .unwrap_or_default();
     let total = loaded
-        .and_then(|data| parse_money_input(&data.spending.total))
+        .and_then(|data| format_money_text(&data.spending.total, &data.spending.currency))
         .unwrap_or_default();
-    let selected_total = selected.as_ref().and_then(|tag| {
+    let selected_total = selected.as_ref().zip(loaded).and_then(|(tag, data)| {
         tags.iter()
             .find(|entry| &entry.key == tag)
-            .and_then(|entry| parse_money_input(&entry.total))
+            .and_then(|entry| format_money_text(&entry.total, &data.spending.currency))
     });
     let period_metric = selected_period_value.as_ref().map(|period| {
         let (total, transaction_count) = loaded
@@ -472,7 +472,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
                         div { class: "tag-list",
                             div { class: "spending-total",
                                 span { class: "metric-label", "Total" }
-                                strong { "{format_full_money(total, &data.spending.currency)}" }
+                                strong { "{total}" }
                                 small { "{data.spending.transaction_count} transactions / {data.spending.start_date} to {data.spending.end_date}" }
                             }
                             if let Some(period) = period_metric.clone() {
@@ -487,7 +487,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
                             if let Some(value) = selected_total {
                                 div { class: "spending-total selected-total",
                                     span { class: "metric-label", "Selected" }
-                                    strong { "{format_full_money(value, &data.spending.currency)}" }
+                                    strong { "{value}" }
                                     small { "{selected_label}" }
                                 }
                             }
