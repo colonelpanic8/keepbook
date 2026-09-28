@@ -591,7 +591,7 @@ impl InteractiveAuth for SchwabSynchronizer {
 
         // Wait for token capture
         println!("Waiting for session capture...");
-        let timeout = Duration::from_secs(300); // 5 minute timeout
+        let timeout = Duration::from_secs(15 * 60); // allow time for SMS/app 2FA
         let start = std::time::Instant::now();
         let mut last_post_login_drive = std::time::Instant::now() - Duration::from_secs(30);
 
@@ -768,7 +768,12 @@ async fn extract_schwab_auth_capture(
         params.context_id = Some(context_id);
         params.return_by_value = Some(true);
         let value = match page.evaluate(params).await {
-            Ok(result) => result.into_value::<Option<serde_json::Value>>()?,
+            Ok(result) => result
+                .value()
+                .and_then(|value| {
+                    serde_json::from_value::<Option<serde_json::Value>>(value.clone()).ok()
+                })
+                .flatten(),
             Err(err) => {
                 let message = err.to_string();
                 if message.contains("Cannot find context with specified id")
@@ -802,8 +807,13 @@ async fn extract_schwab_auth_capture(
 async fn drive_schwab_post_login(page: &chromiumoxide::Page) -> Result<()> {
     let js = r#"(async function() {
   const url = String(location.href || '');
-  const text = String(document.body && document.body.innerText || '').toLowerCase();
-  if (/security code|enter security code|confirm your identity|let's be sure it's you/.test(text)) {
+  const text = String(document.body && document.body.innerText || '')
+    .toLowerCase()
+    .replace(/[\u2018\u2019\u02bc]/g, "'");
+  if (/sws-gateway/i.test(url)) {
+    return { action: 'waiting-for-auth-gateway' };
+  }
+  if (/security code|enter security code|confirm your identity|let's be sure it's you|select a method to confirm|verify your identity|text me at|call me at|remember this device/.test(text)) {
     return { action: 'waiting-for-mfa' };
   }
   if (/login|signon|password|user id|username/.test(text) && /client\.schwab\.com\/login|signon/i.test(url)) {
@@ -824,7 +834,7 @@ async fn drive_schwab_post_login(page: &chromiumoxide::Page) -> Result<()> {
     } catch (_) {}
   }
 
-  if (!/client\.schwab\.com/i.test(url) || /sws-gateway/i.test(url)) {
+  if (!/client\.schwab\.com/i.test(url)) {
     location.href = 'https://client.schwab.com/clientapps/accounts/summary/';
     return { action: 'navigate-summary' };
   }
