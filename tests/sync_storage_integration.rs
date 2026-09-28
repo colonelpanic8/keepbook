@@ -1,6 +1,7 @@
 mod support;
 
 use anyhow::Result;
+use keepbook::models::Asset;
 use keepbook::storage::{JsonFileStorage, Storage};
 use keepbook::sync::{AccountBalances, AccountListing, Synchronizer};
 use support::{mock_connection, MockSynchronizer};
@@ -127,6 +128,38 @@ async fn test_sync_twice_does_not_duplicate_transactions() -> Result<()> {
         1,
         "same transaction id should not be appended twice"
     );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn corrected_chase_asset_replaces_existing_transaction_by_id() -> Result<()> {
+    let dir = TempDir::new()?;
+    let storage = JsonFileStorage::new(dir.path());
+    let mut connection = mock_connection("Mock Chase");
+    storage
+        .save_connection_config(connection.id(), &connection.config)
+        .await?;
+
+    let mut first = MockSynchronizer::new()
+        .sync(&mut connection, &storage)
+        .await?;
+    first.transactions[0].1[0].asset = Asset::currency("392");
+    let account_id = first.transactions[0].0.clone();
+    let transaction_id = first.transactions[0].1[0].id.clone();
+    first.save(&storage).await?;
+
+    let mut corrected = MockSynchronizer::new()
+        .sync(&mut connection, &storage)
+        .await?;
+    corrected.transactions[0].1[0].asset = Asset::currency("USD");
+    corrected.save(&storage).await?;
+
+    let transactions = storage.get_transactions(&account_id).await?;
+    assert_eq!(transactions.len(), 1);
+    assert_eq!(transactions[0].id, transaction_id);
+    assert_eq!(transactions[0].asset, Asset::currency("USD"));
+    assert_eq!(storage.get_transactions_raw(&account_id).await?.len(), 2);
 
     Ok(())
 }
