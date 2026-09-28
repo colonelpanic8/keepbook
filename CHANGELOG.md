@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.12.4 - 2026-09-27
+
+### Fixed
+
+- Chase card purchases at foreign merchants now record the USD settlement
+  amount as USD while retaining Chase's merchant currency and any original
+  amount fields in transaction metadata. A full Chase transaction sync updates
+  existing records without creating duplicate transaction IDs.
+- Schwab browser login now waits up to 15 minutes for MFA, tolerates missing
+  capture values while waiting, and avoids redirects during MFA.
+
 ## 0.12.3 - 2026-09-14
 
 ### Fixed
