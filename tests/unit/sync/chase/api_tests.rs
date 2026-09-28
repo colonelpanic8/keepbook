@@ -19,6 +19,7 @@ fn activity(id: &str) -> ChaseActivity {
         merchant_details: None,
         last4_card_number: None,
         digital_account_identifier: None,
+        additional_fields: serde_json::Map::new(),
     }
 }
 

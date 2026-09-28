@@ -65,6 +65,7 @@ fn chase_activity_to_transaction_persists_extended_metadata() {
         }),
         last4_card_number: Some("1234".to_string()),
         digital_account_identifier: Some(987654321),
+        additional_fields: Map::new(),
     };
 
     let tx = chase_activity_to_transaction(&activity, &Id::from_string("conn-1"), 123)
@@ -106,4 +107,50 @@ fn chase_activity_to_transaction_persists_extended_metadata() {
             .and_then(|v| v.as_i64()),
         Some(987654321)
     );
+}
+
+#[test]
+fn chase_foreign_card_purchase_uses_settlement_currency_and_preserves_source_fields() {
+    let activity: ChaseActivity = serde_json::from_value(serde_json::json!({
+        "transactionStatusCode": "Posted",
+        "transactionAmount": 56.14,
+        "transactionDate": "2026-09-19",
+        "transactionPostDate": "2026-09-21",
+        "sorTransactionIdentifier": "346262130627027",
+        "creditDebitCode": "D",
+        "currencyCode": "392",
+        "originalTransactionAmount": 8230,
+        "originalCurrencyCode": "392"
+    }))
+    .unwrap();
+    let connection_id = Id::from_string("conn-1");
+    let tx = chase_activity_to_transaction(&activity, &connection_id, 123).unwrap();
+
+    assert_eq!(tx.amount, "-56.14");
+    assert_eq!(tx.asset, Asset::currency("USD"));
+    assert_eq!(
+        tx.id,
+        chase_activity_to_transaction_id(&connection_id, 123, &activity)
+    );
+    assert_eq!(tx.synchronizer_data["chase_currency_code"], "392");
+    assert_eq!(tx.synchronizer_data["originalTransactionAmount"], 8230);
+    assert_eq!(tx.synchronizer_data["originalCurrencyCode"], "392");
+}
+
+#[test]
+fn chase_domestic_card_purchase_uses_usd_asset() {
+    let activity: ChaseActivity = serde_json::from_value(serde_json::json!({
+        "transactionStatusCode": "Posted",
+        "transactionAmount": 12.34,
+        "transactionDate": "2026-02-15",
+        "sorTransactionIdentifier": "domestic-1",
+        "creditDebitCode": "D",
+        "currencyCode": "840"
+    }))
+    .unwrap();
+    let tx = chase_activity_to_transaction(&activity, &Id::from_string("conn-1"), 123).unwrap();
+
+    assert_eq!(tx.amount, "-12.34");
+    assert_eq!(tx.asset, Asset::currency("USD"));
+    assert_eq!(tx.synchronizer_data["chase_currency_code"], "840");
 }

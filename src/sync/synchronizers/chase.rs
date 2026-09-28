@@ -778,6 +778,22 @@ fn chase_activity_to_transaction(
             Value::Number(v.into()),
         );
     }
+    if let Some(currency_code) = &activity.currency_code {
+        synchronizer_data.insert(
+            "chase_currency_code".to_string(),
+            Value::String(currency_code.clone()),
+        );
+    }
+    for (key, value) in &activity.additional_fields {
+        let name = key.to_ascii_lowercase();
+        if name.contains("amount")
+            || name.contains("currency")
+            || name.contains("exchange")
+            || name.contains("conversion")
+        {
+            synchronizer_data.insert(key.clone(), value.clone());
+        }
+    }
     if let Some(details) = &activity.merchant_details {
         if let Some(raw) = &details.raw_merchant_details {
             if let Some(v) = &raw.merchant_dba_name {
@@ -852,7 +868,7 @@ fn chase_activity_to_transaction(
             id: tx_id,
             timestamp,
             amount: amount.to_string(),
-            asset: Asset::currency(activity.currency_code.as_deref().unwrap_or("USD")).normalized(),
+            asset: Asset::currency("USD"),
             description: activity.description(),
             status,
             synchronizer_data: Value::Object(synchronizer_data),

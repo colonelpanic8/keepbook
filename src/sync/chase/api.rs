@@ -279,6 +279,8 @@ pub struct ChaseActivity {
     pub last4_card_number: Option<String>,
     #[serde(default, rename = "digitalAccountIdentifier")]
     pub digital_account_identifier: Option<i64>,
+    #[serde(flatten)]
+    pub additional_fields: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
