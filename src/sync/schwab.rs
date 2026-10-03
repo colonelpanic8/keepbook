@@ -128,6 +128,8 @@ impl TransactionHistoryTimeFrame {
     }
 }
 
+/// Schwab's site-wide web app id; the transaction-history gateway rejects requests without one.
+const SCHWAB_CLIENT_APP_ID: &str = "AD00002298";
 const TRANSACTION_HISTORY_MAX_PAGES: usize = 20;
 const TRANSACTION_HISTORY_INIT_PATH: &str =
     "/api/is.TransactionHistoryWeb/TransactionHistoryInterface/TransactionHistory/init";
@@ -368,6 +370,7 @@ impl SchwabClient {
             .request(method, &url)
             .header("authorization", format!("Bearer {token}"))
             .header("schwab-client-channel", "IO")
+            .header("schwab-client-appid", SCHWAB_CLIENT_APP_ID)
             .header("schwab-client-correlid", uuid::Uuid::new_v4().to_string())
             .header("schwab-env", "PROD")
             .header("schwab-resource-version", "1")

@@ -2,7 +2,7 @@ use super::*;
 use crate::credentials::SessionData;
 use crate::models::Id;
 use serde_json::json;
-use wiremock::matchers::{body_partial_json, method, path};
+use wiremock::matchers::{body_partial_json, header_exists, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 #[test]
@@ -141,6 +141,7 @@ async fn get_brokerage_transactions_paginates_with_bookmark() -> Result<()> {
             .and(path(
                 "/api/is.TransactionHistoryWeb/TransactionHistoryInterface/TransactionHistory/brokerage/transactions",
             ))
+            .and(header_exists("schwab-client-appid"))
             .and(body_partial_json(json!({
                 "timeFrame": "All",
                 "bookmark": null
