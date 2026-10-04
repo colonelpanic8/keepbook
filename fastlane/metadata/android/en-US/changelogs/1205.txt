@@ -1,0 +1,1 @@
+* Fixed: Schwab syncs send the `Schwab-Client-AppId` header that Schwab's transaction-history API now requires, fixing `400 Bad Request` failures when fetching transactions.

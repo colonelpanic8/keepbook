@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.12.5 - 2026-10-03
+
+### Fixed
+
+- Schwab syncs send the `Schwab-Client-AppId` header that Schwab's
+  transaction-history API now requires, fixing `400 Bad Request` failures
+  when fetching transactions.
+
 ## 0.12.4 - 2026-09-27
 
 ### Fixed
