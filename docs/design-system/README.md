@@ -102,19 +102,20 @@ The font is Inter, shipped with the app as a variable WOFF2, with
 
 | Token | Size | Use |
 |---|---|---|
-| `--fs-display` | 1.5rem | Headline values (net worth, totals) |
-| `--fs-title` | 1.125rem | Card values, the app name |
-| `--fs-body` | 1rem | Body copy, table cells, panel titles |
+| `--fs-display` | 1.5rem | Headline values (net worth, totals, chart summaries) |
+| `--fs-title` | 1.125rem | Panel titles, the app name |
+| `--fs-body` | 1rem | Body copy, table cells, navigation |
 | `--fs-small` | 0.8125rem | Buttons, notices, secondary text |
 | `--fs-caption` | 0.75rem | Badges, timestamps, chart axes, overline labels |
 
 `--fw-medium` (600) is for controls, navigation, and labels. `--fw-bold`
 (700, the same as `strong`) is for values, headings, and badges. Use
 `.control-label` for the system's only uppercase style, the overline. It
-also styles table heads.
+also styles table heads and `.metric-label`, so a headline value reads as an
+overline label above a display-size number.
 
-Use `font-variant-numeric: tabular-nums` where digits need to line up in a
-column.
+The body sets `font-variant-numeric: tabular-nums`, so money, dates, and
+counts line up in columns and don't shift as they update.
 
 ### Space and shape
 
@@ -125,7 +126,7 @@ column.
     `--sp-8`.
 - Radii:
   - `--radius-sm` (6px) for controls.
-  - `--radius-md` (8px) for panels, cards, and tables.
+  - `--radius-md` (10px) for panels, cards, and tables.
   - `--radius-pill` for badges, chips, switches, and swatches.
 - Control heights:
   - `--control-height` (36px) for buttons, inputs, and the segmented track.
@@ -144,12 +145,14 @@ stills the loops.
 
 ### Iconography
 
-Icons appear only where they speed up recognition of a repeated action, such
-as the page toolbar. They are Lucide stroke icons on a 24px grid, drawn
-inline at 14px with `stroke="currentColor"`, so they follow the button's text
-color, including on a primary fill. Add a new icon to `assets/icons.json`
-and as a `ButtonIcon` variant in `components/actions/icons.rs`; the current
-set is Refresh, GitBranch, and ChevronDown. Small affordances are plain glyphs, not icons:
+Icons appear only where they speed up recognition of a repeated action or a
+destination: the page toolbar and the sidebar. They are Lucide stroke icons
+on a 24px grid, drawn inline at 14px (18px in the sidebar) with
+`stroke="currentColor"`, so they follow the text color, including on a
+primary fill. Sidebar icons are muted, and primary on the selected view. Add
+a new icon to `assets/icons.json` from Lucide's published SVGs and as a
+`ButtonIcon` variant in `components/actions/icons.rs`; `ActiveView::icon`
+picks each view's. Small affordances are plain glyphs, not icons:
 
 | Glyph | Use |
 |---|---|
@@ -190,7 +193,7 @@ named last in each row renders it.
 | Data table | `.data-table` › `.table-head` + `.table-row` | Each table's own class sets its columns with `grid-template-columns`. Below 1200px rows become labeled cards. `DataTable` |
 | Tree group | `.tree-group` › `.tree-parent` + `.data-table` | Accounts grouped by connection. `TreeGroup` |
 | Modal | `.modal-backdrop` › `.modal-dialog(.wide)` › `.modal-header`, body, `.modal-actions` | `Modal` |
-| Navigation | `.app-shell` › `.app-nav` › `.nav-header` + `nav` › `.nav-button(.selected)`, then `.workspace` | A sidebar at wide widths, a sticky header with a drawer below 1200px. `AppShell` |
+| Navigation | `.app-shell` › `.app-nav` › `.nav-header` + `nav` › `.nav-button(.selected)` (icon + label), then `.workspace` | A sidebar at wide widths, a sticky header with a drawer below 1200px. `AppShell` |
 | Legend | `.stacked-legend` › `.stacked-legend-item` (`.selected`, `.asset`) | Swatch and label per series; buttons when selecting a series filters the chart. `Legend` |
 | Net worth | `.chart-card` › `.chart-meta`, `svg.net-worth-chart` | Line and area with per-point hover detail; dragging selects a range. `NetWorthChart` |
 | Spending over time | `.chart-card.spending-over-time-card` › `.chart-meta`, `svg.spending-bar-chart` of `.spending-bar-segment`s, `.stacked-legend` | Stacked by tag; focusing a tag narrows the bars to it. `SpendingChart` |
@@ -246,9 +249,12 @@ named last in each row renders it.
 
 - Charts are SVG with a fixed `viewBox` scaled to the panel width.
   - Gridlines use `--color-divider` and the axis `--color-border-strong`.
-  - Axis text is `--fs-caption` muted.
-  - The line is `--color-primary` over an area of the same color at 14%
-    opacity.
+  - Axis text is muted. Because it is in viewBox units, `.chart-card` is a
+    size container and steps the label size inversely with its width, which
+    keeps labels near 12px on desktop. On phones the 60-unit label gutter caps
+    them at 20 units.
+  - The line is `--color-primary` over a gradient of the same color, from
+    24% opacity under the line to nothing at the axis.
 - Series and tags take `--series-N` by position. Stacked segments are
   separated by `--color-surface` strokes, so they read correctly in both
   themes.

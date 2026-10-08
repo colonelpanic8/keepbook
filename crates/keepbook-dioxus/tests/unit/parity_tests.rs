@@ -43,7 +43,10 @@ const CASES: &[Case] = &[
                     SelectOption { value: "parents".into(), label: "Parents".into(), disabled: true },
                 ],
                 repository: "personal",
-                nav_items: vec!["Accounts".to_string(), "Spending".to_string()],
+                nav_items: vec![
+                NavItem { label: "Accounts".into(), icon: ButtonIcon::Wallet },
+                NavItem { label: "Spending".into(), icon: ButtonIcon::Receipt },
+            ],
                 active: "Accounts",
                 p { "Content" }
             }
@@ -119,6 +122,10 @@ const CASES: &[Case] = &[
             }
         }
     }),
+    (
+        "IconSvg.refresh",
+        || rsx! { IconSvg { icon: ButtonIcon::Refresh } },
+    ),
     ("ControlButton.primary_icon", || {
         rsx! {
             ControlButton { primary: true, icon: ButtonIcon::Refresh, title: "Fetch prices", onclick: |_| {}, "Refresh prices" }
@@ -490,14 +497,25 @@ fn every_component_has_a_parity_case() {
 }
 
 /// Every `ButtonIcon`; the match stops compiling when a variant is added.
-fn every_button_icon() -> [ButtonIcon; 3] {
-    match ButtonIcon::Refresh {
-        ButtonIcon::Refresh | ButtonIcon::GitBranch | ButtonIcon::ChevronDown => {}
+fn every_button_icon() -> [ButtonIcon; 12] {
+    use ButtonIcon::*;
+    match Refresh {
+        Refresh | GitBranch | ChevronDown | Wallet | Landmark | Receipt | Repeat | TrendingUp
+        | Layers | Plug | FilePen | Settings => {}
     }
     [
-        ButtonIcon::Refresh,
-        ButtonIcon::GitBranch,
-        ButtonIcon::ChevronDown,
+        Refresh,
+        GitBranch,
+        ChevronDown,
+        Wallet,
+        Landmark,
+        Receipt,
+        Repeat,
+        TrendingUp,
+        Layers,
+        Plug,
+        FilePen,
+        Settings,
     ]
 }
 
@@ -526,16 +544,17 @@ fn react_nav_items_match_the_app_views() {
     )
     .expect("AppShell mirror should be readable");
     let list = source
-        .split_once("NAV_ITEMS = [")
-        .and_then(|(_, rest)| rest.split_once(']'))
+        .split_once("NAV_ITEMS: NavItem[] = [")
+        .and_then(|(_, rest)| rest.split_once("];"))
         .map(|(list, _)| list)
         .expect("AppShell.tsx should define NAV_ITEMS");
-    let react: Vec<&str> = list.split('"').skip(1).step_by(2).collect();
-    let app: Vec<&str> = crate::views::ActiveView::ALL
-        .map(|view| view.label())
+    let quoted: Vec<&str> = list.split('"').skip(1).step_by(2).collect();
+    let react: Vec<(&str, &str)> = quoted.chunks(2).map(|pair| (pair[0], pair[1])).collect();
+    let app: Vec<(&str, &str)> = crate::views::ActiveView::ALL
+        .map(|view| (view.label(), view.icon().name()))
         .to_vec();
     assert_eq!(
         react, app,
-        "NAV_ITEMS in AppShell.tsx must list the app's views in order"
+        "NAV_ITEMS in AppShell.tsx must list the app's views and icons in order"
     );
 }

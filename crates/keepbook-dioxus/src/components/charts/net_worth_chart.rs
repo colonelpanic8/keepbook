@@ -178,6 +178,13 @@ pub(crate) fn NetWorthChart(
                 view_box: "0 0 720 260",
                 role: "img",
                 style { "{hover_rules}" }
+                // Every chart shares this id; the gradient's colors come from CSS.
+                defs {
+                    linearGradient { id: "chart-area-fill", x1: "0", y1: "0", x2: "0", y2: "1",
+                        stop { class: "chart-area-stop-top", offset: "0" }
+                        stop { class: "chart-area-stop-bottom", offset: "1" }
+                    }
+                }
                 line {
                     class: "chart-grid",
                     x1: "{padding_left}",

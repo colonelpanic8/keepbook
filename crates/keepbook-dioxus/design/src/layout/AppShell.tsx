@@ -1,20 +1,27 @@
 import { useState, type ReactNode } from "react";
 import logo from "../../../../../assets/keepbook-icon.svg";
+import { renderIcon, type IconName } from "../actions/icons";
 import { cx } from "../cx";
 import { Spinner } from "../feedback/Spinner";
 import { toSelectOption, type SelectOption } from "../forms/Select";
 
-/** The app's navigation views, in sidebar order. */
-export const NAV_ITEMS = [
-  "Accounts",
-  "Assets",
-  "Spending",
-  "Recurring",
-  "Net Worth",
-  "Net Worth Breakdown",
-  "Connections",
-  "Proposed Edits",
-  "Settings",
+/** A sidebar destination: its label and icon. */
+export interface NavItem {
+  label: string;
+  icon: IconName;
+}
+
+/** The app's navigation views, in sidebar order, with their icons. */
+export const NAV_ITEMS: NavItem[] = [
+  { label: "Accounts", icon: "wallet" },
+  { label: "Assets", icon: "landmark" },
+  { label: "Spending", icon: "receipt" },
+  { label: "Recurring", icon: "repeat" },
+  { label: "Net Worth", icon: "trending-up" },
+  { label: "Net Worth Breakdown", icon: "layers" },
+  { label: "Connections", icon: "plug" },
+  { label: "Proposed Edits", icon: "file-pen-line" },
+  { label: "Settings", icon: "settings" },
 ];
 
 export interface AppShellProps {
@@ -30,7 +37,7 @@ export interface AppShellProps {
   /** A status line under the switcher, e.g. "Switching to Parents…". */
   repositoryStatus?: string;
   /** Navigation items; defaults to the app's views. */
-  navItems?: string[];
+  navItems?: NavItem[];
   /** Selected navigation item. */
   active?: string;
   onRepositoryChange?: (value: string) => void;
@@ -54,7 +61,7 @@ export function AppShell({
   repositoryBusy = false,
   repositoryStatus,
   navItems = NAV_ITEMS,
-  active = navItems[0],
+  active = navItems[0]?.label,
   onRepositoryChange,
   onNavigate,
   children,
@@ -111,14 +118,15 @@ export function AppShell({
         <nav>
           {navItems.map((item) => (
             <button
-              key={item}
-              className={cx("nav-button", item === active && "selected")}
+              key={item.label}
+              className={cx("nav-button", item.label === active && "selected")}
               onClick={() => {
                 setOpen(false);
-                onNavigate?.(item);
+                onNavigate?.(item.label);
               }}
             >
-              {item}
+              {renderIcon(item.icon)}
+              <span>{item.label}</span>
             </button>
           ))}
         </nav>

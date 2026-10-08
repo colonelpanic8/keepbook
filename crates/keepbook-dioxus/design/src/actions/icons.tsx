@@ -3,6 +3,7 @@ import paths from "../../../assets/icons.json";
 /** Stroke icons on a 24px grid (Lucide shapes), from the shared `assets/icons.json`. */
 export type IconName = keyof typeof paths;
 
+/** A 14px stroke icon in the current text color; CSS may size it up. Mirrors `IconSvg` in `components/actions/icons.rs`. */
 export function renderIcon(icon: IconName) {
   return (
     <svg

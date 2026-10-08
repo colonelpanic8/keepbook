@@ -35,6 +35,7 @@ import {
   ThemePicker,
   TreeGroup,
 } from "../src";
+import { renderIcon } from "../src/actions/icons";
 
 export const cases: Record<string, ComponentType> = {
   "AppShell.basic": () => (
@@ -46,7 +47,10 @@ export const cases: Record<string, ComponentType> = {
         { value: "parents", label: "Parents", disabled: true },
       ]}
       repository="personal"
-      navItems={["Accounts", "Spending"]}
+      navItems={[
+        { label: "Accounts", icon: "wallet" },
+        { label: "Spending", icon: "receipt" },
+      ]}
       active="Accounts"
     >
       <p>Content</p>
@@ -96,6 +100,7 @@ export const cases: Record<string, ComponentType> = {
     <ThemeOptions settings={{ palette: "dynamic", mode: "dark", seed: "#6750a4" }} />
   ),
   "ThemeOptions.dynamic_wallpaper": () => <ThemeOptions settings={{ palette: "dynamic", mode: "system" }} wallpaper />,
+  "IconSvg.refresh": () => renderIcon("refresh"),
   "ControlButton.primary_icon": () => (
     <ControlButton primary icon="refresh" title="Fetch prices">
       Refresh prices

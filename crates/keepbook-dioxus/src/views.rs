@@ -57,6 +57,20 @@ impl ActiveView {
         Self::Settings,
     ];
 
+    pub(crate) fn icon(self) -> ButtonIcon {
+        match self {
+            Self::Spending => ButtonIcon::Receipt,
+            Self::NetWorth => ButtonIcon::TrendingUp,
+            Self::NetWorthBreakdown => ButtonIcon::Layers,
+            Self::Accounts => ButtonIcon::Wallet,
+            Self::Assets => ButtonIcon::Landmark,
+            Self::Connections => ButtonIcon::Plug,
+            Self::Recurring => ButtonIcon::Repeat,
+            Self::ProposedEdits => ButtonIcon::FilePen,
+            Self::Settings => ButtonIcon::Settings,
+        }
+    }
+
     pub(crate) fn label(self) -> &'static str {
         match self {
             Self::Spending => "Spending",
@@ -347,7 +361,12 @@ fn Dashboard(
             repository: active_repository,
             repository_busy,
             repository_status: (!repository_status.is_empty()).then(|| repository_status.clone()),
-            nav_items: ActiveView::ALL.map(|view| view.label().to_string()).to_vec(),
+            nav_items: ActiveView::ALL
+                .map(|view| NavItem {
+                    label: view.label().to_string(),
+                    icon: view.icon(),
+                })
+                .to_vec(),
             active: active.label(),
             onrepositorychange: move |id: String| onrepositorychange.call(id),
             onnavigate: move |label: String| {

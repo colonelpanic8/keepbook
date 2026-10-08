@@ -14,6 +14,15 @@ pub(crate) enum ButtonIcon {
     Refresh,
     GitBranch,
     ChevronDown,
+    Wallet,
+    Landmark,
+    Receipt,
+    Repeat,
+    TrendingUp,
+    Layers,
+    Plug,
+    FilePen,
+    Settings,
 }
 
 impl ButtonIcon {
@@ -22,6 +31,15 @@ impl ButtonIcon {
             Self::Refresh => "refresh",
             Self::GitBranch => "git-branch",
             Self::ChevronDown => "chevron-down",
+            Self::Wallet => "wallet",
+            Self::Landmark => "landmark",
+            Self::Receipt => "receipt",
+            Self::Repeat => "repeat",
+            Self::TrendingUp => "trending-up",
+            Self::Layers => "layers",
+            Self::Plug => "plug",
+            Self::FilePen => "file-pen-line",
+            Self::Settings => "settings",
         }
     }
 
@@ -33,8 +51,11 @@ impl ButtonIcon {
     }
 }
 
+/// A 14px stroke icon in the current text color; CSS may size it up.
+///
+/// Mirror: `renderIcon` in `design/src/actions/icons.tsx`.
 #[component]
-pub(super) fn IconSvg(icon: ButtonIcon) -> Element {
+pub(crate) fn IconSvg(icon: ButtonIcon) -> Element {
     rsx! {
         svg {
             class: "button-icon",

@@ -1,7 +1,14 @@
-use crate::components::{SelectOption, Spinner};
+use crate::components::{ButtonIcon, IconSvg, SelectOption, Spinner};
 use dioxus::prelude::*;
 
 const LOGO_SVG: &str = include_str!("../../../../../assets/keepbook-icon.svg");
+
+/// A sidebar destination: its label and icon.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct NavItem {
+    pub(crate) label: String,
+    pub(crate) icon: ButtonIcon,
+}
 
 /// The full app frame: sidebar navigation beside a scrolling workspace.
 ///
@@ -17,7 +24,7 @@ pub(crate) fn AppShell(
     repository: String,
     repository_busy: Option<bool>,
     repository_status: Option<String>,
-    nav_items: Vec<String>,
+    nav_items: Vec<NavItem>,
     active: String,
     onrepositorychange: Option<EventHandler<String>>,
     onnavigate: Option<EventHandler<String>>,
@@ -84,18 +91,19 @@ pub(crate) fn AppShell(
                 nav {
                     for item in nav_items {
                         button {
-                            key: "{item}",
-                            class: if item == active { "nav-button selected" } else { "nav-button" },
+                            key: "{item.label}",
+                            class: if item.label == active { "nav-button selected" } else { "nav-button" },
                             onclick: {
-                                let item = item.clone();
+                                let label = item.label.clone();
                                 move |_| {
                                     open.set(false);
                                     if let Some(handler) = &onnavigate {
-                                        handler.call(item.clone());
+                                        handler.call(label.clone());
                                     }
                                 }
                             },
-                            "{item}"
+                            IconSvg { icon: item.icon }
+                            span { "{item.label}" }
                         }
                     }
                 }

@@ -94,6 +94,12 @@ export function NetWorthChart({
       </div>
       <svg className="net-worth-chart" viewBox={`0 0 ${WIDTH} ${HEIGHT}`} role="img">
         <style>{rules}</style>
+        <defs>
+          <linearGradient id="chart-area-fill" x1="0" y1="0" x2="0" y2="1">
+            <stop className="chart-area-stop-top" offset="0" />
+            <stop className="chart-area-stop-bottom" offset="1" />
+          </linearGradient>
+        </defs>
         <line className="chart-grid" x1={PAD.left} x2={WIDTH - PAD.right} y1={PAD.top} y2={PAD.top} />
         <line className="chart-grid" x1={PAD.left} x2={WIDTH - PAD.right} y1={PAD.top + plotHeight / 2} y2={PAD.top + plotHeight / 2} />
         <line className="chart-grid axis" x1={PAD.left} x2={WIDTH - PAD.right} y1={PAD.top + plotHeight} y2={PAD.top + plotHeight} />

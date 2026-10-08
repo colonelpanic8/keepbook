@@ -23,7 +23,7 @@
 
   /* Shape */
   --radius-sm: 6px;
-  --radius-md: 8px;
+  --radius-md: 10px;
   --radius-pill: 999px;
   --control-height: 36px;
   --control-height-sm: 28px;
@@ -385,7 +385,10 @@ body {
 }
 
 body {
+  -webkit-font-smoothing: antialiased;
   background: var(--color-bg);
+  /* Money, dates, and counts line up in columns and don't shift as they change. */
+  font-variant-numeric: tabular-nums;
   margin: 0;
 }
 
@@ -398,7 +401,7 @@ body {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 228px minmax(0, 1fr);
+  grid-template-columns: 256px minmax(0, 1fr);
   max-width: 100%;
   min-height: 100vh;
   overflow-x: clip;
@@ -415,17 +418,17 @@ body {
   left: 0;
   min-width: 0;
   overflow-y: auto;
-  padding: var(--sp-24) var(--sp-16);
+  padding: var(--sp-24) var(--sp-12);
   position: fixed;
   top: 0;
-  width: 228px;
+  width: 256px;
   z-index: 10;
 }
 
 .nav-header {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-4);
+  gap: var(--sp-16);
   min-width: 0;
 }
 
@@ -461,6 +464,7 @@ body {
 
 .nav-title strong {
   font-size: var(--fs-title);
+  letter-spacing: -0.01em;
 }
 
 .nav-title small,
@@ -473,7 +477,7 @@ small,
 .app-nav nav {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-8);
+  gap: var(--sp-2);
 }
 
 .repository-switcher {
@@ -533,16 +537,37 @@ small,
 }
 
 .nav-button {
+  align-items: center;
   background: transparent;
   border: 0;
   border-radius: var(--radius-sm);
   color: var(--color-text);
   cursor: pointer;
+  display: flex;
   font: inherit;
   font-weight: var(--fw-medium);
+  gap: var(--sp-12);
   min-height: var(--control-height);
   padding: 0 var(--sp-12);
   text-align: left;
+}
+
+.nav-button .button-icon {
+  color: var(--color-text-muted);
+  flex: none;
+  height: 18px;
+  width: 18px;
+}
+
+.nav-button.selected .button-icon {
+  color: var(--color-primary);
+}
+
+.nav-button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .nav-button:hover,
@@ -603,14 +628,17 @@ small,
   padding: var(--sp-16);
 }
 
-.metric strong {
+.metric strong,
+.chart-meta strong {
   font-size: var(--fs-display);
+  letter-spacing: -0.02em;
+  line-height: 1.15;
 }
 
 .panel,
 .status-panel {
   min-width: 0;
-  padding: var(--sp-16);
+  padding: var(--sp-24);
 }
 
 /* One column that can never exceed the panel. A single unbreakable value — a
@@ -643,8 +671,13 @@ small,
 .panel-header h2,
 .status-panel h2,
 .inline-status h2 {
-  font-size: var(--fs-body);
+  font-size: var(--fs-title);
+  letter-spacing: -0.01em;
   margin: 0;
+}
+
+.panel-title span {
+  font-size: var(--fs-small);
 }
 
 .inline-status {
@@ -785,7 +818,9 @@ small,
   padding-top: var(--sp-12);
 }
 
-/* Overline: the one uppercase label style, for field labels and table heads. */
+/* Overline: the one uppercase label style, for field and metric labels and
+   table heads. */
+.metric-label,
 .control-label,
 .graph-scope-control span,
 .recurring-estimate small:first-child,
@@ -1624,7 +1659,6 @@ select.control-input option {
 }
 
 .chart-meta strong {
-  font-size: var(--fs-title);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1656,6 +1690,44 @@ select.control-input option {
   font-size: var(--fs-caption);
 }
 
+/* Chart text is in viewBox units (the charts are 720 wide), so it grows and
+   shrinks with the rendered chart. Stepping its size inversely with the card's
+   width keeps axis labels near 12px; on phones the 60-unit label gutter caps
+   them at 20 units. */
+.chart-card {
+  container-type: inline-size;
+}
+
+@container (max-width: 340px) {
+  .chart-axis-label {
+    font-size: 20px;
+  }
+}
+
+@container (min-width: 341px) and (max-width: 460px) {
+  .chart-axis-label {
+    font-size: 18px;
+  }
+}
+
+@container (min-width: 461px) and (max-width: 620px) {
+  .chart-axis-label {
+    font-size: 15px;
+  }
+}
+
+@container (min-width: 861px) and (max-width: 1100px) {
+  .chart-axis-label {
+    font-size: 9.5px;
+  }
+}
+
+@container (min-width: 1101px) {
+  .chart-axis-label {
+    font-size: 8px;
+  }
+}
+
 .chart-axis-label.end {
   text-anchor: end;
 }
@@ -1664,9 +1736,19 @@ select.control-input option {
   fill: var(--color-text-muted);
 }
 
+/* The area fades from a tint under the line to nothing at the axis. */
 .chart-area {
-  fill: var(--color-primary);
-  fill-opacity: 0.14;
+  fill: url(#chart-area-fill);
+}
+
+.chart-area-stop-top {
+  stop-color: var(--color-primary);
+  stop-opacity: 0.24;
+}
+
+.chart-area-stop-bottom {
+  stop-color: var(--color-primary);
+  stop-opacity: 0;
 }
 
 .chart-line {
@@ -3329,6 +3411,12 @@ button.stacked-legend-item {
 }
 
 @media (max-width: 520px) {
+  /* Phones keep the tighter panel padding; width matters more than air. */
+  .panel,
+  .status-panel {
+    padding: var(--sp-16);
+  }
+
   .control-grid {
     grid-template-columns: 1fr;
   }
