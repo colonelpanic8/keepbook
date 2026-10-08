@@ -1,51 +1,72 @@
 import type { ReactNode } from "react";
 import themes from "../../../assets/themes.json";
 
-/** The app's themes, in picker order, from the shared `assets/themes.json`. */
-export const THEMES: readonly { id: string; label: string }[] = themes;
+/** A palette or mode, from the shared `assets/themes.json`. */
+export interface ThemeChoice {
+  id: string;
+  label: string;
+  /** Generated from a seed color at runtime rather than defined in `styles.css`. */
+  generated?: boolean;
+}
 
-/** A theme id from `THEMES`. */
-export type ThemeName = string;
+/** Palettes in picker order: `fern`, `catppuccin`, `solarized`, and the generated `dynamic`. */
+export const THEME_PALETTES: readonly ThemeChoice[] = themes.palettes;
+/** `light`, `dark`, and `system`, which follows the OS setting. */
+export const THEME_MODES: readonly ThemeChoice[] = themes.modes;
 
-const STORAGE_KEY = "keepbook-theme";
+/** The stored theme setting, as `assets/theme.js` keeps it. */
+export interface ThemeSettings {
+  palette: string;
+  mode: string;
+  /** Seed color for the dynamic palette, as `#rrggbb`. */
+  seed?: string;
+}
 
-/** The selected theme: a `?theme=` URL parameter, else the app's stored choice, else `fern`. */
-export function storedTheme(): ThemeName {
-  const known = (value: string | null) => THEMES.find((t) => t.id === value)?.id;
-  try {
-    return known(new URLSearchParams(location.search).get("theme")) ?? known(localStorage.getItem(STORAGE_KEY)) ?? "fern";
-  } catch {
-    return "fern";
+/** The dynamic palette's seed until one is picked: Fern's primary. */
+export const DEFAULT_SEED = "#1f6f8b";
+
+declare global {
+  interface Window {
+    /** The shared theme runtime from `assets/theme.js`. */
+    keepbookTheme?: {
+      read(): ThemeSettings;
+      write(settings: ThemeSettings, css: string | null): void;
+      apply(): void;
+    };
   }
 }
 
-/** Applies a theme to the whole document and remembers it, as the app's theme setting does. */
-export function applyTheme(name: ThemeName): void {
-  if (name === "fern") delete document.documentElement.dataset.theme;
-  else document.documentElement.dataset.theme = name;
-  try {
-    localStorage.setItem(STORAGE_KEY, name);
-  } catch {
-    // Storage can be unavailable in sandboxed frames; the theme still applies here.
-  }
+/** The stored setting, or the default (`fern` following the system) where there is none. */
+export function readThemeSettings(): ThemeSettings {
+  return (typeof window !== "undefined" && window.keepbookTheme?.read()) || { palette: "fern", mode: "system" };
+}
+
+/**
+ * Stores a setting and re-themes the page. Designs show the dynamic palette
+ * with a sample the app generated from `DEFAULT_SEED`; the app regenerates it
+ * from the user's seed or wallpaper.
+ */
+export function writeThemeSettings(settings: ThemeSettings): void {
+  window.keepbookTheme?.write(settings, null);
 }
 
 export interface ThemeProps {
-  /** One of `THEMES`. */
-  name: ThemeName;
+  /** One of `THEME_PALETTES`. */
+  palette: string;
+  mode: "light" | "dark";
   children: ReactNode;
 }
 
 /**
- * Renders a section in a specific theme, on that theme's page background.
+ * Renders a section in a specific palette and mode, on that theme's page background.
  *
- * To theme a whole design, use `ThemePicker` or set `data-theme` on `<html>`
- * instead. Use `Theme` to show themes side by side.
+ * To theme a whole design, use `ThemePicker` or set `data-theme="<palette>-<mode>"`
+ * on `<html>` instead. Use `Theme` to show themes side by side.
  */
-export function Theme({ name, children }: ThemeProps) {
+export function Theme({ palette, mode, children }: ThemeProps) {
   return (
     <div
-      data-theme={name}
+      data-theme={`${palette}-${mode}`}
       style={{ background: "var(--color-bg)", borderRadius: "var(--radius-md)", padding: "var(--sp-16)" }}
     >
       {children}

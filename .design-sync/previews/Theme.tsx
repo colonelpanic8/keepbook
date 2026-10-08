@@ -1,4 +1,4 @@
-import { Badge, ControlButton, MetricCard, OperationStatus, Theme, THEMES } from "keepbook-design";
+import { Badge, ControlButton, MetricCard, OperationStatus, Theme, THEME_PALETTES } from "keepbook-design";
 
 const Sample = () => (
   <div style={{ display: "grid", gap: "var(--sp-12)" }}>
@@ -7,6 +7,7 @@ const Sample = () => (
       <ControlButton primary icon="refresh">Refresh prices</ControlButton>
       <ControlButton>Select all</ControlButton>
       <Badge tone="positive">Active</Badge>
+      <Badge tone="negative">Dismissed</Badge>
       <Badge tone="warning">Liability</Badge>
     </div>
     <OperationStatus busy message="Refreshing prices…" />
@@ -14,11 +15,16 @@ const Sample = () => (
 );
 
 export const EveryTheme = () => (
-  <div style={{ display: "grid", gap: "var(--sp-12)" }}>
-    {THEMES.map((theme) => (
-      <Theme key={theme.id} name={theme.id}>
-        <Sample />
-      </Theme>
-    ))}
+  <div style={{ display: "grid", gap: "var(--sp-12)", gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
+    {THEME_PALETTES.flatMap((palette) =>
+      (["light", "dark"] as const).map((mode) => (
+        <Theme key={`${palette.id}-${mode}`} palette={palette.id} mode={mode}>
+          <strong style={{ color: "var(--color-text)" }}>
+            {palette.label} · {mode}
+          </strong>
+          <Sample />
+        </Theme>
+      )),
+    )}
   </div>
 );

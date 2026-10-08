@@ -1,4 +1,13 @@
-[
-  { "id": "fern", "label": "Fern" },
-  { "id": "dark", "label": "Dark" }
-]
+{
+  "palettes": [
+    { "id": "fern", "label": "Fern" },
+    { "id": "catppuccin", "label": "Catppuccin" },
+    { "id": "solarized", "label": "Solarized" },
+    { "id": "dynamic", "label": "Dynamic", "generated": true }
+  ],
+  "modes": [
+    { "id": "light", "label": "Light" },
+    { "id": "dark", "label": "Dark" },
+    { "id": "system", "label": "System" }
+  ]
+}

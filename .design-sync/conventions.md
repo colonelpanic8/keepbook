@@ -11,10 +11,13 @@ the sidebar and the scrolling workspace. Pass page content as its children, in
 this order: a `PageToolbar`, the toolbar's `OperationStatus` lines, a
 `SummaryGrid` of three `MetricCard`s, then `Panel`s.
 
-**Themes.** `THEMES` lists them (`fern`, the default, and `dark`). To pick
-one for the whole page, set `data-theme="<id>"` on `<html>`. To show a
-section in a specific theme, wrap it in `<Theme name="dark">`. `ThemePicker`
-is the app's own theme setting.
+**Themes.** A theme is a palette in a mode. `THEME_PALETTES` lists the
+palettes: `fern` (the default), `catppuccin`, `solarized`, and `dynamic`
+(Material You, shown here with a sample seed). Modes are `light` and `dark`.
+To theme a whole page, set `data-theme="<palette>-<mode>"` on `<html>`, for
+example `data-theme="catppuccin-dark"`. To show a section in a specific theme,
+wrap it in `<Theme palette="solarized" mode="light">`. `ThemePicker` is the
+app's own theme setting.
 
 **Styling.** Compose with the components and don't restyle them. For your own
 layout glue, use inline styles with the design tokens and never raw values:

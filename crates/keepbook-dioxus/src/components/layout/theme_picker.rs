@@ -1,73 +1,139 @@
-use crate::components::{SegmentedControl, SegmentedOption, SettingRow};
+use crate::components::{InputKind, SegmentedControl, SegmentedOption, SettingRow, TextInput};
+use crate::logic::{
+    dynamic_theme_css, hex_color, ThemeChoice, ThemeSettings, DYNAMIC_PALETTE, THEMES,
+};
+use crate::platform::wallpaper_seed;
+use crate::THEME_JS;
 use dioxus::prelude::*;
-use serde::Deserialize;
-use std::sync::LazyLock;
 
-/// A selectable theme, as listed in `assets/themes.json`.
-#[derive(Clone, Debug, Deserialize, PartialEq)]
-pub(crate) struct Theme {
-    pub(crate) id: String,
-    pub(crate) label: String,
+fn segment_options(choices: &[ThemeChoice]) -> Vec<SegmentedOption> {
+    choices
+        .iter()
+        .map(|choice| SegmentedOption::new(choice.id.clone(), choice.label.clone()))
+        .collect()
 }
 
-/// The app's themes, in picker order, shared with the React mirror. Each `id`
-/// is a `[data-theme]` block in `styles.css`; `fern` is the `:root` default.
-pub(crate) static THEMES: LazyLock<Vec<Theme>> = LazyLock::new(|| {
-    serde_json::from_str(include_str!("../../../assets/themes.json"))
-        .expect("assets/themes.json should list the themes")
-});
+/// The Settings theme rows: palette, mode, and the dynamic palette's seed color.
+///
+/// `wallpaper` means the system supplies the seed (Android 12 and later), so
+/// there is no seed picker. Mirror: `design/src/layout/ThemeOptions.tsx`.
+#[component]
+pub(crate) fn ThemeOptions(
+    settings: ThemeSettings,
+    wallpaper: bool,
+    onchange: EventHandler<ThemeSettings>,
+) -> Element {
+    let dynamic = settings.palette == DYNAMIC_PALETTE;
+    let description = match (dynamic, wallpaper) {
+        (true, true) => "Material You colors from your wallpaper",
+        (true, false) => "Material You colors from a seed color",
+        (false, _) => "Colors of the app",
+    };
+    let seed = hex_color(settings.seed_color());
+    let for_palette = settings.clone();
+    let for_mode = settings.clone();
+    let for_seed = settings.clone();
 
-const STORAGE_KEY: &str = "keepbook-theme";
+    rsx! {
+        SettingRow { title: "Theme", description, stacked: true,
+            SegmentedControl {
+                class: "setting-segmented".to_string(),
+                label: "Theme".to_string(),
+                options: segment_options(&THEMES.palettes),
+                selected: settings.palette.clone(),
+                onselect: move |palette: String| {
+                    onchange.call(ThemeSettings { palette, ..for_palette.clone() })
+                },
+            }
+        }
+        SettingRow {
+            title: "Mode",
+            description: "Light, dark, or matching the system",
+            stacked: true,
+            SegmentedControl {
+                class: "setting-segmented".to_string(),
+                label: "Mode".to_string(),
+                options: segment_options(&THEMES.modes),
+                selected: settings.mode.clone(),
+                onselect: move |mode: String| onchange.call(ThemeSettings { mode, ..for_mode.clone() }),
+            }
+        }
+        if dynamic && !wallpaper {
+            SettingRow {
+                title: "Seed color",
+                description: "The dynamic palette is generated from it",
+                TextInput {
+                    label: "Seed",
+                    kind: InputKind::Color,
+                    value: seed,
+                    oninput: move |seed: String| {
+                        onchange.call(ThemeSettings { seed: Some(seed), ..for_seed.clone() })
+                    },
+                }
+            }
+        }
+    }
+}
 
-/// The Settings theme row: picking a theme re-themes the app and remembers it.
+/// The theme rows bound to the stored setting: a change re-themes the app and
+/// is remembered.
 ///
 /// Mirror: `design/src/layout/ThemePicker.tsx`.
 #[component]
 pub(crate) fn ThemePicker() -> Element {
-    let mut current = use_signal(|| "fern".to_string());
+    let wallpaper = use_hook(|| wallpaper_seed().is_some());
+    let mut settings = use_signal(ThemeSettings::default);
     use_future(move || async move {
-        let stored = document::eval(&format!("return localStorage.getItem({STORAGE_KEY:?});"));
-        if let Ok(value) = stored.await {
-            if let Some(theme) = value.as_str() {
-                if THEMES.iter().any(|t| t.id == theme) {
-                    current.set(theme.to_string());
-                }
-            }
+        if let Some(stored) = read_theme_settings().await {
+            settings.set(stored);
         }
     });
 
     rsx! {
-        SettingRow {
-            title: "Theme",
-            description: "Appearance of the app",
-            stacked: true,
-            SegmentedControl {
-                class: "setting-segmented".to_string(),
-                label: "Theme".to_string(),
-                options: THEMES
-                    .iter()
-                    .map(|t| SegmentedOption::new(t.id.clone(), t.label.clone()))
-                    .collect::<Vec<_>>(),
-                selected: current(),
-                onselect: move |theme: String| {
-                    if !THEMES.iter().any(|t| t.id == theme) {
-                        return;
-                    }
-                    current.set(theme.clone());
-                    // `theme` was just matched against THEMES, so formatting it into JS is safe.
-                    let _ = document::eval(&format!(
-                        r#"
-                        var theme = {theme:?};
-                        if (theme === "fern") {{
-                            delete document.documentElement.dataset.theme;
-                        }} else {{
-                            document.documentElement.dataset.theme = theme;
-                        }}
-                        localStorage.setItem({STORAGE_KEY:?}, theme);
-                        "#
-                    ));
-                },
-            }
+        ThemeOptions {
+            settings: settings(),
+            wallpaper,
+            onchange: move |next: ThemeSettings| {
+                let next = next.validated();
+                save_theme_settings(&next);
+                settings.set(next);
+            },
         }
     }
+}
+
+/// Regenerates the dynamic palette when the app starts, so it follows a seed
+/// or wallpaper that changed since its CSS was stored.
+pub(crate) fn use_dynamic_theme_refresh() {
+    use_future(|| async {
+        if let Some(stored) = read_theme_settings().await {
+            if stored.palette == DYNAMIC_PALETTE {
+                save_theme_settings(&stored);
+            }
+        }
+    });
+}
+
+/// The setting stored by `assets/theme.js`.
+async fn read_theme_settings() -> Option<ThemeSettings> {
+    // The runtime installs itself once, so running it first covers callers
+    // that start before its script tag has run.
+    let stored = document::eval(&format!("{THEME_JS}\nreturn window.keepbookTheme.read();"))
+        .await
+        .ok()?;
+    serde_json::from_value::<ThemeSettings>(stored)
+        .ok()
+        .map(ThemeSettings::validated)
+}
+
+/// Stores and applies a setting, generating the dynamic palette's CSS.
+fn save_theme_settings(settings: &ThemeSettings) {
+    let css = (settings.palette == DYNAMIC_PALETTE)
+        .then(|| dynamic_theme_css(wallpaper_seed().unwrap_or_else(|| settings.seed_color())));
+    // Both are JSON, so they are safe to embed as JavaScript literals.
+    let settings = serde_json::to_string(settings).unwrap_or_default();
+    let css = serde_json::to_string(&css).unwrap_or_else(|_| "null".to_string());
+    let _ = document::eval(&format!(
+        "{THEME_JS}\nwindow.keepbookTheme.write({settings}, {css});"
+    ));
 }

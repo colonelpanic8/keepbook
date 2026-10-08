@@ -14,6 +14,7 @@ dioxus = { version = "=0.7.6", default-features = false, features = ["launch", "
 gloo-net = { version = "0.6", features = ["json"], optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+material-colors = { version = "0.5", default-features = false, features = ["std"] }
 image = { version = "0.25", optional = true, default-features = false, features = ["png"] }
 ksni = { version = "0.3", optional = true, features = ["blocking"] }
 futures-util = "0.3"
@@ -33,6 +34,10 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 keepbook-server = { path = "../keepbook-server", default-features = false }
 serde_urlencoded = "0.7"
 tokio = { version = "1", features = ["net", "rt", "sync", "time"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
+ndk-context = "0.1"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # Exact pins: wasm-bindgen must match flake.nix's wasm-bindgen-cli_0_2_118, and the rest ship in lockstep with it.

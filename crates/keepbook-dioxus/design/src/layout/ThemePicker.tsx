@@ -1,37 +1,28 @@
 import { useState } from "react";
-import { SegmentedControl } from "../actions/SegmentedControl";
-import { SettingRow } from "../forms/SettingRow";
-import { applyTheme, storedTheme, THEMES, type ThemeName } from "./Theme";
+import { readThemeSettings, writeThemeSettings, type ThemeSettings } from "./Theme";
+import { ThemeOptions } from "./ThemeOptions";
 
 export interface ThemePickerProps {
-  /** Selected theme; defaults to the stored choice. */
-  selected?: ThemeName;
-  onSelect?: (name: ThemeName) => void;
+  onChange?: (settings: ThemeSettings) => void;
 }
 
 /**
- * The Settings theme row: picking a theme re-themes the whole page and remembers the choice.
+ * The Settings theme rows bound to the stored setting: a change re-themes the whole page and is remembered.
  *
- * Mirrors `components/layout/theme_picker.rs`, including its
- * `keepbook-theme` storage key, so every preview card that follows the stored
+ * Mirrors `ThemePicker` in `components/layout/theme_picker.rs` and shares its
+ * runtime, `assets/theme.js`, so every preview card that follows the stored
  * theme switches with it.
  */
-export function ThemePicker({ selected, onSelect }: ThemePickerProps) {
-  const [current, setCurrent] = useState<ThemeName>(selected ?? storedTheme());
+export function ThemePicker({ onChange }: ThemePickerProps) {
+  const [settings, setSettings] = useState<ThemeSettings>(readThemeSettings);
   return (
-    <SettingRow stacked title="Theme" description="Appearance of the app">
-      <SegmentedControl
-        className="setting-segmented"
-        label="Theme"
-        options={THEMES.map((t) => ({ value: t.id, label: t.label }))}
-        selected={current}
-        onSelect={(value) => {
-          const name = value as ThemeName;
-          setCurrent(name);
-          applyTheme(name);
-          onSelect?.(name);
-        }}
-      />
-    </SettingRow>
+    <ThemeOptions
+      settings={settings}
+      onChange={(next) => {
+        setSettings(next);
+        writeThemeSettings(next);
+        onChange?.(next);
+      }}
+    />
   );
 }

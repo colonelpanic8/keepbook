@@ -90,7 +90,7 @@ fn segmented_control_lays_options_out_as_a_single_row_of_equal_columns() {
 
 #[test]
 fn dropdowns_take_their_background_from_the_active_theme() {
-    let dark = css_rule_body("[data-theme=\"dark\"]");
+    let dark = css_rule_body("[data-theme=\"fern-dark\"]");
     assert!(
         dark.contains("color-scheme: dark;"),
         "the dark theme must declare its color scheme, or platform-drawn surfaces \

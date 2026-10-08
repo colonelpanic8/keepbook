@@ -5,8 +5,8 @@ export interface TextInputProps {
   /** Field label above the input; omit for inline inputs such as search boxes. */
   label?: string;
   value?: string;
-  /** `text` (default), `number`, `date`, or `search`. */
-  kind?: "text" | "number" | "date" | "search";
+  /** `text` (default), `number`, `date`, `search`, or `color` (a swatch that opens the platform picker). */
+  kind?: "text" | "number" | "date" | "search" | "color";
   placeholder?: string;
   /** Bounds for date inputs. */
   min?: string;
@@ -21,7 +21,7 @@ export interface TextInputProps {
 }
 
 /**
- * A text, number, date, search, or multi-line input, optionally labeled above.
+ * A text, number, date, search, color, or multi-line input, optionally labeled above.
  *
  * With a `label` it renders as a labeled field that stacks the label above the
  * control, the way every keepbook form field does. Mirrors

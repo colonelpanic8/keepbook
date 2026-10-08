@@ -31,6 +31,7 @@ import {
   Switch,
   TagPill,
   TextInput,
+  ThemeOptions,
   ThemePicker,
   TreeGroup,
 } from "../src";
@@ -90,6 +91,11 @@ export const cases: Record<string, ComponentType> = {
     </SummaryGrid>
   ),
   "ThemePicker.basic": () => <ThemePicker />,
+  "ThemeOptions.fern_system": () => <ThemeOptions settings={{ palette: "fern", mode: "system" }} />,
+  "ThemeOptions.dynamic_seed": () => (
+    <ThemeOptions settings={{ palette: "dynamic", mode: "dark", seed: "#6750a4" }} />
+  ),
+  "ThemeOptions.dynamic_wallpaper": () => <ThemeOptions settings={{ palette: "dynamic", mode: "system" }} wallpaper />,
   "ControlButton.primary_icon": () => (
     <ControlButton primary icon="refresh" title="Fetch prices">
       Refresh prices

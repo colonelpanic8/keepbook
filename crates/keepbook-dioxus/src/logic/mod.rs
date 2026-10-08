@@ -7,6 +7,7 @@ mod query;
 mod series;
 mod spending;
 mod sync;
+mod theme;
 mod transactions;
 
 use crate::*;
@@ -20,4 +21,5 @@ pub(crate) use query::*;
 pub(crate) use series::*;
 pub(crate) use spending::*;
 pub(crate) use sync::*;
+pub(crate) use theme::*;
 pub(crate) use transactions::*;

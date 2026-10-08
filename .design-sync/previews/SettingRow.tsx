@@ -13,14 +13,15 @@ export const WithSelect = () => (
 );
 
 export const WithOptions = () => (
-  <SettingRow stacked title="Theme" description="Appearance of the app">
+  <SettingRow stacked title="Mode" description="Light, dark, or matching the system">
     <SegmentedControl
       className="setting-segmented"
-      label="Theme"
-      selected="fern"
+      label="Mode"
+      selected="system"
       options={[
-        { value: "fern", label: "Fern" },
+        { value: "light", label: "Light" },
         { value: "dark", label: "Dark" },
+        { value: "system", label: "System" },
       ]}
     />
   </SettingRow>

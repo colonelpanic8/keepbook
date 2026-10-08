@@ -41,4 +41,5 @@ in `design/`). The package bundles the app's real `assets/styles.css` and
 - Chart props differ by design: the Rust charts take app outputs (`SpendingOutput`, `HistoryChangeSummary`), while the mirrors take the derived values (buckets, totals, change text) a designer can type. The geometry and copy are ported, and the parity cases pin them.
 - Money formatting in `design/src/charts/money.ts` copies `logic/format.rs`.
 - `PreviewTheme` and `Theme` are design-only; `componentSrcMap` hides `PreviewTheme` from the component list.
+- The design bundle imports `assets/theme.js` and the Rust-generated `design/parity/dynamic-theme.css`. Designs can't regenerate Dynamic for another seed; picking one in the design `ThemePicker` keeps the sample.
 - The Inter version is 4.1, from the official release zip. Updating it means replacing `assets/fonts/InterVariable.woff2`.

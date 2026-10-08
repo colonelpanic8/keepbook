@@ -7,7 +7,7 @@
 
 use crate::components::*;
 use crate::dto::*;
-use crate::logic::HistoryChangeSummary;
+use crate::logic::{HistoryChangeSummary, ThemeSettings};
 use dioxus::prelude::*;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -96,6 +96,29 @@ const CASES: &[Case] = &[
         }
     }),
     ("ThemePicker.basic", || rsx! { ThemePicker {} }),
+    ("ThemeOptions.fern_system", || {
+        rsx! {
+            ThemeOptions { settings: ThemeSettings::default(), wallpaper: false, onchange: |_| {} }
+        }
+    }),
+    ("ThemeOptions.dynamic_seed", || {
+        rsx! {
+            ThemeOptions {
+                settings: ThemeSettings { palette: "dynamic".into(), mode: "dark".into(), seed: Some("#6750a4".into()) },
+                wallpaper: false,
+                onchange: |_| {},
+            }
+        }
+    }),
+    ("ThemeOptions.dynamic_wallpaper", || {
+        rsx! {
+            ThemeOptions {
+                settings: ThemeSettings { palette: "dynamic".into(), mode: "system".into(), seed: None },
+                wallpaper: true,
+                onchange: |_| {},
+            }
+        }
+    }),
     ("ControlButton.primary_icon", || {
         rsx! {
             ControlButton { primary: true, icon: ButtonIcon::Refresh, title: "Fetch prices", onclick: |_| {}, "Refresh prices" }
@@ -479,7 +502,7 @@ fn every_button_icon() -> [ButtonIcon; 3] {
 }
 
 #[test]
-fn every_icon_and_theme_is_defined() {
+fn every_icon_is_defined() {
     let icons: HashMap<String, Vec<String>> =
         serde_json::from_str(include_str!("../../assets/icons.json")).expect("icons.json");
     let mut listed = icons.keys().map(String::as_str).collect::<Vec<_>>();
@@ -493,25 +516,6 @@ fn every_icon_and_theme_is_defined() {
     assert!(
         icons.values().all(|paths| !paths.is_empty()),
         "every icon needs paths"
-    );
-    let css = crate::APP_CSS;
-    let mut css_themes = css
-        .match_indices("[data-theme=\"")
-        .filter_map(|(start, _)| {
-            let rest = &css[start + "[data-theme=\"".len()..];
-            Some(rest[..rest.find('"')?].to_string())
-        })
-        .collect::<Vec<_>>();
-    css_themes.sort();
-    css_themes.dedup();
-    let mut listed = THEMES
-        .iter()
-        .map(|theme| theme.id.clone())
-        .collect::<Vec<_>>();
-    listed.sort();
-    assert_eq!(
-        css_themes, listed,
-        "assets/themes.json must list exactly the [data-theme] blocks in styles.css"
     );
 }
 

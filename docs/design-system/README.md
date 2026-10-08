@@ -6,7 +6,7 @@ machine. The UI is a dense, quiet tool for reading numbers. It runs as a
 Dioxus app on desktop, web, and Android, all sharing one stylesheet.
 
 The system is deliberately small. There is one token per role, one class
-per component, and two themes that differ only in token values. Before
+per component, and themes that differ only in token values. Before
 adding anything, reuse what exists. If something new is genuinely needed,
 replace an old pattern rather than adding a parallel one.
 
@@ -16,7 +16,7 @@ replace an old pattern rather than adding a parallel one.
 |---|---|
 | `crates/keepbook-dioxus/assets/styles.css` | The source of truth: theme tokens and every component rule. |
 | `crates/keepbook-dioxus/assets/fonts/` | Inter (variable WOFF2, OFL) and its shared `@font-face` rule. |
-| `crates/keepbook-dioxus/assets/icons.json`, `themes.json` | Icon paths and the theme list, read by both the Dioxus components and the React mirrors. |
+| `crates/keepbook-dioxus/assets/icons.json`, `themes.json`, `theme.js` | Icon paths, the palettes and modes, and the theme runtime, shared by the Dioxus components and the React mirrors. |
 | `crates/keepbook-dioxus/src/components/` | The Dioxus components, one file each, grouped as `actions`, `forms`, `display`, `feedback`, `layout`, and `charts`. Views compose these. |
 | `crates/keepbook-dioxus/design/src/` | React mirrors of those components for Claude Design, in the same groups with one file each. |
 | `crates/keepbook-dioxus/design/parity/` | Rendered markup of each component, checked against both sides. |
@@ -27,9 +27,28 @@ Update this README in the same change whenever a pattern is added or changed.
 See [Claude Design](#claude-design) for how the mirrors and the synced project
 stay current.
 
-Set `data-theme="fern"` (the default) or `data-theme="dark"` on `<html>` or
-on any container. A new theme is a `[data-theme]` block in `styles.css` plus
-an entry in `assets/themes.json`; a unit test keeps the two in step.
+### Themes
+
+A theme is a palette in a mode, set as `data-theme="<palette>-<mode>"` on
+`<html>` or on any container:
+
+- Palettes: Fern (the default), Catppuccin (Latte and Mocha), Solarized, and
+  Dynamic.
+- Modes: light, dark, or system, which follows the OS setting.
+- Dynamic is Material You. `logic/theme.rs` generates it at runtime from a
+  seed color with the Material color algorithm. On Android 12 and later the
+  seed is the wallpaper's accent; elsewhere it is picked in Settings.
+
+`assets/theme.js` stores the setting, resolves system mode, and sets the
+attribute before the app renders. It also keeps the generated Dynamic CSS, so
+that palette applies on the first paint.
+
+To add a palette, give it a light and a dark block in `styles.css` and an
+entry in `assets/themes.json`. Every block states every color token, so a
+themed container inherits nothing from its parent. Palettes without their own
+data colors are listed in the shared `--series-N` block. Unit tests check that
+the blocks match `themes.json`, that each one states every token, and that
+text in every theme meets WCAG AA, including Dynamic across a range of seeds.
 
 ## Content
 
@@ -51,8 +70,8 @@ an entry in `assets/themes.json`; a unit test keeps the two in step.
 ### Color
 
 Components reference roles, never literal colors. Each theme is a single
-token block. To try a new look, add a `[data-theme="…"]` block; components
-don't change. Hex values live in the theme blocks at the top of `styles.css`.
+token block. To try a new look, add a palette (see [Themes](#themes));
+components don't change. Hex values live in the theme blocks at the top of `styles.css`.
 
 | Role | Tokens | Use |
 |---|---|---|
@@ -157,7 +176,7 @@ named last in each row renders it.
 | Split button | `.split-button` › `.control-button` + `.control-button.split-button-caret`, then `.menu-backdrop` + `.menu` › `button.menu-item` (`strong` + `small`) | A main action plus a chevron that opens its less common variants, each with a one-line description. Escape or a click outside closes the menu. `SplitButton` |
 | Icon button | `.icon-button` | A transparent 28px square for a glyph. Its label is both the tooltip and the accessible name. `IconButton` |
 | Segmented control | `.segmented-field` › `.control-label` + `.segmented-control` › `.segment` | For mutually exclusive options. Never use a wrapping row of buttons for this. `SegmentedControl` |
-| Input | `.control-input` (+ `.small`), `select.control-input`, inside `label.control-field` | Selects draw their own caret so they follow the theme. `TextInput`, `Select` |
+| Input | `.control-input` (+ `.small`), `select.control-input`, inside `label.control-field` | Selects draw their own caret so they follow the theme. A color input is a 64px swatch that opens the platform picker. `TextInput`, `Select` |
 | Checkbox | `label.compact-check` › `input[type=checkbox]` + `span` | The color comes from `accent-color` set at the root. `Checkbox` |
 | Switch | `label.switch-control` › `input` + `.switch-track` › `.switch-thumb` | For a setting that takes effect immediately. It sits in a `.setting-row`. `Switch` |
 | Setting row | `.setting-row` › `.setting-copy` (`strong` + `small`) + one control | Add `.setting-row-stacked` when the control is a select or an option group. `SettingRow`, `ThemePicker` |
@@ -248,7 +267,10 @@ The design system is synced to Claude Design (claude.ai/design) as the
 `crates/keepbook-dioxus/design/src/` holds a React mirror of each Dioxus
 component, at the same path under the same name and prop names: for example
 `components/charts/legend.rs` and `design/src/charts/Legend.tsx`. Both sides
-use `styles.css`, `inter.css`, `icons.json`, and `themes.json` unchanged.
+use `styles.css`, `inter.css`, `icons.json`, `themes.json`, and `theme.js`
+unchanged. Designs show the Dynamic palette with the sample the app generates
+for the default seed, `design/parity/dynamic-theme.css`, which the tests keep
+current.
 
 The Dioxus components are the source of truth, and the mirrors are checked
 against them:

@@ -55,9 +55,10 @@ pub(crate) enum InputKind {
     Number,
     Date,
     Search,
+    Color,
 }
 
-/// A text, number, date, search, or multi-line input, optionally labeled above.
+/// A text, number, date, search, color, or multi-line input, optionally labeled above.
 ///
 /// Date inputs close the native calendar once a date is picked. Mirror:
 /// `design/src/forms/TextInput.tsx`.
@@ -105,6 +106,7 @@ pub(crate) fn TextInput(
             InputKind::Number => "number",
             InputKind::Date => "date",
             InputKind::Search => "search",
+            InputKind::Color => "color",
         };
         let is_date = kind == InputKind::Date;
         rsx! {

@@ -80,6 +80,7 @@ enum LoadState {
 
 #[component]
 pub(crate) fn App() -> Element {
+    use_dynamic_theme_refresh();
     #[cfg(all(
         feature = "desktop",
         not(any(target_os = "ios", target_os = "android"))
@@ -162,7 +163,7 @@ pub(crate) fn App() -> Element {
         document::Link { rel: "icon", href: "data:," }
         document::Style { {INTER_FONT_CSS.replace("InterVariable.woff2", &INTER_FONT.to_string())} }
         document::Style { "{APP_CSS}" }
-        document::Script { "{THEME_BOOTSTRAP_JS}" }
+        document::Script { "{THEME_JS}" }
         document::Script { "{SSH_KEY_FILE_PICKER_BRIDGE_JS}" }
         document::Script { "{CONTEXT_MENU_COPY_BRIDGE_JS}" }
         main { class: "shell",
