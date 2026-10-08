@@ -352,6 +352,15 @@ small,
   margin-bottom: var(--sp-16);
 }
 
+/* Page-level actions, above the content they act on. */
+.page-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-8);
+  justify-content: flex-end;
+  margin-bottom: var(--sp-16);
+}
+
 .metric,
 .panel,
 .status-panel {
@@ -585,16 +594,18 @@ small,
     filter 120ms ease;
 }
 
-.control-button:not(.selected):hover:not(:disabled) {
+.control-button:not(.primary, .selected):hover:not(:disabled) {
   border-color: var(--color-border-strong);
 }
 
+.control-button.primary,
 .control-button.selected {
   background: var(--color-primary);
   border-color: var(--color-primary);
   color: var(--color-on-primary);
 }
 
+.control-button.primary:hover:not(:disabled),
 .control-button.selected:hover:not(:disabled) {
   filter: brightness(1.08);
 }
@@ -614,6 +625,74 @@ small,
 .control-button:disabled {
   cursor: default;
   opacity: 0.48;
+}
+
+/* A main action joined to a chevron that opens its less common variants. */
+.split-button {
+  display: inline-flex;
+  gap: 1px;
+  position: relative;
+}
+
+.split-button > .control-button:first-child {
+  border-bottom-right-radius: 0;
+  border-top-right-radius: 0;
+  flex: 1;
+}
+
+.control-button.split-button-caret {
+  border-bottom-left-radius: 0;
+  border-top-left-radius: 0;
+  min-width: 0;
+  padding: 0 var(--sp-8);
+}
+
+.menu-backdrop {
+  inset: 0;
+  position: fixed;
+  z-index: 20;
+}
+
+.menu {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  display: grid;
+  min-width: 260px;
+  padding: var(--sp-4);
+  position: absolute;
+  right: 0;
+  top: calc(100% + var(--sp-4));
+  z-index: 21;
+}
+
+.menu-item {
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  cursor: pointer;
+  display: grid;
+  font: inherit;
+  gap: var(--sp-2);
+  padding: var(--sp-8) var(--sp-12);
+  text-align: left;
+}
+
+.menu-item:hover,
+.menu-item:focus-visible {
+  background: var(--color-surface-inset);
+}
+
+.menu-item strong {
+  font-size: var(--fs-small);
+  font-weight: var(--fw-medium);
+}
+
+.menu-item small {
+  color: var(--color-text-muted);
+  font-size: var(--fs-caption);
 }
 
 /*
@@ -3022,6 +3101,10 @@ button.stacked-legend-item {
 @media (max-width: 520px) {
   .control-grid {
     grid-template-columns: 1fr;
+  }
+
+  .page-toolbar > * {
+    flex: 1 1 auto;
   }
 
   .tag-row {

@@ -44,7 +44,6 @@ pub(super) fn AccountsView(
     onrefresh: EventHandler<()>,
 ) -> Element {
     let mut price_busy = use_signal(|| false);
-    let mut force_prices = use_signal(|| false);
     let mut price_status = use_signal(String::new);
     let mut resync_busy = use_signal(|| false);
     let mut resync_status = use_signal(String::new);
@@ -75,6 +74,52 @@ pub(super) fn AccountsView(
         "pull-refresh-indicator ready"
     } else {
         "pull-refresh-indicator"
+    };
+    let mut refresh_prices = move |force: bool| {
+        price_busy.set(true);
+        git_sync_status.set(String::new());
+        resync_status.set(String::new());
+        price_status.set(if force {
+            "Refreshing all prices...".to_string()
+        } else {
+            "Refreshing stale prices...".to_string()
+        });
+        let input = SyncPricesInput {
+            scope: "all".to_string(),
+            target: None,
+            force,
+            quote_staleness_seconds: None,
+        };
+        spawn(async move {
+            match sync_prices(input).await {
+                Ok(result) => {
+                    price_status.set(price_sync_result_summary(&result));
+                    onrefresh.call(());
+                }
+                Err(error) => {
+                    price_status.set(format!("Price refresh failed: {error}"));
+                }
+            }
+            price_busy.set(false);
+        });
+    };
+    let mut resync_data = move || {
+        resync_busy.set(true);
+        git_sync_status.set(String::new());
+        price_status.set(String::new());
+        resync_status.set("Resyncing data from disk...".to_string());
+        spawn(async move {
+            match reload_data().await {
+                Ok(_) => {
+                    resync_status.set("Data resynced.".to_string());
+                    onrefresh.call(());
+                }
+                Err(error) => {
+                    resync_status.set(format!("Resync failed: {error}"));
+                }
+            }
+            resync_busy.set(false);
+        });
     };
 
     rsx! {
@@ -128,6 +173,95 @@ pub(super) fn AccountsView(
                 }
             }
             div { class: "pull-refresh-content",
+                div { class: "page-toolbar",
+                    ControlButton {
+                        icon: ButtonIcon::GitBranch,
+                        disabled: any_account_operation_busy,
+                        busy: is_git_sync_busy,
+                        onclick: move |_| {
+                            git_sync_busy.set(true);
+                            price_status.set(String::new());
+                            resync_status.set(String::new());
+                            git_sync_status.set("Syncing Git repository...".to_string());
+                            spawn(async move {
+                                let result = async {
+                                    let settings = fetch_git_settings().await?;
+                                    let input = GitSyncInput {
+                                        data_dir: normalize_git_data_dir_for_client(settings.data_dir),
+                                        host: settings.git.host,
+                                        repo: settings.git.repo,
+                                        branch: settings.git.branch,
+                                        ssh_user: settings.git.ssh_user,
+                                        private_key_pem: String::new(),
+                                        save_settings: false,
+                                    };
+                                    sync_git_repo_cancelable(
+                                        input,
+                                        new_git_sync_cancel_handle(),
+                                    )
+                                    .await
+                                }
+                                .await;
+
+                                match result {
+                                    Ok(result) => {
+                                        git_sync_status.set(format!(
+                                            "Git sync complete: {} {}.",
+                                            result.remote_url, result.branch
+                                        ));
+                                        onrefresh.call(());
+                                    }
+                                    Err(error) => {
+                                        git_sync_status.set(format!("Git sync failed: {error}"));
+                                    }
+                                }
+                                git_sync_busy.set(false);
+                            });
+                        },
+                        if is_git_sync_busy { "Syncing Git" } else { "Git sync" }
+                    }
+                    SplitButton {
+                        primary: true,
+                        icon: ButtonIcon::Refresh,
+                        title: "Refetch every price, ignoring staleness",
+                        menu_label: "More refresh options",
+                        actions: vec![
+                            MenuAction {
+                                value: "stale-prices",
+                                label: "Refresh stale prices",
+                                detail: "Skip prices that are still fresh",
+                            },
+                            MenuAction {
+                                value: "resync",
+                                label: "Resync data",
+                                detail: "Reload keepbook data from disk",
+                            },
+                        ],
+                        disabled: any_account_operation_busy,
+                        busy: is_price_busy || is_resync_busy,
+                        onclick: move |_| refresh_prices(true),
+                        onselect: move |value| match value {
+                            "stale-prices" => refresh_prices(false),
+                            _ => resync_data(),
+                        },
+                        if is_price_busy {
+                            "Refreshing"
+                        } else if is_resync_busy {
+                            "Resyncing"
+                        } else {
+                            "Refresh all prices"
+                        }
+                    }
+                }
+                if !price_status_text.is_empty() {
+                    OperationStatus { message: price_status_text, busy: is_price_busy }
+                }
+                if !resync_status_text.is_empty() {
+                    OperationStatus { message: resync_status_text, busy: is_resync_busy }
+                }
+                if !git_sync_status_text.is_empty() {
+                    OperationStatus { message: git_sync_status_text, busy: is_git_sync_busy }
+                }
                 section { class: "summary-grid",
                     MetricCard {
                         label: "Net worth",
@@ -174,129 +308,6 @@ pub(super) fn AccountsView(
                 Panel {
                     title: "Accounts",
                     subtitle: account_count.to_string(),
-                    actions: rsx! {
-                        div { class: "settings-actions inline-actions",
-                            label { class: "compact-check",
-                                input {
-                                    r#type: "checkbox",
-                                    checked: force_prices(),
-                                    disabled: any_account_operation_busy,
-                                    onchange: move |event| force_prices.set(event.checked())
-                                }
-                                span { "Force prices" }
-                            }
-                            ControlButton {
-                                disabled: any_account_operation_busy,
-                                busy: is_price_busy,
-                                onclick: move |_| {
-                                    price_busy.set(true);
-                                    git_sync_status.set(String::new());
-                                    resync_status.set(String::new());
-                                    let input = SyncPricesInput {
-                                        scope: "all".to_string(),
-                                        target: None,
-                                        force: force_prices(),
-                                        quote_staleness_seconds: None,
-                                    };
-                                    price_status.set(if input.force {
-                                        "Refreshing all prices...".to_string()
-                                    } else {
-                                        "Refreshing stale prices...".to_string()
-                                    });
-                                    spawn(async move {
-                                        match sync_prices(input).await {
-                                            Ok(result) => {
-                                                price_status.set(price_sync_result_summary(&result));
-                                                onrefresh.call(());
-                                            }
-                                            Err(error) => {
-                                                price_status.set(format!("Price refresh failed: {error}"));
-                                            }
-                                        }
-                                        price_busy.set(false);
-                                    });
-                                },
-                                if is_price_busy { "Refreshing" } else { "Refresh prices" }
-                            }
-                            ControlButton {
-                                disabled: any_account_operation_busy,
-                                busy: is_resync_busy,
-                                onclick: move |_| {
-                                    resync_busy.set(true);
-                                    git_sync_status.set(String::new());
-                                    price_status.set(String::new());
-                                    resync_status.set("Resyncing data from disk...".to_string());
-                                    spawn(async move {
-                                        match reload_data().await {
-                                            Ok(_) => {
-                                                resync_status.set("Data resynced.".to_string());
-                                                onrefresh.call(());
-                                            }
-                                            Err(error) => {
-                                                resync_status.set(format!("Resync failed: {error}"));
-                                            }
-                                        }
-                                        resync_busy.set(false);
-                                    });
-                                },
-                                if is_resync_busy { "Resyncing" } else { "Resync data" }
-                            }
-                            ControlButton {
-                                disabled: any_account_operation_busy,
-                                busy: is_git_sync_busy,
-                                onclick: move |_| {
-                                    git_sync_busy.set(true);
-                                    price_status.set(String::new());
-                                    resync_status.set(String::new());
-                                    git_sync_status.set("Syncing Git repository...".to_string());
-                                    spawn(async move {
-                                        let result = async {
-                                            let settings = fetch_git_settings().await?;
-                                            let input = GitSyncInput {
-                                                data_dir: normalize_git_data_dir_for_client(settings.data_dir),
-                                                host: settings.git.host,
-                                                repo: settings.git.repo,
-                                                branch: settings.git.branch,
-                                                ssh_user: settings.git.ssh_user,
-                                                private_key_pem: String::new(),
-                                                save_settings: false,
-                                            };
-                                            sync_git_repo_cancelable(
-                                                input,
-                                                new_git_sync_cancel_handle(),
-                                            )
-                                            .await
-                                        }
-                                        .await;
-
-                                        match result {
-                                            Ok(result) => {
-                                                git_sync_status.set(format!(
-                                                    "Git sync complete: {} {}.",
-                                                    result.remote_url, result.branch
-                                                ));
-                                                onrefresh.call(());
-                                            }
-                                            Err(error) => {
-                                                git_sync_status.set(format!("Git sync failed: {error}"));
-                                            }
-                                        }
-                                        git_sync_busy.set(false);
-                                    });
-                                },
-                                if is_git_sync_busy { "Syncing Git" } else { "Git sync" }
-                            }
-                        }
-                    },
-                    if !price_status_text.is_empty() {
-                        OperationStatus { message: price_status_text, busy: is_price_busy }
-                    }
-                    if !resync_status_text.is_empty() {
-                        OperationStatus { message: resync_status_text, busy: is_resync_busy }
-                    }
-                    if !git_sync_status_text.is_empty() {
-                        OperationStatus { message: git_sync_status_text, busy: is_git_sync_busy }
-                    }
                     div { class: "group-list",
                         if !virtual_accounts.is_empty() {
                             VirtualAccountGroup {

@@ -101,11 +101,63 @@ pub(super) fn Panel(
     }
 }
 
+/// Stroke icons drawn on a 24x24 grid (Lucide shapes).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum ButtonIcon {
+    Refresh,
+    GitBranch,
+    ChevronDown,
+}
+
+impl ButtonIcon {
+    fn paths(self) -> &'static [&'static str] {
+        match self {
+            Self::Refresh => &[
+                "M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8",
+                "M21 3v5h-5",
+                "M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16",
+                "M8 16H3v5",
+            ],
+            Self::GitBranch => &[
+                "M6 3v12",
+                "M15 6a3 3 0 1 0 6 0a3 3 0 1 0-6 0",
+                "M3 18a3 3 0 1 0 6 0a3 3 0 1 0-6 0",
+                "M18 9a9 9 0 0 1-9 9",
+            ],
+            Self::ChevronDown => &["m6 9 6 6 6-6"],
+        }
+    }
+}
+
+#[component]
+fn IconSvg(icon: ButtonIcon) -> Element {
+    rsx! {
+        svg {
+            class: "button-icon",
+            view_box: "0 0 24 24",
+            width: "14",
+            height: "14",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            "aria-hidden": "true",
+            for d in icon.paths() {
+                path { d: *d }
+            }
+        }
+    }
+}
+
 #[component]
 pub(super) fn ControlButton(
     children: Element,
     selected: Option<bool>,
+    primary: Option<bool>,
     danger: Option<bool>,
+    icon: Option<ButtonIcon>,
+    title: Option<String>,
     class: Option<String>,
     disabled: Option<bool>,
     busy: Option<bool>,
@@ -114,6 +166,9 @@ pub(super) fn ControlButton(
     let mut class_name = String::from("control-button");
     if selected == Some(true) {
         class_name.push_str(" selected");
+    }
+    if primary == Some(true) {
+        class_name.push_str(" primary");
     }
     if danger == Some(true) {
         class_name.push_str(" danger");
@@ -128,13 +183,92 @@ pub(super) fn ControlButton(
     rsx! {
         button {
             class: "{class_name}",
+            title,
             disabled: disabled.unwrap_or(false) || is_busy,
             aria_busy: is_busy,
             onclick: move |event| onclick.call(event),
             if is_busy {
                 span { class: "activity-spinner control-spinner", aria_hidden: "true" }
+            } else if let Some(icon) = icon {
+                IconSvg { icon }
             }
             {children}
+        }
+    }
+}
+
+/// A less common variant of a [`SplitButton`]'s main action.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct MenuAction {
+    /// Stable identifier handed back to `onselect`.
+    pub value: &'static str,
+    pub label: &'static str,
+    pub detail: &'static str,
+}
+
+/// A main action plus a chevron that opens its less common variants.
+#[component]
+pub(super) fn SplitButton(
+    children: Element,
+    primary: Option<bool>,
+    icon: Option<ButtonIcon>,
+    title: Option<String>,
+    disabled: Option<bool>,
+    busy: Option<bool>,
+    menu_label: String,
+    actions: Vec<MenuAction>,
+    onclick: EventHandler<MouseEvent>,
+    onselect: EventHandler<&'static str>,
+) -> Element {
+    let mut open = use_signal(|| false);
+    let is_open = open();
+    let caret_class = if primary == Some(true) {
+        "control-button primary split-button-caret"
+    } else {
+        "control-button split-button-caret"
+    };
+
+    rsx! {
+        div {
+            class: "split-button",
+            onkeydown: move |event| {
+                if event.key() == Key::Escape {
+                    open.set(false);
+                }
+            },
+            ControlButton {
+                primary,
+                icon,
+                title,
+                disabled,
+                busy,
+                onclick,
+                {children}
+            }
+            button {
+                class: caret_class,
+                aria_label: menu_label,
+                aria_expanded: is_open,
+                disabled: disabled.unwrap_or(false) || busy.unwrap_or(false),
+                onclick: move |_| open.toggle(),
+                IconSvg { icon: ButtonIcon::ChevronDown }
+            }
+            if is_open {
+                div { class: "menu-backdrop", onclick: move |_| open.set(false) }
+                div { class: "menu",
+                    for action in actions {
+                        button {
+                            class: "menu-item",
+                            onclick: move |_| {
+                                open.set(false);
+                                onselect.call(action.value);
+                            },
+                            strong { "{action.label}" }
+                            small { "{action.detail}" }
+                        }
+                    }
+                }
+            }
         }
     }
 }
