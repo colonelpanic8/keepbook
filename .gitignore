@@ -31,3 +31,12 @@ Thumbs.db
 # Personal documents and Python caches
 /*.pdf
 __pycache__/
+
+# Claude Design sync (see .design-sync/)
+node_modules/
+crates/keepbook-dioxus/design/dist/
+.ds-sync/
+ds-bundle/
+.design-sync/.cache/
+.design-sync/learnings/
+.design-sync/node_modules

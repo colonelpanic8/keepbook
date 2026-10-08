@@ -1,0 +1,59 @@
+{
+  "projectId": "95a6c5e2-5e9a-4d7f-9537-464ba37bc11e",
+  "pkg": "keepbook-design",
+  "globalName": "Keepbook",
+  "shape": "package",
+  "buildCmd": "cd crates/keepbook-dioxus/design && npm ci && npm run build",
+  "entry": "crates/keepbook-dioxus/design/dist/index.js",
+  "srcDir": "src",
+  "cssEntry": "dist/index.css",
+  "guidelinesGlob": [
+    "../../../docs/design-system/*.md"
+  ],
+  "overrides": {
+    "Panel": {
+      "cardMode": "column"
+    },
+    "TreeGroup": {
+      "cardMode": "column"
+    },
+    "DataTable": {
+      "cardMode": "column"
+    },
+    "SummaryGrid": {
+      "cardMode": "column"
+    },
+    "NetWorthChart": {
+      "cardMode": "column"
+    },
+    "AppShell": {
+      "cardMode": "single",
+      "viewport": "1280x720"
+    },
+    "Modal": {
+      "cardMode": "single",
+      "viewport": "720x420"
+    },
+    "SplitButton": {
+      "cardMode": "single",
+      "primaryStory": "MenuOpen",
+      "viewport": "480x300"
+    },
+    "SpendingChart": {
+      "cardMode": "column"
+    },
+    "SpendingBreakdown": {
+      "cardMode": "column"
+    },
+    "Theme": {
+      "cardMode": "column"
+    }
+  },
+  "readmeHeader": ".design-sync/conventions.md",
+  "provider": {
+    "component": "PreviewTheme"
+  },
+  "componentSrcMap": {
+    "PreviewTheme": null
+  }
+}

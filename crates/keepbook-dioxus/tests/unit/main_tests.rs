@@ -112,6 +112,99 @@ fn dropdowns_take_their_background_from_the_active_theme() {
     );
 }
 
+fn files_with_extension(dir: &std::path::Path, extension: &str, out: &mut Vec<std::path::PathBuf>) {
+    for entry in std::fs::read_dir(dir).expect("directory should be readable") {
+        let path = entry.expect("directory entry should be readable").path();
+        if path.is_dir() {
+            files_with_extension(&path, extension, out);
+        } else if path.extension().is_some_and(|ext| ext == extension) {
+            out.push(path);
+        }
+    }
+}
+
+fn contains_class(haystack: &str, needle: &str) -> bool {
+    let is_ident = |c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_';
+    haystack.match_indices(needle).any(|(start, _)| {
+        let before = haystack[..start].chars().next_back();
+        let after = haystack[start + needle.len()..].chars().next();
+        !before.is_some_and(is_ident) && !after.is_some_and(is_ident)
+    })
+}
+
+/// Class names written in `className` attributes and `cx(...)` calls.
+fn mirror_class_names(source: &str) -> Vec<String> {
+    let mut expressions = Vec::new();
+    for (marker, open, close) in [("className={", '{', '}'), ("cx(", '(', ')')] {
+        for (start, _) in source.match_indices(marker) {
+            let body = &source[start + marker.len()..];
+            let mut depth = 1;
+            let end = body
+                .char_indices()
+                .find_map(|(i, c)| {
+                    depth += (c == open) as i32 - (c == close) as i32;
+                    (depth == 0).then_some(i)
+                })
+                .unwrap_or(body.len());
+            expressions.push(&body[..end]);
+        }
+    }
+    for (start, _) in source.match_indices("className=\"") {
+        let body = &source[start + "className=\"".len()..];
+        expressions.push(&body[..body.find('"').unwrap_or(body.len())]);
+    }
+    let mut names = Vec::new();
+    for expression in expressions {
+        let literals: Vec<&str> = if expression.contains('"') {
+            expression.split('"').skip(1).step_by(2).collect()
+        } else {
+            vec![expression]
+        };
+        for literal in literals {
+            names.extend(
+                literal
+                    .split_whitespace()
+                    .filter(|word| {
+                        word.chars()
+                            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+                    })
+                    .map(str::to_string),
+            );
+        }
+    }
+    names
+}
+
+#[test]
+fn design_mirrors_only_use_classes_the_app_defines() {
+    let crate_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut views = Vec::new();
+    files_with_extension(&crate_dir.join("src"), "rs", &mut views);
+    let rust_sources: String = views
+        .iter()
+        .map(|path| std::fs::read_to_string(path).expect("view source should be readable"))
+        .collect();
+    let mut mirrors = Vec::new();
+    files_with_extension(&crate_dir.join("design/src"), "tsx", &mut mirrors);
+    assert!(!mirrors.is_empty(), "the React mirrors should exist");
+
+    let mut unknown = Vec::new();
+    for path in &mirrors {
+        let source = std::fs::read_to_string(path).expect("mirror source should be readable");
+        for class in mirror_class_names(&source) {
+            let defined = contains_class(APP_CSS, &format!(".{class}"))
+                || contains_class(&rust_sources, &class);
+            if !defined {
+                unknown.push(format!("{}: {class}", path.display()));
+            }
+        }
+    }
+    assert!(
+        unknown.is_empty(),
+        "React mirrors must only use classes from styles.css or the Dioxus views; drifted: {unknown:?}"
+    );
+}
+
 #[test]
 fn navigation_styles_keep_compact_header_sticky_to_the_viewport() {
     assert!(

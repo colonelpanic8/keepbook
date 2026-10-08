@@ -1,0 +1,23 @@
+{
+  "name": "keepbook-design",
+  "version": "0.0.0",
+  "private": true,
+  "description": "React mirrors of keepbook's Dioxus components, synced to Claude Design.",
+  "type": "module",
+  "module": "dist/index.js",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "esbuild src/index.ts --bundle --format=esm --jsx=automatic --loader:.svg=text --loader:.woff2=file --asset-names=[name] --external:react --external:react-dom --external:react/jsx-runtime --outfile=dist/index.js && tsc -p ."
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "esbuild": "^0.28.2",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "typescript": "^7.0.2"
+  }
+}
