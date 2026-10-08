@@ -1,0 +1,3 @@
+* Added: Themes: alongside Fern, Settings offers Catppuccin (Latte and Mocha), Solarized, and Dynamic, each in light, dark, or system mode, which follows the OS setting. Dynamic generates a Material You palette from a seed color; on Android 12 and later it follows the wallpaper. Without a saved choice the app now follows the system's light or dark setting.
+* Added: The app bundles the Inter font, so text looks the same on every platform.
+* ...see CHANGELOG.md for the rest.

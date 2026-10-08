@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.13.0 - 2026-10-08
+
+### Added
+
+- Themes: alongside Fern, Settings offers Catppuccin (Latte and Mocha),
+  Solarized, and Dynamic, each in light, dark, or system mode, which follows
+  the OS setting. Dynamic generates a Material You palette from a seed color;
+  on Android 12 and later it follows the wallpaper. Without a saved choice the
+  app now follows the system's light or dark setting.
+- The app bundles the Inter font, so text looks the same on every platform.
+
+### Changed
+
+- The Accounts view puts Git sync and price refresh in a page toolbar. Less
+  common refresh options, "Refresh stale prices" and "Resync data", sit behind
+  the refresh button's menu.
+- Buttons, panels, badges, empty states, and switches share one consistent
+  look, and switches now match the size of the segmented controls.
+
 ## 0.12.5 - 2026-10-03
 
 ### Fixed
