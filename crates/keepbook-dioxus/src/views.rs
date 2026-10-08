@@ -24,6 +24,8 @@ use shared::*;
 use spending::SpendingView;
 
 const NAV_LOGO_SVG: &str = include_str!("../../../assets/keepbook-icon.svg");
+const INTER_FONT: Asset = asset!("/assets/fonts/InterVariable.woff2");
+const INTER_FONT_CSS: &str = include_str!("../assets/fonts/inter.css");
 
 pub(crate) fn repository_can_remove(repository: &Repository) -> bool {
     !repository.active && !repository.managed
@@ -158,6 +160,7 @@ pub(crate) fn App() -> Element {
             content: "width=device-width, initial-scale=1, viewport-fit=cover",
         }
         document::Link { rel: "icon", href: "data:," }
+        document::Style { {INTER_FONT_CSS.replace("InterVariable.woff2", &INTER_FONT.to_string())} }
         document::Style { "{APP_CSS}" }
         document::Script { "{THEME_BOOTSTRAP_JS}" }
         document::Script { "{SSH_KEY_FILE_PICKER_BRIDGE_JS}" }
