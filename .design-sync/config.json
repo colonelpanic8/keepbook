@@ -46,7 +46,8 @@
       "cardMode": "column"
     },
     "Theme": {
-      "cardMode": "column"
+      "cardMode": "single",
+      "viewport": "1100x960"
     }
   },
   "readmeHeader": ".design-sync/conventions.md",

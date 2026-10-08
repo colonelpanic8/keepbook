@@ -1,4 +1,4 @@
-import { Badge, ControlButton, MetricCard, OperationStatus, Theme, THEME_PALETTES } from "keepbook-design";
+import { Badge, ControlButton, MetricCard, Theme, THEME_PALETTES } from "keepbook-design";
 
 const Sample = () => (
   <div style={{ display: "grid", gap: "var(--sp-12)" }}>
@@ -10,7 +10,6 @@ const Sample = () => (
       <Badge tone="negative">Dismissed</Badge>
       <Badge tone="warning">Liability</Badge>
     </div>
-    <OperationStatus busy message="Refreshing prices…" />
   </div>
 );
 
