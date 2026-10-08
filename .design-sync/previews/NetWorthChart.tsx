@@ -16,7 +16,12 @@ const points = [
 ];
 
 export const OneYear = () => (
-  <NetWorthChart points={points} change="+$1,204.10 (21.5%)" changeTone="positive" hoverIndex={4} />
+  <NetWorthChart
+    data={points}
+    currentValueText="6814.24"
+    changeText="+$1,204.10 (21.5%)"
+    hoverIndex={4}
+  />
 );
 
-export const Empty = () => <NetWorthChart points={[]} />;
+export const Empty = () => <NetWorthChart data={[]} />;

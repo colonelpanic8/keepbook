@@ -2,8 +2,11 @@
 
 Keepbook's UI is Rust/Dioxus. The synced design system is the React mirror
 package in `crates/keepbook-dioxus/design/` (`keepbook-design`, `window.Keepbook`).
-Each mirror emits the same markup and classes as its Dioxus component and
-bundles the app's real `assets/styles.css` and `assets/fonts/inter.css`.
+Each mirror in `design/src/<group>/<Name>.tsx` emits the same markup as its
+Dioxus component in `src/components/<group>/<name>.rs`, checked by the parity
+snapshots in `design/parity/` (`cargo test -p keepbook-dioxus` and `npm test`
+in `design/`). The package bundles the app's real `assets/styles.css` and
+`assets/fonts/inter.css`.
 
 ## Building
 
@@ -25,7 +28,7 @@ bundles the app's real `assets/styles.css` and `assets/fonts/inter.css`.
 - Wide components use `cardMode: column`. At card widths below 1200px, `DataTable`, `TreeGroup` and `SummaryGrid` render their compact or stacked layout. That's the app's real responsive behavior, not a bug.
 - `Modal` renders a `position: fixed` backdrop. The preview wraps it in a transformed, fixed-height box so the dialog stays inside the card.
 - The `SplitButton` menu opens toward the left, as in the right-aligned toolbar. Its open-menu preview right-aligns the button.
-- Every preview has a `Dark` cell wrapped in `Theme`. The single-story cards (`Modal`, `SplitButton`) show both themes inside their primary story. `AppShell`'s dark version is its own `Dark` story.
+- Previews render through the `PreviewTheme` provider, which applies the theme saved by the `ThemePicker` card (or a `?theme=` URL parameter), so one pick re-themes every card. The `Theme` card shows every theme side by side.
 
 ## Known render warns
 
@@ -33,12 +36,9 @@ bundles the app's real `assets/styles.css` and `assets/fonts/inter.css`.
 
 ## Re-sync risks
 
-- The mirrors are hand-written copies of the Dioxus markup.
-  - The `design_mirrors_only_use_classes_the_app_defines` unit test checks class names only, not structure or props.
-  - Review mirrors whenever `views/shared.rs` or a view's markup changes.
-- Some data is copied by hand from Rust and can silently drift:
-  - Chart geometry and copy: `NetWorthChart` (`views/charts/net_worth.rs`), `SpendingChart` (`views/spending/over_time.rs`), `SpendingBreakdown` (`views/spending/pie.rs`, `logic/spending.rs`).
-  - Money formatting in `design/src/charts/money.ts` (`logic/format.rs`).
-  - The `renderIcon` paths (`ButtonIcon` in `views/shared.rs`).
-  - `NAV_ITEMS` (`ActiveView` in `views.rs`).
+- Markup parity covers each case in `tests/unit/parity_tests.rs`, not every prop combination. Add a case on both sides when a component gains a variant.
+- `design/parity/cases.tsx` mirrors the Rust case inputs by hand. A case that passes with different inputs proves nothing, so keep the two lists identical.
+- Chart props differ by design: the Rust charts take app outputs (`SpendingOutput`, `HistoryChangeSummary`), while the mirrors take the derived values (buckets, totals, change text) a designer can type. The geometry and copy are ported, and the parity cases pin them.
+- Money formatting in `design/src/charts/money.ts` copies `logic/format.rs`.
+- `PreviewTheme` and `Theme` are design-only; `componentSrcMap` hides `PreviewTheme` from the component list.
 - The Inter version is 4.1, from the official release zip. Updating it means replacing `assets/fonts/InterVariable.woff2`.

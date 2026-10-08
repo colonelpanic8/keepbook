@@ -1,17 +1,25 @@
 import { SpendingChart } from "keepbook-design";
 
-const tags = ["Housing", "Groceries", "Travel", "Utilities", "Dining", "Subscriptions"];
+const series = ["Housing", "Groceries", "Travel", "Utilities", "Dining", "Subscriptions"];
+const month = (label: string, end: string, segments: [string, number, number][]) => ({
+  label,
+  startDate: `${label}-01`,
+  endDate: `${label}-${end}`,
+  total: segments.reduce((sum, [, value]) => sum + value, 0),
+  transactionCount: segments.reduce((sum, [, , count]) => sum + count, 0),
+  segments: segments.map(([key, value, transactionCount]) => ({ key, value, transactionCount })),
+});
 const buckets = [
-  { label: "2026-04", segments: [{ tag: "Housing", value: 2400 }, { tag: "Groceries", value: 312.4 }, { tag: "Utilities", value: 118.2 }, { tag: "Dining", value: 64.1 }, { tag: "Subscriptions", value: 15.99 }] },
-  { label: "2026-05", segments: [{ tag: "Housing", value: 2400 }, { tag: "Groceries", value: 170.41 }, { tag: "Utilities", value: 118.63 }, { tag: "Dining", value: 42.5 }, { tag: "Subscriptions", value: 15.99 }] },
-  { label: "2026-06", segments: [{ tag: "Housing", value: 2400 }, { tag: "Groceries", value: 171.44 }, { tag: "Travel", value: 330 }, { tag: "Utilities", value: 124.09 }, { tag: "Dining", value: 61.75 }, { tag: "Subscriptions", value: 15.99 }] },
-  { label: "2026-07", segments: [{ tag: "Housing", value: 2400 }, { tag: "Groceries", value: 88.42 }, { tag: "Dining", value: 38.2 }, { tag: "Subscriptions", value: 15.99 }] },
+  month("2026-04", "30", [["Housing", 2400, 1], ["Groceries", 312.4, 4], ["Utilities", 118.2, 1], ["Dining", 64.1, 2], ["Subscriptions", 15.99, 1]]),
+  month("2026-05", "31", [["Housing", 2400, 1], ["Groceries", 170.41, 2], ["Utilities", 118.63, 1], ["Dining", 42.5, 1], ["Subscriptions", 15.99, 1]]),
+  month("2026-06", "30", [["Housing", 2400, 1], ["Groceries", 171.44, 2], ["Travel", 330, 1], ["Utilities", 124.09, 1], ["Dining", 61.75, 2], ["Subscriptions", 15.99, 1]]),
+  month("2026-07", "31", [["Housing", 2400, 1], ["Groceries", 88.42, 1], ["Dining", 38.2, 1], ["Subscriptions", 15.99, 1]]),
 ];
 
 export const Monthly = () => (
-  <SpendingChart buckets={buckets} tags={tags} total="$8,361.43" bucket="Monthly" hover={{ bucket: 2, tag: "Travel" }} />
+  <SpendingChart buckets={buckets} series={series} total="$11,304.10" bucketLabel="Monthly" pinned={{ bucket: 2, key: "Travel" }} />
 );
 
 export const FocusedTag = () => (
-  <SpendingChart buckets={buckets} tags={tags} total="$742.67" bucket="Monthly" selectedTag="Groceries" />
+  <SpendingChart buckets={buckets} series={series} total="$742.67" bucketLabel="Monthly" selected="Groceries" />
 );

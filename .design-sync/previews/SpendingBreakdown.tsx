@@ -1,18 +1,21 @@
 import { SpendingBreakdown } from "keepbook-design";
 
 const tags = [
-  { tag: "Housing", total: 7200, count: 3 },
-  { tag: "Groceries", total: 430.27, count: 5 },
-  { tag: "Travel", total: 330, count: 1 },
-  { tag: "Utilities", total: 242.72, count: 2 },
-  { tag: "Dining", total: 142.45, count: 3 },
-  { tag: "Subscriptions", total: 15.99, count: 1 },
+  { key: "Housing", total: "-7200", transactionCount: 3 },
+  { key: "Groceries", total: "-430.27", transactionCount: 5 },
+  { key: "Travel", total: "-330", transactionCount: 1 },
+  { key: "Utilities", total: "-242.72", transactionCount: 2 },
+  { key: "Dining", total: "-142.45", transactionCount: 3 },
+  { key: "Subscriptions", total: "-15.99", transactionCount: 1 },
 ];
+const total = { label: "Total", value: "$8,361.43", detail: "15 transactions / 2025-10-08 to 2026-10-08" };
 
-export const ByTag = () => (
-  <SpendingBreakdown tags={tags} total="$8,361.43" detail="15 transactions / 2025-10-08 to 2026-10-08" />
-);
+export const ByTag = () => <SpendingBreakdown tags={tags} totals={[total]} />;
 
-export const SelectedTag = () => (
-  <SpendingBreakdown tags={tags} total="$8,361.43" detail="15 transactions / 2025-10-08 to 2026-10-08" selectedTag="Groceries" />
+export const FocusedPeriod = () => (
+  <SpendingBreakdown
+    tags={tags}
+    totals={[total, { label: "2026-06", value: "$3,103.27", detail: "8 transactions", highlighted: true }]}
+    selected="Groceries"
+  />
 );

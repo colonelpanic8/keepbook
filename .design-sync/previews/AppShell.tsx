@@ -3,6 +3,12 @@ import {
   PageToolbar, Panel, SplitButton, SummaryGrid, TreeGroup,
 } from "keepbook-design";
 
+const accounts = [
+  { name: "Demo Checking", balance: "$8,250.44", tags: "cash", included: true },
+  { name: "Demo Credit Card", balance: "-$1,436.20", tags: "card", included: true },
+  { name: "Old Savings", balance: "$0.00", tags: "", included: false },
+];
+
 export const AccountsScreen = () => (
   <AppShell active="Accounts" repositories={["Personal", "Parents"]}>
     <PageToolbar>
@@ -27,21 +33,24 @@ export const AccountsScreen = () => (
     </SummaryGrid>
     <Panel title="Accounts" subtitle="3">
       <TreeGroup title="Demo Bank" subtitle="manual" aside={<Badge tone="positive">2/3 active</Badge>}>
-        <DataTable
-          columns={[
-            { label: "Account", width: "minmax(200px, 1.2fr)" },
-            { label: "Balance (USD)", width: "minmax(150px, 0.7fr)" },
-            { label: "Status", width: "minmax(110px, 0.4fr)" },
-            { label: "Tags", width: "minmax(180px, 1fr)" },
-            { label: "Include", width: "minmax(132px, 0.6fr)" },
-          ]}
-          rows={[
-            [<strong>Demo Checking</strong>, <strong>$8,250.44</strong>, <Badge tone="positive">Active</Badge>, <small>cash</small>, <Checkbox label="Included" checked />],
-            [<strong>Demo Credit Card</strong>, <strong>-$1,436.20</strong>, <Badge tone="positive">Active</Badge>, <small>card</small>, <Checkbox label="Included" checked />],
-            [<strong>Old Savings</strong>, <strong>$0.00</strong>, <Badge>Ignored</Badge>, <small>—</small>, <Checkbox label="Included" />],
-          ]}
-          mutedRows={[2]}
-        />
+        <DataTable className="account-table" columns={["Account", "Balance (USD)", "Status", "Tags", "Include"]}>
+          {accounts.map((a) => (
+            <div
+              key={a.name}
+              className={a.included ? "table-row account-row-with-toggle" : "table-row ignored-account-row account-row-with-toggle"}
+            >
+              <button className="account-row-main account-click-row" title="View graph">
+                <strong>{a.name}</strong>
+              </button>
+              <span>{a.balance}</span>
+              {a.included ? <Badge tone="positive">Active</Badge> : <Badge>Ignored</Badge>}
+              <small>{a.tags}</small>
+              <div className="account-override-cell">
+                <Checkbox label="Include" className="account-include-toggle" checked={a.included} />
+              </div>
+            </div>
+          ))}
+        </DataTable>
       </TreeGroup>
     </Panel>
   </AppShell>

@@ -9,9 +9,12 @@ numbers. These components mirror the app's real Dioxus components, and
 and every component is styled. Start full screens with `AppShell`, which draws
 the sidebar and the scrolling workspace. Pass page content as its children, in
 this order: a `PageToolbar`, the toolbar's `OperationStatus` lines, a
-`SummaryGrid` of three `MetricCard`s, then `Panel`s. For the dark theme, set
-`data-theme="dark"` on `<html>`, or wrap any section in
-`<Theme mode="dark">` to show it in the dark theme.
+`SummaryGrid` of three `MetricCard`s, then `Panel`s.
+
+**Themes.** `THEMES` lists them (`fern`, the default, and `dark`). To pick
+one for the whole page, set `data-theme="<id>"` on `<html>`. To show a
+section in a specific theme, wrap it in `<Theme name="dark">`. `ThemePicker`
+is the app's own theme setting.
 
 **Styling.** Compose with the components and don't restyle them. For your own
 layout glue, use inline styles with the design tokens and never raw values:
@@ -30,6 +33,11 @@ layout glue, use inline styles with the design tokens and never raw values:
 
 Wrap gains and losses in `<strong className="change-positive">` or
 `<strong className="change-negative">`.
+
+**Tables.** `DataTable` takes rows as children, as the app does: one
+`<div className="table-row">` per row with one child per column. Its
+`className` picks the column tracks: `account-table`, `connection-table`,
+`proposed-edits-table`, or `recurring-occurrence-table`.
 
 **Rules the app follows:**
 - At most one `primary` button per toolbar.
@@ -67,8 +75,8 @@ const { AppShell, PageToolbar, ControlButton, SplitButton, OperationStatus, Summ
     <MetricCard label="Connections" value="1" detail="Configured sources" />
   </SummaryGrid>
   <Panel title="Net worth" subtitle="1Y / Weekly">
-    <NetWorthChart points={[{ date: "2026-01-08", value: 5920.4 }, { date: "2026-10-08", value: 6814.24 }]}
-      change="+$893.84 (15.1%)" changeTone="positive" />
+    <NetWorthChart data={[{ date: "2026-01-08", value: 5920.4 }, { date: "2026-10-08", value: 6814.24 }]}
+      changeText="+$893.84 (15.1%)" />
   </Panel>
 </AppShell>
 ```
