@@ -102,14 +102,14 @@ app appear frozen.
   balance date. Expansion is keyed by asset id plus the liability flag, so an
   asset's debt row expands independently of its asset row.
 - Rows aggregating negative holdings keep their own row (no netting) and get
-  the existing `status liability-status` badge, matching the accounts view's
-  badge treatment.
+  a `badge warning` "Liability" badge.
 - Change cells show the signed percentage colored with `change-positive` /
   `change-negative`; exactly zero stays neutral (no class). The signed
   absolute change is exposed as the cell tooltip. When a period exists but
   has no comparable past value (a new position), the cell shows the signed
   absolute change instead; a period with no data shows an em dash.
 
-Status treatments use semantic roles from `styles.css`: accent colors for
-in-flight activity, neutral surfaces for settled messages, and the shared
-spinner/progress tokens. Add new state colors only through the token document.
+Status treatments use the `.notice` component: `.notice.busy` (accent roles
+plus a spinner) for in-flight work, plain `.notice` (neutral surface) for
+settled messages. Add new state colors only through the token roles in the
+[design-system README](README.md).
