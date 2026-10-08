@@ -254,13 +254,11 @@ pub(super) fn StackedHistoryGraphPanel(
                     }
                 }
                 div { class: "sampling-row minor-series-row",
-                    label { class: "stacked-account-toggle minor-series-toggle",
-                        input {
-                            r#type: "checkbox",
-                            checked: group_minor,
-                            onchange: move |_| group_minor_series.set(!group_minor_series())
-                        }
-                        span { "Group small" }
+                    Checkbox {
+                        label: "Group small",
+                        class: "stacked-account-toggle minor-series-toggle",
+                        checked: group_minor,
+                        onchange: move |checked: bool| group_minor_series.set(checked),
                     }
                     label { class: "minor-series-threshold",
                         span { class: "control-label", "Below" }

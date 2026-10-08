@@ -178,8 +178,8 @@ named last in each row renders it.
 | Segmented control | `.segmented-field` › `.control-label` + `.segmented-control` › `.segment` | For mutually exclusive options. Never use a wrapping row of buttons for this. `SegmentedControl` |
 | Input | `.control-input` (+ `.small`), `select.control-input`, inside `label.control-field` | Selects draw their own caret so they follow the theme. A color input is a 64px swatch that opens the platform picker. `TextInput`, `Select` |
 | Checkbox | `label.compact-check` › `input[type=checkbox]` + `span` | The color comes from `accent-color` set at the root. `Checkbox` |
-| Switch | `label.switch-control` › `input` + `.switch-track` › `.switch-thumb` | For a setting that takes effect immediately. It sits in a `.setting-row`. `Switch` |
-| Setting row | `.setting-row` › `.setting-copy` (`strong` + `small`) + one control | Add `.setting-row-stacked` when the control is a select or an option group. `SettingRow`, `ThemePicker` |
+| Switch | `label.switch-control` › `input` + `.switch-track` › `.switch-thumb` | For a setting that takes effect immediately. It sits in a `.setting-row`. It is a two-position segmented control: the same 36px track, with a thumb that becomes a selected segment when on. `Switch` |
+| Setting row | `.setting-row` › `.setting-copy` (`strong` + `small`) + one control | Add `.setting-row-stacked` when the control is a select or an option group. `SettingRow`, `ThemeOptions`, `ThemePicker` |
 | Badge | `.badge` + `.positive` / `.negative` / `.warning` | A short status. Neutral unless toned. `Badge` |
 | Tag pill | `.tag-pill` (`.readonly`, `.removable`), `.tag-suggestion-pill` | Spending tags. Tags get color from the swatch, not the pill. `TagPill` |
 | Filter chip | `.filter-clear-chip` | Exists only while a filter is active. Clicking it clears the filter. `FilterChip` |

@@ -18,13 +18,11 @@ pub(super) fn StackedSeriesControls(
                     let account_id = account.account_id.clone().unwrap_or_default();
                     let checked = expanded_accounts.contains(&account_id);
                     rsx! {
-                        label { class: "stacked-account-toggle",
-                            input {
-                                r#type: "checkbox",
-                                checked,
-                                onchange: move |_| ontoggle.call(account_id.clone())
-                            }
-                            span { "{account.label}" }
+                        Checkbox {
+                            label: account.label.clone(),
+                            class: "stacked-account-toggle",
+                            checked,
+                            onchange: move |_| ontoggle.call(account_id.clone()),
                         }
                     }
                 }

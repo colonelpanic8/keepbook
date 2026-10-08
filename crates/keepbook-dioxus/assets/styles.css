@@ -2628,34 +2628,45 @@ button.stacked-legend-item {
   width: 1px;
 }
 
+/* A switch is a two-position segmented control: the same 36px track, and a
+   thumb that turns into a selected segment when on. */
 .switch-track {
-  align-items: center;
-  background: var(--color-border-strong);
-  border-radius: var(--radius-pill);
+  background: var(--color-surface-inset);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-sizing: border-box;
   display: flex;
-  height: 30px;
+  height: var(--control-height);
   padding: 3px;
-  transition: background 120ms ease;
-  width: 54px;
+  width: 64px;
 }
 
 .switch-thumb {
-  background: var(--color-surface);
-  border-radius: var(--radius-pill);
-  box-shadow: var(--shadow-sm);
+  background: var(--color-text-muted);
+  border-radius: calc(var(--radius-md) - 3px);
   display: block;
-  height: 24px;
-  transform: translateX(0);
-  transition: transform 120ms ease;
-  width: 24px;
-}
-
-.switch-control input:checked + .switch-track {
-  background: var(--color-primary);
+  height: 100%;
+  transition:
+    background 120ms ease,
+    transform 120ms ease;
+  width: 50%;
 }
 
 .switch-control input:checked + .switch-track .switch-thumb {
-  transform: translateX(24px);
+  background: var(--color-primary);
+  box-shadow: var(--shadow-sm);
+  transform: translateX(100%);
+}
+
+/* The input is visually hidden, so its focus ring is drawn on the track. */
+.switch-control input:focus-visible + .switch-track {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.switch-control input:disabled + .switch-track {
+  cursor: default;
+  opacity: 0.48;
 }
 
 .settings-source {
