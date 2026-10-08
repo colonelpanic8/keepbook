@@ -466,15 +466,34 @@ fn every_component_has_a_parity_case() {
     );
 }
 
+/// Every `ButtonIcon`; the match stops compiling when a variant is added.
+fn every_button_icon() -> [ButtonIcon; 3] {
+    match ButtonIcon::Refresh {
+        ButtonIcon::Refresh | ButtonIcon::GitBranch | ButtonIcon::ChevronDown => {}
+    }
+    [
+        ButtonIcon::Refresh,
+        ButtonIcon::GitBranch,
+        ButtonIcon::ChevronDown,
+    ]
+}
+
 #[test]
 fn every_icon_and_theme_is_defined() {
-    for icon in ButtonIcon::ALL {
-        assert!(
-            !icon.paths().is_empty(),
-            "assets/icons.json has no paths for {}",
-            icon.name()
-        );
-    }
+    let icons: HashMap<String, Vec<String>> =
+        serde_json::from_str(include_str!("../../assets/icons.json")).expect("icons.json");
+    let mut listed = icons.keys().map(String::as_str).collect::<Vec<_>>();
+    let mut variants = every_button_icon().map(ButtonIcon::name).to_vec();
+    listed.sort();
+    variants.sort();
+    assert_eq!(
+        listed, variants,
+        "assets/icons.json must define exactly the ButtonIcon variants"
+    );
+    assert!(
+        icons.values().all(|paths| !paths.is_empty()),
+        "every icon needs paths"
+    );
     let css = crate::APP_CSS;
     let mut css_themes = css
         .match_indices("[data-theme=\"")

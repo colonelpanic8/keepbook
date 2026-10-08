@@ -17,9 +17,6 @@ pub(crate) enum ButtonIcon {
 }
 
 impl ButtonIcon {
-    #[cfg(test)]
-    pub(crate) const ALL: [ButtonIcon; 3] = [Self::Refresh, Self::GitBranch, Self::ChevronDown];
-
     pub(crate) fn name(self) -> &'static str {
         match self {
             Self::Refresh => "refresh",
