@@ -167,13 +167,13 @@ pub(super) fn AccountsView(
                 aria_live: "polite",
                 style: "height: {pull_offset}px; opacity: {pull_offset / PULL_REFRESH_MAX_OFFSET_PX};",
                 if pull_ready {
-                    span { class: "activity-spinner" }
+                    Spinner {}
                 } else {
                     span { class: "pull-refresh-dot" }
                 }
             }
             div { class: "pull-refresh-content",
-                div { class: "page-toolbar",
+                PageToolbar {
                     ControlButton {
                         icon: ButtonIcon::GitBranch,
                         disabled: any_account_operation_busy,
@@ -262,7 +262,7 @@ pub(super) fn AccountsView(
                 if !git_sync_status_text.is_empty() {
                     OperationStatus { message: git_sync_status_text, busy: is_git_sync_busy }
                 }
-                section { class: "summary-grid",
+                SummaryGrid {
                     MetricCard {
                         label: "Net worth",
                         value: net_worth,
@@ -285,11 +285,10 @@ pub(super) fn AccountsView(
                         title: selection.name.clone(),
                         subtitle: selection.connection_name.clone(),
                         actions: rsx! {
-                            button {
-                                class: "icon-button",
-                                title: "Close",
+                            IconButton {
+                                label: "Close",
+                                glyph: "×",
                                 onclick: move |_| selected_graph.set(None),
-                                "x"
                             }
                         },
                         HistoryGraphPanel {
@@ -345,22 +344,13 @@ fn VirtualAccountGroup(
     onselect: EventHandler<AccountGraphSelection>,
 ) -> Element {
     rsx! {
-        section { class: "tree-group",
-            div { class: "tree-parent",
-                div {
-                    strong { "Virtual" }
-                    small { "Portfolio adjustments" }
-                }
-                span { class: "badge", "{accounts.len()} active" }
-            }
-            div { class: "data-table account-table",
-                div { class: "table-head",
-                    span { "Account" }
-                    span { "Balance ({currency})" }
-                    span { "Status" }
-                    span { "Tags" }
-                    span { "Include" }
-                }
+        TreeGroup {
+            title: "Virtual",
+            subtitle: "Portfolio adjustments",
+            aside: rsx! { Badge { "{accounts.len()} active" } },
+            DataTable {
+                class: "account-table",
+                columns: account_table_columns(&currency),
                 for account in accounts {
                     VirtualAccountRow {
                         account,
@@ -397,7 +387,7 @@ fn VirtualAccountRow(
             onclick: move |_| onselect.call(selection.clone()),
             strong { "{account.account_name}" }
             span { "{value}" }
-            span { class: "badge", "Virtual" }
+            Badge { "Virtual" }
             small { "{account.connection_name}" }
             span {}
         }
@@ -426,22 +416,13 @@ fn AccountGroup(
     };
 
     rsx! {
-        section { class: "tree-group",
-            div { class: "tree-parent",
-                div {
-                    strong { "{connection.name}" }
-                    small { "{connection.synchronizer}" }
-                }
-                span { class: "badge positive", "{status_text}" }
-            }
-            div { class: "data-table account-table",
-                div { class: "table-head",
-                    span { "Account" }
-                    span { "Balance ({currency})" }
-                    span { "Status" }
-                    span { "Tags" }
-                    span { "Include" }
-                }
+        TreeGroup {
+            title: connection.name.clone(),
+            subtitle: connection.synchronizer.clone(),
+            aside: rsx! { Badge { tone: BadgeTone::Positive, "{status_text}" } },
+            DataTable {
+                class: "account-table",
+                columns: account_table_columns(&currency),
                 for account in accounts {
                     AccountRow {
                         account,
@@ -485,10 +466,10 @@ fn AccountRow(
     } else {
         "table-row"
     };
-    let status_class = if account.active && !effective_excluded {
-        "badge positive"
+    let status_tone = if account.active && !effective_excluded {
+        BadgeTone::Positive
     } else {
-        "badge"
+        BadgeTone::Neutral
     };
     let tags = account.tags.join(", ");
     let balance = account_snapshot_value_text(&account.id, &account_summaries)
@@ -516,28 +497,23 @@ fn AccountRow(
                 strong { "{account_name}" }
             }
             span { "{balance}" }
-            span { class: "{status_class}", "{status}" }
+            Badge { tone: status_tone, "{status}" }
             small { "{tags}" }
             div { class: "account-override-cell",
-                label { class: "compact-check account-include-toggle",
-                    input {
-                        r#type: "checkbox",
-                        checked: included,
-                        onchange: move |event| {
-                            let next = toggle_filter_overrides
-                                .clone()
-                                .with_account_exclude_override(
-                                    toggle_account_id.clone(),
-                                    !event.checked(),
-                                );
-                            onfilterchange.call(next);
-                        }
+                Checkbox {
+                    label: "Include",
+                    class: "account-include-toggle",
+                    checked: included,
+                    onchange: move |checked: bool| {
+                        let next = toggle_filter_overrides
+                            .clone()
+                            .with_account_exclude_override(toggle_account_id.clone(), !checked);
+                        onfilterchange.call(next);
                     }
-                    span { "Include" }
                 }
                 if override_active {
-                    button {
-                        class: "text-button reset-account-override",
+                    ControlButton {
+                        small: true,
                         title: "Reset account override",
                         onclick: move |_| {
                             onfilterchange.call(
@@ -552,4 +528,16 @@ fn AccountRow(
             }
         }
     }
+}
+
+fn account_table_columns(currency: &str) -> Vec<String> {
+    [
+        "Account",
+        &format!("Balance ({currency})"),
+        "Status",
+        "Tags",
+        "Include",
+    ]
+    .map(str::to_string)
+    .to_vec()
 }

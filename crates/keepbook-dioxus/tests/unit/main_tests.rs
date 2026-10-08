@@ -132,9 +132,10 @@ fn contains_class(haystack: &str, needle: &str) -> bool {
     })
 }
 
-/// Class names written in `className` attributes and `cx(...)` calls.
+/// Class names in `className` attributes and the string literals of
+/// `className={...}` expressions and `cx(...)` calls.
 fn mirror_class_names(source: &str) -> Vec<String> {
-    let mut expressions = Vec::new();
+    let mut literals = Vec::new();
     for (marker, open, close) in [("className={", '{', '}'), ("cx(", '(', ')')] {
         for (start, _) in source.match_indices(marker) {
             let body = &source[start + marker.len()..];
@@ -146,33 +147,22 @@ fn mirror_class_names(source: &str) -> Vec<String> {
                     (depth == 0).then_some(i)
                 })
                 .unwrap_or(body.len());
-            expressions.push(&body[..end]);
+            literals.extend(body[..end].split('"').skip(1).step_by(2));
         }
     }
     for (start, _) in source.match_indices("className=\"") {
         let body = &source[start + "className=\"".len()..];
-        expressions.push(&body[..body.find('"').unwrap_or(body.len())]);
+        literals.push(&body[..body.find('"').unwrap_or(body.len())]);
     }
-    let mut names = Vec::new();
-    for expression in expressions {
-        let literals: Vec<&str> = if expression.contains('"') {
-            expression.split('"').skip(1).step_by(2).collect()
-        } else {
-            vec![expression]
-        };
-        for literal in literals {
-            names.extend(
-                literal
-                    .split_whitespace()
-                    .filter(|word| {
-                        word.chars()
-                            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-                    })
-                    .map(str::to_string),
-            );
-        }
-    }
-    names
+    literals
+        .into_iter()
+        .flat_map(str::split_whitespace)
+        .filter(|word| {
+            word.chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        })
+        .map(str::to_string)
+        .collect()
 }
 
 #[test]

@@ -51,38 +51,33 @@ pub(super) fn TransactionList(
                     span { "{range_text}" }
                 }
                 div { class: "pagination-controls",
-                    button {
-                        class: "icon-button",
-                        title: "Previous page",
+                    IconButton {
+                        label: "Previous page",
+                        glyph: "‹",
                         disabled: page == 0,
                         onclick: move |event| onprev.call(event),
-                        "‹"
                     }
                     span { "{page + 1} / {page_count}" }
-                    button {
-                        class: "icon-button",
-                        title: "Next page",
+                    IconButton {
+                        label: "Next page",
+                        glyph: "›",
                         disabled: page + 1 >= page_count,
                         onclick: move |event| onnext.call(event),
-                        "›"
                     }
                 }
             }
             div { class: "transaction-controls",
-                input {
-                    class: "control-input transaction-search-input",
-                    r#type: "search",
-                    value: "{title_filter}",
+                TextInput {
+                    kind: InputKind::Search,
+                    class: "transaction-search-input",
+                    value: title_filter.clone(),
                     placeholder: "Filter titles",
-                    oninput: move |event| ontitlefilterchange.call(event.value())
+                    oninput: move |value| ontitlefilterchange.call(value)
                 }
-                label { class: "compact-check",
-                    input {
-                        r#type: "checkbox",
-                        checked: show_ignored,
-                        onchange: move |event| onshowignoredchange.call(event.checked())
-                    }
-                    span { "Show ignored" }
+                Checkbox {
+                    label: "Show ignored",
+                    checked: show_ignored,
+                    onchange: move |checked| onshowignoredchange.call(checked)
                 }
                 ControlButton {
                     onclick: move |event| onselectpage.call(event),
@@ -103,7 +98,7 @@ pub(super) fn TransactionList(
                 }
                 if has_visible_selection {
                     ControlButton {
-                        selected: true,
+                        primary: true,
                         disabled: mutation_busy,
                         onclick: move |_| group_editor_open.set(true),
                         "Edit Tags"
@@ -141,16 +136,16 @@ pub(super) fn TransactionList(
                     strong { "AI rule assistant" }
                     small { "{selected_count} selected" }
                 }
-                textarea {
-                    class: "control-input ai-rule-prompt",
-                    value: "{ai_prompt}",
+                TextInput {
+                    multiline: true,
+                    value: ai_prompt.clone(),
                     placeholder: "Ask for a tag, ignore, or rename rule for the selected transactions.",
                     disabled: ai_busy,
-                    oninput: move |event| onpromptchange.call(event.value())
+                    oninput: move |value| onpromptchange.call(value)
                 }
                 div { class: "ai-rule-actions",
                     ControlButton {
-                        selected: true,
+                        primary: true,
                         busy: ai_busy,
                         onclick: move |event| onairulesubmit.call(event),
                         disabled: selected_count == 0 || ai_prompt.trim().is_empty() || ai_busy,
@@ -166,14 +161,13 @@ pub(super) fn TransactionList(
             }
             if has_visible_selection && group_editor_open() {
                 Modal {
-                    dialog_class: "group-edit-dialog",
+                    wide: true,
                     title: "Group edit",
                     header_actions: rsx! {
-                        button {
-                            class: "icon-button",
-                            title: "Close group edit",
+                        IconButton {
+                            label: "Close group edit",
+                            glyph: "×",
                             onclick: move |_| group_editor_open.set(false),
-                            "x"
                         }
                     },
                     GroupTagsEditor {
@@ -187,9 +181,10 @@ pub(super) fn TransactionList(
                 }
             }
             if !has_transactions {
-                div { class: "chart-empty transaction-empty",
-                    strong { "No matching transactions" }
-                    small { "Select another tag or range." }
+                EmptyState {
+                    compact: true,
+                    title: "No matching transactions",
+                    detail: "Select another tag or range.",
                 }
             } else {
                 div { class: "data-table transaction-table",
@@ -302,20 +297,20 @@ pub(super) fn TransactionList(
                                                 span { class: "tag-empty", "Untagged" }
                                             }
                                             for tag in row_tags.clone() {
-                                                span { class: "tag-pill readonly", "{tag}" }
+                                                TagPill { tag: tag.clone() }
                                             }
                                         }
                                         if tx.ignored_from_spending {
-                                            small { class: "badge", "Not counted" }
+                                            Badge { "Not counted" }
                                         }
                                     }
                                     span { class: "transaction-account-cell", "{tx.account_name}" }
                                     strong { class: "transaction-amount-cell", "{format_transaction_amount(&tx, &currency)}" }
-                                    button {
-                                        class: "icon-button transaction-expand-toggle",
-                                        r#type: "button",
-                                        title: if is_expanded { "Collapse editor" } else { "Expand to edit" },
-                                        onclick: move |event| {
+                                    IconButton {
+                                        class: "transaction-expand-toggle",
+                                        label: if is_expanded { "Collapse editor" } else { "Expand to edit" },
+                                        glyph: if is_expanded { "\u{2304}" } else { "\u{203A}" },
+                                        onclick: move |event: MouseEvent| {
                                             event.stop_propagation();
                                             let next = if expanded_transaction_key().as_deref()
                                                 == Some(chevron_toggle_key.as_str())
@@ -326,7 +321,6 @@ pub(super) fn TransactionList(
                                             };
                                             expanded_transaction_key.set(next);
                                         },
-                                        if is_expanded { "\u{2304}" } else { "\u{203A}" }
                                     }
                                 }
                                 if is_expanded {
@@ -351,7 +345,7 @@ pub(super) fn TransactionList(
                     }
                     span { "{page + 1} / {page_count}" }
                     ControlButton {
-                        selected: true,
+                        primary: true,
                         disabled: page + 1 >= page_count,
                         onclick: move |event| onnext.call(event),
                         "Next"

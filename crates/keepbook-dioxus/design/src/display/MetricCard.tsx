@@ -6,7 +6,7 @@ export interface MetricCardProps {
   detail: string;
 }
 
-/** A headline number with its label and one line of context. Use three in a `SummaryGrid`. Mirrors `MetricCard` in `views/shared.rs`. */
+/** A headline number with its label and one line of context. Use three in a `SummaryGrid`. Mirrors `components/display/metric_card.rs`. */
 export function MetricCard({ label, value, detail }: MetricCardProps) {
   return (
     <article className="metric">

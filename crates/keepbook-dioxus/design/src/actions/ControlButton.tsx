@@ -1,5 +1,6 @@
 import type { MouseEventHandler, ReactNode } from "react";
 import { cx } from "../cx";
+import { Spinner } from "../feedback/Spinner";
 import { renderIcon, type IconName } from "./icons";
 
 export interface ControlButtonProps {
@@ -28,7 +29,7 @@ export interface ControlButtonProps {
  *
  * While `busy`, a spinner takes the icon's slot so the label doesn't shift.
  * Use a present participle label while busy ("Refreshing"). Mirrors
- * `ControlButton` in `views/shared.rs`.
+ * `components/actions/control_button.rs`.
  */
 export function ControlButton({
   children,
@@ -59,7 +60,7 @@ export function ControlButton({
       onClick={onClick}
     >
       {busy ? (
-        <span className="activity-spinner control-spinner" aria-hidden="true" />
+        <Spinner size="small" />
       ) : (
         icon && renderIcon(icon)
       )}

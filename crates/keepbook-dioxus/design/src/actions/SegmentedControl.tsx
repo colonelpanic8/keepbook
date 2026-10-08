@@ -21,7 +21,7 @@ export interface SegmentedControlProps {
  *
  * Use it for every one-of-N choice (range presets, bucket size, view tabs);
  * never use a wrapping row of buttons. The row never wraps: labels shrink and
- * then ellipsize instead. Mirrors `SegmentedControl` in `views/shared.rs`.
+ * then ellipsize instead. Mirrors `components/actions/segmented_control.rs`.
  */
 export function SegmentedControl({ label, options, selected, onSelect, className }: SegmentedControlProps) {
   const [current, setCurrent] = useState(selected ?? options[0]?.value);

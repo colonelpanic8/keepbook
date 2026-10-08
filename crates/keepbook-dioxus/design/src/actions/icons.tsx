@@ -1,21 +1,7 @@
-/** Stroke icons on a 24px grid (Lucide shapes). Mirrors `ButtonIcon` in `views/shared.rs`. */
-export type IconName = "refresh" | "git-branch" | "chevron-down";
+import paths from "../../../assets/icons.json";
 
-const PATHS: Record<IconName, string[]> = {
-  refresh: [
-    "M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8",
-    "M21 3v5h-5",
-    "M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16",
-    "M8 16H3v5",
-  ],
-  "git-branch": [
-    "M6 3v12",
-    "M15 6a3 3 0 1 0 6 0a3 3 0 1 0-6 0",
-    "M3 18a3 3 0 1 0 6 0a3 3 0 1 0-6 0",
-    "M18 9a9 9 0 0 1-9 9",
-  ],
-  "chevron-down": ["m6 9 6 6 6-6"],
-};
+/** Stroke icons on a 24px grid (Lucide shapes), from the shared `assets/icons.json`. */
+export type IconName = keyof typeof paths;
 
 export function renderIcon(icon: IconName) {
   return (
@@ -31,7 +17,7 @@ export function renderIcon(icon: IconName) {
       strokeLinejoin="round"
       aria-hidden="true"
     >
-      {PATHS[icon].map((d) => (
+      {paths[icon].map((d) => (
         <path key={d} d={d} />
       ))}
     </svg>

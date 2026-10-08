@@ -1,4 +1,7 @@
-use super::*;
+use crate::components::*;
+use crate::dto::*;
+use crate::logic::*;
+use dioxus::prelude::*;
 use std::collections::HashMap;
 
 #[derive(Clone, Debug)]
@@ -40,13 +43,13 @@ struct SpendingSegmentKey {
 /// Payload emitted when a segment is clicked to focus the view on a single
 /// category within a single time period.
 #[derive(Clone, Debug, PartialEq)]
-pub(super) struct SpendingSegmentSelection {
-    pub(super) key: String,
-    pub(super) period: SpendingPeriodSelection,
+pub(crate) struct SpendingSegmentSelection {
+    pub(crate) key: String,
+    pub(crate) period: SpendingPeriodSelection,
 }
 
 #[component]
-pub(super) fn SpendingOverTimeChart(
+pub(crate) fn SpendingChart(
     spending: SpendingOutput,
     /// Per-tag totals for the whole range, from the `period=range` report.
     series: Vec<SpendingBreakdownEntry>,
@@ -70,9 +73,10 @@ pub(super) fn SpendingOverTimeChart(
 
     if visible_points.is_empty() || series.is_empty() {
         return rsx! {
-            div { class: "chart-empty spending-over-time-empty",
-                strong { "No spending over time" }
-                small { "Refresh transactions or adjust the range." }
+            EmptyState {
+                class: "spending-over-time-empty",
+                title: "No spending over time",
+                detail: "Refresh transactions or adjust the range.",
             }
         };
     }
@@ -453,30 +457,19 @@ pub(super) fn SpendingOverTimeChart(
                     }
                 }
             }
-            div { class: "stacked-legend spending-bar-legend",
-                for (index, item) in series.iter().enumerate() {
-                    {
-                        let color = spending_tag_color_for(&colors, &item.key, index);
-                        let key = item.key.clone();
-                        let key_for_click = key.clone();
-                        let class = if selected.as_ref() == Some(&key) {
-                            "stacked-legend-item selected"
-                        } else {
-                            "stacked-legend-item"
-                        };
-                        rsx! {
-                            button {
-                                class: "{class}",
-                                onclick: move |_| onselecttag.call(key_for_click.clone()),
-                                span {
-                                    class: "stacked-legend-swatch",
-                                    style: "background: {color};"
-                                }
-                                span { "{key}" }
-                            }
-                        }
-                    }
-                }
+            Legend {
+                class: "spending-bar-legend",
+                items: series
+                    .iter()
+                    .enumerate()
+                    .map(|(index, item)| LegendItem {
+                        label: item.key.clone(),
+                        color: spending_tag_color_for(&colors, &item.key, index).to_string(),
+                        muted: false,
+                    })
+                    .collect::<Vec<_>>(),
+                selected: selected.clone(),
+                onselect: move |tag: String| onselecttag.call(tag),
             }
         }
     }

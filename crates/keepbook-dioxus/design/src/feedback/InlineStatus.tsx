@@ -3,7 +3,7 @@ export interface InlineStatusProps {
   message: string;
 }
 
-/** A centered message filling a region that couldn't load, such as a failed fetch. Mirrors `InlineStatus` in `views/shared.rs`. */
+/** A centered message filling a region that couldn't load, such as a failed fetch. Mirrors `components/feedback/inline_status.rs`. */
 export function InlineStatus({ title, message }: InlineStatusProps) {
   return (
     <div className="inline-status">

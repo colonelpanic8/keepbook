@@ -5,38 +5,53 @@ export interface TextInputProps {
   /** Field label above the input; omit for inline inputs such as search boxes. */
   label?: string;
   value?: string;
+  /** `text` (default), `number`, `date`, or `search`. */
+  kind?: "text" | "number" | "date" | "search";
   placeholder?: string;
-  /** `text`, `number`, `date`, … */
-  type?: string;
-  /** A multi-line text area (e.g. prompts and notes). */
-  multiline?: boolean;
+  /** Bounds for date inputs. */
+  min?: string;
+  max?: string;
   /** Compact height for dense editors. */
   small?: boolean;
+  /** A multi-line text area, e.g. for prompts. */
+  multiline?: boolean;
   disabled?: boolean;
+  className?: string;
   onChange?: ChangeEventHandler<HTMLInputElement | HTMLTextAreaElement>;
 }
 
 /**
- * A text, number, date, or multi-line input, optionally labeled above.
+ * A text, number, date, search, or multi-line input, optionally labeled above.
  *
  * With a `label` it renders as a labeled field that stacks the label above the
- * control, the way every keepbook form field does.
+ * control, the way every keepbook form field does. Mirrors
+ * `components/forms/text_input.rs`.
  */
-export function TextInput({ label, value, placeholder, type = "text", multiline, small, disabled, onChange }: TextInputProps) {
+export function TextInput({
+  label,
+  value,
+  kind = "text",
+  placeholder,
+  min,
+  max,
+  small,
+  multiline,
+  disabled,
+  className,
+  onChange,
+}: TextInputProps) {
+  const classes = cx("control-input", small && "small", multiline && "ai-rule-prompt", className);
   const control = multiline ? (
-    <textarea
-      className={cx("control-input", "ai-rule-prompt")}
-      defaultValue={value}
-      placeholder={placeholder}
-      disabled={disabled}
-      onChange={onChange}
-    />
+    <textarea className={classes} defaultValue={value} placeholder={placeholder} disabled={disabled} onChange={onChange} />
   ) : (
     <input
-      className={cx("control-input", small && "small")}
-      type={type}
+      className={classes}
+      type={kind}
       defaultValue={value}
       placeholder={placeholder}
+      min={min}
+      max={max}
+      step={kind === "number" ? "0.01" : undefined}
       disabled={disabled}
       onChange={onChange}
     />

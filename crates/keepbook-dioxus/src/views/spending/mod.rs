@@ -1,7 +1,5 @@
 mod editor;
 mod matches;
-mod over_time;
-mod pie;
 mod transactions;
 
 use super::*;
@@ -13,8 +11,6 @@ use std::collections::HashSet;
 
 use editor::*;
 use matches::*;
-use over_time::*;
-use pie::*;
 use transactions::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -282,7 +278,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
                 span { "{currency}" }
             },
             if state.is_none() {
-                BackendActivity { message: "Waiting on backend spending data" }
+                OperationStatus { message: "Waiting on backend spending data".to_string(), busy: true }
             }
             if let Some(message) = tag_update_status() {
                 OperationStatus { message, busy: mutation_busy() }
@@ -327,8 +323,9 @@ pub(super) fn SpendingView(currency: String) -> Element {
                         }
                         if dates_open {
                             div { class: "control-grid spending-date-grid",
-                                DateInput {
-                                    label: "Start",
+                                TextInput {
+                                    kind: InputKind::Date,
+                                    label: "Start".to_string(),
                                     value: resolved_start.clone(),
                                     min: String::new(),
                                     max: resolved_end.clone(),
@@ -340,8 +337,9 @@ pub(super) fn SpendingView(currency: String) -> Element {
                                         transaction_page.set(0);
                                     }
                                 }
-                                DateInput {
-                                    label: "End",
+                                TextInput {
+                                    kind: InputKind::Date,
+                                    label: "End".to_string(),
                                     value: resolved_end.clone(),
                                     min: resolved_start.clone(),
                                     max: current_date_string(),
@@ -395,27 +393,23 @@ pub(super) fn SpendingView(currency: String) -> Element {
                     }
                 }
                 if let Some(label) = focus_chip_label.clone() {
-                    div { class: "filter-chip-row",
-                        button {
-                            class: "filter-clear-chip",
-                            r#type: "button",
-                            title: "Clear the focused tag and period",
-                            onclick: move |_| {
-                                selected_tag.set(None);
-                                selected_period.set(None);
-                                transaction_page.set(0);
-                            },
-                            span { class: "filter-clear-chip-text", "Focused: {label}" }
-                            span { aria_hidden: "true", "✕" }
-                        }
+                    FilterChip {
+                        label: format!("Focused: {label}"),
+                        title: "Clear the focused tag and period",
+                        onclear: move |_| {
+                            selected_tag.set(None);
+                            selected_period.set(None);
+                            transaction_page.set(0);
+                        },
                     }
                 }
             }
             match state {
                 None => rsx! {
-                    GraphLoadingPanel {
-                        range: range_summary_text(&resolved_start, &resolved_end),
-                        sampling: selected_tab.label()
+                    EmptyState {
+                        loading: true,
+                        title: "Updating graph".to_string(),
+                        detail: format!("{} / {}", range_summary_text(&resolved_start, &resolved_end), selected_tab.label()),
                     }
                 },
                 Some(Err(error)) => rsx! {
@@ -423,7 +417,7 @@ pub(super) fn SpendingView(currency: String) -> Element {
                 },
                 Some(Ok(data)) => rsx! {
                     if selected_tab == SpendingTab::Tags {
-                        SpendingOverTimeChart {
+                        SpendingChart {
                         spending: data.spending_over_time.clone(),
                         series: tags.clone(),
                         selected: selected.clone(),
@@ -463,63 +457,20 @@ pub(super) fn SpendingView(currency: String) -> Element {
                             transaction_page.set(0);
                         }
                     }
-                    div { class: "spending-layout",
-                        div { class: "spending-chart-area",
-                            SpendingPieChart {
-                                tags: tags.clone(),
-                                selected: selected.clone(),
-                                currency: data.spending.currency.clone(),
-                                colors: tag_colors.clone(),
-                                onclick: move |tag: String| {
-                                    let next = if selected_tag() == Some(tag.clone()) {
-                                        None
-                                    } else {
-                                        Some(tag)
-                                    };
-                                    selected_tag.set(next);
-                                    transaction_page.set(0);
-                                }
-                            }
-                        }
-                        div { class: "tag-list",
-                            div { class: "spending-total",
-                                span { class: "metric-label", "Total" }
-                                strong { "{total}" }
-                                small { "{data.spending.transaction_count} transactions / {data.spending.start_date} to {data.spending.end_date}" }
-                            }
-                            if let Some(period) = period_metric.clone() {
-                                div { class: "spending-total selected-total",
-                                    span { class: "metric-label", "Period" }
-                                    strong { "{period.label}" }
-                                    small {
-                                        "{format_full_money(period.total, &data.spending.currency)} / {period.transaction_count} transactions / {period.start_date} to {period.end_date}"
-                                    }
-                                }
-                            }
-                            if let Some(value) = selected_total {
-                                div { class: "spending-total selected-total",
-                                    span { class: "metric-label", "Selected" }
-                                    strong { "{value}" }
-                                    small { "{selected_label}" }
-                                }
-                            }
-                            for (index, entry) in tags.iter().enumerate() {
-                                TagRow {
-                                    entry: entry.clone(),
-                                    color: spending_tag_color_for(&tag_colors, &entry.key, index),
-                                    currency: data.spending.currency.clone(),
-                                    selected: selected.as_ref() == Some(&entry.key),
-                                    onclick: move |tag: String| {
-                                        let next = if selected_tag() == Some(tag.clone()) {
-                                            None
-                                        } else {
-                                            Some(tag)
-                                        };
-                                        selected_tag.set(next);
-                                        transaction_page.set(0);
-                                    }
-                                }
-                            }
+                    SpendingBreakdown {
+                        tags: tags.clone(),
+                        colors: tag_colors.clone(),
+                        currency: data.spending.currency.clone(),
+                        totals: spending_totals(&data, &total, period_metric.clone(), selected_total.clone(), selected_label),
+                        selected: selected.clone(),
+                        onselect: move |tag: String| {
+                            let next = if selected_tag() == Some(tag.clone()) {
+                                None
+                            } else {
+                                Some(tag)
+                            };
+                            selected_tag.set(next);
+                            transaction_page.set(0);
                         }
                     }
                     } else {
@@ -755,4 +706,46 @@ pub(super) fn SpendingView(currency: String) -> Element {
             }
         }
     }
+}
+
+fn spending_totals(
+    data: &SpendingDashboardData,
+    total: &str,
+    period: Option<SpendingPeriodSelection>,
+    selected_total: Option<String>,
+    selected_label: &str,
+) -> Vec<SpendingTotal> {
+    let spending = &data.spending;
+    let mut totals = vec![SpendingTotal {
+        label: "Total".to_string(),
+        value: total.to_string(),
+        detail: format!(
+            "{} transactions / {} to {}",
+            spending.transaction_count, spending.start_date, spending.end_date
+        ),
+        highlighted: false,
+    }];
+    if let Some(period) = period {
+        totals.push(SpendingTotal {
+            label: "Period".to_string(),
+            value: period.label.clone(),
+            detail: format!(
+                "{} / {} transactions / {} to {}",
+                format_full_money(period.total, &spending.currency),
+                period.transaction_count,
+                period.start_date,
+                period.end_date
+            ),
+            highlighted: true,
+        });
+    }
+    if let Some(value) = selected_total {
+        totals.push(SpendingTotal {
+            label: "Selected".to_string(),
+            value,
+            detail: selected_label.to_string(),
+            highlighted: true,
+        });
+    }
+    totals
 }

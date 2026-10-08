@@ -1,12 +1,11 @@
 import type { ReactNode } from "react";
+import themes from "../../../assets/themes.json";
 
-/** The app's themes, in picker order. Mirrors `THEMES` in `views/graph_settings.rs`. */
-export const THEMES = [
-  { id: "fern", label: "Fern" },
-  { id: "dark", label: "Dark" },
-] as const;
+/** The app's themes, in picker order, from the shared `assets/themes.json`. */
+export const THEMES: readonly { id: string; label: string }[] = themes;
 
-export type ThemeName = (typeof THEMES)[number]["id"];
+/** A theme id from `THEMES`. */
+export type ThemeName = string;
 
 const STORAGE_KEY = "keepbook-theme";
 

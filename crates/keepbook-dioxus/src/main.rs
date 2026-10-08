@@ -1,4 +1,5 @@
 mod api;
+mod components;
 mod dto;
 mod logic;
 mod views;
@@ -321,3 +322,7 @@ fn desktop_window_visible(options: DesktopStartupOptions) -> bool {
 #[cfg(test)]
 #[path = "../tests/unit/main_tests.rs"]
 mod main_tests;
+
+#[cfg(test)]
+#[path = "../tests/unit/parity_tests.rs"]
+mod parity_tests;

@@ -8,7 +8,8 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "esbuild src/index.ts --bundle --format=esm --jsx=automatic --loader:.svg=text --loader:.woff2=file --asset-names=[name] --external:react --external:react-dom --external:react/jsx-runtime --outfile=dist/index.js && tsc -p ."
+    "build": "esbuild src/index.ts --bundle --format=esm --jsx=automatic --loader:.svg=text --loader:.woff2=file --asset-names=[name] --external:react --external:react-dom --external:react/jsx-runtime --outfile=dist/index.js && tsc -p .",
+    "test": "node scripts/parity.mjs"
   },
   "peerDependencies": {
     "react": ">=18"
@@ -16,6 +17,7 @@
   "devDependencies": {
     "@types/react": "^19.3.0",
     "esbuild": "^0.28.2",
+    "parse5": "^8.0.1",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "typescript": "^7.0.2"

@@ -1,6 +1,7 @@
 use super::api::*;
 use super::logic::*;
 use super::*;
+use crate::components::*;
 use dioxus::prelude::*;
 
 mod accounts;
@@ -23,7 +24,6 @@ use recurring::RecurringView;
 use shared::*;
 use spending::SpendingView;
 
-const NAV_LOGO_SVG: &str = include_str!("../../../assets/keepbook-icon.svg");
 const INTER_FONT: Asset = asset!("/assets/fonts/InterVariable.woff2");
 const INTER_FONT_CSS: &str = include_str!("../assets/fonts/inter.css");
 
@@ -32,7 +32,7 @@ pub(crate) fn repository_can_remove(repository: &Repository) -> bool {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ActiveView {
+pub(crate) enum ActiveView {
     Spending,
     NetWorth,
     NetWorthBreakdown,
@@ -45,7 +45,7 @@ enum ActiveView {
 }
 
 impl ActiveView {
-    const ALL: [Self; 9] = [
+    pub(crate) const ALL: [Self; 9] = [
         Self::Accounts,
         Self::Assets,
         Self::Spending,
@@ -57,7 +57,7 @@ impl ActiveView {
         Self::Settings,
     ];
 
-    fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> &'static str {
         match self {
             Self::Spending => "Spending",
             Self::NetWorth => "Net Worth",
@@ -286,7 +286,7 @@ fn StatusPanel(state: LoadState, onretry: Option<EventHandler<()>>) -> Element {
             if failed {
                 if let Some(onretry) = onretry {
                     ControlButton {
-                        selected: true,
+                        primary: true,
                         onclick: move |_| onretry.call(()),
                         "Retry"
                     }
@@ -318,93 +318,52 @@ fn Dashboard(
     onrefresh: EventHandler<()>,
 ) -> Element {
     let mut active_view = use_signal(|| ActiveView::Accounts);
-    let mut mobile_nav_open = use_signal(|| false);
     let active = active_view();
-    let nav_class = if mobile_nav_open() {
-        "app-nav open"
-    } else {
-        "app-nav"
+    let (repository_options, active_repository) = match repositories.clone() {
+        Some(Ok(registry)) => (
+            registry
+                .repositories
+                .iter()
+                .map(|repository| SelectOption {
+                    value: repository.id.clone(),
+                    label: repository.name.clone(),
+                    disabled: !repository.cloned,
+                })
+                .collect::<Vec<_>>(),
+            registry.active_repository.unwrap_or_default(),
+        ),
+        _ => (Vec::new(), String::new()),
     };
 
     rsx! {
-        div { class: "app-shell",
-            DesktopTrayViewActions {
-                onshowsettings: move |_| active_view.set(ActiveView::Settings),
-            }
-            aside { class: "{nav_class}",
-                div { class: "nav-header",
-                    div { class: "nav-title",
-                        div { class: "nav-logo", dangerous_inner_html: NAV_LOGO_SVG }
-                        div { class: "nav-title-text",
-                            strong { "{APP_NAME}" }
-                            small { "{overview.reporting_currency}" }
-                        }
-                    }
-                    button {
-                        class: "mobile-nav-toggle",
-                        r#type: "button",
-                        aria_label: "Toggle navigation",
-                        aria_expanded: "{mobile_nav_open()}",
-                        onclick: move |_| mobile_nav_open.set(!mobile_nav_open()),
-                        span { aria_hidden: "true" }
-                        span { aria_hidden: "true" }
-                        span { aria_hidden: "true" }
-                    }
-                    if let Some(Ok(registry)) = repositories.clone() {
-                        label { class: "repository-switcher",
-                            span { "Repository" }
-                            select {
-                                class: "control-input",
-                                aria_label: "Repository",
-                                disabled: repository_busy,
-                                value: registry.active_repository.as_deref().unwrap_or_default(),
-                                onchange: move |event| onrepositorychange.call(event.value()),
-                                for repository in registry.repositories {
-                                    option {
-                                        value: "{repository.id}",
-                                        disabled: !repository.cloned,
-                                        "{repository.name}"
-                                    }
-                                }
-                            }
-                        }
-                    }
+        DesktopTrayViewActions {
+            onshowsettings: move |_| active_view.set(ActiveView::Settings),
+        }
+        AppShell {
+            title: APP_NAME,
+            currency: overview.reporting_currency.clone(),
+            repositories: repository_options,
+            repository: active_repository,
+            repository_busy,
+            repository_status: (!repository_status.is_empty()).then(|| repository_status.clone()),
+            nav_items: ActiveView::ALL.map(|view| view.label().to_string()).to_vec(),
+            active: active.label(),
+            onrepositorychange: move |id: String| onrepositorychange.call(id),
+            onnavigate: move |label: String| {
+                let Some(view) = ActiveView::ALL.into_iter().find(|view| view.label() == label) else {
+                    return;
+                };
+                if matches!(
+                    view,
+                    ActiveView::Accounts
+                        | ActiveView::Assets
+                        | ActiveView::NetWorth
+                        | ActiveView::NetWorthBreakdown
+                ) {
+                    onrefresh.call(());
                 }
-                if !repository_status.is_empty() {
-                    div { class: "repository-switch-status", aria_live: "polite",
-                        if repository_busy { span { class: "activity-spinner" } }
-                        small { "{repository_status}" }
-                    }
-                }
-                nav {
-                    for view in ActiveView::ALL {
-                        NavButton {
-                            label: view.label(),
-                            selected: active == view,
-                            onclick: move |_| {
-                                if matches!(
-                                    view,
-                                    ActiveView::Accounts
-                                        | ActiveView::Assets
-                                        | ActiveView::NetWorth
-                                        | ActiveView::NetWorthBreakdown
-                                ) {
-                                    onrefresh.call(());
-                                }
-                                active_view.set(view);
-                                mobile_nav_open.set(false);
-                            }
-                        }
-                    }
-                }
-            }
-            button {
-                class: if mobile_nav_open() { "nav-backdrop open" } else { "nav-backdrop" },
-                r#type: "button",
-                aria_label: "Close navigation",
-                onclick: move |_| mobile_nav_open.set(false),
-            }
-            div { class: "workspace",
+                active_view.set(view);
+            },
                 if overview_refreshing {
                     OperationStatus {
                         message: "Refreshing app data…".to_string(),
@@ -479,7 +438,6 @@ fn Dashboard(
                         }
                     },
                 }
-            }
         }
     }
 }
@@ -505,21 +463,4 @@ fn DesktopTrayViewActions(onshowsettings: EventHandler<()>) -> Element {
 fn DesktopTrayViewActions(onshowsettings: EventHandler<()>) -> Element {
     let _ = onshowsettings;
     rsx! {}
-}
-
-#[component]
-fn NavButton(label: &'static str, selected: bool, onclick: EventHandler<MouseEvent>) -> Element {
-    let class = if selected {
-        "nav-button selected"
-    } else {
-        "nav-button"
-    };
-
-    rsx! {
-        button {
-            class: "{class}",
-            onclick: move |event| onclick.call(event),
-            "{label}"
-        }
-    }
 }

@@ -25,23 +25,19 @@ pub(super) fn ProposedEditsView(onrefresh: EventHandler<()>) -> Element {
                 OperationStatus { message: status_text, busy: !busy.is_empty() }
             }
             match current {
-                None => rsx! { BackendActivity { message: "Loading proposed edits" } },
+                None => rsx! { OperationStatus { message: "Loading proposed edits".to_string(), busy: true } },
                 Some(Err(error)) => rsx! { p { class: "validation", "{error}" } },
                 Some(Ok(items)) => rsx! {
                     if items.is_empty() {
-                        div { class: "chart-empty proposal-empty",
-                            strong { "No pending edits" }
-                            small { "Approved, rejected, and removed edits are hidden from this queue." }
+                        EmptyState {
+                            compact: true,
+                            title: "No pending edits",
+                            detail: "Approved, rejected, and removed edits are hidden from this queue.",
                         }
                     } else {
-                        div { class: "data-table proposed-edits-table",
-                            div { class: "table-head",
-                                span { "Transaction" }
-                                span { "Account" }
-                                span { "Patch" }
-                                span { "Created" }
-                                span { "Actions" }
-                            }
+                        DataTable {
+                            class: "proposed-edits-table",
+                            columns: ["Transaction", "Account", "Patch", "Created", "Actions"].map(str::to_string).to_vec(),
                             for edit in items {
                                 ProposedEditRow {
                                     edit: edit.clone(),
@@ -105,7 +101,7 @@ fn ProposedEditRow(
             small { "{edit.created_at}" }
             div { class: "proposal-actions",
                 ControlButton {
-                    selected: true,
+                    primary: true,
                     disabled: any_busy,
                     busy: is_busy && busy_action == "approve",
                     onclick: move |_| ondecide.call((approve_id.clone(), "approve")),

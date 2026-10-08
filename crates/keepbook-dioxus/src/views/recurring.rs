@@ -37,27 +37,21 @@ pub(super) fn RecurringView() -> Element {
                 }
             }
             div { class: "recurring-controls",
-                label { class: "compact-check",
-                    input {
-                        r#type: "checkbox",
-                        checked: include_possible(),
-                        onchange: move |event| {
-                            include_possible.set(event.checked());
-                            recurring.restart();
-                        }
+                Checkbox {
+                    label: "Borderline",
+                    checked: include_possible(),
+                    onchange: move |checked| {
+                        include_possible.set(checked);
+                        recurring.restart();
                     }
-                    span { "Borderline" }
                 }
-                label { class: "compact-check",
-                    input {
-                        r#type: "checkbox",
-                        checked: include_dismissed(),
-                        onchange: move |event| {
-                            include_dismissed.set(event.checked());
-                            recurring.restart();
-                        }
+                Checkbox {
+                    label: "Dismissed",
+                    checked: include_dismissed(),
+                    onchange: move |checked| {
+                        include_dismissed.set(checked);
+                        recurring.restart();
                     }
-                    span { "Dismissed" }
                 }
                 label { class: "control-field compact-control-field",
                     span { "Confidence" }
@@ -88,13 +82,14 @@ pub(super) fn RecurringView() -> Element {
                 OperationStatus { message: status_text, busy: !busy.is_empty() }
             }
             match current {
-                None => rsx! { BackendActivity { message: "Loading recurring transactions" } },
+                None => rsx! { OperationStatus { message: "Loading recurring transactions".to_string(), busy: true } },
                 Some(Err(error)) => rsx! { p { class: "validation", "{error}" } },
                 Some(Ok(items)) => rsx! {
                     if items.is_empty() {
-                        div { class: "chart-empty proposal-empty",
-                            strong { "No predictable recurring costs" }
-                            small { "Include borderline patterns or lower confidence to widen the scan." }
+                        EmptyState {
+                            compact: true,
+                            title: "No predictable recurring costs",
+                            detail: "Include borderline patterns or lower confidence to widen the scan.",
                         }
                     } else {
                         div { class: "recurring-list",
@@ -140,10 +135,10 @@ fn RecurringCandidateCard(
     busy_action: String,
     onreview: EventHandler<(RecurringTransaction, &'static str)>,
 ) -> Element {
-    let review_class = match item.review_status.as_str() {
-        "verified" => "badge positive",
-        "dismissed" => "badge negative",
-        _ => "badge",
+    let review_tone = match item.review_status.as_str() {
+        "verified" => BadgeTone::Positive,
+        "dismissed" => BadgeTone::Negative,
+        _ => BadgeTone::Neutral,
     };
     let candidate_for_verify = item.clone();
     let candidate_for_dismiss = item.clone();
@@ -164,7 +159,7 @@ fn RecurringCandidateCard(
             div { class: "recurring-card-main",
                 div { class: "recurring-title-row",
                     h3 { "{item.name}" }
-                    span { class: "{review_class}", "{item.review_status}" }
+                    Badge { tone: review_tone, "{item.review_status}" }
                 }
                 div { class: "recurring-meta",
                     span { "{item.status}" }
@@ -173,7 +168,7 @@ fn RecurringCandidateCard(
                 }
                 div { class: "recurring-reasons",
                     for reason in item.reason_codes.iter() {
-                        span { class: "badge", "{reason}" }
+                        Badge { "{reason}" }
                     }
                 }
             }
@@ -195,7 +190,7 @@ fn RecurringCandidateCard(
             }
             div { class: "recurring-actions",
                 ControlButton {
-                    selected: true,
+                    primary: true,
                     disabled: any_busy || item.review_status == "verified",
                     busy: is_busy && busy_action == "verified",
                     onclick: move |_| onreview.call((candidate_for_verify.clone(), "verified")),
@@ -211,13 +206,9 @@ fn RecurringCandidateCard(
             }
             details { class: "recurring-occurrences",
                 summary { "{item.occurrence_count} transactions · {item.first_seen} to {item.last_seen}" }
-                div { class: "data-table recurring-occurrence-table",
-                    div { class: "table-head",
-                        span { "Date" }
-                        span { "Description" }
-                        span { "Account" }
-                        span { "Amount" }
-                    }
+                DataTable {
+                    class: "recurring-occurrence-table",
+                    columns: ["Date", "Description", "Account", "Amount"].map(str::to_string).to_vec(),
                     for occurrence in item.transactions.iter() {
                         div { class: "table-row",
                             small { "{occurrence.date}" }

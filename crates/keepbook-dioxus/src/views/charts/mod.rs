@@ -1,12 +1,10 @@
 mod geometry;
-mod net_worth;
 mod stacked;
 
 use super::*;
 use std::collections::HashSet;
 
 use geometry::*;
-use net_worth::*;
 use stacked::*;
 
 /// Range presets offered by the net-worth graph panels, in display order.
@@ -105,9 +103,9 @@ pub(super) fn AccountGraphPanel(
                 }
             },
             if selected_id.is_empty() {
-                div { class: "chart-empty",
-                    strong { "No accounts" }
-                    small { "Refresh balances or add an account to populate account charts." }
+                EmptyState {
+                    title: "No accounts",
+                    detail: "Refresh balances or add an account to populate account charts.",
                 }
             } else {
                 HistoryGraphPanel {
@@ -228,7 +226,7 @@ pub(super) fn StackedHistoryGraphPanel(
             title: "Net Worth Breakdown",
             subtitle: "Zero baseline / stacked by account",
             if is_history_loading {
-                BackendActivity { message: "Waiting on backend net worth data" }
+                OperationStatus { message: "Waiting on backend net worth data".to_string(), busy: true }
             }
             div { class: "chart-controls",
                 SegmentedControl {
@@ -282,9 +280,10 @@ pub(super) fn StackedHistoryGraphPanel(
             }
             match history_state {
                 None => rsx! {
-                    GraphLoadingPanel {
-                        range: range_summary_text(&start_date, &end_date),
-                        sampling: selected_sampling.label()
+                    EmptyState {
+                        loading: true,
+                        title: "Updating graph".to_string(),
+                        detail: format!("{} / {}", range_summary_text(&start_date, &end_date), selected_sampling.label()),
                     }
                 },
                 Some(Err(error)) => rsx! {
@@ -322,8 +321,9 @@ pub(super) fn StackedHistoryGraphPanel(
             }
             div { class: "chart-controls chart-bottom-controls",
                 div { class: "control-grid compact-date-grid",
-                    DateInput {
-                        label: "Start",
+                    TextInput {
+                        kind: InputKind::Date,
+                        label: "Start".to_string(),
                         value: start_date.clone(),
                         min: min_date.clone(),
                         max: end_date.clone(),
@@ -332,8 +332,9 @@ pub(super) fn StackedHistoryGraphPanel(
                             range_preset.set(RangePreset::Custom);
                         }
                     }
-                    DateInput {
-                        label: "End",
+                    TextInput {
+                        kind: InputKind::Date,
+                        label: "End".to_string(),
                         value: end_date.clone(),
                         min: start_date.clone(),
                         max: max_date.clone(),
@@ -481,7 +482,7 @@ pub(super) fn HistoryGraphPanel(
             }
         }
         if is_history_loading {
-            BackendActivity { message: "Waiting on backend graph data" }
+            OperationStatus { message: "Waiting on backend graph data".to_string(), busy: true }
         }
         div { class: "chart-controls",
             SegmentedControl {
@@ -523,9 +524,10 @@ pub(super) fn HistoryGraphPanel(
         }
         match history_state {
             None => rsx! {
-                GraphLoadingPanel {
-                    range: range_summary_text(&start_date, &end_date),
-                    sampling: selected_sampling.label()
+                EmptyState {
+                    loading: true,
+                    title: "Updating graph".to_string(),
+                    detail: format!("{} / {}", range_summary_text(&start_date, &end_date), selected_sampling.label()),
                 }
             },
             Some(Err(error)) => rsx! {
@@ -556,8 +558,9 @@ pub(super) fn HistoryGraphPanel(
         }
         div { class: "chart-controls chart-bottom-controls",
             div { class: "control-grid",
-                DateInput {
-                    label: "Start",
+                TextInput {
+                    kind: InputKind::Date,
+                    label: "Start".to_string(),
                     value: start_date.clone(),
                     min: min_date.clone(),
                     max: end_date.clone(),
@@ -566,8 +569,9 @@ pub(super) fn HistoryGraphPanel(
                         range_preset.set(RangePreset::Custom);
                     }
                 }
-                DateInput {
-                    label: "End",
+                TextInput {
+                    kind: InputKind::Date,
+                    label: "End".to_string(),
                     value: end_date.clone(),
                     min: start_date.clone(),
                     max: max_date.clone(),
@@ -576,13 +580,15 @@ pub(super) fn HistoryGraphPanel(
                         range_preset.set(RangePreset::Custom);
                     }
                 }
-                NumberInput {
-                    label: "Min",
+                TextInput {
+                    kind: InputKind::Number,
+                    label: "Min".to_string(),
                     value: y_min_text.clone(),
                     oninput: move |value| y_min_input.set(value)
                 }
-                NumberInput {
-                    label: "Max",
+                TextInput {
+                    kind: InputKind::Number,
+                    label: "Max".to_string(),
                     value: y_max_text.clone(),
                     oninput: move |value| y_max_input.set(value)
                 }

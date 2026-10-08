@@ -9,7 +9,7 @@ export interface OperationStatusProps {
  * Inline feedback for work the user started, shown next to its controls.
  *
  * It never blocks the page or replaces loaded content. Mirrors
- * `OperationStatus` in `views/shared.rs`.
+ * `components/feedback/operation_status.rs`.
  */
 export function OperationStatus({ message, busy }: OperationStatusProps) {
   return (

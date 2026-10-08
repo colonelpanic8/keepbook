@@ -34,7 +34,7 @@ export interface SplitButtonProps {
  * For example, "Refresh all prices" with "Refresh stale prices" and "Resync
  * data" in the menu. Use it instead of a checkbox that modifies an action, and
  * to keep a toolbar down to its essential buttons. Mirrors `SplitButton` in
- * `views/shared.rs`.
+ * `components/actions/split_button.rs`.
  */
 export function SplitButton({
   children,

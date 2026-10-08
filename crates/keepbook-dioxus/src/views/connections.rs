@@ -22,32 +22,23 @@ pub(super) fn ConnectionsView(
             subtitle: connection_count.to_string(),
             actions: rsx! {
                 div { class: "settings-actions inline-actions",
-                    label { class: "compact-check",
-                        input {
-                            r#type: "checkbox",
-                            checked: only_stale(),
-                            disabled: is_busy,
-                            onchange: move |event| only_stale.set(event.checked())
-                        }
-                        span { "Stale only" }
+                    Checkbox {
+                        label: "Stale only",
+                        checked: only_stale(),
+                        disabled: is_busy,
+                        onchange: move |checked| only_stale.set(checked)
                     }
-                    label { class: "compact-check",
-                        input {
-                            r#type: "checkbox",
-                            checked: full_transactions(),
-                            disabled: is_busy,
-                            onchange: move |event| full_transactions.set(event.checked())
-                        }
-                        span { "Full transactions" }
+                    Checkbox {
+                        label: "Full transactions",
+                        checked: full_transactions(),
+                        disabled: is_busy,
+                        onchange: move |checked| full_transactions.set(checked)
                     }
-                    label { class: "compact-check",
-                        input {
-                            r#type: "checkbox",
-                            checked: force_prices(),
-                            disabled: is_busy,
-                            onchange: move |event| force_prices.set(event.checked())
-                        }
-                        span { "Force prices" }
+                    Checkbox {
+                        label: "Force prices",
+                        checked: force_prices(),
+                        disabled: is_busy,
+                        onchange: move |checked| force_prices.set(checked)
                     }
                     ControlButton {
                         disabled: is_busy,
@@ -78,7 +69,7 @@ pub(super) fn ConnectionsView(
                         if busy == "all" { "Refreshing" } else { "Refresh balances" }
                     }
                     ControlButton {
-                        selected: true,
+                        primary: true,
                         disabled: is_busy,
                         busy: busy == "prices:all",
                         onclick: move |_| {
@@ -112,14 +103,9 @@ pub(super) fn ConnectionsView(
             if !status_text.is_empty() {
                 OperationStatus { message: status_text, busy: is_busy }
             }
-            div { class: "data-table connection-table",
-                div { class: "table-head",
-                    span { "Name" }
-                    span { "Source" }
-                    span { "Accounts" }
-                    span { "Last balance refresh" }
-                    span { "Actions" }
-                }
+            DataTable {
+                class: "connection-table",
+                columns: ["Name", "Source", "Accounts", "Last balance refresh", "Actions"].map(str::to_string).to_vec(),
                 for connection in connections {
                     {
                         let target = connection.id.clone();
@@ -133,7 +119,7 @@ pub(super) fn ConnectionsView(
                         rsx! {
                     div { class: "table-row",
                         strong { "{connection.name}" }
-                        span { class: "badge positive", "{connection.status}" }
+                        Badge { tone: BadgeTone::Positive, "{connection.status}" }
                         span { "{connection.account_count}" }
                         small {
                             "{connection.last_sync.clone().unwrap_or_else(|| \"Never\".to_string())}"

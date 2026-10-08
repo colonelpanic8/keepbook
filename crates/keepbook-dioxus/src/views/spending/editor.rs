@@ -35,13 +35,11 @@ pub(super) fn GroupTagsEditor(
                         span { class: "tag-empty", "No tags selected" }
                     }
                     for tag in tags.clone() {
-                        button {
-                            class: "tag-pill removable",
-                            title: "Remove tag",
+                        TagPill {
+                            tag: tag.clone(),
+                            removable: true,
                             disabled: !has_selection,
                             onclick: move |_| selected_tags.set(remove_tag_from_list(&selected_tags(), &tag)),
-                            span { "{tag}" }
-                            span { class: "tag-pill-remove", "x" }
                         }
                     }
                     div { class: "tag-entry-row",
@@ -59,8 +57,8 @@ pub(super) fn GroupTagsEditor(
                                 option { value: "{tag}" }
                             }
                         }
-                        button {
-                            class: "control-button small",
+                        ControlButton {
+                            small: true,
                             title: "Add tag",
                             disabled: !can_add,
                             onclick: move |_| {
@@ -74,11 +72,11 @@ pub(super) fn GroupTagsEditor(
                 if !suggestions.is_empty() {
                     div { class: "tag-suggestion-list",
                         for tag in suggestions {
-                            button {
-                                class: "tag-suggestion-pill",
+                            TagPill {
+                                tag: tag.clone(),
+                                suggestion: true,
                                 disabled: !has_selection,
                                 onclick: move |_| selected_tags.set(add_tag_to_list(selected_tags(), &tag)),
-                                "{tag}"
                             }
                         }
                     }
@@ -86,7 +84,7 @@ pub(super) fn GroupTagsEditor(
             }
             div { class: "group-tag-row tag-action-row",
                 ControlButton {
-                    selected: true,
+                    primary: true,
                     disabled: !has_selection || tags.is_empty(),
                     onclick: move |_| {
                         ontagsbulksave.call(SetTransactionTagsInput {
@@ -205,9 +203,9 @@ pub(super) fn TransactionEditorPanel(
                                 span { class: "tag-empty", "Untagged" }
                             }
                             for tag in current_tags.clone() {
-                                button {
-                                    class: "tag-pill removable",
-                                    title: "Remove tag",
+                                TagPill {
+                                    tag: tag.clone(),
+                                    removable: true,
                                     disabled,
                                     onclick: {
                                         let account_id = account_id.clone();
@@ -223,8 +221,6 @@ pub(super) fn TransactionEditorPanel(
                                             ));
                                         }
                                     },
-                                    span { "{tag}" }
-                                    span { class: "tag-pill-remove", "x" }
                                 }
                             }
                             div { class: "tag-entry-row",
@@ -263,8 +259,8 @@ pub(super) fn TransactionEditorPanel(
                                         option { value: "{tag}" }
                                     }
                                 }
-                                button {
-                                    class: "control-button small",
+                                ControlButton {
+                                    small: true,
                                     title: "Add tag",
                                     disabled: !can_add,
                                     onclick: {
@@ -292,8 +288,9 @@ pub(super) fn TransactionEditorPanel(
                         if !suggestions.is_empty() {
                             div { class: "tag-suggestion-list",
                                 for tag in suggestions.clone() {
-                                    button {
-                                        class: "tag-suggestion-pill",
+                                    TagPill {
+                                        tag: tag.clone(),
+                                        suggestion: true,
                                         disabled,
                                         onclick: {
                                             let account_id = account_id.clone();
@@ -309,7 +306,6 @@ pub(super) fn TransactionEditorPanel(
                                                 ));
                                             }
                                         },
-                                        "{tag}"
                                     }
                                 }
                             }
@@ -351,8 +347,8 @@ pub(super) fn TransactionEditorPanel(
                         }
                         small { "Posted {posted_date}" }
                         if has_effective_date {
-                            button {
-                                class: "control-button small",
+                            ControlButton {
+                                small: true,
                                 title: "Reset to posted date",
                                 disabled,
                                 onclick: {
@@ -374,26 +370,24 @@ pub(super) fn TransactionEditorPanel(
                 }
                 div { class: "transaction-editor-section",
                     span { class: "control-label", "Spending" }
-                    label { class: "compact-check transaction-exclude-toggle",
-                        input {
-                            r#type: "checkbox",
-                            checked: exclude_checked,
-                            disabled: rule_ignored || disabled,
-                            onchange: {
-                                let account_id = account_id.clone();
-                                let transaction_id = transaction_id.clone();
-                                move |event: FormEvent| {
+                    Checkbox {
+                        label: "Exclude from spending",
+                        class: "transaction-exclude-toggle",
+                        checked: exclude_checked,
+                        disabled: rule_ignored || disabled,
+                        onchange: {
+                            let account_id = account_id.clone();
+                            let transaction_id = transaction_id.clone();
+                            move |checked: bool| {
                                     onignoresave.call(SetTransactionIgnoreInput {
                                         transactions: single_transaction_target(
                                             &account_id,
                                             &transaction_id,
                                         ),
-                                        ignore: event.checked(),
+                                        ignore: checked,
                                     });
                                 }
                             }
-                        }
-                        span { "Exclude from spending" }
                     }
                     if rule_ignored {
                         small { class: "transaction-exclude-note", "Excluded by an ignore rule" }

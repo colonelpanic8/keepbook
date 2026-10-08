@@ -16,12 +16,12 @@ export interface ModalProps {
  * A centered dialog over a dimmed backdrop; render it only while open.
  *
  * Use it for focused edits and long-running operations, and prefer inline
- * feedback for everything else. Mirrors `Modal` in `views/shared.rs`.
+ * feedback for everything else. Mirrors `components/layout/modal.rs`.
  */
 export function Modal({ title, headerActions, actions, wide, children }: ModalProps) {
   return (
     <div className="modal-backdrop">
-      <div className={cx("modal-dialog", wide && "group-edit-dialog")} role="dialog" aria-label={title}>
+      <div className={cx("modal-dialog", wide && "wide")} role="dialog" aria-label={title}>
         <div className="modal-header">
           <h3>{title}</h3>
           {headerActions}

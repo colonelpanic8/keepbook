@@ -12,7 +12,7 @@ export interface ThemePickerProps {
 /**
  * The Settings theme row: picking a theme re-themes the whole page and remembers the choice.
  *
- * Mirrors the Theme setting in `views/graph_settings.rs`, including its
+ * Mirrors `components/layout/theme_picker.rs`, including its
  * `keepbook-theme` storage key, so every preview card that follows the stored
  * theme switches with it.
  */

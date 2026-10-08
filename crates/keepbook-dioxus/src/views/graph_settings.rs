@@ -5,10 +5,6 @@ use crate::api::{
 };
 use dioxus::core::Task;
 
-/// Selectable UI themes. The identifier maps to `data-theme` on the document
-/// element (with "fern" being the `:root` default, so it clears the attribute).
-const THEMES: &[(&str, &str)] = &[("fern", "Fern"), ("dark", "Dark")];
-
 #[component]
 pub(super) fn NetWorthGraphView(
     currency: String,
@@ -73,29 +69,21 @@ fn PortfolioSettingsPanel(
     let reset_filter_overrides = filter_overrides.clone();
 
     rsx! {
-        section { class: "panel settings-panel",
-            div { class: "panel-header",
-                h2 { "Portfolio" }
-                span { "{source}" }
-            }
+        Panel {
+            class: "settings-panel",
+            title: "Portfolio",
+            subtitle: source.to_string(),
             div { class: "settings-list",
-                article { class: "setting-row",
-                    div { class: "setting-copy",
-                        strong { "Latent capital gains tax" }
-                        small { "Include {latent_tax.account_name} in net worth and history" }
-                    }
-                    label { class: "switch-control",
-                        input {
-                            r#type: "checkbox",
-                            checked: latent_tax.effective_enabled,
-                            onchange: move |event| {
-                                let mut next = toggle_filter_overrides.clone();
-                                next.include_latent_capital_gains_tax = Some(event.checked());
-                                onfilterchange.call(next);
-                            }
-                        }
-                        span { class: "switch-track",
-                            span { class: "switch-thumb" }
+                SettingRow {
+                    title: "Latent capital gains tax",
+                    description: format!("Include {} in net worth and history", latent_tax.account_name),
+                    Switch {
+                        label: "Latent capital gains tax",
+                        checked: latent_tax.effective_enabled,
+                        onchange: move |checked| {
+                            let mut next = toggle_filter_overrides.clone();
+                            next.include_latent_capital_gains_tax = Some(checked);
+                            onfilterchange.call(next);
                         }
                     }
                 }
@@ -151,62 +139,13 @@ fn ApplicationSettingsPanel() -> Element {
     let is_busy = busy();
     let status_text = status();
 
-    // Current theme, seeded from persisted localStorage on mount. Defaults to
-    // "fern" on any error or absence.
-    let mut current_theme = use_signal(|| "fern".to_string());
-    use_future(move || async move {
-        let eval = document::eval(r#"return localStorage.getItem("keepbook-theme");"#);
-        if let Ok(value) = eval.await {
-            if let Some(theme) = value.as_str() {
-                if THEMES.iter().any(|(id, _)| *id == theme) {
-                    current_theme.set(theme.to_string());
-                }
-            }
-        }
-    });
-
     rsx! {
-        section { class: "panel settings-panel",
-            div { class: "panel-header",
-                h2 { "Application" }
-                span { "Build" }
-            }
+        Panel {
+            class: "settings-panel",
+            title: "Application",
+            subtitle: "Build",
             div { class: "settings-list",
-                article { class: "setting-row setting-row-stacked",
-                    div { class: "setting-copy",
-                        strong { "Theme" }
-                        small { "Appearance of the app" }
-                    }
-                    SegmentedControl {
-                        class: "setting-segmented".to_string(),
-                        label: "Theme".to_string(),
-                        options: THEMES
-                            .iter()
-                            .map(|(id, label)| SegmentedOption::new(*id, *label))
-                            .collect::<Vec<_>>(),
-                        selected: current_theme(),
-                        onselect: move |theme_id: String| {
-                            if !THEMES.iter().any(|(id, _)| *id == theme_id) {
-                                return;
-                            }
-                            current_theme.set(theme_id.clone());
-                            // `theme_id` was just matched against the THEMES const, so
-                            // formatting it into the JS string is safe.
-                            let js = format!(
-                                r#"
-                                var theme = "{theme_id}";
-                                if (theme === "fern") {{
-                                    delete document.documentElement.dataset.theme;
-                                }} else {{
-                                    document.documentElement.dataset.theme = theme;
-                                }}
-                                localStorage.setItem("keepbook-theme", theme);
-                                "#
-                            );
-                            let _ = document::eval(&js);
-                        },
-                    }
-                }
+                ThemePicker {}
             }
             div { class: "settings-meta settings-meta-grid app-build-meta",
                 span { "Version {app_version}" }
@@ -216,22 +155,18 @@ fn ApplicationSettingsPanel() -> Element {
                 }
             }
             match current_settings {
-                None => rsx! { BackendActivity { message: "Loading application settings" } },
+                None => rsx! { OperationStatus { message: "Loading application settings".to_string(), busy: true } },
                 Some(Err(error)) => rsx! { p { class: "validation", "{error}" } },
                 Some(Ok(current)) => rsx! {
                     div { class: "settings-list",
-                        article { class: "setting-row",
-                            div { class: "setting-copy",
-                                strong { "Start minimized to tray" }
-                                small { "Launch Keepbook in the background and open it from the tray icon" }
-                            }
-                            label { class: "switch-control",
-                                input {
-                                    r#type: "checkbox",
+                        SettingRow {
+                            title: "Start minimized to tray",
+                            description: "Launch Keepbook in the background and open it from the tray icon",
+                                Switch {
+                                    label: "Start minimized to tray",
                                     checked: start_minimized(),
                                     disabled: is_busy,
-                                    onchange: move |event| {
-                                        let next = event.checked();
+                                    onchange: move |next: bool| {
                                         start_minimized.set(next);
                                         busy.set(true);
                                         status.set("Saving application settings...".to_string());
@@ -259,23 +194,21 @@ fn ApplicationSettingsPanel() -> Element {
                                         });
                                     }
                                 }
-                                span { class: "switch-track",
-                                    span { class: "switch-thumb" }
-                                }
-                            }
                         }
-                        article { class: "setting-row setting-row-stacked",
-                            div { class: "setting-copy",
-                                strong { "Window decorations" }
-                                small { "Auto hides the system title bar on Hyprland; choose System or Hidden to override it" }
-                            }
-                            select {
-                                class: "control-input",
-                                value: "{window_decorations}",
+                        SettingRow {
+                            stacked: true,
+                            title: "Window decorations",
+                            description: "Auto hides the system title bar on Hyprland; choose System or Hidden to override it",
+                            Select {
+                                options: vec![
+                                    SelectOption::new("auto", "Auto"),
+                                    SelectOption::new("system", "System"),
+                                    SelectOption::new("hidden", "Hidden"),
+                                ],
+                                value: window_decorations(),
                                 disabled: is_busy,
-                                onchange: move |event| {
+                                onchange: move |next: String| {
                                     let previous = window_decorations();
-                                    let next = event.value();
                                     let current_start_minimized = start_minimized();
                                     window_decorations.set(next.clone());
                                     busy.set(true);
@@ -303,9 +236,6 @@ fn ApplicationSettingsPanel() -> Element {
                                         busy.set(false);
                                     });
                                 },
-                                option { value: "auto", "Auto" }
-                                option { value: "system", "System" }
-                                option { value: "hidden", "Hidden" }
                             }
                         }
                     }
@@ -396,7 +326,7 @@ pub(super) fn SettingsView(
                 }
             },
             match repositories.clone() {
-                None => rsx! { BackendActivity { message: "Loading repositories" } },
+                None => rsx! { OperationStatus { message: "Loading repositories".to_string(), busy: true } },
                 Some(Err(error)) => rsx! { p { class: "validation", "{error}" } },
                 Some(Ok(registry)) => rsx! {
                     div { class: "settings-meta",
@@ -496,7 +426,7 @@ pub(super) fn SettingsView(
             title: "Git Authentication",
             subtitle: "Device-local",
             match current_settings {
-                None => rsx! { BackendActivity { message: "Loading Git authentication" } },
+                None => rsx! { OperationStatus { message: "Loading Git authentication".to_string(), busy: true } },
                 Some(Err(error)) => rsx! { p { class: "validation", "{error}" } },
                 Some(Ok(current)) => rsx! {
                     div { class: "settings-meta",
@@ -587,11 +517,11 @@ pub(super) fn SettingsView(
             Modal {
                 title: "Add repository",
                 header_actions: rsx! {
-                    button {
-                        class: "icon-button",
+                    IconButton {
+                        label: "Close",
+                        glyph: "×",
                         disabled: is_busy,
                         onclick: move |_| add_location_open.set(false),
-                        "x"
                     }
                 },
                 actions: rsx! {
@@ -601,7 +531,7 @@ pub(super) fn SettingsView(
                         "Cancel"
                     }
                     ControlButton {
-                        selected: true,
+                        primary: true,
                         disabled: is_busy,
                         onclick: move |_| {
                             match git_settings_from_remote(&location_remote_input()) {
@@ -695,14 +625,14 @@ pub(super) fn SettingsView(
         }
         if clone_dialog_open() {
             Modal {
-                dialog_class: "clone-dialog",
+                wide: true,
                 title: clone_dialog_title(),
                 header_actions: rsx! {
                     if !is_busy {
-                        button {
-                            class: "icon-button",
+                        IconButton {
+                            label: "Close",
+                            glyph: "×",
                             onclick: move |_| clone_dialog_open.set(false),
-                            "x"
                         }
                     }
                 },
@@ -728,25 +658,13 @@ pub(super) fn SettingsView(
                         }
                     } else {
                         ControlButton {
-                            selected: true,
+                            primary: true,
                             onclick: move |_| clone_dialog_open.set(false),
                             "Close"
                         }
                     }
                 },
-                div { class: "clone-progress",
-                    if is_busy {
-                        span { class: "activity-spinner large" }
-                    }
-                    div { class: "clone-progress-copy",
-                        p { "{clone_dialog_message()}" }
-                        if is_busy {
-                            div { class: "indeterminate-progress",
-                                span {}
-                            }
-                        }
-                    }
-                }
+                Progress { label: clone_dialog_message(), busy: is_busy }
             }
         }
     }
@@ -798,7 +716,7 @@ fn RepositoryList(
                     div { class: "git-location-actions",
                         if !repository.active && repository.cloned {
                             ControlButton {
-                                selected: true,
+                                primary: true,
                                 disabled: busy,
                                 onclick: {
                                     let repository_id = repository.id.clone();

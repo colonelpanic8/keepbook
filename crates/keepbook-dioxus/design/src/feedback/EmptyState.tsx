@@ -1,4 +1,5 @@
 import { cx } from "../cx";
+import { Spinner } from "./Spinner";
 
 export interface EmptyStateProps {
   title: string;
@@ -8,26 +9,27 @@ export interface EmptyStateProps {
   loading?: boolean;
   /** For lists and tables: a fixed minimum height instead of a chart's aspect ratio. */
   compact?: boolean;
+  className?: string;
 }
 
 /**
  * A dashed placeholder that keeps the footprint of the content it replaces.
  *
- * The page doesn't jump when data arrives. Mirrors `GraphLoadingPanel` and the
- * views' `chart-empty` blocks.
+ * The page doesn't jump when data arrives. Mirrors
+ * `components/feedback/empty_state.rs`.
  */
-export function EmptyState({ title, detail, loading, compact }: EmptyStateProps) {
+export function EmptyState({ title, detail, loading, compact, className }: EmptyStateProps) {
   if (loading) {
     return (
-      <div className={cx("chart-loading", compact && "spending-empty")} role="status" aria-live="polite">
-        <span className="activity-spinner large" />
+      <div className={cx("chart-loading", compact && "compact", className)} role="status" aria-live="polite">
+        <Spinner size="large" />
         <strong>{title}</strong>
         <span>{detail}</span>
       </div>
     );
   }
   return (
-    <div className={cx("chart-empty", compact && "spending-empty")}>
+    <div className={cx("chart-empty", compact && "compact", className)}>
       <strong>{title}</strong>
       <small>{detail}</small>
     </div>

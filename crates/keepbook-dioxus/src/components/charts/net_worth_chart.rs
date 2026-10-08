@@ -1,7 +1,10 @@
-use super::*;
+use crate::components::*;
+use crate::dto::*;
+use crate::logic::*;
+use dioxus::prelude::*;
 
 #[component]
-pub(super) fn NetWorthChart(
+pub(crate) fn NetWorthChart(
     data: Vec<NetWorthDataPoint>,
     currency: String,
     y_domain: Option<(f64, f64)>,
@@ -22,9 +25,9 @@ pub(super) fn NetWorthChart(
 
     if values.is_empty() {
         return rsx! {
-            div { class: "chart-empty",
-                strong { "{empty_title}" }
-                small { "{empty_detail}" }
+            EmptyState {
+                title: empty_title.clone(),
+                detail: empty_detail.clone(),
             }
         };
     }
@@ -143,9 +146,9 @@ pub(super) fn NetWorthChart(
         .join("\n");
     let (Some(first), Some(latest)) = (chart_points.first(), chart_points.last()) else {
         return rsx! {
-            div { class: "chart-empty",
-                strong { "{empty_title}" }
-                small { "{empty_detail}" }
+            EmptyState {
+                title: empty_title.clone(),
+                detail: empty_detail.clone(),
             }
         };
     };

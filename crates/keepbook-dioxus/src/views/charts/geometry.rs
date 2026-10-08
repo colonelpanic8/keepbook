@@ -36,14 +36,6 @@ pub(super) struct StackedTooltipRow {
     pub(super) color: &'static str,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) struct ChartDragSelection {
-    pub(super) x: f64,
-    pub(super) y: f64,
-    pub(super) width: f64,
-    pub(super) height: f64,
-}
-
 pub(super) fn account_stacked_series(history: &StackedHistory) -> Vec<StackedHistorySeries> {
     let final_values = final_component_values(history);
     let mut series = history
@@ -269,44 +261,6 @@ pub(super) fn stacked_y(
     plot_height: f64,
 ) -> f64 {
     padding_top + ((y_min + y_range - value) / y_range) * plot_height
-}
-
-pub(super) fn chart_drag_selection(
-    start: Option<usize>,
-    current: Option<usize>,
-    point_xs: Vec<f64>,
-    padding_top: f64,
-    plot_height: f64,
-) -> Option<ChartDragSelection> {
-    let start = start?;
-    let current = current?;
-    if start == current {
-        return None;
-    }
-    let start_x = *point_xs.get(start)?;
-    let current_x = *point_xs.get(current)?;
-    let x = start_x.min(current_x);
-    Some(ChartDragSelection {
-        x,
-        y: padding_top,
-        width: (start_x - current_x).abs().max(1.0),
-        height: plot_height,
-    })
-}
-
-pub(super) fn selected_date_range(
-    start: Option<usize>,
-    current: Option<usize>,
-    dates: &[String],
-) -> Option<(String, String)> {
-    let start = start?;
-    let current = current?;
-    if start == current {
-        return None;
-    }
-    let min_index = start.min(current);
-    let max_index = start.max(current);
-    Some((dates.get(min_index)?.clone(), dates.get(max_index)?.clone()))
 }
 
 #[allow(clippy::too_many_arguments)]

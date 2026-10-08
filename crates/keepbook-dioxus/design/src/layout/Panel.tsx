@@ -15,7 +15,7 @@ export interface PanelProps {
  * The unit of page content: a bordered surface with a titled header.
  *
  * A panel is a single column that never grows wider than the workspace, so
- * long values wrap. Mirrors `Panel` in `views/shared.rs`.
+ * long values wrap. Mirrors `components/layout/panel.rs`.
  */
 export function Panel({ title, subtitle, actions, className, children }: PanelProps) {
   return (

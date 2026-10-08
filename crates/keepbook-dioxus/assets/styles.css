@@ -1241,11 +1241,6 @@ select.control-input option {
   white-space: nowrap;
 }
 
-.clone-dialog {
-  max-width: 500px;
-  width: min(100%, 500px);
-}
-
 .clone-progress {
   align-items: center;
   display: flex;
@@ -1352,7 +1347,7 @@ select.control-input option {
   width: min(100%, 440px);
 }
 
-.modal-dialog.group-edit-dialog {
+.modal-dialog.wide {
   max-width: 620px;
   width: min(100%, 620px);
 }
@@ -2335,8 +2330,9 @@ button.stacked-legend-item {
   min-width: 64px;
 }
 
-.spending-empty,
-.transaction-empty {
+/* Placeholders for lists and tables, which have no chart ratio to keep. */
+.chart-empty.compact,
+.chart-loading.compact {
   aspect-ratio: auto;
   min-height: 180px;
 }
@@ -2600,11 +2596,6 @@ button.stacked-legend-item {
   color: var(--color-text);
 }
 
-.reset-account-override {
-  min-height: var(--control-height-sm);
-  padding: 0 var(--sp-8);
-}
-
 .connection-table .table-head,
 .connection-table .table-row {
   grid-template-columns:
@@ -2650,11 +2641,6 @@ button.stacked-legend-item {
 
 .proposal-actions .control-button {
   min-width: 76px;
-}
-
-.proposal-empty {
-  aspect-ratio: auto;
-  min-height: 160px;
 }
 
 .recurring-panel {

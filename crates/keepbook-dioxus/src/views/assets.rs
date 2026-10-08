@@ -31,7 +31,7 @@ pub(super) fn AssetsView(filter_overrides: FilterOverrides) -> Element {
             None => rsx! {
                 Panel {
                     title: "Assets",
-                    BackendActivity { message: "Waiting on backend asset data" }
+                    OperationStatus { message: "Waiting on backend asset data".to_string(), busy: true }
                 }
             },
             Some(Err(error)) => rsx! {
@@ -62,7 +62,7 @@ pub(super) fn AssetsView(filter_overrides: FilterOverrides) -> Element {
                 };
 
                 rsx! {
-                    section { class: "summary-grid assets-summary-grid",
+                    SummaryGrid { class: "assets-summary-grid",
                         MetricCard {
                             label: "Total value",
                             value: total_value,
@@ -96,31 +96,25 @@ pub(super) fn AssetsView(filter_overrides: FilterOverrides) -> Element {
                         },
                         actions: rsx! {
                             div { class: "settings-actions inline-actions asset-view-actions",
-                                label { class: "compact-check",
-                                    input {
-                                        r#type: "checkbox",
-                                        checked: include_amount_changes(),
-                                        onchange: move |event| {
-                                            include_amount_changes.set(event.checked());
-                                            breakdown.restart();
-                                        }
+                                Checkbox {
+                                    label: "Include amount changes",
+                                    checked: include_amount_changes(),
+                                    onchange: move |checked| {
+                                        include_amount_changes.set(checked);
+                                        breakdown.restart();
                                     }
-                                    span { "Include amount changes" }
                                 }
-                                label { class: "compact-check",
-                                    input {
-                                        r#type: "checkbox",
-                                        checked: show_absolute_changes(),
-                                        onchange: move |event| show_absolute_changes.set(event.checked())
-                                    }
-                                    span { "Absolute changes" }
+                                Checkbox {
+                                    label: "Absolute changes",
+                                    checked: show_absolute_changes(),
+                                    onchange: move |checked| show_absolute_changes.set(checked)
                                 }
                             }
                         },
                         if entries.is_empty() {
-                            div { class: "chart-empty",
-                                strong { "No assets" }
-                                small { "Refresh balances to populate the asset breakdown." }
+                            EmptyState {
+                                title: "No assets",
+                                detail: "Refresh balances to populate the asset breakdown.",
                             }
                         } else {
                             AssetMobileSortControls {
@@ -296,7 +290,7 @@ fn AssetRow(
                 div { class: "asset-name-line",
                     strong { "{name}" }
                     if entry.liability {
-                        span { class: "badge warning", "Liability" }
+                        Badge { tone: BadgeTone::Warning, "Liability" }
                     }
                 }
                 small { "{detail_text}" }
@@ -341,15 +335,14 @@ fn AssetRow(
                     span { "{amount_changed}" }
                 }
             }
-            button {
-                class: "icon-button transaction-expand-toggle",
-                r#type: "button",
-                title: if expanded { "Hide details and accounts" } else { "Show details and accounts" },
-                onclick: move |event| {
+            IconButton {
+                class: "transaction-expand-toggle",
+                label: if expanded { "Hide details and accounts" } else { "Show details and accounts" },
+                glyph: if expanded { "\u{2304}" } else { "\u{203A}" },
+                onclick: move |event: MouseEvent| {
                     event.stop_propagation();
                     ontoggle.call(chevron_toggle_key.clone());
                 },
-                if expanded { "\u{2304}" } else { "\u{203A}" }
             }
         }
         if expanded {
@@ -478,9 +471,8 @@ fn AssetMobileSortControls(
                     }
                 }
             }
-            button {
-                class: "control-button asset-sort-direction",
-                r#type: "button",
+            ControlButton {
+                class: "asset-sort-direction",
                 title: "Reverse asset sort order",
                 onclick: move |_| onsortdirectionchange.call(direction.toggle()),
                 span { class: "asset-sort-direction-label", "{direction.label()}" }

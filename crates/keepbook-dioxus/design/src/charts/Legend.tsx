@@ -1,20 +1,51 @@
-import { seriesColor } from "../cx";
+import { cx, seriesColor } from "../cx";
 
-export interface LegendProps {
-  /** Series labels, colored by position from the shared series palette. */
-  items: string[];
+export interface LegendItem {
+  label: string;
+  /** A CSS color; defaults to the series palette by position. */
+  color?: string;
+  /** De-emphasized, e.g. an asset series beside account series. */
+  muted?: boolean;
 }
 
-/** A wrapping row of swatch + label pairs under a chart. Series colors are assigned by position, matching the chart. */
-export function Legend({ items }: LegendProps) {
+export interface LegendProps {
+  /** Entries; a plain string is a label colored by position. */
+  items: (string | LegendItem)[];
+  className?: string;
+  /** Highlights the entry with this label. */
+  selected?: string;
+  /** Makes entries buttons that report the clicked label. */
+  onSelect?: (label: string) => void;
+}
+
+/**
+ * A wrapping row of swatch and label pairs under a chart.
+ *
+ * Series colors are assigned by position, matching the chart. Mirrors
+ * `components/charts/legend.rs`.
+ */
+export function Legend({ items, className, selected, onSelect }: LegendProps) {
   return (
-    <div className="stacked-legend">
-      {items.map((label, index) => (
-        <span key={label} className="stacked-legend-item">
-          <span className="stacked-legend-swatch" style={{ background: seriesColor(index) }} />
-          <span>{label}</span>
-        </span>
-      ))}
+    <div className={cx("stacked-legend", className)}>
+      {items.map((raw, index) => {
+        const item: LegendItem = typeof raw === "string" ? { label: raw } : raw;
+        const classes = cx("stacked-legend-item", item.muted && "asset", item.label === selected && "selected");
+        const content = (
+          <>
+            <span className="stacked-legend-swatch" style={{ background: item.color ?? seriesColor(index) }} />
+            <span>{item.label}</span>
+          </>
+        );
+        return onSelect ? (
+          <button key={item.label} className={classes} onClick={() => onSelect(item.label)}>
+            {content}
+          </button>
+        ) : (
+          <span key={item.label} className={classes}>
+            {content}
+          </span>
+        );
+      })}
     </div>
   );
 }

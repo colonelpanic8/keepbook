@@ -44,9 +44,9 @@ pub(super) fn StackedNetWorthChart(
     let mut drag_current = use_signal(|| None::<usize>);
     if data.is_empty() || series.is_empty() {
         return rsx! {
-            div { class: "chart-empty",
-                strong { "No net worth breakdown" }
-                small { "Refresh balances to populate the stacked graph." }
+            EmptyState {
+                title: "No net worth breakdown",
+                detail: "Refresh balances to populate the stacked graph.",
             }
         };
     }
@@ -289,26 +289,16 @@ pub(super) fn StackedNetWorthChart(
                     }
                 }
             }
-            div { class: "stacked-legend",
-                for (index, item) in series.iter().enumerate() {
-                    {
-                        let color = series_color(index);
-                        let class = if item.series_type == "account_asset" {
-                            "stacked-legend-item asset"
-                        } else {
-                            "stacked-legend-item"
-                        };
-                        rsx! {
-                            span { class: "{class}",
-                                span {
-                                    class: "stacked-legend-swatch",
-                                    style: "background: {color};"
-                                }
-                                span { "{item.label}" }
-                            }
-                        }
-                    }
-                }
+            Legend {
+                items: series
+                    .iter()
+                    .enumerate()
+                    .map(|(index, item)| LegendItem {
+                        label: item.label.clone(),
+                        color: series_color(index).to_string(),
+                        muted: item.series_type == "account_asset",
+                    })
+                    .collect::<Vec<_>>(),
             }
         }
     }
