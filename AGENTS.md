@@ -49,10 +49,13 @@ for interaction states, components, and tokens. Update the relevant design
 document in the same change whenever a new UI pattern is introduced or an
 existing pattern changes.
 
-`crates/keepbook-dioxus/design/` holds React mirrors of the Dioxus components
-for Claude Design. When a component's markup or props change in
-`views/shared.rs`, update its mirror in the same change. After visual changes,
-re-run `/design-sync` (see `.design-sync/NOTES.md`).
+Reusable UI lives in `crates/keepbook-dioxus/src/components/`, one component
+per file; views compose these instead of hand-writing component classes.
+`crates/keepbook-dioxus/design/src/` holds React mirrors of them for Claude
+Design. When a component's markup or props change, update its parity
+snapshots and its mirror in the same change, following "Claude Design" in
+`docs/design-system/README.md`. After visual changes, re-run `/design-sync`
+(see `.design-sync/NOTES.md`).
 
 ## Development Environment
 

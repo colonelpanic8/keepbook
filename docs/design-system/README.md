@@ -16,8 +16,10 @@ replace an old pattern rather than adding a parallel one.
 |---|---|
 | `crates/keepbook-dioxus/assets/styles.css` | The source of truth: theme tokens and every component rule. |
 | `crates/keepbook-dioxus/assets/fonts/` | Inter (variable WOFF2, OFL) and its shared `@font-face` rule. |
-| `crates/keepbook-dioxus/src/views/shared.rs` | The Dioxus components. |
-| `crates/keepbook-dioxus/design/` | React mirrors of those components, synced to Claude Design. |
+| `crates/keepbook-dioxus/assets/icons.json`, `themes.json` | Icon paths and the theme list, read by both the Dioxus components and the React mirrors. |
+| `crates/keepbook-dioxus/src/components/` | The Dioxus components, one file each, grouped as `actions`, `forms`, `display`, `feedback`, `layout`, and `charts`. Views compose these. |
+| `crates/keepbook-dioxus/design/src/` | React mirrors of those components for Claude Design, in the same groups with one file each. |
+| `crates/keepbook-dioxus/design/parity/` | Rendered markup of each component, checked against both sides. |
 | `.design-sync/` | Claude Design sync config, notes, and authored preview cards. |
 | `interaction-states.md` | Loading, progress, failure, and cancellation behavior. |
 
@@ -26,7 +28,8 @@ See [Claude Design](#claude-design) for how the mirrors and the synced project
 stay current.
 
 Set `data-theme="fern"` (the default) or `data-theme="dark"` on `<html>` or
-on any container.
+on any container. A new theme is a `[data-theme]` block in `styles.css` plus
+an entry in `assets/themes.json`; a unit test keeps the two in step.
 
 ## Content
 
@@ -125,9 +128,9 @@ stills the loops.
 Icons appear only where they speed up recognition of a repeated action, such
 as the page toolbar. They are Lucide stroke icons on a 24px grid, drawn
 inline at 14px with `stroke="currentColor"`, so they follow the button's text
-color, including on a primary fill. Add a new icon as a `ButtonIcon` variant
-in `views/shared.rs`; the current set is Refresh, GitBranch, and
-ChevronDown. Small affordances are plain glyphs, not icons:
+color, including on a primary fill. Add a new icon to `assets/icons.json`
+and as a `ButtonIcon` variant in `components/actions/icons.rs`; the current
+set is Refresh, GitBranch, and ChevronDown. Small affordances are plain glyphs, not icons:
 
 | Glyph | Use |
 |---|---|
@@ -142,8 +145,9 @@ The logo is `assets/keepbook-icon.svg` at the repository root.
 
 ## Components
 
-The Rust components in `crates/keepbook-dioxus/src/views/shared.rs` emit this
-markup. Use them instead of hand-writing the classes.
+The Rust components in `crates/keepbook-dioxus/src/components/` emit this
+markup. Views use them instead of hand-writing the classes; the component
+named last in each row renders it.
 
 | Component | Markup | Rules |
 |---|---|---|
@@ -151,24 +155,27 @@ markup. Use them instead of hand-writing the classes.
 | Metric | `article.metric` › `.metric-label`, `strong`, `small`, inside `.summary-grid` | Three across, stacking below 1200px. `MetricCard` |
 | Button | `.control-button` + `.primary` / `.selected` / `.danger` / `.small` | One `primary` per toolbar. `.selected` is a toggled state, not emphasis. While busy, a spinner replaces the icon and the button is disabled. `ControlButton` |
 | Split button | `.split-button` › `.control-button` + `.control-button.split-button-caret`, then `.menu-backdrop` + `.menu` › `button.menu-item` (`strong` + `small`) | A main action plus a chevron that opens its less common variants, each with a one-line description. Escape or a click outside closes the menu. `SplitButton` |
-| Icon button | `.icon-button` | A transparent 28px square for a glyph. It needs an `aria-label`. |
+| Icon button | `.icon-button` | A transparent 28px square for a glyph. Its label is both the tooltip and the accessible name. `IconButton` |
 | Segmented control | `.segmented-field` › `.control-label` + `.segmented-control` › `.segment` | For mutually exclusive options. Never use a wrapping row of buttons for this. `SegmentedControl` |
-| Input | `.control-input` (+ `.small`), `select.control-input`, inside `label.control-field` | Selects draw their own caret so they follow the theme. |
-| Checkbox | `label.compact-check` › `input[type=checkbox]` + text | The color comes from `accent-color` set at the root. |
-| Switch | `label.switch-control` › `input` + `.switch-track` › `.switch-thumb` | For a setting that takes effect immediately. It sits in a `.setting-row`. |
-| Setting row | `.setting-row` › `.setting-copy` (`strong` + `small`) + one control | Add `.setting-row-stacked` when the control is a select or an option group. |
-| Badge | `.badge` + `.positive` / `.negative` / `.warning` | A short status. Neutral unless toned. |
-| Tag pill | `.tag-pill` (`.readonly`, `.removable`), `.tag-suggestion-pill` | Spending tags. Tags get color from the swatch, not the pill. |
-| Filter chip | `.filter-clear-chip` | Exists only while a filter is active. Clicking it clears the filter. |
-| Notice | `.notice` (+ `.busy` with `.activity-spinner`) | Feedback for work the user started, placed next to the control that started it. `OperationStatus`, `BackendActivity` |
-| Progress | `.activity-spinner` (`.large`, `.control-spinner`), `.indeterminate-progress` | Indeterminate only. |
-| Empty / loading | `.chart-empty`, `.chart-loading` (`strong` + `small`) | Holds the footprint of the content it replaces. `GraphLoadingPanel` |
-| Data table | `.data-table` › `.table-head` + `.table-row` | Each table sets its columns with `grid-template-columns`. Below 1200px rows become labeled cards. |
-| Tree group | `.tree-group` › `.tree-parent` + `.data-table` | Accounts grouped by connection. |
-| Modal | `.modal-backdrop` › `.modal-dialog` › `.modal-header`, body, `.modal-actions` | `Modal` |
-| Navigation | `.app-nav` › `.nav-header` + `nav` › `.nav-button(.selected)` | A sidebar at wide widths, a sticky header with a drawer below 1200px. |
-| Spending over time | `.chart-card.spending-over-time-card` › `.chart-meta`, `svg.spending-bar-chart` of `.spending-bar-segment`s, `.stacked-legend` | Stacked by tag; focusing a tag narrows the bars to it. |
-| Spending by tag | `.spending-layout` › `.spending-pie` + `.tag-list` (`.spending-total`, `.tag-row`s) | Donut and tag rows share the series colors by position. |
+| Input | `.control-input` (+ `.small`), `select.control-input`, inside `label.control-field` | Selects draw their own caret so they follow the theme. `TextInput`, `Select` |
+| Checkbox | `label.compact-check` › `input[type=checkbox]` + `span` | The color comes from `accent-color` set at the root. `Checkbox` |
+| Switch | `label.switch-control` › `input` + `.switch-track` › `.switch-thumb` | For a setting that takes effect immediately. It sits in a `.setting-row`. `Switch` |
+| Setting row | `.setting-row` › `.setting-copy` (`strong` + `small`) + one control | Add `.setting-row-stacked` when the control is a select or an option group. `SettingRow`, `ThemePicker` |
+| Badge | `.badge` + `.positive` / `.negative` / `.warning` | A short status. Neutral unless toned. `Badge` |
+| Tag pill | `.tag-pill` (`.readonly`, `.removable`), `.tag-suggestion-pill` | Spending tags. Tags get color from the swatch, not the pill. `TagPill` |
+| Filter chip | `.filter-clear-chip` | Exists only while a filter is active. Clicking it clears the filter. `FilterChip` |
+| Notice | `.notice` (+ `.busy` with `.activity-spinner`) | Feedback for work the user started, placed next to the control that started it. `OperationStatus` |
+| Inline status | `.inline-status` (`h2` + `p`) | Fills a region whose data couldn't load. `InlineStatus` |
+| Progress | `.activity-spinner` (`.large`, `.control-spinner`), `.indeterminate-progress` | Indeterminate only. `Spinner`, `Progress` |
+| Empty / loading | `.chart-empty`, `.chart-loading` (`strong` + detail), `.compact` | Holds the footprint of the content it replaces; `.compact` drops the chart aspect ratio for lists. `EmptyState` |
+| Data table | `.data-table` › `.table-head` + `.table-row` | Each table's own class sets its columns with `grid-template-columns`. Below 1200px rows become labeled cards. `DataTable` |
+| Tree group | `.tree-group` › `.tree-parent` + `.data-table` | Accounts grouped by connection. `TreeGroup` |
+| Modal | `.modal-backdrop` › `.modal-dialog(.wide)` › `.modal-header`, body, `.modal-actions` | `Modal` |
+| Navigation | `.app-shell` › `.app-nav` › `.nav-header` + `nav` › `.nav-button(.selected)`, then `.workspace` | A sidebar at wide widths, a sticky header with a drawer below 1200px. `AppShell` |
+| Legend | `.stacked-legend` › `.stacked-legend-item` (`.selected`, `.asset`) | Swatch and label per series; buttons when selecting a series filters the chart. `Legend` |
+| Net worth | `.chart-card` › `.chart-meta`, `svg.net-worth-chart` | Line and area with per-point hover detail; dragging selects a range. `NetWorthChart` |
+| Spending over time | `.chart-card.spending-over-time-card` › `.chart-meta`, `svg.spending-bar-chart` of `.spending-bar-segment`s, `.stacked-legend` | Stacked by tag; focusing a tag narrows the bars to it. `SpendingChart` |
+| Spending by tag | `.spending-layout` › `.spending-pie` + `.tag-list` (`.spending-total`, `.tag-row`s) | Donut and tag rows share the series colors by position. `SpendingBreakdown` |
 
 ## Layout
 
@@ -238,15 +245,29 @@ markup. Use them instead of hand-writing the classes.
 
 The design system is synced to Claude Design (claude.ai/design) as the
 **Keepbook** project. The Claude Design agent builds with React, so
-`crates/keepbook-dioxus/design/` holds a React mirror of each component. Every
-mirror emits exactly the markup and classes of its Dioxus counterpart and
-uses `styles.css` and `inter.css` unchanged.
+`crates/keepbook-dioxus/design/src/` holds a React mirror of each Dioxus
+component, at the same path under the same name and prop names: for example
+`components/charts/legend.rs` and `design/src/charts/Legend.tsx`. Both sides
+use `styles.css`, `inter.css`, `icons.json`, and `themes.json` unchanged.
 
-- Change a component's markup or props in `views/shared.rs` and update its
-  mirror in the same commit, under the same name and prop names.
-- A new reusable class-based pattern gets a mirror and a preview card in
-  `.design-sync/previews/<Name>.tsx`.
-- A keepbook-dioxus unit test fails if a mirror uses a class that neither
-  `styles.css` nor the Rust views define.
-- After visual changes, re-run `/design-sync` to update the project. Its
-  `.design-sync/NOTES.md` records how the sync is built.
+The Dioxus components are the source of truth, and the mirrors are checked
+against them:
+
+- `cargo test -p keepbook-dioxus` renders each component case in
+  `tests/unit/parity_tests.rs` and compares it with
+  `design/parity/<Component>.<case>.html`. It fails if a component has no
+  case, and if a mirror uses a class that neither `styles.css` nor the Rust
+  sources define.
+- `npm test` in `crates/keepbook-dioxus/design` renders the same cases from
+  `design/parity/cases.tsx` with the mirrors and compares the markup.
+
+To change a component:
+
+1. Change it in `src/components/` and run
+   `UPDATE_PARITY=1 cargo test -p keepbook-dioxus parity`. Review the
+   snapshot diff.
+2. Update the mirror until `npm test` passes, adding a case on both sides for
+   any new component or variant.
+3. Update its preview card in `.design-sync/previews/<Name>.tsx`, then re-run
+   `/design-sync` to update the project. `.design-sync/NOTES.md` records how
+   the sync is built.
