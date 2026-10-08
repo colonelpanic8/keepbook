@@ -46,7 +46,7 @@ pub(super) fn GroupTagsEditor(
                     }
                     div { class: "tag-entry-row",
                         input {
-                            class: "tag-editor-input tag-entry-input",
+                            class: "control-input small tag-entry-input",
                             r#type: "text",
                             list: "{list_id}",
                             value: "{draft}",
@@ -60,7 +60,7 @@ pub(super) fn GroupTagsEditor(
                             }
                         }
                         button {
-                            class: "tag-editor-button",
+                            class: "control-button small",
                             title: "Add tag",
                             disabled: !can_add,
                             onclick: move |_| {
@@ -198,7 +198,7 @@ pub(super) fn TransactionEditorPanel(
         div { class: "transaction-editor-panel",
             div { class: "transaction-editor-grid",
                 div { class: "transaction-editor-section",
-                    span { class: "transaction-editor-label", "Tags" }
+                    span { class: "control-label", "Tags" }
                     div { class: "tag-editor transaction-tag-editor",
                         div { class: "tag-pill-list",
                             if current_tags.is_empty() {
@@ -229,7 +229,7 @@ pub(super) fn TransactionEditorPanel(
                             }
                             div { class: "tag-entry-row",
                                 input {
-                                    class: "tag-editor-input tag-entry-input",
+                                    class: "control-input small tag-entry-input",
                                     r#type: "text",
                                     list: "{list_id}",
                                     value: "{draft}",
@@ -264,7 +264,7 @@ pub(super) fn TransactionEditorPanel(
                                     }
                                 }
                                 button {
-                                    class: "tag-editor-button",
+                                    class: "control-button small",
                                     title: "Add tag",
                                     disabled: !can_add,
                                     onclick: {
@@ -317,10 +317,10 @@ pub(super) fn TransactionEditorPanel(
                     }
                 }
                 div { class: "transaction-editor-section",
-                    span { class: "transaction-editor-label", "Reporting date" }
+                    span { class: "control-label", "Reporting date" }
                     div { class: "effective-date-editor",
                         input {
-                            class: "effective-date-input",
+                            class: "control-input small effective-date-input",
                             r#type: "date",
                             value: "{date_value}",
                             title: "Reporting date",
@@ -352,7 +352,7 @@ pub(super) fn TransactionEditorPanel(
                         small { "Posted {posted_date}" }
                         if has_effective_date {
                             button {
-                                class: "tag-editor-button",
+                                class: "control-button small",
                                 title: "Reset to posted date",
                                 disabled,
                                 onclick: {
@@ -373,7 +373,7 @@ pub(super) fn TransactionEditorPanel(
                     }
                 }
                 div { class: "transaction-editor-section",
-                    span { class: "transaction-editor-label", "Spending" }
+                    span { class: "control-label", "Spending" }
                     label { class: "compact-check transaction-exclude-toggle",
                         input {
                             r#type: "checkbox",

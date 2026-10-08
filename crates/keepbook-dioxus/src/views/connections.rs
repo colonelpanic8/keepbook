@@ -133,7 +133,7 @@ pub(super) fn ConnectionsView(
                         rsx! {
                     div { class: "table-row",
                         strong { "{connection.name}" }
-                        span { class: "status", "{connection.status}" }
+                        span { class: "badge positive", "{connection.status}" }
                         span { "{connection.account_count}" }
                         small {
                             "{connection.last_sync.clone().unwrap_or_else(|| \"Never\".to_string())}"

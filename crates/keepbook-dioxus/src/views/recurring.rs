@@ -37,7 +37,7 @@ pub(super) fn RecurringView() -> Element {
                 }
             }
             div { class: "recurring-controls",
-                label { class: "toggle-field",
+                label { class: "compact-check",
                     input {
                         r#type: "checkbox",
                         checked: include_possible(),
@@ -48,7 +48,7 @@ pub(super) fn RecurringView() -> Element {
                     }
                     span { "Borderline" }
                 }
-                label { class: "toggle-field",
+                label { class: "compact-check",
                     input {
                         r#type: "checkbox",
                         checked: include_dismissed(),
@@ -140,7 +140,11 @@ fn RecurringCandidateCard(
     busy_action: String,
     onreview: EventHandler<(RecurringTransaction, &'static str)>,
 ) -> Element {
-    let review_class = format!("review-badge review-{}", item.review_status);
+    let review_class = match item.review_status.as_str() {
+        "verified" => "badge positive",
+        "dismissed" => "badge negative",
+        _ => "badge",
+    };
     let candidate_for_verify = item.clone();
     let candidate_for_dismiss = item.clone();
     let is_busy = busy == item.candidate_key;
@@ -169,7 +173,7 @@ fn RecurringCandidateCard(
                 }
                 div { class: "recurring-reasons",
                     for reason in item.reason_codes.iter() {
-                        span { class: "reason-chip", "{reason}" }
+                        span { class: "badge", "{reason}" }
                     }
                 }
             }
@@ -198,7 +202,7 @@ fn RecurringCandidateCard(
                     if is_busy && busy_action == "verified" { "Verifying" } else { "Verify" }
                 }
                 ControlButton {
-                    class: "danger-button",
+                    danger: true,
                     disabled: any_busy || item.review_status == "dismissed",
                     busy: is_busy && busy_action == "dismissed",
                     onclick: move |_| onreview.call((candidate_for_dismiss.clone(), "dismissed")),

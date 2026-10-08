@@ -118,7 +118,7 @@ fn ProposedEditRow(
                     if is_busy && busy_action == "reject" { "Rejecting" } else { "Reject" }
                 }
                 ControlButton {
-                    class: "danger-button",
+                    danger: true,
                     disabled: any_busy,
                     busy: is_busy && busy_action == "remove",
                     onclick: move |_| ondecide.call((remove_id.clone(), "remove")),

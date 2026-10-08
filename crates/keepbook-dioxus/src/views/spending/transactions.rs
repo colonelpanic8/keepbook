@@ -70,7 +70,7 @@ pub(super) fn TransactionList(
             }
             div { class: "transaction-controls",
                 input {
-                    class: "transaction-search-input",
+                    class: "control-input transaction-search-input",
                     r#type: "search",
                     value: "{title_filter}",
                     placeholder: "Filter titles",
@@ -142,7 +142,7 @@ pub(super) fn TransactionList(
                     small { "{selected_count} selected" }
                 }
                 textarea {
-                    class: "ai-rule-prompt",
+                    class: "control-input ai-rule-prompt",
                     value: "{ai_prompt}",
                     placeholder: "Ask for a tag, ignore, or rename rule for the selected transactions.",
                     disabled: ai_busy,
@@ -306,13 +306,13 @@ pub(super) fn TransactionList(
                                             }
                                         }
                                         if tx.ignored_from_spending {
-                                            small { class: "ignored-badge", "Not counted" }
+                                            small { class: "badge", "Not counted" }
                                         }
                                     }
                                     span { class: "transaction-account-cell", "{tx.account_name}" }
                                     strong { class: "transaction-amount-cell", "{format_transaction_amount(&tx, &currency)}" }
                                     button {
-                                        class: "transaction-expand-toggle",
+                                        class: "icon-button transaction-expand-toggle",
                                         r#type: "button",
                                         title: if is_expanded { "Collapse editor" } else { "Expand to edit" },
                                         onclick: move |event| {

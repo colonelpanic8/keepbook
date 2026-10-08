@@ -225,14 +225,12 @@ fn can_rename_untagged(spending: &SpendingOutput) -> bool {
         < 2
 }
 
-css_var_palette!(pub(crate) fn spending_tag_color from "cat" [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
-
 pub(crate) fn spending_tag_color_map(
     tags: &[SpendingBreakdownEntry],
 ) -> HashMap<String, &'static str> {
     tags.iter()
         .enumerate()
-        .map(|(index, entry)| (entry.key.clone(), spending_tag_color(index)))
+        .map(|(index, entry)| (entry.key.clone(), series_color(index)))
         .collect()
 }
 
@@ -244,7 +242,7 @@ pub(crate) fn spending_tag_color_for(
     colors
         .get(key)
         .copied()
-        .unwrap_or_else(|| spending_tag_color(fallback_index))
+        .unwrap_or_else(|| series_color(fallback_index))
 }
 
 pub(crate) fn pie_slices(

@@ -334,13 +334,13 @@ fn VirtualAccountGroup(
     onselect: EventHandler<AccountGraphSelection>,
 ) -> Element {
     rsx! {
-        section { class: "tree-group virtual-group",
+        section { class: "tree-group",
             div { class: "tree-parent",
                 div {
                     strong { "Virtual" }
                     small { "Portfolio adjustments" }
                 }
-                span { class: "status liability-status", "{accounts.len()} active" }
+                span { class: "badge", "{accounts.len()} active" }
             }
             div { class: "data-table account-table",
                 div { class: "table-head",
@@ -381,12 +381,12 @@ fn VirtualAccountRow(
 
     rsx! {
         button {
-            class: "table-row virtual-account-row account-click-row",
+            class: "table-row account-click-row",
             title: "View graph",
             onclick: move |_| onselect.call(selection.clone()),
             strong { "{account.account_name}" }
             span { "{value}" }
-            span { class: "status liability-status", "Virtual" }
+            span { class: "badge", "Virtual" }
             small { "{account.connection_name}" }
             span {}
         }
@@ -421,7 +421,7 @@ fn AccountGroup(
                     strong { "{connection.name}" }
                     small { "{connection.synchronizer}" }
                 }
-                span { class: "status", "{status_text}" }
+                span { class: "badge positive", "{status_text}" }
             }
             div { class: "data-table account-table",
                 div { class: "table-head",
@@ -474,10 +474,10 @@ fn AccountRow(
     } else {
         "table-row"
     };
-    let status_class = if effective_excluded {
-        "status ignored-status"
+    let status_class = if account.active && !effective_excluded {
+        "badge positive"
     } else {
-        "status"
+        "badge"
     };
     let tags = account.tags.join(", ");
     let balance = account_snapshot_value_text(&account.id, &account_summaries)

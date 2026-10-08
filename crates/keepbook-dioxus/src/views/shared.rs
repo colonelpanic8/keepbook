@@ -26,7 +26,7 @@ pub(super) fn MetricCard(label: String, value: String, detail: String) -> Elemen
 pub(super) fn BackendActivity(message: &'static str) -> Element {
     rsx! {
         div {
-            class: "backend-activity",
+            class: "notice busy",
             role: "status",
             aria_live: "polite",
             span { class: "activity-spinner" }
@@ -42,11 +42,7 @@ pub(super) fn BackendActivity(message: &'static str) -> Element {
 /// readable without blocking navigation or replacing already-loaded content.
 #[component]
 pub(super) fn OperationStatus(message: String, busy: bool) -> Element {
-    let class = if busy {
-        "operation-status busy"
-    } else {
-        "operation-status"
-    };
+    let class = if busy { "notice busy" } else { "notice" };
 
     rsx! {
         div {

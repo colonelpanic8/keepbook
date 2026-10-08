@@ -381,7 +381,7 @@ pub(super) fn SettingsView(
             subtitle: "App-wide",
             actions: rsx! {
                 button {
-                    class: "icon-button add-location-button",
+                    class: "control-button add-location-button",
                     title: "Add repository",
                     disabled: is_busy || repository_busy,
                     onclick: move |_| {
@@ -515,7 +515,7 @@ pub(super) fn SettingsView(
                                     r#type: "file",
                                     disabled: is_busy,
                                 }
-                                span { class: "file-select-button", "Select key file" }
+                                span { class: "control-button", "Select key file" }
                             }
                             input {
                                 id: "ssh-private-key-file-payload",

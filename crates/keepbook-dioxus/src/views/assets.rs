@@ -296,7 +296,7 @@ fn AssetRow(
                 div { class: "asset-name-line",
                     strong { "{name}" }
                     if entry.liability {
-                        span { class: "status liability-status", "Liability" }
+                        span { class: "badge warning", "Liability" }
                     }
                 }
                 small { "{detail_text}" }
@@ -342,7 +342,7 @@ fn AssetRow(
                 }
             }
             button {
-                class: "transaction-expand-toggle",
+                class: "icon-button transaction-expand-toggle",
                 r#type: "button",
                 title: if expanded { "Hide details and accounts" } else { "Show details and accounts" },
                 onclick: move |event| {

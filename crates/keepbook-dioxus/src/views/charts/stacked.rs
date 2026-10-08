@@ -109,7 +109,7 @@ pub(super) fn StackedNetWorthChart(
                 index,
                 series: series.clone(),
                 path,
-                color: stacked_chart_color(index),
+                color: series_color(index),
             })
         })
         .collect::<Vec<_>>();
@@ -292,7 +292,7 @@ pub(super) fn StackedNetWorthChart(
             div { class: "stacked-legend",
                 for (index, item) in series.iter().enumerate() {
                     {
-                        let color = stacked_chart_color(index);
+                        let color = series_color(index);
                         let class = if item.series_type == "account_asset" {
                             "stacked-legend-item asset"
                         } else {
@@ -384,11 +384,6 @@ fn StackedPointTooltip(
                     let row_y = rows_start_y + row_index as f64 * row_height;
                     let label = tooltip_label(&row.label, 28);
                     let value_text = format_full_money(row.value, &currency);
-                    let value_class = if row.value < 0.0 {
-                        "chart-tooltip-detail stacked-tooltip-value negative"
-                    } else {
-                        "chart-tooltip-detail stacked-tooltip-value"
-                    };
                     rsx! {
                         rect {
                             class: "stacked-tooltip-swatch",
@@ -406,7 +401,7 @@ fn StackedPointTooltip(
                             "{label}"
                         }
                         text {
-                            class: "{value_class}",
+                            class: "chart-tooltip-detail stacked-tooltip-value",
                             x: "{tooltip_x + tooltip_width - 12.0}",
                             y: "{row_y}",
                             "{value_text}"

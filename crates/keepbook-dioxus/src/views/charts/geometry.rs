@@ -1,5 +1,4 @@
 use super::*;
-use crate::logic::css_var_palette;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Debug)]
@@ -358,7 +357,7 @@ pub(super) fn stacked_hover_points(
                     Some(StackedTooltipRow {
                         label: series.label.clone(),
                         value,
-                        color: stacked_chart_color(series_index),
+                        color: series_color(series_index),
                     })
                 })
                 .collect::<Vec<_>>();
@@ -396,7 +395,3 @@ pub(super) fn tooltip_label(label: &str, max_chars: usize) -> String {
     truncated.push_str("...");
     truncated
 }
-
-css_var_palette!(pub(super) fn stacked_chart_color from "series" [
-    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18
-]);
