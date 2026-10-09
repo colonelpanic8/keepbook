@@ -1,0 +1,3 @@
+* Changed: Refreshing, syncing, and saving no longer move the page. Progress and results appear in a floating stack at the bottom-right (along the bottom on phones) instead of being inserted above the content, and results clear themselves after a few seconds or with their close button.
+* Changed: Reloading data after a sync or when switching views shows a small spinner on the logo instead of a "Refreshing app data…" banner that pushed the page down.
+* ...see CHANGELOG.md for the rest.

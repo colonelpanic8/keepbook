@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.15.0 - 2026-10-09
+
+### Changed
+
+- Refreshing, syncing, and saving no longer move the page. Progress and
+  results appear in a floating stack at the bottom-right (along the bottom on
+  phones) instead of being inserted above the content, and results clear
+  themselves after a few seconds or with their close button.
+- Reloading data after a sync or when switching views shows a small spinner
+  on the logo instead of a "Refreshing app data…" banner that pushed the page
+  down.
+- The net worth, breakdown, and spending views no longer show a "Waiting on
+  backend…" line above their controls while they first load; the chart
+  placeholder already holds that space.
+
 ## 0.14.0 - 2026-10-09
 
 ### Changed
