@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.14.0 - 2026-10-09
+
+### Changed
+
+- A refreshed look: the sidebar shows an icon beside each view, panel
+  titles and headline numbers are larger, metric labels sit above their
+  values as small capitals, and panels have more room and softer corners.
+- Numbers use fixed-width digits, so money and dates line up in columns.
+- Chart axis labels stay near 12px at every width instead of growing on
+  desktop and shrinking to near-unreadable on phones, and the net worth chart
+  fills with a fade under the line.
+
 ## 0.13.1 - 2026-10-08
 
 ### Changed
