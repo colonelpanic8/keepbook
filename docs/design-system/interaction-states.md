@@ -8,9 +8,13 @@ app appear frozen.
 
 - Start user-triggered work asynchronously. Never run network, disk, sync, Git,
   market-data, or AI work on the UI thread.
-- Show a nearby `OperationStatus` as soon as work starts. Use a concrete present
-  participle such as “Refreshing prices…” or “Saving tags…”, plus an
-  indeterminate spinner when exact progress is unavailable.
+- Show an `OperationStatus` in the floating `StatusStack` as soon as work
+  starts. Use a concrete present participle such as “Refreshing prices…” or
+  “Saving tags…”, plus an indeterminate spinner when exact progress is
+  unavailable.
+- Feedback never changes the page layout: views mount a `FloatingStatus`,
+  which publishes into the stack and renders nothing in place. Background
+  revalidation of loaded data is not user work; it shows only the logo badge.
 - Put `aria-busy="true"` on the active status and control. Announce status text
   with a polite live region; do not repeatedly announce animation frames.
 - Keep navigation, already-loaded content, scrolling, filtering, and unrelated
@@ -26,6 +30,9 @@ app appear frozen.
 
 - Replace progress text with a concise success or failure result. Do not leave a
   spinner running after the future resolves.
+- Settled results leave the stack after 4–12s, scaled to message length, wait
+  while the stack is hovered, and can be closed early. A result also leaves
+  when the view that started the work unmounts.
 - A failed load offers an in-context retry. A failed mutation restores its
   controls and keeps the user's inputs whenever retrying is safe.
 - Long operations that support safe cancellation (currently Git clone/sync)
@@ -55,7 +62,9 @@ app appear frozen.
 
 - `BackendActivity` is for initial, local data-region loading only.
 - `GraphLoadingPanel` is the chart-specific initial/loading treatment.
-- `OperationStatus` is the standard persistent feedback for user-triggered work.
+- `FloatingStatus` (in views) is the standard feedback for user-triggered work;
+  it renders an `OperationStatus` in the app-wide `StatusStack`. An inline
+  `OperationStatus` is only for a region's first load.
 - `ControlButton`'s `busy` state adds the compact spinner, `aria-busy`, and
   duplicate-submission protection.
 

@@ -79,7 +79,7 @@ pub(super) fn RecurringView() -> Element {
                 }
             }
             if !status_text.is_empty() {
-                OperationStatus { message: status_text, busy: !busy.is_empty() }
+                FloatingStatus { message: status_text, busy: !busy.is_empty() }
             }
             match current {
                 None => rsx! { OperationStatus { message: "Loading recurring transactions".to_string(), busy: true } },

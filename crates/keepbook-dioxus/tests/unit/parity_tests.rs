@@ -292,6 +292,18 @@ const CASES: &[Case] = &[
         || rsx! { OperationStatus { message: "Refreshed 14 prices.", busy: false } },
     ),
     (
+        "OperationStatus.dismissible",
+        || rsx! { OperationStatus { message: "Data resynced.", busy: false, ondismiss: |_| {} } },
+    ),
+    ("StatusStack.basic", || {
+        rsx! {
+            StatusStack {
+                OperationStatus { message: "Refreshing prices…", busy: true }
+                OperationStatus { message: "Refreshed 14 prices.", busy: false, ondismiss: |_| {} }
+            }
+        }
+    }),
+    (
         "InlineStatus.basic",
         || rsx! { InlineStatus { title: "Couldn't load", message: "Try again." } },
     ),

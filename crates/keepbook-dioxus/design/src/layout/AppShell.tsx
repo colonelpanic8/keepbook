@@ -36,6 +36,8 @@ export interface AppShellProps {
   repositoryBusy?: boolean;
   /** A status line under the switcher, e.g. "Switching to Parents…". */
   repositoryStatus?: string;
+  /** Loaded data is revalidating: fades a spinner badge in over the logo without taking space. */
+  refreshing?: boolean;
   /** Navigation items; defaults to the app's views. */
   navItems?: NavItem[];
   /** Selected navigation item. */
@@ -49,8 +51,9 @@ export interface AppShellProps {
 /**
  * The full keepbook app frame: sidebar navigation beside a scrolling workspace.
  *
- * Holds the logo, repository switcher, and navigation. Below 1200px wide the
- * sidebar becomes a sticky compact header whose hamburger opens a drawer.
+ * Holds the logo, repository switcher, and navigation. `refreshing` badges the
+ * logo while loaded data revalidates. Below 1200px wide the sidebar becomes a
+ * sticky compact header whose hamburger opens a drawer.
  * Every full-screen design starts here. Mirrors `components/layout/app_shell.rs`.
  */
 export function AppShell({
@@ -60,6 +63,7 @@ export function AppShell({
   repository,
   repositoryBusy = false,
   repositoryStatus,
+  refreshing = false,
   navItems = NAV_ITEMS,
   active = navItems[0]?.label,
   onRepositoryChange,
@@ -73,7 +77,17 @@ export function AppShell({
       <aside className={cx("app-nav", open && "open")}>
         <div className="nav-header">
           <div className="nav-title">
-            <div className="nav-logo" dangerouslySetInnerHTML={{ __html: logo }} />
+            <div className="nav-logo-slot">
+              <div className="nav-logo" dangerouslySetInnerHTML={{ __html: logo }} />
+              <span
+                className={cx("nav-refresh-badge", refreshing && "active")}
+                role="progressbar"
+                aria-label="Refreshing app data"
+                aria-hidden={refreshing ? undefined : "true"}
+              >
+                <Spinner size="small" />
+              </span>
+            </div>
             <div className="nav-title-text">
               <strong>{title}</strong>
               <small>{currency}</small>

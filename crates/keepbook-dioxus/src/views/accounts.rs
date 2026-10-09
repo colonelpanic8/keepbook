@@ -254,13 +254,13 @@ pub(super) fn AccountsView(
                     }
                 }
                 if !price_status_text.is_empty() {
-                    OperationStatus { message: price_status_text, busy: is_price_busy }
+                    FloatingStatus { message: price_status_text, busy: is_price_busy }
                 }
                 if !resync_status_text.is_empty() {
-                    OperationStatus { message: resync_status_text, busy: is_resync_busy }
+                    FloatingStatus { message: resync_status_text, busy: is_resync_busy }
                 }
                 if !git_sync_status_text.is_empty() {
-                    OperationStatus { message: git_sync_status_text, busy: is_git_sync_busy }
+                    FloatingStatus { message: git_sync_status_text, busy: is_git_sync_busy }
                 }
                 SummaryGrid {
                     MetricCard {

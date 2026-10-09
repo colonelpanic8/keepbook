@@ -101,7 +101,7 @@ pub(super) fn ConnectionsView(
                 }
             },
             if !status_text.is_empty() {
-                OperationStatus { message: status_text, busy: is_busy }
+                FloatingStatus { message: status_text, busy: is_busy }
             }
             DataTable {
                 class: "connection-table",

@@ -13,6 +13,7 @@ mod proposed_edits;
 mod recurring;
 mod shared;
 mod spending;
+mod status_feed;
 
 use accounts::AccountsView;
 use assets::AssetsView;
@@ -23,6 +24,7 @@ use proposed_edits::ProposedEditsView;
 use recurring::RecurringView;
 use shared::*;
 use spending::SpendingView;
+use status_feed::*;
 
 const INTER_FONT: Asset = asset!("/assets/fonts/InterVariable.woff2");
 const INTER_FONT_CSS: &str = include_str!("../assets/fonts/inter.css");
@@ -105,6 +107,7 @@ pub(crate) fn App() -> Element {
     });
 
     let mut refresh_epoch = use_context_provider(|| Signal::new(0u64));
+    StatusFeed::provide();
     let mut filter_overrides = use_signal(FilterOverrides::default);
     let mut repositories = use_resource(fetch_repositories);
     let mut repository_status = use_signal(String::new);
@@ -225,6 +228,7 @@ pub(crate) fn App() -> Element {
                     }
                 },
             }
+            StatusFeedHost {}
         }
     }
 }
@@ -361,6 +365,7 @@ fn Dashboard(
             repository: active_repository,
             repository_busy,
             repository_status: (!repository_status.is_empty()).then(|| repository_status.clone()),
+            refreshing: overview_refreshing,
             nav_items: ActiveView::ALL
                 .map(|view| NavItem {
                     label: view.label().to_string(),
@@ -384,12 +389,6 @@ fn Dashboard(
                 }
                 active_view.set(view);
             },
-                if overview_refreshing {
-                    OperationStatus {
-                        message: "Refreshing app data…".to_string(),
-                        busy: true,
-                    }
-                }
                 match active {
                     ActiveView::Spending => rsx! {
                         SpendingView {

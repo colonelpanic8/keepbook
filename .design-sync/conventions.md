@@ -8,8 +8,9 @@ numbers. These components mirror the app's real Dioxus components, and
 **Setup.** No provider or wrapper is needed: load `styles.css` and the bundle,
 and every component is styled. Start full screens with `AppShell`, which draws
 the sidebar and the scrolling workspace. Pass page content as its children, in
-this order: a `PageToolbar`, the toolbar's `OperationStatus` lines, a
-`SummaryGrid` of three `MetricCard`s, then `Panel`s.
+this order: a `PageToolbar`, a `SummaryGrid` of three `MetricCard`s, then
+`Panel`s. Feedback for an action goes in a `StatusStack` that floats over the
+page, never in the page flow.
 
 **Themes.** A theme is a palette in a mode. `THEME_PALETTES` lists the
 palettes: `fern` (the default), `catppuccin`, `solarized`, and `dynamic`

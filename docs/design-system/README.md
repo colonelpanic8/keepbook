@@ -133,8 +133,8 @@ counts line up in columns and don't shift as they update.
   - `--control-height-sm` (28px) for compact buttons, segments, pills, and
     icon buttons.
 - Separate surfaces with 1px borders. Shadows are reserved for elements that
-  float: `--shadow-lg` for modals and the drawer, `--shadow-sm` for the
-  switch thumb and the selected segment.
+  float: `--shadow-lg` for modals, the drawer, and the status stack, and
+  `--shadow-sm` for the switch thumb and the selected segment.
 
 ### Motion
 
@@ -186,14 +186,15 @@ named last in each row renders it.
 | Badge | `.badge` + `.positive` / `.negative` / `.warning` | A short status. Neutral unless toned. `Badge` |
 | Tag pill | `.tag-pill` (`.readonly`, `.removable`), `.tag-suggestion-pill` | Spending tags. Tags get color from the swatch, not the pill. `TagPill` |
 | Filter chip | `.filter-clear-chip` | Exists only while a filter is active. Clicking it clears the filter. `FilterChip` |
-| Notice | `.notice` (+ `.busy` with `.activity-spinner`) | Feedback for work the user started, placed next to the control that started it. `OperationStatus` |
+| Notice | `.notice` (+ `.busy` with `.activity-spinner`), optional `.icon-button.notice-dismiss` | A busy line, then its result. Inline only for a region's first load; feedback for work the user started goes in the status stack. `OperationStatus` |
+| Status stack | `.status-stack` › `.notice`s | Floats at the bottom-right of the viewport (full width along the bottom below 720px) above the content, so feedback never moves the page. Settled notices get a close button and leave on their own after 4–12s, scaled to length, waiting while hovered. `StatusStack` |
 | Inline status | `.inline-status` (`h2` + `p`) | Fills a region whose data couldn't load. `InlineStatus` |
 | Progress | `.activity-spinner` (`.large`, `.control-spinner`), `.indeterminate-progress` | Indeterminate only. `Spinner`, `Progress` |
 | Empty / loading | `.chart-empty`, `.chart-loading` (`strong` + detail), `.compact` | Holds the footprint of the content it replaces; `.compact` drops the chart aspect ratio for lists. `EmptyState` |
 | Data table | `.data-table` › `.table-head` + `.table-row` | Each table's own class sets its columns with `grid-template-columns`. Below 1200px rows become labeled cards. `DataTable` |
 | Tree group | `.tree-group` › `.tree-parent` + `.data-table` | Accounts grouped by connection. `TreeGroup` |
 | Modal | `.modal-backdrop` › `.modal-dialog(.wide)` › `.modal-header`, body, `.modal-actions` | `Modal` |
-| Navigation | `.app-shell` › `.app-nav` › `.nav-header` + `nav` › `.nav-button(.selected)` (icon + label), then `.workspace` | A sidebar at wide widths, a sticky header with a drawer below 1200px. `AppShell` |
+| Navigation | `.app-shell` › `.app-nav` › `.nav-header` + `nav` › `.nav-button(.selected)` (icon + label), then `.workspace` | A sidebar at wide widths, a sticky header with a drawer below 1200px. While loaded data revalidates, `.nav-refresh-badge.active` fades a spinner in over the logo's corner without taking space. `AppShell` |
 | Legend | `.stacked-legend` › `.stacked-legend-item` (`.selected`, `.asset`) | Swatch and label per series; buttons when selecting a series filters the chart. `Legend` |
 | Net worth | `.chart-card` › `.chart-meta`, `svg.net-worth-chart` | Line and area with per-point hover detail; dragging selects a range. `NetWorthChart` |
 | Spending over time | `.chart-card.spending-over-time-card` › `.chart-meta`, `svg.spending-bar-chart` of `.spending-bar-segment`s, `.stacked-legend` | Stacked by tag; focusing a tag narrows the bars to it. `SpendingChart` |
@@ -209,8 +210,12 @@ named last in each row renders it.
 - The workspace is capped at `--workspace-max-width` and centered.
 - Page-level actions (refresh, resync, sync) go in a `.page-toolbar` at the
   top of the view, above the metrics and right-aligned, never in a panel
-  header. Their `notice` lines render directly beneath it. Below 520px its
+  header. Their notices go in the floating status stack. Below 520px its
   controls grow to fill the row.
+- Starting, finishing, or dismissing work never changes the page layout.
+  Don't insert transient banners or status lines into the page flow.
+  Revalidating loaded data (after a sync, on navigation) shows only the logo
+  badge.
 - Keep a toolbar to its main actions. A variant of an action or a rarely used
   action goes in a `SplitButton` menu with a one-line description, never in a
   checkbox beside the button or as another button. The Accounts toolbar shows

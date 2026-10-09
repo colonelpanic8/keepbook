@@ -25,6 +25,7 @@ import {
   SettingRow,
   SpendingBreakdown,
   SpendingChart,
+  StatusStack,
   Spinner,
   SplitButton,
   SummaryGrid,
@@ -188,6 +189,13 @@ export const cases: Record<string, ComponentType> = {
   ),
   "OperationStatus.busy": () => <OperationStatus message="Refreshing prices…" busy />,
   "OperationStatus.done": () => <OperationStatus message="Refreshed 14 prices." busy={false} />,
+  "OperationStatus.dismissible": () => <OperationStatus message="Data resynced." busy={false} onDismiss={() => {}} />,
+  "StatusStack.basic": () => (
+    <StatusStack>
+      <OperationStatus message="Refreshing prices…" busy />
+      <OperationStatus message="Refreshed 14 prices." busy={false} onDismiss={() => {}} />
+    </StatusStack>
+  ),
   "InlineStatus.basic": () => <InlineStatus title="Couldn't load" message="Try again." />,
   "EmptyState.basic": () => <EmptyState title="No assets" detail="Refresh balances." />,
   "EmptyState.loading": () => <EmptyState title="Updating graph" detail="1Y / Weekly" loading />,

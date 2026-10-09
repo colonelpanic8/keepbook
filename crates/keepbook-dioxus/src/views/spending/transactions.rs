@@ -152,7 +152,7 @@ pub(super) fn TransactionList(
                         if ai_busy { "Asking AI" } else { "Ask AI" }
                     }
                     if let Some(status) = ai_status.clone() {
-                        OperationStatus { message: status, busy: ai_busy }
+                        FloatingStatus { message: status, busy: ai_busy }
                     }
                 }
                 if let Some(result) = ai_result.clone() {

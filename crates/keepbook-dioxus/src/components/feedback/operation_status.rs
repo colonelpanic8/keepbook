@@ -1,15 +1,22 @@
 use super::Spinner;
+use crate::components::IconButton;
 use dioxus::prelude::*;
 
-/// Persistent, non-modal feedback for an operation the user started.
+/// Non-modal feedback for an operation: a busy line while work runs, then
+/// its result.
 ///
-/// Keep this near the controls that started the work. Busy operations get an
-/// indeterminate spinner and `aria-busy`; completed and failed messages remain
-/// readable without blocking navigation or replacing already-loaded content.
-/// Mirror: `design/src/feedback/OperationStatus.tsx`.
+/// Busy operations get an indeterminate spinner and `aria-busy`. Inline, it
+/// holds a region's first load; feedback for work the user started goes in a
+/// [`StatusStack`](super::StatusStack) instead, where `ondismiss` adds a close
+/// button to a settled message. Mirror: `design/src/feedback/OperationStatus.tsx`.
 #[component]
-pub(crate) fn OperationStatus(message: String, busy: bool) -> Element {
+pub(crate) fn OperationStatus(
+    message: String,
+    busy: bool,
+    ondismiss: Option<EventHandler<()>>,
+) -> Element {
     let class = if busy { "notice busy" } else { "notice" };
+    let dismiss = ondismiss.filter(|_| !busy);
 
     rsx! {
         div {
@@ -21,6 +28,14 @@ pub(crate) fn OperationStatus(message: String, busy: bool) -> Element {
                 Spinner {}
             }
             span { "{message}" }
+            if let Some(handler) = dismiss {
+                IconButton {
+                    label: "Dismiss",
+                    glyph: "×",
+                    class: "notice-dismiss",
+                    onclick: move |_| handler.call(()),
+                }
+            }
         }
     }
 }

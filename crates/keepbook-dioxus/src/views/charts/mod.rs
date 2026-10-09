@@ -175,7 +175,6 @@ pub(super) fn StackedHistoryGraphPanel(
     let start_text = start_override();
     let end_text = end_override();
     let history_state = history.cloned();
-    let is_history_loading = history_state.is_none();
     let loaded_history = match &history_state {
         Some(Ok(history)) => Some(history),
         _ => None,
@@ -225,9 +224,6 @@ pub(super) fn StackedHistoryGraphPanel(
             class: "graph-panel stacked-graph-panel",
             title: "Net Worth Breakdown",
             subtitle: "Zero baseline / stacked by account",
-            if is_history_loading {
-                OperationStatus { message: "Waiting on backend net worth data".to_string(), busy: true }
-            }
             div { class: "chart-controls",
                 SegmentedControl {
                     label: "Range",
@@ -403,7 +399,6 @@ pub(super) fn HistoryGraphPanel(
     let start_text = start_override();
     let end_text = end_override();
     let history_state = history.cloned();
-    let is_history_loading = history_state.is_none();
     let loaded_history = match &history_state {
         Some(Ok(history)) => Some(history),
         _ => None,
@@ -478,9 +473,6 @@ pub(super) fn HistoryGraphPanel(
                 h2 { "{title}" }
                 span { "{header_label}" }
             }
-        }
-        if is_history_loading {
-            OperationStatus { message: "Waiting on backend graph data".to_string(), busy: true }
         }
         div { class: "chart-controls",
             SegmentedControl {

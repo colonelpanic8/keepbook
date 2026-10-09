@@ -277,11 +277,8 @@ pub(super) fn SpendingView(currency: String) -> Element {
             actions: rsx! {
                 span { "{currency}" }
             },
-            if state.is_none() {
-                OperationStatus { message: "Waiting on backend spending data".to_string(), busy: true }
-            }
             if let Some(message) = tag_update_status() {
-                OperationStatus { message, busy: mutation_busy() }
+                FloatingStatus { message, busy: mutation_busy() }
             }
             div { class: "chart-controls spending-controls",
                 SegmentedControl {

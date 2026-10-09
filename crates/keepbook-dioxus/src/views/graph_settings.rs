@@ -240,7 +240,7 @@ fn ApplicationSettingsPanel() -> Element {
                         }
                     }
                     if !status_text.is_empty() {
-                        OperationStatus { message: status_text, busy: is_busy }
+                        FloatingStatus { message: status_text, busy: is_busy }
                     }
                     div { class: "settings-source",
                         small { "{current.config_path}" }
@@ -433,7 +433,7 @@ pub(super) fn SettingsView(
                         span { "Config {current.config_path}" }
                     }
                     if !status_text.is_empty() {
-                        OperationStatus { message: status_text, busy: is_busy }
+                        FloatingStatus { message: status_text, busy: is_busy }
                     }
                     div { class: "control-field secret-field",
                         span { "SSH private key" }
