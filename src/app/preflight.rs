@@ -55,3 +55,28 @@ pub fn run_preflight(config: &ResolvedConfig, opts: PreflightOptions) -> Result<
 
     Ok(())
 }
+
+/// Pull remote data changes before refreshing prices.
+///
+/// Runs regardless of `git.pull_before_edit`; only skipped when the data
+/// directory has no git remote to sync with.
+pub fn pull_before_price_refresh(config: &ResolvedConfig) -> Result<()> {
+    match try_pull_remote(&config.data_dir, &config.git)
+        .map_err(|err| err.context("Git pull before price refresh failed"))?
+    {
+        PullRemoteOutcome::SkippedNotRepo { reason }
+        | PullRemoteOutcome::SkippedNoUpstream { reason } => {
+            tracing::debug!("Git pull before price refresh skipped: {reason}");
+        }
+        PullRemoteOutcome::UpToDate => {
+            tracing::debug!("Git pull before price refresh: already up to date");
+        }
+        PullRemoteOutcome::Pulled => {
+            tracing::info!("Git pull before price refresh: pulled remote changes");
+        }
+        PullRemoteOutcome::ConflictAborted => {
+            anyhow::bail!("Git pull before price refresh aborted due to conflicts");
+        }
+    }
+    Ok(())
+}

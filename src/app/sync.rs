@@ -14,7 +14,8 @@ use crate::sync::{
 };
 
 use super::{
-    apply_transaction_rules_without_auto_commit, maybe_auto_commit, ApplyTransactionRulesOptions,
+    apply_transaction_rules_without_auto_commit, maybe_auto_commit, pull_before_price_refresh,
+    ApplyTransactionRulesOptions,
 };
 
 struct StdinPrompter;
@@ -514,6 +515,8 @@ pub async fn sync_prices(
     force: bool,
     quote_staleness_override: Option<std::time::Duration>,
 ) -> Result<serde_json::Value> {
+    pull_before_price_refresh(config)?;
+
     let service =
         build_sync_service_with_quote_staleness(storage.clone(), config, quote_staleness_override)
             .await;

@@ -47,7 +47,7 @@ pub use portfolio::{
     PortfolioTaxImpactRequest, PriceHistoryRequest, DEFAULT_PORTFOLIO_CHANGE_POINTS_GRANULARITY,
     DEFAULT_PORTFOLIO_HISTORY_GRANULARITY, DEFAULT_PORTFOLIO_INCLUDE_PRICES,
 };
-pub use preflight::{run_preflight, PreflightOptions};
+pub use preflight::{pull_before_price_refresh, run_preflight, PreflightOptions};
 pub use recurring::{
     list_recurring_transaction_reviews, list_recurring_transactions,
     list_reviewed_recurring_transactions, reconcile_recurring_transaction_reviews,

@@ -11,7 +11,7 @@ use keepbook::repositories::setup_manifest_repositories;
 use keepbook::storage::{JsonFileStorage, Storage};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
-use cli::{apply_runtime_credential_overrides, Cli, Command, RepositoriesCommand};
+use cli::{apply_runtime_credential_overrides, Cli, Command, RepositoriesCommand, SyncCommand};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -54,6 +54,8 @@ async fn main() -> Result<()> {
         .as_ref()
         .map(|command| command.edits_data())
         .unwrap_or(false);
+    // `sync prices` always pulls on its own.
+    let pulls_itself = matches!(cli.command, Some(Command::Sync(SyncCommand::Prices { .. })));
     let push_after_sync = if cli.git_push_after_sync {
         true
     } else if cli.skip_git_push_after_sync {
@@ -79,7 +81,7 @@ async fn main() -> Result<()> {
         &config,
         app::PreflightOptions {
             merge_origin_master: merge_enabled,
-            pull_remote: edits_data && pull_enabled,
+            pull_remote: edits_data && pull_enabled && !pulls_itself,
         },
     )?;
 
