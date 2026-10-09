@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.13.1 - 2026-10-08
+
+### Changed
+
+- Refreshing prices always pulls remote changes into the data repository
+  first, from the CLI, the sync daemon, and the app, regardless of
+  `git.pull_before_edit`. A pull conflict or uncommitted changes in the data
+  repository stop the refresh instead of running it on stale data.
+
 ## 0.13.0 - 2026-10-08
 
 ### Added
