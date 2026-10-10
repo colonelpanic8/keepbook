@@ -120,7 +120,7 @@ fn ApplicationSettingsPanel() -> Element {
     let mut start_minimized = use_signal(|| false);
     let mut window_decorations = use_signal(|| "auto".to_string());
     let mut loaded_value = use_signal(|| None::<(bool, String)>);
-    let mut status = use_signal(String::new);
+    let status = use_action_feedback();
     let mut busy = use_signal(|| false);
 
     if let Some(Ok(current)) = settings.cloned() {
@@ -137,13 +137,16 @@ fn ApplicationSettingsPanel() -> Element {
 
     let current_settings = settings.cloned();
     let is_busy = busy();
-    let status_text = status();
 
     rsx! {
         Panel {
             class: "settings-panel",
             title: "Application",
             subtitle: "Build",
+            status: status.status_for("app"),
+            if let Some(error) = status.error_for("app") {
+                ErrorNotice { message: error, ondismiss: move |_| status.dismiss() }
+            }
             div { class: "settings-list",
                 ThemePicker {}
             }
@@ -169,7 +172,7 @@ fn ApplicationSettingsPanel() -> Element {
                                     onchange: move |next: bool| {
                                         start_minimized.set(next);
                                         busy.set(true);
-                                        status.set("Saving application settings...".to_string());
+                                        status.start("app", "Saving…");
                                         spawn(async move {
                                             match save_application_settings(ApplicationSettingsInput {
                                                 start_minimized_to_tray: next,
@@ -182,12 +185,12 @@ fn ApplicationSettingsPanel() -> Element {
                                                         saved.start_minimized_to_tray,
                                                         saved.window_decorations,
                                                     )));
-                                                    status.set("Saved. This takes effect the next time Keepbook starts.".to_string());
+                                                    status.succeed("app", "Saved; takes effect the next time Keepbook starts", None);
                                                     settings.restart();
                                                 }
                                                 Err(error) => {
                                                     start_minimized.set(!next);
-                                                    status.set(error);
+                                                    status.fail("app", "Save failed", format!("Saving application settings failed: {error}"));
                                                 }
                                             }
                                             busy.set(false);
@@ -212,7 +215,7 @@ fn ApplicationSettingsPanel() -> Element {
                                     let current_start_minimized = start_minimized();
                                     window_decorations.set(next.clone());
                                     busy.set(true);
-                                    status.set("Saving application settings...".to_string());
+                                    status.start("app", "Saving…");
                                     spawn(async move {
                                         match save_application_settings(ApplicationSettingsInput {
                                             start_minimized_to_tray: current_start_minimized,
@@ -225,12 +228,12 @@ fn ApplicationSettingsPanel() -> Element {
                                                     saved.start_minimized_to_tray,
                                                     saved.window_decorations,
                                                 )));
-                                                status.set("Saved. This takes effect the next time Keepbook starts.".to_string());
+                                                status.succeed("app", "Saved; takes effect the next time Keepbook starts", None);
                                                 settings.restart();
                                             }
                                             Err(error) => {
                                                 window_decorations.set(previous);
-                                                status.set(error);
+                                                status.fail("app", "Save failed", format!("Saving application settings failed: {error}"));
                                             }
                                         }
                                         busy.set(false);
@@ -238,9 +241,6 @@ fn ApplicationSettingsPanel() -> Element {
                                 },
                             }
                         }
-                    }
-                    if !status_text.is_empty() {
-                        FloatingStatus { message: status_text, busy: is_busy }
                     }
                     div { class: "settings-source",
                         small { "{current.config_path}" }
@@ -268,7 +268,7 @@ pub(super) fn SettingsView(
     let mut ssh_key_path = use_signal(|| None::<String>);
     let mut private_key = use_signal(String::new);
     let mut private_key_name = use_signal(String::new);
-    let mut status = use_signal(String::new);
+    let status = use_action_feedback();
     let mut busy = use_signal(|| false);
     let mut cancel_requested = use_signal(|| false);
     let mut git_sync_cancel = use_signal(|| None::<GitSyncCancelHandle>);
@@ -294,7 +294,6 @@ pub(super) fn SettingsView(
     let current_settings = settings.cloned();
     let is_busy = busy();
     let is_canceling = cancel_requested();
-    let status_text = status();
 
     rsx! {
         PortfolioSettingsPanel {
@@ -309,6 +308,7 @@ pub(super) fn SettingsView(
             class: "settings-panel",
             title: "Repositories",
             subtitle: "App-wide",
+            status: status.status_for("repos"),
             actions: rsx! {
                 button {
                     class: "control-button add-location-button",
@@ -325,6 +325,9 @@ pub(super) fn SettingsView(
                     "+"
                 }
             },
+            if let Some(error) = status.error_for("repos") {
+                ErrorNotice { message: error, ondismiss: move |_| status.dismiss() }
+            }
             match repositories.clone() {
                 None => rsx! { OperationStatus { message: "Loading repositories".to_string(), busy: true } },
                 Some(Err(error)) => rsx! { p { class: "validation", "{error}" } },
@@ -343,14 +346,14 @@ pub(super) fn SettingsView(
                         onactivate: move |id| onrepositorychange.call(id),
                         onremove: move |id: String| {
                             busy.set(true);
-                            status.set("Removing repository from Keepbook...".to_string());
+                            status.start("repos", "Removing repository…");
                             spawn(async move {
                                 match remove_repository(id).await {
                                     Ok(_) => {
-                                        status.set("Repository removed from Keepbook. Files were not deleted.".to_string());
+                                        status.succeed("repos", "Repository removed; its files were kept", None);
                                         onrefresh.call(());
                                     }
-                                    Err(error) => status.set(error),
+                                    Err(error) => status.fail("repos", "Remove failed", format!("Removing the repository failed: {error}")),
                                 }
                                 busy.set(false);
                             });
@@ -359,7 +362,7 @@ pub(super) fn SettingsView(
                             let (next_host, next_repo, next_ssh_user) = match git_settings_from_remote(&repository.remote) {
                                 Ok(settings) => settings,
                                 Err(error) => {
-                                    status.set(error);
+                                    status.fail("repos", "Git sync failed", format!("Git sync failed: {error}"));
                                     return;
                                 }
                             };
@@ -386,7 +389,7 @@ pub(super) fn SettingsView(
                                 "{action_progress} {} at {}",
                                 repository.remote, repository.path
                             ));
-                            status.set(format!("{action_progress} repository..."));
+                            status.start("repos", format!("{action_progress} repository…"));
                             let task = spawn(async move {
                                 match sync_git_repo_cancelable(input, cancel_handle).await {
                                     Ok(result) => {
@@ -395,18 +398,18 @@ pub(super) fn SettingsView(
                                             "Git synced {} from {} {}",
                                             result.data_dir, result.remote_url, result.branch
                                         ));
-                                        status.set(format!("Repository {} is ready.", repository.name));
+                                        status.succeed("repos", format!("Repository {} is ready", repository.name), None);
                                         onrefresh.call(());
                                     }
                                     Err(error) => {
                                         if error.contains("cancelled") || error.contains("canceled") {
                                             clone_dialog_title.set("Git operation canceled".to_string());
                                             clone_dialog_message.set("Git sync was canceled before it completed.".to_string());
-                                            status.set("Git sync canceled.".to_string());
+                                            status.succeed("repos", "Git sync canceled", None);
                                         } else {
                                             clone_dialog_title.set("Git operation failed".to_string());
                                             clone_dialog_message.set(error.clone());
-                                            status.set(format!("Git sync failed: {error}"));
+                                            status.fail("repos", "Git sync failed", format!("Git sync failed: {error}"));
                                         }
                                     }
                                 }
@@ -425,15 +428,16 @@ pub(super) fn SettingsView(
             class: "settings-panel",
             title: "Git Authentication",
             subtitle: "Device-local",
+            status: status.status_for("auth"),
+            if let Some(error) = status.error_for("auth") {
+                ErrorNotice { message: error, ondismiss: move |_| status.dismiss() }
+            }
             match current_settings {
                 None => rsx! { OperationStatus { message: "Loading Git authentication".to_string(), busy: true } },
                 Some(Err(error)) => rsx! { p { class: "validation", "{error}" } },
                 Some(Ok(current)) => rsx! {
                     div { class: "settings-meta",
                         span { "Config {current.config_path}" }
-                    }
-                    if !status_text.is_empty() {
-                        FloatingStatus { message: status_text, busy: is_busy }
                     }
                     div { class: "control-field secret-field",
                         span { "SSH private key" }
@@ -455,11 +459,11 @@ pub(super) fn SettingsView(
                                     match serde_json::from_str::<serde_json::Value>(&event.value()) {
                                         Ok(payload) => {
                                             if let Some(message) = payload.get("status").and_then(|value| value.as_str()) {
-                                                status.set(message.to_string());
+                                                status.succeed("auth", message, None);
                                                 return;
                                             }
                                             if let Some(error) = payload.get("error").and_then(|value| value.as_str()) {
-                                                status.set(error.to_string());
+                                                status.fail("auth", "Key file read failed", format!("Reading the SSH key file failed: {error}"));
                                                 return;
                                             }
                                             let name = payload
@@ -473,14 +477,14 @@ pub(super) fn SettingsView(
                                                 .unwrap_or_default()
                                                 .to_string();
                                             if contents.trim().is_empty() {
-                                                status.set("Selected SSH key file is empty.".to_string());
+                                                status.fail("auth", "Key file read failed", "The selected SSH key file is empty.".to_string());
                                             } else {
                                                 private_key.set(contents);
                                                 private_key_name.set(name.clone());
-                                                status.set(format!("Selected SSH key file: {name}."));
+                                                status.succeed("auth", format!("Selected SSH key file: {name}"), None);
                                             }
                                         }
-                                        Err(error) => status.set(format!("Key file read failed: {error}")),
+                                        Err(error) => status.fail("auth", "Key file read failed", format!("Reading the SSH key file failed: {error}")),
                                     }
                                 }
                             }
@@ -503,7 +507,7 @@ pub(super) fn SettingsView(
                                     onclick: move |_| {
                                         private_key.set(String::new());
                                         private_key_name.set(String::new());
-                                        status.set("SSH key cleared.".to_string());
+                                        status.succeed("auth", "SSH key cleared", None);
                                     },
                                     "Clear key"
                                 }
@@ -550,18 +554,18 @@ pub(super) fn SettingsView(
                                             branch: next_branch,
                                         };
                                         busy.set(true);
-                                        status.set("Adding repository...".to_string());
+                                        status.start("repos", "Adding repository…");
                                         spawn(async move {
                                             match add_repository(input).await {
                                                 Ok(_) => {
                                                     location_error.set(String::new());
                                                     add_location_open.set(false);
-                                                    status.set("Repository added. Clone it when you are ready.".to_string());
+                                                    status.succeed("repos", "Repository added; clone it when you are ready", None);
                                                     onrefresh.call(());
                                                 }
                                                 Err(error) => {
                                                     location_error.set(error.clone());
-                                                    status.set(format!("Save failed: {error}"));
+                                                    status.fail("repos", "Save failed", format!("Adding the repository failed: {error}"));
                                                 }
                                             }
                                             busy.set(false);
@@ -648,7 +652,7 @@ pub(super) fn SettingsView(
                                 cancel_requested.set(true);
                                 clone_dialog_title.set("Canceling Git operation".to_string());
                                 clone_dialog_message.set("Waiting for the current Git transfer step to stop.".to_string());
-                                status.set("Canceling Git sync...".to_string());
+                                status.start("repos", "Canceling Git sync…");
                             },
                             if is_canceling {
                                 "Canceling"

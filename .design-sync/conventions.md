@@ -9,8 +9,10 @@ numbers. These components mirror the app's real Dioxus components, and
 and every component is styled. Start full screens with `AppShell`, which draws
 the sidebar and the scrolling workspace. Pass page content as its children, in
 this order: a `PageToolbar`, a `SummaryGrid` of three `MetricCard`s, then
-`Panel`s. Feedback for an action goes in a `StatusStack` that floats over the
-page, never in the page flow.
+`Panel`s. Feedback for an action shows on the control that started it: a
+button's `feedback`, or a panel's `status` when no button started it. Never
+add a toast or a status line for progress or success. A failure also shows an
+`ErrorNotice` beneath the control until dismissed.
 
 **Themes.** A theme is a palette in a mode. `THEME_PALETTES` lists the
 palettes: `fern` (the default), `catppuccin`, `solarized`, and `dynamic`
@@ -62,17 +64,19 @@ Wrap gains and losses in `<strong className="change-positive">` or
 **Example:**
 
 ```jsx
-const { AppShell, PageToolbar, ControlButton, SplitButton, OperationStatus, SummaryGrid, MetricCard, Panel, NetWorthChart } = window.Keepbook;
+const { AppShell, PageToolbar, SplitButton, SummaryGrid, MetricCard, Panel, NetWorthChart } = window.Keepbook;
 
 <AppShell active="Net Worth">
   <PageToolbar>
-    <ControlButton icon="git-branch">Git sync</ControlButton>
     <SplitButton primary icon="refresh" menuLabel="More refresh options"
-      actions={[{ value: "stale", label: "Refresh stale prices", detail: "Skip prices that are still fresh" }]}>
+      actions={[
+        { value: "stale", label: "Refresh stale prices", detail: "Skip prices that are still fresh" },
+        { value: "git", label: "Git sync", detail: "Pull and push the data repository" },
+      ]}
+      feedback={{ tone: "done", label: "Prices refreshed", detail: "Refreshed 14 prices." }}>
       Refresh all prices
     </SplitButton>
   </PageToolbar>
-  <OperationStatus message="Refreshed 14 prices." />
   <SummaryGrid>
     <MetricCard label="Net worth" value="$6,814.24" detail="2026-10-08" />
     <MetricCard label="Accounts" value="3" detail="3 total" />

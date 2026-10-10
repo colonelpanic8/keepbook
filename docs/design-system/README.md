@@ -133,8 +133,8 @@ counts line up in columns and don't shift as they update.
   - `--control-height-sm` (28px) for compact buttons, segments, pills, and
     icon buttons.
 - Separate surfaces with 1px borders. Shadows are reserved for elements that
-  float: `--shadow-lg` for modals, the drawer, and the status stack, and
-  `--shadow-sm` for the switch thumb and the selected segment.
+  float: `--shadow-lg` for modals and the drawer, and `--shadow-sm` for the
+  switch thumb and the selected segment.
 
 ### Motion
 
@@ -173,10 +173,10 @@ named last in each row renders it.
 
 | Component | Markup | Rules |
 |---|---|---|
-| Panel | `section.panel` › `.panel-header` › `.panel-title` (`h2` + subtitle `span`) | The unit of page content. It is a single column that can't exceed its own width. `Panel` |
+| Panel | `section.panel` › `.panel-header` › `.panel-title` (`h2` + subtitle `span`), optional `.panel-status` | The unit of page content. It is a single column that can't exceed its own width. `.panel-status` reports work started in the panel that has no button of its own (a setting saving itself, an inline edit) on one line beside the actions; it shrinks first and ellipsizes, so it never wraps the title or grows the header. `Panel` |
 | Metric | `article.metric` › `.metric-label`, `strong`, `small`, inside `.summary-grid` | Three across, stacking below 1200px. `MetricCard` |
-| Button | `.control-button` + `.primary` / `.selected` / `.danger` / `.small` | One `primary` per toolbar. `.selected` is a toggled state, not emphasis. While busy, a spinner replaces the icon and the button is disabled. `ControlButton` |
-| Split button | `.split-button` › `.control-button` + `.control-button.split-button-caret`, then `.menu-backdrop` + `.menu` › `button.menu-item` (`strong` + `small`) | A main action plus a chevron that opens its less common variants, each with a one-line description. Escape or a click outside closes the menu. `SplitButton` |
+| Button | `.control-button` + `.primary` / `.selected` / `.danger` / `.small` | One `primary` per toolbar. `.selected` is a toggled state, not emphasis. While busy, a spinner replaces the icon and the button is disabled. `.has-feedback` (`.feedback-busy` / `.feedback-done` / `.feedback-failed`) reports the work the button started on the button itself: `.button-feedback` (spinner, check, or alert icon + label) lays over `.button-face`, the button's own label kept in place but hidden, so the width never changes. Feedback labels are short ("Refreshing…", "Prices refreshed", "Refresh failed") and ellipsize past the button's width; buttons too narrow for words show only the icon. The full message is the tooltip. `ControlButton` |
+| Split button | `.split-button` › `.control-button` + `.control-button.split-button-caret`, then `.menu-backdrop` + `.menu` › `button.menu-item` (`strong` + `small`) | A main action plus a chevron that opens its less common variants, each with a one-line description. Escape or a click outside closes the menu. Feedback for any of its actions, the menu's included, shows on the main button. `SplitButton` |
 | Icon button | `.icon-button` | A transparent 28px square for a glyph. Its label is both the tooltip and the accessible name. `IconButton` |
 | Segmented control | `.segmented-field` › `.control-label` + `.segmented-control` › `.segment` | For mutually exclusive options. Never use a wrapping row of buttons for this. `SegmentedControl` |
 | Input | `.control-input` (+ `.small`), `select.control-input`, inside `label.control-field` | Selects draw their own caret so they follow the theme. A color input is a 64px swatch that opens the platform picker. `TextInput`, `Select` |
@@ -186,8 +186,8 @@ named last in each row renders it.
 | Badge | `.badge` + `.positive` / `.negative` / `.warning` | A short status. Neutral unless toned. `Badge` |
 | Tag pill | `.tag-pill` (`.readonly`, `.removable`), `.tag-suggestion-pill` | Spending tags. Tags get color from the swatch, not the pill. `TagPill` |
 | Filter chip | `.filter-clear-chip` | Exists only while a filter is active. Clicking it clears the filter. `FilterChip` |
-| Notice | `.notice` (+ `.busy` with `.activity-spinner`), optional `.icon-button.notice-dismiss` | A busy line, then its result. Inline only for a region's first load; feedback for work the user started goes in the status stack. `OperationStatus` |
-| Status stack | `.status-stack` › `.notice`s | Floats at the bottom-right of the viewport (full width along the bottom below 720px) above the content, so feedback never moves the page. Settled notices get a close button and leave on their own after 4–12s, scaled to length, waiting while hovered. `StatusStack` |
+| Notice | `.notice` (+ `.busy` with `.activity-spinner`) | Holds a region while its data first loads. Not for feedback on work the user started; that shows on the control that started it. `OperationStatus` |
+| Error notice | `.notice.error` (alert icon, message, `.icon-button.notice-dismiss`) | The full failure of work the user started, directly beneath the control that started it (under the page toolbar, or at the top of the panel). It names what failed and stays until dismissed or the work is retried, while the button keeps its failed state. The one feedback that may move the page. `ErrorNotice` |
 | Inline status | `.inline-status` (`h2` + `p`) | Fills a region whose data couldn't load. `InlineStatus` |
 | Progress | `.activity-spinner` (`.large`, `.control-spinner`), `.indeterminate-progress` | Indeterminate only. `Spinner`, `Progress` |
 | Empty / loading | `.chart-empty`, `.chart-loading` (`strong` + detail), `.compact` | Holds the footprint of the content it replaces; `.compact` drops the chart aspect ratio for lists. `EmptyState` |
@@ -210,17 +210,20 @@ named last in each row renders it.
 - The workspace is capped at `--workspace-max-width` and centered.
 - Page-level actions (refresh, resync, sync) go in a `.page-toolbar` at the
   top of the view, above the metrics and right-aligned, never in a panel
-  header. Their notices go in the floating status stack. Below 520px its
-  controls grow to fill the row.
-- Starting, finishing, or dismissing work never changes the page layout.
-  Don't insert transient banners or status lines into the page flow.
-  Revalidating loaded data (after a sync, on navigation) shows only the logo
-  badge.
+  header. Below 520px its controls grow to fill the row.
+- Feedback on work lives on the control that started it, never in a separate
+  banner, toast, or status line, and never changes the page layout. A button
+  shows its own state (see Button); work with no button of its own reports in
+  its panel's `.panel-status`. Successes clear themselves after 3s, so nothing
+  needs dismissing. Failures are the exception: they must not be missable, so
+  the control keeps its failed state and an error notice appears beneath it
+  until dismissed or retried. Revalidating loaded data (after a sync, on
+  navigation) shows only the logo badge.
 - Keep a toolbar to its main actions. A variant of an action or a rarely used
   action goes in a `SplitButton` menu with a one-line description, never in a
-  checkbox beside the button or as another button. The Accounts toolbar shows
-  only "Git sync" and "Refresh all prices"; "Refresh stale prices" and
-  "Resync data" sit behind the chevron.
+  checkbox beside the button or as another button. The Accounts toolbar is a
+  single "Refresh all prices" split button; "Refresh stale prices", "Resync
+  data", and "Git sync" sit behind the chevron.
 - Navigation stays visible while the workspace scrolls.
   - At wide widths it is a fixed sidebar.
   - Narrower, it is a compact header stuck to the top. It holds the

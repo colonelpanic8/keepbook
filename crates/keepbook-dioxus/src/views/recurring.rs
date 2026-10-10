@@ -9,7 +9,7 @@ pub(super) fn RecurringView() -> Element {
     let mut sort_order = use_signal(|| "annual_desc".to_string());
     let mut busy_key = use_signal(String::new);
     let mut busy_action = use_signal(String::new);
-    let mut status = use_signal(String::new);
+    let status = use_action_feedback();
     let mut recurring = use_resource(move || {
         let query =
             recurring_query_string(include_possible(), include_dismissed(), min_confidence());
@@ -21,20 +21,22 @@ pub(super) fn RecurringView() -> Element {
         sort_recurring_items(items, &sort_order_value);
     }
     let busy = busy_key();
-    let status_text = status();
 
     rsx! {
-        section { class: "panel recurring-panel",
-            div { class: "panel-header",
-                div {
-                    h2 { "Predictable recurring costs" }
-                    span { "Active, regular outflows with stable amounts" }
-                }
+        Panel {
+            class: "recurring-panel",
+            title: "Predictable recurring costs",
+            subtitle: "Active, regular outflows with stable amounts",
+            status: status.status_for("review"),
+            actions: rsx! {
                 ControlButton {
                     disabled: !busy.is_empty(),
                     onclick: move |_| recurring.restart(),
                     "Refresh"
                 }
+            },
+            if let Some(error) = status.error_for("review") {
+                ErrorNotice { message: error, ondismiss: move |_| status.dismiss() }
             }
             div { class: "recurring-controls",
                 Checkbox {
@@ -78,9 +80,6 @@ pub(super) fn RecurringView() -> Element {
                     }
                 }
             }
-            if !status_text.is_empty() {
-                FloatingStatus { message: status_text, busy: !busy.is_empty() }
-            }
             match current {
                 None => rsx! { OperationStatus { message: "Loading recurring transactions".to_string(), busy: true } },
                 Some(Err(error)) => rsx! { p { class: "validation", "{error}" } },
@@ -101,7 +100,6 @@ pub(super) fn RecurringView() -> Element {
                                     onreview: move |(candidate, review_status): (RecurringTransaction, &'static str)| {
                                         busy_key.set(candidate.candidate_key.clone());
                                         busy_action.set(review_status.to_string());
-                                        status.set(format!("Marking {} as {review_status}...", candidate.name));
                                         spawn(async move {
                                             let input = RecurringTransactionReviewInput {
                                                 status: review_status.to_string(),
@@ -109,10 +107,10 @@ pub(super) fn RecurringView() -> Element {
                                             };
                                             match review_recurring_transaction(input).await {
                                                 Ok(()) => {
-                                                    status.set(format!("Marked recurring transaction as {review_status}."));
+                                                    status.succeed("review", format!("Marked as {review_status}"), None);
                                                     recurring.restart();
                                                 }
-                                                Err(error) => status.set(error),
+                                                Err(error) => status.fail("review", "Review failed", format!("Reviewing the recurring transaction failed: {error}")),
                                             }
                                             busy_key.set(String::new());
                                             busy_action.set(String::new());

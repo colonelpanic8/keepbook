@@ -6,15 +6,84 @@ pub(super) fn ConnectionsView(
     connections: Vec<Connection>,
     onrefresh: EventHandler<()>,
 ) -> Element {
-    let mut busy_target = use_signal(String::new);
-    let mut status = use_signal(String::new);
+    let operation = use_action_feedback();
     let mut only_stale = use_signal(|| true);
     let mut full_transactions = use_signal(|| false);
     let mut force_prices = use_signal(|| false);
-    let busy = busy_target();
-    let is_busy = !busy.is_empty();
-    let status_text = status();
+    let is_busy = operation.is_busy();
     let connection_count = connections.len();
+    // Row buttons are too narrow for words; they show only the state's icon.
+    let labels = |target: &Option<String>, label: &'static str| {
+        if target.is_some() {
+            ""
+        } else {
+            label
+        }
+    };
+    // Failures name the connection, since a row button can't say which one failed.
+    let failure_scope = |name: &Option<String>| {
+        name.as_ref()
+            .map(|name| format!("{name}: "))
+            .unwrap_or_default()
+    };
+    let refresh_balances = move |key: String, target: Option<String>, name: Option<String>| {
+        let scope = failure_scope(&name);
+        operation.start(key.clone(), labels(&target, "Refreshing…"));
+        let done = labels(&target, "Refreshed");
+        let failed = labels(&target, "Failed");
+        let input = SyncConnectionsInput {
+            target,
+            if_stale: only_stale(),
+            full_transactions: full_transactions(),
+        };
+        spawn(async move {
+            match sync_connections(input).await {
+                Ok(result) => {
+                    operation.succeed(key, done, Some(sync_result_summary(&result)));
+                    onrefresh.call(());
+                }
+                Err(error) => operation.fail(
+                    key,
+                    failed,
+                    format!("{scope}Balance refresh failed: {error}"),
+                ),
+            }
+        });
+    };
+    let refresh_prices = move |key: String, target: Option<String>, name: Option<String>| {
+        let scope = failure_scope(&name);
+        operation.start(key.clone(), labels(&target, "Refreshing…"));
+        let done = labels(&target, "Refreshed");
+        let failed = labels(&target, "Failed");
+        let partial = labels(&target, "Some failed");
+        let input = SyncPricesInput {
+            scope: if target.is_some() {
+                "connection"
+            } else {
+                "all"
+            }
+            .to_string(),
+            target,
+            force: force_prices(),
+            quote_staleness_seconds: None,
+        };
+        spawn(async move {
+            match sync_prices(input).await {
+                Ok(result) => {
+                    let summary = price_sync_result_summary(&result);
+                    if price_sync_result_has_failures(&result) {
+                        operation.fail(key, partial, format!("{scope}{summary}"));
+                    } else {
+                        operation.succeed(key, done, Some(summary));
+                    }
+                    onrefresh.call(());
+                }
+                Err(error) => {
+                    operation.fail(key, failed, format!("{scope}Price refresh failed: {error}"))
+                }
+            }
+        });
+    };
 
     rsx! {
         Panel {
@@ -42,79 +111,32 @@ pub(super) fn ConnectionsView(
                     }
                     ControlButton {
                         disabled: is_busy,
-                        busy: busy == "all",
-                        onclick: move |_| {
-                            busy_target.set("all".to_string());
-                            let input = SyncConnectionsInput {
-                                target: None,
-                                if_stale: only_stale(),
-                                full_transactions: full_transactions(),
-                            };
-                            status.set(if input.if_stale {
-                                "Refreshing stale balances...".to_string()
-                            } else {
-                                "Refreshing balances for all connections...".to_string()
-                            });
-                            spawn(async move {
-                                match sync_connections(input).await {
-                                    Ok(result) => {
-                                        status.set(sync_result_summary(&result));
-                                        onrefresh.call(());
-                                    }
-                                    Err(error) => status.set(format!("Balance refresh failed: {error}")),
-                                }
-                                busy_target.set(String::new());
-                            });
-                        },
-                        if busy == "all" { "Refreshing" } else { "Refresh balances" }
+                        feedback: operation.for_key("balances:all"),
+                        onclick: move |_| refresh_balances("balances:all".to_string(), None, None),
+                        "Refresh balances"
                     }
                     ControlButton {
-                        primary: true,
+                        selected: true,
                         disabled: is_busy,
-                        busy: busy == "prices:all",
-                        onclick: move |_| {
-                            busy_target.set("prices:all".to_string());
-                            let input = SyncPricesInput {
-                                scope: "all".to_string(),
-                                target: None,
-                                force: force_prices(),
-                                quote_staleness_seconds: None,
-                            };
-                            status.set(if input.force {
-                                "Refreshing all prices...".to_string()
-                            } else {
-                                "Refreshing stale prices...".to_string()
-                            });
-                            spawn(async move {
-                                match sync_prices(input).await {
-                                    Ok(result) => {
-                                        status.set(price_sync_result_summary(&result));
-                                        onrefresh.call(());
-                                    }
-                                    Err(error) => status.set(format!("Price refresh failed: {error}")),
-                                }
-                                busy_target.set(String::new());
-                            });
-                        },
-                        if busy == "prices:all" { "Refreshing" } else { "Refresh prices" }
+                        feedback: operation.for_key("prices:all"),
+                        onclick: move |_| refresh_prices("prices:all".to_string(), None, None),
+                        "Refresh prices"
                     }
                 }
             },
-            if !status_text.is_empty() {
-                FloatingStatus { message: status_text, busy: is_busy }
+            if let Some(error) = operation.error() {
+                ErrorNotice { message: error, ondismiss: move |_| operation.dismiss() }
             }
             DataTable {
                 class: "connection-table",
                 columns: ["Name", "Source", "Accounts", "Last balance refresh", "Actions"].map(str::to_string).to_vec(),
                 for connection in connections {
                     {
-                        let target = connection.id.clone();
-                        let price_target = format!("prices:{target}");
-                        let row_busy = busy == target;
-                        let price_busy = busy == price_target;
-                        let sync_target = target.clone();
-                        let sync_name = connection.name.clone();
-                        let prices_target = target.clone();
+                        let balances_key = format!("balances:{}", connection.id);
+                        let prices_key = format!("prices:{}", connection.id);
+                        let balances_target = connection.id.clone();
+                        let prices_target = connection.id.clone();
+                        let balances_name = connection.name.clone();
                         let prices_name = connection.name.clone();
                         rsx! {
                     div { class: "table-row",
@@ -127,55 +149,19 @@ pub(super) fn ConnectionsView(
                         div { class: "connection-actions",
                             ControlButton {
                                 disabled: is_busy,
-                                busy: row_busy,
+                                feedback: operation.for_key(&balances_key),
                                 onclick: move |_| {
-                                    let target = sync_target.clone();
-                                    busy_target.set(target.clone());
-                                    let input = SyncConnectionsInput {
-                                        target: Some(target.clone()),
-                                        if_stale: only_stale(),
-                                        full_transactions: full_transactions(),
-                                    };
-                                    status.set(format!("Refreshing balances for {sync_name}..."));
-                                    spawn(async move {
-                                        match sync_connections(input).await {
-                                            Ok(result) => {
-                                                status.set(sync_result_summary(&result));
-                                                onrefresh.call(());
-                                            }
-                                            Err(error) => status.set(format!("Balance refresh failed: {error}")),
-                                        }
-                                        busy_target.set(String::new());
-                                    });
+                                    refresh_balances(balances_key.clone(), Some(balances_target.clone()), Some(balances_name.clone()))
                                 },
-                                if row_busy { "Refreshing" } else { "Balances" }
+                                "Balances"
                             }
                             ControlButton {
                                 disabled: is_busy,
-                                busy: price_busy,
+                                feedback: operation.for_key(&prices_key),
                                 onclick: move |_| {
-                                    let target = prices_target.clone();
-                                    let price_target = format!("prices:{target}");
-                                    busy_target.set(price_target);
-                                    let input = SyncPricesInput {
-                                        scope: "connection".to_string(),
-                                        target: Some(target),
-                                        force: force_prices(),
-                                        quote_staleness_seconds: None,
-                                    };
-                                    status.set(format!("Refreshing prices for {prices_name}..."));
-                                    spawn(async move {
-                                        match sync_prices(input).await {
-                                            Ok(result) => {
-                                                status.set(price_sync_result_summary(&result));
-                                                onrefresh.call(());
-                                            }
-                                            Err(error) => status.set(format!("Price refresh failed: {error}")),
-                                        }
-                                        busy_target.set(String::new());
-                                    });
+                                    refresh_prices(prices_key.clone(), Some(prices_target.clone()), Some(prices_name.clone()))
                                 },
-                                if price_busy { "Refreshing" } else { "Prices" }
+                                "Prices"
                             }
                         }
                     }

@@ -12,8 +12,9 @@ static ICON_PATHS: LazyLock<HashMap<String, Vec<String>>> = LazyLock::new(|| {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum ButtonIcon {
     Refresh,
-    GitBranch,
     ChevronDown,
+    Check,
+    CircleAlert,
     Wallet,
     Landmark,
     Receipt,
@@ -29,8 +30,9 @@ impl ButtonIcon {
     pub(crate) fn name(self) -> &'static str {
         match self {
             Self::Refresh => "refresh",
-            Self::GitBranch => "git-branch",
             Self::ChevronDown => "chevron-down",
+            Self::Check => "check",
+            Self::CircleAlert => "circle-alert",
             Self::Wallet => "wallet",
             Self::Landmark => "landmark",
             Self::Receipt => "receipt",

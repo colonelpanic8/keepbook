@@ -707,6 +707,18 @@ small,
   font-size: var(--fs-small);
 }
 
+/* One line beside the actions that shrinks before anything else in the header,
+   so a status never wraps the title or grows the header. */
+.panel-status {
+  flex: 0 1000 auto;
+  font-size: var(--fs-small);
+  margin-left: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .inline-status {
   display: flex;
   flex-direction: column;
@@ -745,58 +757,21 @@ small,
   color: var(--color-accent-fg);
 }
 
+.notice.error {
+  background: var(--color-negative-bg);
+  border-color: var(--color-negative);
+  color: var(--color-negative);
+  width: 100%;
+}
+
+.notice.error > .button-icon {
+  flex: none;
+}
+
 .icon-button.notice-dismiss {
+  color: inherit;
+  flex: none;
   margin: calc(-1 * var(--sp-4)) calc(-1 * var(--sp-8)) calc(-1 * var(--sp-4)) auto;
-}
-
-/* Floats over the workspace: above the sticky compact header (30), below
-   modals (40). Notices inside it never move the page. */
-.status-stack {
-  align-items: flex-end;
-  bottom: calc(var(--sp-16) + var(--safe-area-bottom));
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-8);
-  pointer-events: none;
-  position: fixed;
-  right: calc(var(--sp-16) + var(--safe-area-right));
-  width: min(380px, calc(100vw - 2 * var(--sp-16)));
-  z-index: 35;
-}
-
-.status-stack:empty {
-  display: none;
-}
-
-.status-stack .notice {
-  animation: notice-enter 120ms ease-out;
-  background: var(--color-surface);
-  box-shadow: var(--shadow-lg);
-  margin: 0;
-  pointer-events: auto;
-}
-
-.status-stack .notice.busy {
-  background: var(--color-accent-bg);
-}
-
-@keyframes notice-enter {
-  from {
-    opacity: 0;
-    transform: translateY(var(--sp-8));
-  }
-}
-
-@media (max-width: 720px) {
-  .status-stack {
-    align-items: stretch;
-    left: calc(var(--sp-16) + var(--safe-area-left));
-    width: auto;
-  }
-
-  .status-stack .notice {
-    width: auto;
-  }
 }
 
 .activity-spinner {
@@ -967,6 +942,51 @@ small,
 .control-button:disabled {
   cursor: default;
   opacity: 0.48;
+}
+
+/* Feedback lays over the button's own label, which stays in place hidden so
+   the button keeps its width while its state changes. */
+.control-button.has-feedback {
+  position: relative;
+}
+
+.button-face {
+  align-items: center;
+  display: inline-flex;
+  gap: var(--sp-8);
+  visibility: hidden;
+}
+
+.button-feedback {
+  align-items: center;
+  display: flex;
+  gap: var(--sp-8);
+  inset: 0;
+  justify-content: center;
+  padding: 0 var(--sp-8);
+  position: absolute;
+}
+
+.button-feedback-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.button-feedback-label:empty {
+  display: none;
+}
+
+.control-button.feedback-busy:disabled {
+  cursor: progress;
+  opacity: 1;
+}
+
+.control-button.feedback-failed {
+  background: var(--color-negative-bg);
+  border-color: var(--color-negative);
+  color: var(--color-negative);
 }
 
 /* A main action joined to a chevron that opens its less common variants. */
@@ -1656,10 +1676,6 @@ select.control-input option {
   .indeterminate-progress span {
     animation: none;
     left: 29%;
-  }
-
-  .status-stack .notice {
-    animation: none;
   }
 }
 
@@ -2384,6 +2400,16 @@ button.stacked-legend-item {
   flex-wrap: wrap;
   gap: var(--sp-12);
   justify-content: space-between;
+}
+
+/* Zero basis so a long status ellipsizes instead of wrapping the row. */
+.ai-rule-status {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .group-tag-row {

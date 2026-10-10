@@ -9,6 +9,7 @@ import {
   ControlButton,
   DataTable,
   EmptyState,
+  ErrorNotice,
   FilterChip,
   IconButton,
   InlineStatus,
@@ -25,7 +26,6 @@ import {
   SettingRow,
   SpendingBreakdown,
   SpendingChart,
-  StatusStack,
   Spinner,
   SplitButton,
   SummaryGrid,
@@ -73,7 +73,6 @@ export const cases: Record<string, ComponentType> = {
   ),
   "PageToolbar.basic": () => (
     <PageToolbar>
-      <ControlButton icon="git-branch">Git sync</ControlButton>
       <ControlButton primary icon="refresh">
         Refresh prices
       </ControlButton>
@@ -86,6 +85,11 @@ export const cases: Record<string, ComponentType> = {
   ),
   "Panel.title_only": () => (
     <Panel title="Accounts" className="assets-panel">
+      <p>Body</p>
+    </Panel>
+  ),
+  "Panel.status": () => (
+    <Panel title="Spending" subtitle="1Y / Monthly" status="Tags saved">
       <p>Body</p>
     </Panel>
   ),
@@ -118,6 +122,32 @@ export const cases: Record<string, ComponentType> = {
     </ControlButton>
   ),
   "ControlButton.selected": () => <ControlButton selected>Monthly</ControlButton>,
+  "ControlButton.feedback_busy": () => (
+    <ControlButton icon="refresh" feedback={{ tone: "busy", label: "Refreshing…" }}>
+      Refresh prices
+    </ControlButton>
+  ),
+  "ControlButton.feedback_done": () => (
+    <ControlButton primary feedback={{ tone: "done", label: "Prices refreshed", detail: "Refreshed 14 prices." }}>
+      Refresh all prices
+    </ControlButton>
+  ),
+  "ControlButton.feedback_failed": () => (
+    <ControlButton feedback={{ tone: "failed", label: "", detail: "Price refresh failed: quote source unavailable." }}>
+      Prices
+    </ControlButton>
+  ),
+  "SplitButton.feedback": () => (
+    <SplitButton
+      primary
+      icon="refresh"
+      menuLabel="More refresh options"
+      actions={[{ value: "git", label: "Git sync", detail: "Pull and push the data repository" }]}
+      feedback={{ tone: "busy", label: "Syncing…" }}
+    >
+      Refresh all prices
+    </SplitButton>
+  ),
   "SplitButton.closed": () => (
     <SplitButton
       primary
@@ -189,13 +219,7 @@ export const cases: Record<string, ComponentType> = {
   ),
   "OperationStatus.busy": () => <OperationStatus message="Refreshing prices…" busy />,
   "OperationStatus.done": () => <OperationStatus message="Refreshed 14 prices." busy={false} />,
-  "OperationStatus.dismissible": () => <OperationStatus message="Data resynced." busy={false} onDismiss={() => {}} />,
-  "StatusStack.basic": () => (
-    <StatusStack>
-      <OperationStatus message="Refreshing prices…" busy />
-      <OperationStatus message="Refreshed 14 prices." busy={false} onDismiss={() => {}} />
-    </StatusStack>
-  ),
+  "ErrorNotice.basic": () => <ErrorNotice message="Git sync failed: remote rejected the push." />,
   "InlineStatus.basic": () => <InlineStatus title="Couldn't load" message="Try again." />,
   "EmptyState.basic": () => <EmptyState title="No assets" detail="Refresh balances." />,
   "EmptyState.loading": () => <EmptyState title="Updating graph" detail="1Y / Weekly" loading />,

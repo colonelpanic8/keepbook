@@ -26,7 +26,8 @@ pub(super) fn TransactionList(
     onprev: EventHandler<MouseEvent>,
     onnext: EventHandler<MouseEvent>,
     ai_prompt: String,
-    ai_status: Option<String>,
+    ai_feedback: Option<ButtonFeedback>,
+    onaidismiss: EventHandler<()>,
     ai_busy: bool,
     mutation_busy: bool,
     ai_result: Option<AiRuleSuggestionsOutput>,
@@ -134,7 +135,17 @@ pub(super) fn TransactionList(
             div { class: "ai-rule-panel",
                 div { class: "ai-rule-copy",
                     strong { "AI rule assistant" }
-                    small { "{selected_count} selected" }
+                    match ai_feedback.clone().filter(|feedback| feedback.tone != FeedbackTone::Failed) {
+                        Some(feedback) => {
+                            let text = feedback.detail.unwrap_or(feedback.label);
+                            rsx! {
+                                small { class: "ai-rule-status", role: "status", aria_live: "polite", title: "{text}", "{text}" }
+                            }
+                        }
+                        None => rsx! {
+                            small { class: "ai-rule-status", "{selected_count} selected" }
+                        },
+                    }
                 }
                 TextInput {
                     multiline: true,
@@ -146,13 +157,19 @@ pub(super) fn TransactionList(
                 div { class: "ai-rule-actions",
                     ControlButton {
                         primary: true,
-                        busy: ai_busy,
+                        feedback: ai_feedback.clone().map(|feedback| ButtonFeedback {
+                            label: String::new(),
+                            ..feedback
+                        }),
                         onclick: move |event| onairulesubmit.call(event),
                         disabled: selected_count == 0 || ai_prompt.trim().is_empty() || ai_busy,
-                        if ai_busy { "Asking AI" } else { "Ask AI" }
+                        "Ask AI"
                     }
-                    if let Some(status) = ai_status.clone() {
-                        FloatingStatus { message: status, busy: ai_busy }
+                }
+                if let Some(feedback) = ai_feedback.clone().filter(|feedback| feedback.tone == FeedbackTone::Failed) {
+                    ErrorNotice {
+                        message: feedback.detail.unwrap_or(feedback.label),
+                        ondismiss: move |_| onaidismiss.call(()),
                     }
                 }
                 if let Some(result) = ai_result.clone() {

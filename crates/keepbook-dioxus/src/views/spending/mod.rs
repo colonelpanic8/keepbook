@@ -68,8 +68,8 @@ pub(super) fn SpendingView(currency: String) -> Element {
     let mut selected_transaction_keys = use_signal(HashSet::<String>::new);
     let mut ai_prompt = use_signal(String::new);
     let mut ai_result = use_signal(|| None::<AiRuleSuggestionsOutput>);
-    let mut ai_status = use_signal(|| None::<String>);
-    let mut tag_update_status = use_signal(|| None::<String>);
+    let ai_feedback = use_action_feedback();
+    let edit_status = use_action_feedback();
     let mut ai_busy = use_signal(|| false);
     let mut mutation_busy = use_signal(|| false);
     let spending = use_resource({
@@ -274,11 +274,12 @@ pub(super) fn SpendingView(currency: String) -> Element {
             class: "spending-panel",
             title: "{panel_title}",
             subtitle: "{panel_subtitle}",
+            status: edit_status.status_for("edit"),
             actions: rsx! {
                 span { "{currency}" }
             },
-            if let Some(message) = tag_update_status() {
-                FloatingStatus { message, busy: mutation_busy() }
+            if let Some(error) = edit_status.error_for("edit") {
+                ErrorNotice { message: error, ondismiss: move |_| edit_status.dismiss() }
             }
             div { class: "chart-controls spending-controls",
                 SegmentedControl {
@@ -535,7 +536,8 @@ pub(super) fn SpendingView(currency: String) -> Element {
                             }
                         },
                         ai_prompt: ai_prompt(),
-                        ai_status: ai_status(),
+                        ai_feedback: ai_feedback.for_key("ai"),
+                        onaidismiss: move |_| ai_feedback.dismiss(),
                         ai_busy: ai_busy(),
                         mutation_busy: mutation_busy(),
                         ai_result: ai_result(),
@@ -547,17 +549,16 @@ pub(super) fn SpendingView(currency: String) -> Element {
                             let existing_tags = tag_options.clone();
                             ai_result.set(None);
                             if prompt.is_empty() {
-                                ai_status.set(Some("Enter a prompt for the rule assistant.".to_string()));
+                                ai_feedback.fail("ai", "Enter a prompt", "Enter a prompt for the rule assistant.".to_string());
                                 return;
                             }
                             if transactions.is_empty() {
-                                ai_status.set(Some("Select at least one matching transaction.".to_string()));
+                                ai_feedback.fail("ai", "Select transactions", "Select at least one matching transaction.".to_string());
                                 return;
                             }
-                            ai_status.set(Some("Requesting AI rule suggestions...".to_string()));
+                            ai_feedback.start("ai", "Asking AI…");
                             ai_busy.set(true);
                             spawn({
-                                let mut ai_status = ai_status;
                                 let mut ai_result = ai_result;
                                 let mut ai_busy = ai_busy;
                                 async move {
@@ -567,14 +568,18 @@ pub(super) fn SpendingView(currency: String) -> Element {
                                         existing_tags,
                                     }).await {
                                         Ok(output) => {
-                                            ai_status.set(Some(format!(
-                                                "Received {} suggestion(s) from {}.",
-                                                output.suggestions.len(),
-                                                output.model
-                                            )));
+                                            ai_feedback.succeed(
+                                                "ai",
+                                                format!("{} suggestion(s)", output.suggestions.len()),
+                                                Some(format!(
+                                                    "Received {} suggestion(s) from {}.",
+                                                    output.suggestions.len(),
+                                                    output.model
+                                                )),
+                                            );
                                             ai_result.set(Some(output));
                                         }
-                                        Err(error) => ai_status.set(Some(error)),
+                                        Err(error) => ai_feedback.fail("ai", "Request failed", format!("AI rule suggestions failed: {error}")),
                                     }
                                     ai_busy.set(false);
                                 }
@@ -585,20 +590,17 @@ pub(super) fn SpendingView(currency: String) -> Element {
                                 return;
                             }
                             mutation_busy.set(true);
-                            tag_update_status.set(Some("Saving tags...".to_string()));
+                            edit_status.start("edit", "Saving tags…");
                             spawn({
                                 let mut spending = spending;
-                                let mut tag_update_status = tag_update_status;
                                 let mut mutation_busy = mutation_busy;
                                 async move {
                                     match set_transaction_tags(input).await {
                                         Ok(()) => {
-                                            tag_update_status.set(Some("Tags saved.".to_string()));
+                                            edit_status.succeed("edit", "Tags saved", None);
                                             spending.restart();
                                         }
-                                        Err(error) => {
-                                            tag_update_status.set(Some(error));
-                                        }
+                                        Err(error) => edit_status.fail("edit", "Save failed", format!("Saving tags failed: {error}")),
                                     }
                                     mutation_busy.set(false);
                                 }
@@ -610,26 +612,19 @@ pub(super) fn SpendingView(currency: String) -> Element {
                             }
                             mutation_busy.set(true);
                             let updated_count = input.transactions.len();
-                            tag_update_status.set(Some(format!(
-                                "Saving tags for {updated_count} transaction(s)..."
-                            )));
+                            edit_status.start("edit", format!("Saving tags for {updated_count} transaction(s)…"));
                             spawn({
                                 let mut spending = spending;
-                                let mut tag_update_status = tag_update_status;
                                 let mut selected_transaction_keys = selected_transaction_keys;
                                 let mut mutation_busy = mutation_busy;
                                 async move {
                                     match set_transaction_tags(input).await {
                                         Ok(()) => {
-                                            tag_update_status.set(Some(format!(
-                                                "Updated {updated_count} transaction(s)."
-                                            )));
+                                            edit_status.succeed("edit", format!("Updated {updated_count} transaction(s)"), None);
                                             selected_transaction_keys.set(HashSet::new());
                                             spending.restart();
                                         }
-                                        Err(error) => {
-                                            tag_update_status.set(Some(error));
-                                        }
+                                        Err(error) => edit_status.fail("edit", "Save failed", format!("Saving tags failed: {error}")),
                                     }
                                     mutation_busy.set(false);
                                 }
@@ -640,20 +635,17 @@ pub(super) fn SpendingView(currency: String) -> Element {
                                 return;
                             }
                             mutation_busy.set(true);
-                            tag_update_status.set(Some("Saving date...".to_string()));
+                            edit_status.start("edit", "Saving date…");
                             spawn({
                                 let mut spending = spending;
-                                let mut tag_update_status = tag_update_status;
                                 let mut mutation_busy = mutation_busy;
                                 async move {
                                     match set_transaction_effective_date(input).await {
                                         Ok(()) => {
-                                            tag_update_status.set(Some("Date saved.".to_string()));
+                                            edit_status.succeed("edit", "Date saved", None);
                                             spending.restart();
                                         }
-                                        Err(error) => {
-                                            tag_update_status.set(Some(error));
-                                        }
+                                        Err(error) => edit_status.fail("edit", "Save failed", format!("Saving the date failed: {error}")),
                                     }
                                     mutation_busy.set(false);
                                 }
@@ -666,28 +658,29 @@ pub(super) fn SpendingView(currency: String) -> Element {
                             mutation_busy.set(true);
                             let count = input.transactions.len();
                             let clear_selection = count > 1;
-                            tag_update_status.set(Some("Updating spending exclusion...".to_string()));
+                            edit_status.start("edit", "Updating spending exclusion…");
                             spawn({
                                 let mut spending = spending;
-                                let mut tag_update_status = tag_update_status;
                                 let mut selected_transaction_keys = selected_transaction_keys;
                                 let mut mutation_busy = mutation_busy;
                                 async move {
                                     match set_transaction_ignore(input).await {
                                         Ok(()) => {
-                                            tag_update_status.set(Some(if count > 1 {
-                                                format!("Updated {count} transaction(s).")
-                                            } else {
-                                                "Updated.".to_string()
-                                            }));
+                                            edit_status.succeed(
+                                                "edit",
+                                                if count > 1 {
+                                                    format!("Updated {count} transaction(s)")
+                                                } else {
+                                                    "Updated".to_string()
+                                                },
+                                                None,
+                                            );
                                             if clear_selection {
                                                 selected_transaction_keys.set(HashSet::new());
                                             }
                                             spending.restart();
                                         }
-                                        Err(error) => {
-                                            tag_update_status.set(Some(error));
-                                        }
+                                        Err(error) => edit_status.fail("edit", "Save failed", format!("Updating the spending exclusion failed: {error}")),
                                     }
                                     mutation_busy.set(false);
                                 }

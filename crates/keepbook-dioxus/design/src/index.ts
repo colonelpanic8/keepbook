@@ -36,7 +36,7 @@ export * from "./display/DataTable";
 export * from "./display/TreeGroup";
 
 export * from "./feedback/OperationStatus";
-export * from "./feedback/StatusStack";
+export * from "./feedback/ErrorNotice";
 export * from "./feedback/InlineStatus";
 export * from "./feedback/EmptyState";
 export * from "./feedback/Spinner";

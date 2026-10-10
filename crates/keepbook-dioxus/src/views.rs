@@ -5,6 +5,7 @@ use crate::components::*;
 use dioxus::prelude::*;
 
 mod accounts;
+mod action_feedback;
 mod assets;
 mod charts;
 mod connections;
@@ -13,9 +14,9 @@ mod proposed_edits;
 mod recurring;
 mod shared;
 mod spending;
-mod status_feed;
 
 use accounts::AccountsView;
+use action_feedback::*;
 use assets::AssetsView;
 use charts::{HistoryGraphPanel, StackedHistoryGraphPanel};
 use connections::ConnectionsView;
@@ -24,7 +25,6 @@ use proposed_edits::ProposedEditsView;
 use recurring::RecurringView;
 use shared::*;
 use spending::SpendingView;
-use status_feed::*;
 
 const INTER_FONT: Asset = asset!("/assets/fonts/InterVariable.woff2");
 const INTER_FONT_CSS: &str = include_str!("../assets/fonts/inter.css");
@@ -107,7 +107,6 @@ pub(crate) fn App() -> Element {
     });
 
     let mut refresh_epoch = use_context_provider(|| Signal::new(0u64));
-    StatusFeed::provide();
     let mut filter_overrides = use_signal(FilterOverrides::default);
     let mut repositories = use_resource(fetch_repositories);
     let mut repository_status = use_signal(String::new);
@@ -228,7 +227,6 @@ pub(crate) fn App() -> Element {
                     }
                 },
             }
-            StatusFeedHost {}
         }
     }
 }

@@ -27,7 +27,6 @@ in `design/`). The package bundles the app's real `assets/styles.css` and
 
 - Wide components use `cardMode: column`. At card widths below 1200px, `DataTable`, `TreeGroup` and `SummaryGrid` render their compact or stacked layout. That's the app's real responsive behavior, not a bug.
 - `Modal` renders a `position: fixed` backdrop. The preview wraps it in a transformed, fixed-height box so the dialog stays inside the card.
-- `StatusStack` is `position: fixed` to the viewport's bottom-right, so its preview uses the same transformed box.
 - The `SplitButton` menu opens toward the left, as in the right-aligned toolbar. Its open-menu preview right-aligns the button.
 - Previews render through the `PreviewTheme` provider, which applies the theme saved by the `ThemePicker` card (or a `?theme=` URL parameter), so one pick re-themes every card. The `Theme` card shows every theme side by side.
 

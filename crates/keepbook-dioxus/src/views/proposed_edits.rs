@@ -6,23 +6,23 @@ pub(super) fn ProposedEditsView(onrefresh: EventHandler<()>) -> Element {
     let mut proposals = use_resource(fetch_proposed_transaction_edits);
     let mut busy_id = use_signal(String::new);
     let mut busy_action = use_signal(String::new);
-    let mut status = use_signal(String::new);
+    let status = use_action_feedback();
     let current = proposals.cloned();
     let busy = busy_id();
-    let status_text = status();
 
     rsx! {
-        section { class: "panel",
-            div { class: "panel-header",
-                h2 { "Proposed transaction edits" }
+        Panel {
+            title: "Proposed transaction edits",
+            status: status.status_for("decide"),
+            actions: rsx! {
                 ControlButton {
                     disabled: !busy.is_empty(),
                     onclick: move |_| proposals.restart(),
                     "Refresh"
                 }
-            }
-            if !status_text.is_empty() {
-                FloatingStatus { message: status_text, busy: !busy.is_empty() }
+            },
+            if let Some(error) = status.error_for("decide") {
+                ErrorNotice { message: error, ondismiss: move |_| status.dismiss() }
             }
             match current {
                 None => rsx! { OperationStatus { message: "Loading proposed edits".to_string(), busy: true } },
@@ -46,15 +46,14 @@ pub(super) fn ProposedEditsView(onrefresh: EventHandler<()>) -> Element {
                                     ondecide: move |(id, action): (String, &'static str)| {
                                         busy_id.set(id.clone());
                                         busy_action.set(action.to_string());
-                                        status.set(format!("{action} {id}..."));
                                         spawn(async move {
                                             match decide_proposed_transaction_edit(id.clone(), action).await {
                                                 Ok(()) => {
-                                                    status.set(format!("{} {id}.", proposal_action_past_tense(action)));
+                                                    status.succeed("decide", format!("Edit {}", proposal_action_past_tense(action).to_lowercase()), None);
                                                     proposals.restart();
                                                     onrefresh.call(());
                                                 }
-                                                Err(error) => status.set(error),
+                                                Err(error) => status.fail("decide", "Update failed", format!("Updating the proposed edit failed: {error}")),
                                             }
                                             busy_id.set(String::new());
                                             busy_action.set(String::new());

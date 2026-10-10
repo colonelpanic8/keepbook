@@ -70,7 +70,6 @@ const CASES: &[Case] = &[
     ("PageToolbar.basic", || {
         rsx! {
             PageToolbar {
-                ControlButton { icon: ButtonIcon::GitBranch, onclick: |_| {}, "Git sync" }
                 ControlButton { primary: true, icon: ButtonIcon::Refresh, onclick: |_| {}, "Refresh prices" }
             }
         }
@@ -88,6 +87,11 @@ const CASES: &[Case] = &[
     ("Panel.title_only", || {
         rsx! {
             Panel { title: "Accounts", class: "assets-panel", p { "Body" } }
+        }
+    }),
+    ("Panel.status", || {
+        rsx! {
+            Panel { title: "Spending", subtitle: "1Y / Monthly", status: "Tags saved", p { "Body" } }
         }
     }),
     ("SummaryGrid.basic", || {
@@ -144,6 +148,57 @@ const CASES: &[Case] = &[
     ("ControlButton.selected", || {
         rsx! {
             ControlButton { selected: true, onclick: |_| {}, "Monthly" }
+        }
+    }),
+    ("ControlButton.feedback_busy", || {
+        rsx! {
+            ControlButton {
+                icon: ButtonIcon::Refresh,
+                feedback: ButtonFeedback { tone: FeedbackTone::Busy, label: "Refreshing…".into(), detail: None },
+                onclick: |_| {},
+                "Refresh prices"
+            }
+        }
+    }),
+    ("ControlButton.feedback_done", || {
+        rsx! {
+            ControlButton {
+                primary: true,
+                feedback: ButtonFeedback {
+                    tone: FeedbackTone::Done,
+                    label: "Prices refreshed".into(),
+                    detail: Some("Refreshed 14 prices.".into()),
+                },
+                onclick: |_| {},
+                "Refresh all prices"
+            }
+        }
+    }),
+    ("ControlButton.feedback_failed", || {
+        rsx! {
+            ControlButton {
+                feedback: ButtonFeedback {
+                    tone: FeedbackTone::Failed,
+                    label: "".into(),
+                    detail: Some("Price refresh failed: quote source unavailable.".into()),
+                },
+                onclick: |_| {},
+                "Prices"
+            }
+        }
+    }),
+    ("SplitButton.feedback", || {
+        rsx! {
+            SplitButton {
+                primary: true,
+                icon: ButtonIcon::Refresh,
+                menu_label: "More refresh options",
+                actions: vec![MenuAction { value: "git", label: "Git sync", detail: "Pull and push the data repository" }],
+                feedback: ButtonFeedback { tone: FeedbackTone::Busy, label: "Syncing…".into(), detail: None },
+                onclick: |_| {},
+                onselect: |_| {},
+                "Refresh all prices"
+            }
         }
     }),
     ("SplitButton.closed", || {
@@ -292,17 +347,9 @@ const CASES: &[Case] = &[
         || rsx! { OperationStatus { message: "Refreshed 14 prices.", busy: false } },
     ),
     (
-        "OperationStatus.dismissible",
-        || rsx! { OperationStatus { message: "Data resynced.", busy: false, ondismiss: |_| {} } },
+        "ErrorNotice.basic",
+        || rsx! { ErrorNotice { message: "Git sync failed: remote rejected the push.", ondismiss: |_| {} } },
     ),
-    ("StatusStack.basic", || {
-        rsx! {
-            StatusStack {
-                OperationStatus { message: "Refreshing prices…", busy: true }
-                OperationStatus { message: "Refreshed 14 prices.", busy: false, ondismiss: |_| {} }
-            }
-        }
-    }),
     (
         "InlineStatus.basic",
         || rsx! { InlineStatus { title: "Couldn't load", message: "Try again." } },
@@ -509,16 +556,17 @@ fn every_component_has_a_parity_case() {
 }
 
 /// Every `ButtonIcon`; the match stops compiling when a variant is added.
-fn every_button_icon() -> [ButtonIcon; 12] {
+fn every_button_icon() -> [ButtonIcon; 13] {
     use ButtonIcon::*;
     match Refresh {
-        Refresh | GitBranch | ChevronDown | Wallet | Landmark | Receipt | Repeat | TrendingUp
-        | Layers | Plug | FilePen | Settings => {}
+        Refresh | ChevronDown | Check | CircleAlert | Wallet | Landmark | Receipt | Repeat
+        | TrendingUp | Layers | Plug | FilePen | Settings => {}
     }
     [
         Refresh,
-        GitBranch,
         ChevronDown,
+        Check,
+        CircleAlert,
         Wallet,
         Landmark,
         Receipt,

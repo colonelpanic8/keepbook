@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { cx } from "../cx";
-import { ControlButton } from "./ControlButton";
+import { ControlButton, type ButtonFeedback } from "./ControlButton";
 import { renderIcon, type IconName } from "./icons";
 
 /** A less common variant of the split button's main action. */
@@ -18,6 +18,8 @@ export interface SplitButtonProps {
   icon?: IconName;
   title?: string;
   busy?: boolean;
+  /** The state of whichever action is running or just finished, the menu's included, shown on the main button. */
+  feedback?: ButtonFeedback;
   disabled?: boolean;
   /** Accessible label for the chevron. */
   menuLabel: string;
@@ -31,8 +33,8 @@ export interface SplitButtonProps {
 /**
  * A main action plus a chevron menu of its less common variants.
  *
- * For example, "Refresh all prices" with "Refresh stale prices" and "Resync
- * data" in the menu. Use it instead of a checkbox that modifies an action, and
+ * For example, "Refresh all prices" with "Refresh stale prices", "Resync
+ * data", and "Git sync" in the menu. Use it instead of a checkbox that modifies an action, and
  * to keep a toolbar down to its essential buttons. Mirrors `SplitButton` in
  * `components/actions/split_button.rs`.
  */
@@ -42,6 +44,7 @@ export function SplitButton({
   icon,
   title,
   busy,
+  feedback,
   disabled,
   menuLabel,
   actions,
@@ -50,16 +53,25 @@ export function SplitButton({
   onSelect,
 }: SplitButtonProps) {
   const [open, setOpen] = useState(defaultOpen);
+  const isBusy = busy || feedback?.tone === "busy";
   return (
     <div className="split-button" onKeyDown={(event) => event.key === "Escape" && setOpen(false)}>
-      <ControlButton primary={primary} icon={icon} title={title} busy={busy} disabled={disabled} onClick={onClick}>
+      <ControlButton
+        primary={primary}
+        icon={icon}
+        title={title}
+        busy={busy}
+        feedback={feedback}
+        disabled={disabled}
+        onClick={onClick}
+      >
         {children}
       </ControlButton>
       <button
         className={cx("control-button", primary && "primary", "split-button-caret")}
         aria-label={menuLabel}
         aria-expanded={open}
-        disabled={disabled || busy}
+        disabled={disabled || isBusy}
         onClick={() => setOpen(!open)}
       >
         {renderIcon("chevron-down")}

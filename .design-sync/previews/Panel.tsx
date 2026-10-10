@@ -18,3 +18,9 @@ export const TitleOnly = () => (
     <p style={{ margin: 0, color: "var(--color-text-muted)" }}>Accounts grouped by connection appear here.</p>
   </Panel>
 );
+
+export const Saving = () => (
+  <Panel title="Application" subtitle="Build" status="Saving…">
+    <p style={{ margin: 0, color: "var(--color-text-muted)" }}>Settings save as soon as they change.</p>
+  </Panel>
+);

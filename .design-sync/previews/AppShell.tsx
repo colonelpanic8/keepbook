@@ -1,5 +1,5 @@
 import {
-  AppShell, Badge, Checkbox, ControlButton, DataTable, MetricCard, OperationStatus,
+  AppShell, Badge, Checkbox, ControlButton, DataTable, MetricCard,
   PageToolbar, Panel, SplitButton, SummaryGrid, TreeGroup,
 } from "keepbook-design";
 
@@ -12,7 +12,6 @@ const accounts = [
 export const AccountsScreen = () => (
   <AppShell active="Accounts" repositories={["Personal", "Parents"]}>
     <PageToolbar>
-      <ControlButton icon="git-branch">Git sync</ControlButton>
       <SplitButton
         primary
         icon="refresh"
@@ -20,12 +19,13 @@ export const AccountsScreen = () => (
         actions={[
           { value: "stale", label: "Refresh stale prices", detail: "Skip prices that are still fresh" },
           { value: "resync", label: "Resync data", detail: "Reload keepbook data from disk" },
+          { value: "git", label: "Git sync", detail: "Pull and push the data repository" },
         ]}
+        feedback={{ tone: "busy", label: "Refreshing…" }}
       >
         Refresh all prices
       </SplitButton>
     </PageToolbar>
-    <OperationStatus busy message="Refreshing prices…" />
     <SummaryGrid>
       <MetricCard label="Net worth" value="$6,814.24" detail="2026-10-08" />
       <MetricCard label="Accounts" value="3" detail="3 total" />

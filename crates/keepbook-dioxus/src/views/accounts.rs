@@ -43,12 +43,7 @@ pub(super) fn AccountsView(
     connection_count: usize,
     onrefresh: EventHandler<()>,
 ) -> Element {
-    let mut price_busy = use_signal(|| false);
-    let mut price_status = use_signal(String::new);
-    let mut resync_busy = use_signal(|| false);
-    let mut resync_status = use_signal(String::new);
-    let mut git_sync_busy = use_signal(|| false);
-    let mut git_sync_status = use_signal(String::new);
+    let operation = use_action_feedback();
     let mut pull_start = use_signal(|| None::<PullStart>);
     let mut pull_distance = use_signal(|| 0.0);
     let mut selected_graph = use_signal(|| None::<AccountGraphSelection>);
@@ -60,13 +55,6 @@ pub(super) fn AccountsView(
     let account_summaries = snapshot.by_account.clone();
     let selected_graph_selection = selected_graph();
     let _ = balances;
-    let is_price_busy = price_busy();
-    let price_status_text = price_status();
-    let is_resync_busy = resync_busy();
-    let resync_status_text = resync_status();
-    let is_git_sync_busy = git_sync_busy();
-    let git_sync_status_text = git_sync_status();
-    let any_account_operation_busy = is_git_sync_busy || is_price_busy || is_resync_busy;
     let pull_distance_value = pull_distance();
     let pull_offset = pull_refresh_offset(pull_distance_value);
     let pull_ready = pull_distance_value >= PULL_REFRESH_TRIGGER_PX;
@@ -75,15 +63,8 @@ pub(super) fn AccountsView(
     } else {
         "pull-refresh-indicator"
     };
-    let mut refresh_prices = move |force: bool| {
-        price_busy.set(true);
-        git_sync_status.set(String::new());
-        resync_status.set(String::new());
-        price_status.set(if force {
-            "Refreshing all prices...".to_string()
-        } else {
-            "Refreshing stale prices...".to_string()
-        });
+    let refresh_prices = move |force: bool| {
+        operation.start("prices", "Refreshing…");
         let input = SyncPricesInput {
             scope: "all".to_string(),
             target: None,
@@ -93,32 +74,66 @@ pub(super) fn AccountsView(
         spawn(async move {
             match sync_prices(input).await {
                 Ok(result) => {
-                    price_status.set(price_sync_result_summary(&result));
+                    let summary = price_sync_result_summary(&result);
+                    if price_sync_result_has_failures(&result) {
+                        operation.fail("prices", "Some prices failed", summary);
+                    } else {
+                        operation.succeed("prices", "Prices refreshed", Some(summary));
+                    }
                     onrefresh.call(());
                 }
-                Err(error) => {
-                    price_status.set(format!("Price refresh failed: {error}"));
-                }
+                Err(error) => operation.fail(
+                    "prices",
+                    "Refresh failed",
+                    format!("Price refresh failed: {error}"),
+                ),
             }
-            price_busy.set(false);
         });
     };
-    let mut resync_data = move || {
-        resync_busy.set(true);
-        git_sync_status.set(String::new());
-        price_status.set(String::new());
-        resync_status.set("Resyncing data from disk...".to_string());
+    let resync_data = move || {
+        operation.start("resync", "Resyncing…");
         spawn(async move {
             match reload_data().await {
                 Ok(_) => {
-                    resync_status.set("Data resynced.".to_string());
+                    operation.succeed("resync", "Data resynced", None);
                     onrefresh.call(());
                 }
                 Err(error) => {
-                    resync_status.set(format!("Resync failed: {error}"));
+                    operation.fail("resync", "Resync failed", format!("Resync failed: {error}"))
                 }
             }
-            resync_busy.set(false);
+        });
+    };
+    let git_sync = move || {
+        operation.start("git", "Syncing…");
+        spawn(async move {
+            let result = async {
+                let settings = fetch_git_settings().await?;
+                let input = GitSyncInput {
+                    data_dir: normalize_git_data_dir_for_client(settings.data_dir),
+                    host: settings.git.host,
+                    repo: settings.git.repo,
+                    branch: settings.git.branch,
+                    ssh_user: settings.git.ssh_user,
+                    private_key_pem: String::new(),
+                    save_settings: false,
+                };
+                sync_git_repo_cancelable(input, new_git_sync_cancel_handle()).await
+            }
+            .await;
+            match result {
+                Ok(result) => {
+                    operation.succeed(
+                        "git",
+                        "Git synced",
+                        Some(format!("Synced {} {}.", result.remote_url, result.branch)),
+                    );
+                    onrefresh.call(());
+                }
+                Err(error) => {
+                    operation.fail("git", "Sync failed", format!("Git sync failed: {error}"))
+                }
+            }
         });
     };
 
@@ -174,52 +189,6 @@ pub(super) fn AccountsView(
             }
             div { class: "pull-refresh-content",
                 PageToolbar {
-                    ControlButton {
-                        icon: ButtonIcon::GitBranch,
-                        disabled: any_account_operation_busy,
-                        busy: is_git_sync_busy,
-                        onclick: move |_| {
-                            git_sync_busy.set(true);
-                            price_status.set(String::new());
-                            resync_status.set(String::new());
-                            git_sync_status.set("Syncing Git repository...".to_string());
-                            spawn(async move {
-                                let result = async {
-                                    let settings = fetch_git_settings().await?;
-                                    let input = GitSyncInput {
-                                        data_dir: normalize_git_data_dir_for_client(settings.data_dir),
-                                        host: settings.git.host,
-                                        repo: settings.git.repo,
-                                        branch: settings.git.branch,
-                                        ssh_user: settings.git.ssh_user,
-                                        private_key_pem: String::new(),
-                                        save_settings: false,
-                                    };
-                                    sync_git_repo_cancelable(
-                                        input,
-                                        new_git_sync_cancel_handle(),
-                                    )
-                                    .await
-                                }
-                                .await;
-
-                                match result {
-                                    Ok(result) => {
-                                        git_sync_status.set(format!(
-                                            "Git sync complete: {} {}.",
-                                            result.remote_url, result.branch
-                                        ));
-                                        onrefresh.call(());
-                                    }
-                                    Err(error) => {
-                                        git_sync_status.set(format!("Git sync failed: {error}"));
-                                    }
-                                }
-                                git_sync_busy.set(false);
-                            });
-                        },
-                        if is_git_sync_busy { "Syncing Git" } else { "Git sync" }
-                    }
                     SplitButton {
                         primary: true,
                         icon: ButtonIcon::Refresh,
@@ -236,31 +205,24 @@ pub(super) fn AccountsView(
                                 label: "Resync data",
                                 detail: "Reload keepbook data from disk",
                             },
+                            MenuAction {
+                                value: "git",
+                                label: "Git sync",
+                                detail: "Pull and push the data repository",
+                            },
                         ],
-                        disabled: any_account_operation_busy,
-                        busy: is_price_busy || is_resync_busy,
+                        feedback: operation.current(),
                         onclick: move |_| refresh_prices(true),
                         onselect: move |value| match value {
                             "stale-prices" => refresh_prices(false),
-                            _ => resync_data(),
+                            "resync" => resync_data(),
+                            _ => git_sync(),
                         },
-                        if is_price_busy {
-                            "Refreshing"
-                        } else if is_resync_busy {
-                            "Resyncing"
-                        } else {
-                            "Refresh all prices"
-                        }
+                        "Refresh all prices"
                     }
                 }
-                if !price_status_text.is_empty() {
-                    FloatingStatus { message: price_status_text, busy: is_price_busy }
-                }
-                if !resync_status_text.is_empty() {
-                    FloatingStatus { message: resync_status_text, busy: is_resync_busy }
-                }
-                if !git_sync_status_text.is_empty() {
-                    FloatingStatus { message: git_sync_status_text, busy: is_git_sync_busy }
+                if let Some(error) = operation.error() {
+                    ErrorNotice { message: error, ondismiss: move |_| operation.dismiss() }
                 }
                 SummaryGrid {
                     MetricCard {

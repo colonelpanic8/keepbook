@@ -8,13 +8,13 @@ app appear frozen.
 
 - Start user-triggered work asynchronously. Never run network, disk, sync, Git,
   market-data, or AI work on the UI thread.
-- Show an `OperationStatus` in the floating `StatusStack` as soon as work
-  starts. Use a concrete present participle such as “Refreshing prices…” or
-  “Saving tags…”, plus an indeterminate spinner when exact progress is
-  unavailable.
-- Feedback never changes the page layout: views mount a `FloatingStatus`,
-  which publishes into the stack and renders nothing in place. Background
-  revalidation of loaded data is not user work; it shows only the logo badge.
+- Show the work's state on the control that started it as soon as it starts:
+  a button's `feedback`, or its panel's `status` when no button started it.
+  Use a concrete present participle such as “Refreshing…” or “Saving tags…”,
+  with an indeterminate spinner when exact progress is unavailable.
+- Feedback is never a toast or a floating banner, and progress and success
+  never change the page layout. Background revalidation of loaded data is not user work; it shows
+  only the logo badge.
 - Put `aria-busy="true"` on the active status and control. Announce status text
   with a polite live region; do not repeatedly announce animation frames.
 - Keep navigation, already-loaded content, scrolling, filtering, and unrelated
@@ -30,9 +30,11 @@ app appear frozen.
 
 - Replace progress text with a concise success or failure result. Do not leave a
   spinner running after the future resolves.
-- Settled results leave the stack after 4–12s, scaled to message length, wait
-  while the stack is hovered, and can be closed early. A result also leaves
-  when the view that started the work unmounts.
+- A success clears itself after 3s, and nothing needs dismissing. Its full
+  message is the control's tooltip.
+- A failure stays visible: the control keeps its failed state and an
+  `ErrorNotice` beneath it gives the full message, naming what failed, until
+  it is dismissed or the work is tried again.
 - A failed load offers an in-context retry. A failed mutation restores its
   controls and keeps the user's inputs whenever retrying is safe.
 - Long operations that support safe cancellation (currently Git clone/sync)
@@ -62,9 +64,11 @@ app appear frozen.
 
 - `BackendActivity` is for initial, local data-region loading only.
 - `GraphLoadingPanel` is the chart-specific initial/loading treatment.
-- `FloatingStatus` (in views) is the standard feedback for user-triggered work;
-  it renders an `OperationStatus` in the app-wide `StatusStack`. An inline
-  `OperationStatus` is only for a region's first load.
+- `use_action_feedback` (in views) tracks the work a view's controls started,
+  keyed by control, and clears successes; hand `for_key` to a button's
+  `feedback`, `status_for` to a panel's `status`, and `error` / `error_for` to
+  an `ErrorNotice` with `dismiss` as its `ondismiss`. `OperationStatus` is only
+  for a region's first load.
 - `ControlButton`'s `busy` state adds the compact spinner, `aria-busy`, and
   duplicate-submission protection.
 
