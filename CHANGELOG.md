@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.16.0 - 2026-10-09
+
+### Changed
+
+- Progress and results now show on the button that started the work instead
+  of a floating message in the corner: "Refreshing…", then "Prices
+  refreshed", returning to normal after a few seconds. Buttons keep their
+  size while their state changes. Settings that save themselves and inline
+  edits report on one line in their panel's header.
+- Failures stay until you deal with them: the button stays red and a notice
+  beneath it gives the full error, naming what failed, until you dismiss it
+  or try again.
+- Git sync moved into the Accounts refresh menu alongside "Refresh stale
+  prices" and "Resync data".
+
 ## 0.15.0 - 2026-10-09
 
 ### Changed

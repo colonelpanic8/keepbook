@@ -1,0 +1,2 @@
+* Changed: Progress and results now show on the button that started the work instead of a floating message in the corner: "Refreshing…", then "Prices refreshed", returning to normal after a few seconds. Buttons keep their size while their state changes. Settings that save themselves and inline edits report on one line in their panel's header.
+* ...see CHANGELOG.md for the rest.
