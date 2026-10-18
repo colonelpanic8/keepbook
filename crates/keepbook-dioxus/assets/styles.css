@@ -3658,7 +3658,8 @@ button.stacked-legend-item {
   min-width: 0;
 }
 
-.asset-cell-label {
+.asset-cell-label,
+.asset-position-summary {
   display: none;
 }
 
@@ -3680,12 +3681,14 @@ button.stacked-legend-item {
 }
 
 @media (max-width: 1200px) {
+  /* The total's detail line already states both counts. */
   .assets-summary-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    display: block;
+    margin-bottom: var(--sp-12);
   }
 
-  .assets-summary-grid .metric:first-child {
-    grid-column: 1 / -1;
+  .assets-summary-grid .metric:not(:first-child) {
+    display: none;
   }
 
   .assets-panel .panel-header {
@@ -3698,23 +3701,26 @@ button.stacked-legend-item {
   }
 
   .asset-mobile-sort {
-    align-items: end;
-    background: var(--color-surface-subtle);
-    border: 1px solid var(--color-divider);
-    border-radius: var(--radius-md);
+    align-items: center;
     display: grid;
-    gap: var(--sp-12);
+    gap: var(--sp-8);
     grid-template-columns: minmax(0, 1fr) auto;
-    margin-bottom: var(--sp-12);
-    padding: var(--sp-12);
+    margin-bottom: var(--sp-4);
   }
 
   .asset-mobile-sort-field {
-    min-width: 0;
+    align-items: center;
+    flex-direction: row;
+    gap: var(--sp-8);
   }
 
   .asset-mobile-sort-field select {
-    width: 100%;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .asset-sort-control-label {
+    white-space: nowrap;
   }
 
   .asset-sort-direction {
@@ -3726,56 +3732,108 @@ button.stacked-legend-item {
     white-space: nowrap;
   }
 
+  /* Rows are a hairline-divided list: name and value on the first line,
+     the trailing changes on the second. Amount, price, and freshness show
+     only when a row is expanded. */
   .assets-table {
     border: 0;
     border-radius: 0;
+    gap: 0;
   }
 
   .assets-table .asset-row {
-    gap: var(--sp-12);
+    border: 0;
+    border-bottom: 1px solid var(--color-divider);
+    border-radius: 0;
+    gap: var(--sp-8) var(--sp-12);
     grid-template-areas:
-      "name toggle"
-      "value value"
-      "position position"
-      "changes changes"
-      "audit audit";
-    grid-template-columns: minmax(0, 1fr) 36px !important;
-    padding: var(--sp-16);
+      "name value toggle"
+      "changes changes changes";
+    grid-template-columns: minmax(0, 1fr) auto 28px !important;
+    padding: var(--sp-12) var(--sp-4);
+  }
+
+  .assets-table .asset-row.expanded {
+    grid-template-areas:
+      "name value toggle"
+      "changes changes changes"
+      "audit audit audit";
+  }
+
+  .assets-table .asset-row strong,
+  .assets-table .asset-row span,
+  .assets-table .asset-row small {
+    overflow: hidden;
+    overflow-wrap: normal;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .assets-table .asset-name-cell {
+    align-self: center;
     grid-area: name;
   }
 
-  .assets-table .asset-name-line strong {
-    font-size: var(--fs-title);
-  }
-
-  .assets-table .asset-position-grid {
-    grid-area: position;
+  .assets-table .asset-name-cell > small,
+  .assets-table .asset-position-summary {
+    font-size: var(--fs-caption);
   }
 
   .assets-table .asset-value-cell {
-    align-items: baseline;
-    background: var(--color-accent-bg);
-    border-radius: var(--radius-sm);
+    align-items: flex-end;
+    align-self: center;
     display: flex;
-    gap: var(--sp-12);
+    flex-direction: column;
+    gap: var(--sp-2);
     grid-area: value;
-    justify-content: space-between;
-    padding: var(--sp-12);
-  }
-
-  .assets-table .asset-value-cell strong {
-    font-size: var(--fs-title);
+    min-width: 0;
     text-align: right;
   }
 
-  .assets-table .asset-audit-grid {
+  .assets-table .asset-value-cell .asset-cell-label {
     display: none;
+  }
+
+  .assets-table .asset-position-summary {
+    color: var(--color-text-muted);
+    display: block;
+    font-weight: var(--fw-medium);
+    max-width: 100%;
+  }
+
+  .assets-table .asset-change-grid {
+    gap: var(--sp-8);
+    grid-area: changes;
+    grid-template-columns: repeat(4, minmax(max-content, 1fr));
+  }
+
+  .assets-table .asset-change-cell {
+    align-items: baseline;
+    display: flex;
+    font-size: var(--fs-small);
     gap: var(--sp-4);
+  }
+
+  .assets-table .asset-change-cell .asset-cell-label {
+    display: block;
+    flex: none;
+  }
+
+  .assets-table .asset-change-cell > span {
+    overflow: visible;
+  }
+
+  .assets-table .asset-position-grid {
+    display: none;
+  }
+
+  .assets-table .asset-audit-grid {
+    color: var(--color-text-muted);
+    display: none;
+    font-size: var(--fs-caption);
+    gap: var(--sp-4) var(--sp-16);
     grid-area: audit;
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   }
 
   .assets-table .asset-row.expanded .asset-audit-grid {
@@ -3789,79 +3847,99 @@ button.stacked-legend-item {
     justify-content: space-between;
   }
 
-  .assets-table .asset-change-grid {
+  .assets-table .asset-audit-grid .asset-cell-label {
+    display: block;
+    flex: none;
+  }
+
+  .assets-table .asset-row > .transaction-expand-toggle {
+    align-self: center;
+    grid-area: toggle;
+    height: 28px;
+    min-height: var(--control-height-sm);
+    min-width: 28px;
+    width: 28px;
+  }
+
+  .assets-table .asset-holding-row {
     background: var(--color-surface-subtle);
-    border-radius: var(--radius-sm);
-    gap: var(--sp-4);
-    grid-area: changes;
+    border: 0;
+    border-left: 2px solid var(--color-accent-border);
+    border-radius: 0;
+    gap: var(--sp-2) var(--sp-12);
+    grid-template-areas:
+      "name value"
+      "date amount";
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    margin-left: var(--sp-12);
+    padding: var(--sp-8) var(--sp-12);
+    width: calc(100% - var(--sp-12));
+  }
+
+  .assets-table .asset-holding-row .asset-name-cell {
+    grid-area: name;
+  }
+
+  .assets-table .asset-holding-row .asset-cell-label {
+    display: none;
+  }
+
+  .assets-table .asset-holding-value {
+    grid-area: value;
+    text-align: right;
+  }
+
+  .assets-table .asset-holding-amount {
+    color: var(--color-text-muted);
+    font-size: var(--fs-caption);
+    grid-area: amount;
+    text-align: right;
+  }
+
+  .assets-table .asset-holding-date {
+    font-size: var(--fs-caption);
+    grid-area: date;
+  }
+
+  .assets-table .asset-holding-row:last-child {
+    border-bottom: 1px solid var(--color-divider);
+  }
+}
+
+/* Tablet widths have room for the changes between name and value, which
+   keeps each row to the height of its two-line name. */
+@media (min-width: 721px) and (max-width: 1200px) {
+  .assets-table .asset-row {
+    grid-template-areas: "name changes value toggle";
+    grid-template-columns:
+      minmax(120px, 1fr)
+      minmax(280px, 1.4fr)
+      minmax(140px, auto)
+      28px !important;
+  }
+
+  .assets-table .asset-row.expanded {
+    grid-template-areas:
+      "name changes value toggle"
+      "audit audit audit audit";
+  }
+
+  .assets-table .asset-change-grid {
+    display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    padding: var(--sp-8);
-  }
-
-  .assets-table .asset-position-grid {
-    gap: var(--sp-8);
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .assets-table .asset-position-grid .asset-labeled-cell,
-  .assets-table .asset-change-cell {
-    display: flex;
-    flex-direction: column;
-    gap: var(--sp-2);
   }
 
   .assets-table .asset-change-cell {
     align-items: center;
-    font-size: var(--fs-small);
-    text-align: center;
-  }
-
-  .assets-table .asset-cell-label {
-    display: block;
-  }
-
-  .assets-table .asset-row > .transaction-expand-toggle {
-    align-self: start;
-    grid-area: toggle;
-  }
-
-  .assets-table .asset-labeled-cell > span,
-  .assets-table .asset-value-cell strong {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .assets-table .asset-holding-row {
-    border-left: 3px solid var(--color-accent-border);
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-    margin-left: var(--sp-12);
-    width: calc(100% - var(--sp-12));
-  }
-
-  .assets-table .asset-holding-row .asset-name-cell,
-  .assets-table .asset-holding-date {
-    grid-column: 1 / -1;
+    flex-direction: column;
+    gap: var(--sp-2);
   }
 }
 
 @media (max-width: 520px) {
-  .assets-summary-grid {
-    display: block;
-    margin-bottom: var(--sp-12);
-  }
-
   .assets-summary-grid .metric {
     gap: var(--sp-4);
     padding: var(--sp-12);
-  }
-
-  .assets-summary-grid .metric:first-child strong {
-    font-size: var(--fs-display);
-  }
-
-  .assets-summary-grid .metric:not(:first-child) {
-    display: none;
   }
 
   .assets-panel {
@@ -3889,136 +3967,34 @@ button.stacked-legend-item {
     min-height: var(--control-height-sm);
   }
 
-  .asset-mobile-sort {
-    align-items: end;
-    gap: var(--sp-8);
-    grid-template-columns: minmax(0, 1fr) 42px;
-    margin-bottom: var(--sp-8);
-    padding: var(--sp-8);
-  }
-
   .asset-sort-direction {
-    min-width: 42px;
+    min-width: var(--control-height);
     padding: 0;
-    width: 100%;
   }
 
   .asset-sort-direction-label {
     display: none;
   }
 
-  .asset-sort-control-label {
-    border: 0;
-    clip: rect(0 0 0 0);
-    clip-path: inset(50%);
-    height: 1px;
-    margin: -1px;
-    overflow: hidden;
-    padding: 0;
-    position: absolute;
-    white-space: nowrap;
-    width: 1px;
-  }
-
-  .assets-table {
-    gap: 0;
-  }
-
   .assets-table .asset-row {
-    border-left: 0;
-    border-radius: 0;
-    border-right: 0;
-    border-top: 0;
-    gap: var(--sp-8);
-    grid-template-areas:
-      "name value toggle"
-      "position position position"
-      "changes changes changes"
-      "audit audit audit";
-    grid-template-columns: minmax(0, 1fr) auto 28px !important;
-    padding: var(--sp-12) 0;
-  }
-
-  .assets-table .asset-name-cell {
-    align-self: center;
-  }
-
-  .assets-table .asset-name-line {
-    gap: var(--sp-8);
-  }
-
-  .assets-table .asset-name-line strong {
-    font-size: var(--fs-body);
-  }
-
-  .assets-table .asset-name-cell > small {
-    font-size: var(--fs-caption);
-  }
-
-  .assets-table .asset-value-cell {
-    align-items: flex-end;
-    align-self: center;
-    background: transparent;
-    display: flex;
-    gap: 0;
-    justify-content: flex-end;
-    padding: 0;
-  }
-
-  .assets-table .asset-value-cell .asset-cell-label {
-    display: none;
-  }
-
-  .assets-table .asset-value-cell strong {
-    font-size: var(--fs-body);
-  }
-
-  .assets-table .asset-position-grid {
-    border-top: 1px solid var(--color-divider);
-    gap: var(--sp-12);
-    padding-top: var(--sp-8);
-  }
-
-  .assets-table .asset-position-grid .asset-labeled-cell {
-    flex-direction: row;
-    gap: var(--sp-8);
-  }
-
-  .assets-table .asset-position-grid .asset-labeled-cell:last-child {
-    justify-content: flex-end;
-    text-align: right;
-  }
-
-  .assets-table .asset-change-grid {
-    background: transparent;
-    border-radius: 0;
-    border-top: 1px solid var(--color-divider);
-    padding: var(--sp-8) 0 0;
-  }
-
-  .assets-table .asset-audit-grid .asset-cell-label {
-    color: var(--color-text-muted);
-    font-weight: var(--fw-medium);
-  }
-
-  .assets-table .asset-audit-grid {
-    border-top: 1px solid var(--color-divider);
-    padding-top: var(--sp-8);
-  }
-
-  .assets-table .asset-row > .transaction-expand-toggle {
-    align-self: center;
-    height: 28px;
-    min-height: var(--control-height-sm);
-    min-width: 28px;
-    width: 28px;
+    padding-inline: 0;
   }
 
   .assets-table .asset-holding-row {
-    border-left-width: 2px;
-    border-radius: var(--radius-sm);
-    margin: var(--sp-4) 0 var(--sp-8) var(--sp-8);
-    padding: var(--sp-8);
+    margin-left: var(--sp-8);
     width: calc(100% - var(--sp-8));
+  }
+}
+
+@media (max-width: 380px) {
+  .assets-table .asset-change-grid {
+    gap: var(--sp-4);
+    grid-template-columns: repeat(4, auto);
+    justify-content: space-between;
+  }
+
+  .assets-table .asset-change-cell {
+    font-size: var(--fs-caption);
+    gap: var(--sp-2);
   }
 }

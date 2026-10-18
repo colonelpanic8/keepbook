@@ -272,6 +272,7 @@ fn AssetRow(
         .as_deref()
         .and_then(|value| format_money_text(value, &currency))
         .unwrap_or_else(|| "—".to_string());
+    let position_summary = entry.price.as_ref().map(|_| format!("{amount} × {price}"));
     let row_class = if expanded {
         "table-row asset-row expanded"
     } else {
@@ -308,6 +309,9 @@ fn AssetRow(
             div { class: "asset-value-cell asset-labeled-cell",
                 small { class: "asset-cell-label", "Value ({currency})" }
                 strong { "{value}" }
+                if let Some(position_summary) = position_summary {
+                    small { class: "asset-position-summary", "{position_summary}" }
+                }
             }
             div { class: "asset-change-grid",
                 {asset_change_cell(&entry, AssetSortField::DayChange, &currency, show_absolute_changes)}
@@ -363,11 +367,11 @@ fn AssetRow(
                                     small { "{connection}" }
                                 }
                             }
-                            span { class: "asset-labeled-cell",
+                            span { class: "asset-labeled-cell asset-holding-amount",
                                 small { class: "asset-cell-label", "Amount" }
                                 span { "{holding_amount}" }
                             }
-                            span { class: "asset-labeled-cell",
+                            span { class: "asset-labeled-cell asset-holding-value",
                                 small { class: "asset-cell-label", "Value ({currency})" }
                                 span { "{holding_value}" }
                             }
@@ -393,7 +397,7 @@ fn asset_change_cell(
     let Some(change) = asset_period_change(entry, field) else {
         return rsx! {
             span { class: "asset-change-cell asset-labeled-cell",
-                small { class: "asset-cell-label", "{field.label()}" }
+                small { class: "asset-cell-label", "{field.short_label()}" }
                 span { "—" }
             }
         };
@@ -411,7 +415,7 @@ fn asset_change_cell(
             span {
                 class: "asset-change-cell asset-labeled-cell {absolute_class}",
                 title: "{percentage_title}",
-                small { class: "asset-cell-label", "{field.label()}" }
+                small { class: "asset-cell-label", "{field.short_label()}" }
                 span { "{absolute_text}" }
             }
         };
@@ -426,7 +430,7 @@ fn asset_change_cell(
             span {
                 class: "asset-change-cell asset-labeled-cell {percent_class}",
                 title: "{absolute_text}",
-                small { class: "asset-cell-label", "{field.label()}" }
+                small { class: "asset-cell-label", "{field.short_label()}" }
                 span { "{percent_text}" }
             }
         },
@@ -434,7 +438,7 @@ fn asset_change_cell(
             span {
                 class: "asset-change-cell asset-labeled-cell {absolute_class}",
                 title: "No prior value for this period",
-                small { class: "asset-cell-label", "{field.label()}" }
+                small { class: "asset-cell-label", "{field.short_label()}" }
                 span { "{absolute_text}" }
             }
         },

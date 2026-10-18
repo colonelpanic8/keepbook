@@ -95,6 +95,16 @@ impl AssetSortField {
         }
     }
 
+    pub(crate) fn short_label(self) -> &'static str {
+        match self {
+            Self::DayChange => "1D",
+            Self::WeekChange => "1W",
+            Self::MonthChange => "1M",
+            Self::YearChange => "1Y",
+            _ => self.label(),
+        }
+    }
+
     pub(crate) fn value(self) -> &'static str {
         match self {
             Self::Name => "name",

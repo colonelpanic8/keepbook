@@ -44,8 +44,23 @@ pub(crate) fn asset_kind_label(asset: &serde_json::Value) -> &'static str {
 
 /// Display form of an asset holding amount: rounded and trimmed like the rest
 /// of the app's decimal output, keeping the raw text when unparseable.
+/// Two decimals, with up to eight for amounts that would otherwise round to
+/// zero (fractional crypto).
 pub(crate) fn format_asset_amount(amount: &str) -> String {
-    format_decimal_text(amount, 4).unwrap_or_else(|| amount.to_string())
+    match format_decimal_text(amount, 2) {
+        Some(rounded) if is_zero_text(&rounded) && !is_zero_text(amount) => {
+            format_decimal_text(amount, 8).unwrap_or(rounded)
+        }
+        Some(rounded) => rounded,
+        None => amount.to_string(),
+    }
+}
+
+fn is_zero_text(value: &str) -> bool {
+    value
+        .trim_start_matches('-')
+        .bytes()
+        .all(|b| b == b'0' || b == b'.')
 }
 
 /// Expansion-state key for an asset breakdown row. Asset and liability rows

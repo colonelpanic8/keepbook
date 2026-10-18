@@ -1740,6 +1740,13 @@ fn asset_amount_display_trims_trailing_zeros() {
 }
 
 #[test]
+fn asset_amount_display_rounds_to_two_decimals_unless_that_hides_it() {
+    assert_eq!(format_asset_amount("1355.6559"), "1355.66");
+    assert_eq!(format_asset_amount("0.00123456"), "0.00123456");
+    assert_eq!(format_asset_amount("0"), "0");
+}
+
+#[test]
 fn asset_expansion_keys_distinguish_liability_rows() {
     let asset = asset_entry(
         serde_json::json!({"type": "currency", "iso_code": "USD"}),

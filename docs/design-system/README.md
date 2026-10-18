@@ -245,6 +245,11 @@ named last in each row renders it.
 - Panels are one `minmax(0, 1fr)` column. Machine values shown in full
   (paths, URLs) set `overflow-wrap: anywhere`. Identifiers shown as a token
   (hashes in a repository row) stay on one line and ellipsize.
+- Below 1200px the assets table is a list divided by hairlines, not cards, so
+  a holding costs one or two lines. Name and kind sit on the left, value and
+  `amount × price` on the right, and the four trailing changes in one strip
+  beneath (between name and value above 720px). An expanded row adds only
+  freshness and holdings, so amount and price never repeat.
 - A setting row pairs copy with one control. A switch sits beside its copy at
   any width. A select or option group is `.setting-row-stacked` and stacks
   below 520px.
