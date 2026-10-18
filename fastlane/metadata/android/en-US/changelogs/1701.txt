@@ -1,0 +1,1 @@
+* Fixed: On Android, folding or unfolding a foldable, switching between its inner and outer screens, or resizing the app in split screen no longer leaves a blank screen.

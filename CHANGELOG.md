@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.17.1 - 2026-10-18
+
+### Fixed
+
+- On Android, folding or unfolding a foldable, switching between its inner
+  and outer screens, or resizing the app in split screen no longer leaves a
+  blank screen.
+
 ## 0.17.0 - 2026-10-18
 
 ### Changed
