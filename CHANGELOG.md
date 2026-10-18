@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.17.0 - 2026-10-18
+
+### Changed
+
+- On phones and tablets the Assets page lists each holding in one or two
+  lines instead of a card: name and kind on the left, value and
+  "amount × price" on the right, and the 1D/1W/1M/1Y changes in a strip
+  beneath. Expanding a row adds only freshness dates and per-account
+  holdings, so amount and price no longer appear twice.
+- Asset quantities show two decimals, with up to eight for small amounts
+  that would otherwise round to zero.
+
 ## 0.16.0 - 2026-10-09
 
 ### Changed
