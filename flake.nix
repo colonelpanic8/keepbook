@@ -304,6 +304,11 @@
 
                 if [[ -f "$manifest" ]]; then
                   sed -i '/android:extractNativeLibs=/d' "$manifest"
+                  # wry cannot rebuild its WebView when Android recreates the
+                  # activity, which leaves a blank screen. Folding/unfolding
+                  # and multi-window resizes change smallestScreenSize and
+                  # density, which `dx`'s default list does not cover.
+                  sed -i 's/android:configChanges="[^"]*"/android:configChanges="orientation|screenLayout|screenSize|smallestScreenSize|density|uiMode|keyboard|keyboardHidden|navigation"/' "$manifest"
                 fi
 
                 # `dx` derives the launcher label from the crate name
