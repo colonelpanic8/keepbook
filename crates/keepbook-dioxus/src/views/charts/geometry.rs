@@ -147,15 +147,11 @@ pub(super) fn build_stack_points(
     padding_left: f64,
     plot_width: f64,
 ) -> Vec<StackPoint> {
-    let count = data.len();
+    let x_positions = history_x_positions(data, padding_left, plot_width);
     data.iter()
         .enumerate()
         .flat_map(|(index, point)| {
-            let x = if count <= 1 {
-                padding_left + plot_width / 2.0
-            } else {
-                padding_left + (index as f64 / (count - 1) as f64) * plot_width
-            };
+            let x = x_positions[index];
             let values = point
                 .components
                 .iter()
@@ -276,24 +272,20 @@ pub(super) fn stacked_hover_points(
     plot_height: f64,
     chart_width: f64,
 ) -> Vec<StackedHoverPoint> {
-    let count = data.len();
+    let x_positions = history_x_positions(data, padding_left, plot_width);
     data.iter()
         .enumerate()
         .map(|(index, point)| {
-            let x = if count <= 1 {
-                padding_left + plot_width / 2.0
-            } else {
-                padding_left + (index as f64 / (count - 1) as f64) * plot_width
-            };
+            let x = x_positions[index];
             let previous_x = if index == 0 {
                 padding_left
             } else {
-                padding_left + ((index as f64 - 0.5) / (count - 1) as f64) * plot_width
+                (x_positions[index - 1] + x) / 2.0
             };
-            let next_x = if index + 1 == count {
+            let next_x = if index + 1 == data.len() {
                 chart_width - padding_right
             } else {
-                padding_left + ((index as f64 + 0.5) / (count - 1) as f64) * plot_width
+                (x + x_positions[index + 1]) / 2.0
             };
             let component_values = point
                 .components
@@ -349,3 +341,7 @@ pub(super) fn tooltip_label(label: &str, max_chars: usize) -> String {
     truncated.push_str("...");
     truncated
 }
+
+#[cfg(test)]
+#[path = "../../../tests/unit/charts_geometry_tests.rs"]
+mod charts_geometry_tests;

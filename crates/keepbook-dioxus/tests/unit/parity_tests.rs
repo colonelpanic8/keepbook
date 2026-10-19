@@ -412,7 +412,7 @@ const CASES: &[Case] = &[
             NetWorthChart {
                 data: vec![
                     NetWorthDataPoint { date: "2026-01-01".into(), value: 5000.0 },
-                    NetWorthDataPoint { date: "2026-02-01".into(), value: 5600.5 },
+                    NetWorthDataPoint { date: "2026-01-02".into(), value: 5600.5 },
                     NetWorthDataPoint { date: "2026-03-01".into(), value: 5400.0 },
                 ],
                 currency: "USD",

@@ -223,6 +223,30 @@ impl DatedSeriesPoint for StackedHistoryDataPoint {
     }
 }
 
+/// Horizontal positions for chronologically ordered, date-based history.
+pub(crate) fn history_x_positions<P: DatedSeriesPoint>(
+    points: &[P],
+    padding_left: f64,
+    plot_width: f64,
+) -> Vec<f64> {
+    let span = points
+        .first()
+        .zip(points.last())
+        .and_then(|(first, last)| days_between(first.date(), last.date()))
+        .unwrap_or(0);
+    points
+        .iter()
+        .map(|point| {
+            if span <= 0 {
+                padding_left + plot_width / 2.0
+            } else {
+                let elapsed = days_between(points[0].date(), point.date()).unwrap_or(0);
+                padding_left + elapsed as f64 / span as f64 * plot_width
+            }
+        })
+        .collect()
+}
+
 pub(crate) fn date_bounds<P: DatedSeriesPoint>(points: &[P]) -> Option<(String, String)> {
     Some((
         points.first()?.date().to_string(),

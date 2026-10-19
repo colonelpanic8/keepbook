@@ -57,7 +57,7 @@ pub(super) fn StackedNetWorthChart(
     let padding_bottom = 38.0;
     let plot_width = width - padding_left - padding_right;
     let plot_height = height - padding_top - padding_bottom;
-    let count = data.len();
+    let x_positions = history_x_positions(&data, padding_left, plot_width);
     let stack_points = build_stack_points(&data, &series, padding_left, plot_width);
     let (y_min, y_max) = stacked_y_domain(&stack_points, &data);
     let y_range = (y_max - y_min).max(1.0);
@@ -80,11 +80,7 @@ pub(super) fn StackedNetWorthChart(
         .iter()
         .enumerate()
         .map(|(index, point)| {
-            let x = if count <= 1 {
-                padding_left + plot_width / 2.0
-            } else {
-                padding_left + (index as f64 / (count - 1) as f64) * plot_width
-            };
+            let x = x_positions[index];
             let y = stacked_y(point.total, y_min, y_range, padding_top, plot_height);
             let command = if index == 0 { "M" } else { "L" };
             format!("{command} {:.2} {:.2}", x, y)

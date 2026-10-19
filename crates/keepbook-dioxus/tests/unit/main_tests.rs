@@ -2077,3 +2077,40 @@ fn assets_query_strings_parse_into_server_assets_query() {
         .expect("combined change mode should parse");
     assert!(parsed.include_amount_changes);
 }
+
+#[test]
+fn history_positions_scale_with_elapsed_days_across_leap_day() {
+    let points = ["2024-02-28", "2024-02-29", "2024-03-09"].map(|date| NetWorthDataPoint {
+        date: date.into(),
+        value: 100.0,
+    });
+    assert_eq!(
+        history_x_positions(&points, 68.0, 632.0),
+        vec![68.0, 131.2, 700.0]
+    );
+    let stacked = points.map(|point| stacked_point(&point.date, point.value, &[]));
+    assert_eq!(
+        history_x_positions(&stacked, 68.0, 632.0),
+        vec![68.0, 131.2, 700.0]
+    );
+}
+
+#[test]
+fn history_positions_center_single_date_and_empty_history_has_no_positions() {
+    let point = NetWorthDataPoint {
+        date: "2026-01-01".into(),
+        value: 100.0,
+    };
+    assert_eq!(
+        history_x_positions::<NetWorthDataPoint>(&[], 68.0, 632.0),
+        Vec::<f64>::new()
+    );
+    assert_eq!(
+        history_x_positions(std::slice::from_ref(&point), 68.0, 632.0),
+        vec![384.0]
+    );
+    assert_eq!(
+        history_x_positions(&[point.clone(), point], 68.0, 632.0),
+        vec![384.0, 384.0]
+    );
+}

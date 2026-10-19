@@ -254,7 +254,7 @@ export const cases: Record<string, ComponentType> = {
     <NetWorthChart
       data={[
         { date: "2026-01-01", value: 5000 },
-        { date: "2026-02-01", value: 5600.5 },
+        { date: "2026-01-02", value: 5600.5 },
         { date: "2026-03-01", value: 5400 },
       ]}
       currency="USD"

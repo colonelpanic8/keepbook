@@ -61,17 +61,13 @@ pub(crate) fn NetWorthChart(
         (min_value - padding, max_value + padding)
     };
     let y_range = (y_max - y_min).max(1.0);
-    let count = values.len();
+    let x_positions = history_x_positions(&data, padding_left, plot_width);
 
     let chart_points = values
         .iter()
         .enumerate()
         .map(|(index, (date, value))| {
-            let x = if count <= 1 {
-                padding_left + plot_width / 2.0
-            } else {
-                padding_left + (index as f64 / (count - 1) as f64) * plot_width
-            };
+            let x = x_positions[index];
             let y = padding_top + ((y_max - value) / y_range) * plot_height;
             ChartPoint {
                 date: date.clone(),

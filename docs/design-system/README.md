@@ -260,6 +260,10 @@ named last in each row renders it.
 
 ## Charts
 
+- Net worth lines and stacked history areas share a continuous date axis: horizontal
+  distance is proportional to elapsed calendar days, including gaps in history
+  and the current snapshot. Hover regions end halfway between adjacent plotted
+  dates; drag selections use those same positions. A single date is centered.
 - Charts are SVG with a fixed `viewBox` scaled to the panel width.
   - Gridlines use `--color-divider` and the axis `--color-border-strong`.
   - Axis text is muted. Because it is in viewBox units, `.chart-card` is a

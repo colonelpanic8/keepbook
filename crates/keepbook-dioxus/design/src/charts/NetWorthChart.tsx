@@ -59,10 +59,12 @@ export function NetWorthChart({
       return [min - padding, max + padding];
     })();
   const yRange = Math.max(yMax - yMin, 1);
+  const firstTime = Date.parse(data[0].date);
+  const span = Date.parse(data[data.length - 1].date) - firstTime;
   const points = data.map((p, index) => ({
     ...p,
     index,
-    x: data.length <= 1 ? PAD.left + plotWidth / 2 : PAD.left + (index / (data.length - 1)) * plotWidth,
+    x: span <= 0 ? PAD.left + plotWidth / 2 : PAD.left + ((Date.parse(p.date) - firstTime) / span) * plotWidth,
     y: PAD.top + ((yMax - p.value) / yRange) * plotHeight,
   }));
   const line = points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(" ");
