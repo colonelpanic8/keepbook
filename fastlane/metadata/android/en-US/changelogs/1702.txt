@@ -1,0 +1,1 @@
+* Fixed: Net worth and stacked history charts now space points by elapsed calendar days, so gaps in history stay proportional to time. Hover regions and drag selections follow the same date scale.

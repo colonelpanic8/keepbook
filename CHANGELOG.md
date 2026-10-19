@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.17.2 - 2026-10-19
+
+### Fixed
+
+- Net worth and stacked history charts now space points by elapsed calendar
+  days, so gaps in history stay proportional to time. Hover regions and drag
+  selections follow the same date scale.
+
 ## 0.17.1 - 2026-10-18
 
 ### Fixed
