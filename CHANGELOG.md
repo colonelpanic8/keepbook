@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.18.0 - 2026-10-20
+
+### Changed
+
+- Refresh moved from the Accounts page into the app header, so it is
+  available from every view. Its main action refreshes stale balances and
+  then stale prices. The menu beside it offers "Refresh all prices",
+  "Resync data", and "Git sync". On phones the header shows the logo without
+  the app name to make room.
+
 ## 0.17.2 - 2026-10-19
 
 ### Fixed
