@@ -13,7 +13,7 @@ export interface ButtonFeedback {
 }
 
 export interface ControlButtonProps {
-  children: ReactNode;
+  children?: ReactNode;
   /** The emphasized action. Use at most one per toolbar. */
   primary?: boolean;
   /** Toggled-on state, e.g. an active filter. Not for emphasis. */

@@ -43,7 +43,6 @@ pub(super) fn AccountsView(
     connection_count: usize,
     onrefresh: EventHandler<()>,
 ) -> Element {
-    let operation = use_action_feedback();
     let mut pull_start = use_signal(|| None::<PullStart>);
     let mut pull_distance = use_signal(|| 0.0);
     let mut selected_graph = use_signal(|| None::<AccountGraphSelection>);
@@ -63,80 +62,6 @@ pub(super) fn AccountsView(
     } else {
         "pull-refresh-indicator"
     };
-    let refresh_prices = move |force: bool| {
-        operation.start("prices", "Refreshing…");
-        let input = SyncPricesInput {
-            scope: "all".to_string(),
-            target: None,
-            force,
-            quote_staleness_seconds: None,
-        };
-        spawn(async move {
-            match sync_prices(input).await {
-                Ok(result) => {
-                    let summary = price_sync_result_summary(&result);
-                    if price_sync_result_has_failures(&result) {
-                        operation.fail("prices", "Some prices failed", summary);
-                    } else {
-                        operation.succeed("prices", "Prices refreshed", Some(summary));
-                    }
-                    onrefresh.call(());
-                }
-                Err(error) => operation.fail(
-                    "prices",
-                    "Refresh failed",
-                    format!("Price refresh failed: {error}"),
-                ),
-            }
-        });
-    };
-    let resync_data = move || {
-        operation.start("resync", "Resyncing…");
-        spawn(async move {
-            match reload_data().await {
-                Ok(_) => {
-                    operation.succeed("resync", "Data resynced", None);
-                    onrefresh.call(());
-                }
-                Err(error) => {
-                    operation.fail("resync", "Resync failed", format!("Resync failed: {error}"))
-                }
-            }
-        });
-    };
-    let git_sync = move || {
-        operation.start("git", "Syncing…");
-        spawn(async move {
-            let result = async {
-                let settings = fetch_git_settings().await?;
-                let input = GitSyncInput {
-                    data_dir: normalize_git_data_dir_for_client(settings.data_dir),
-                    host: settings.git.host,
-                    repo: settings.git.repo,
-                    branch: settings.git.branch,
-                    ssh_user: settings.git.ssh_user,
-                    private_key_pem: String::new(),
-                    save_settings: false,
-                };
-                sync_git_repo_cancelable(input, new_git_sync_cancel_handle()).await
-            }
-            .await;
-            match result {
-                Ok(result) => {
-                    operation.succeed(
-                        "git",
-                        "Git synced",
-                        Some(format!("Synced {} {}.", result.remote_url, result.branch)),
-                    );
-                    onrefresh.call(());
-                }
-                Err(error) => {
-                    operation.fail("git", "Sync failed", format!("Git sync failed: {error}"))
-                }
-            }
-        });
-    };
-
     rsx! {
         div {
             class: "pull-refresh-surface",
@@ -188,42 +113,6 @@ pub(super) fn AccountsView(
                 }
             }
             div { class: "pull-refresh-content",
-                PageToolbar {
-                    SplitButton {
-                        primary: true,
-                        icon: ButtonIcon::Refresh,
-                        title: "Refetch every price, ignoring staleness",
-                        menu_label: "More refresh options",
-                        actions: vec![
-                            MenuAction {
-                                value: "stale-prices",
-                                label: "Refresh stale prices",
-                                detail: "Skip prices that are still fresh",
-                            },
-                            MenuAction {
-                                value: "resync",
-                                label: "Resync data",
-                                detail: "Reload keepbook data from disk",
-                            },
-                            MenuAction {
-                                value: "git",
-                                label: "Git sync",
-                                detail: "Pull and push the data repository",
-                            },
-                        ],
-                        feedback: operation.current(),
-                        onclick: move |_| refresh_prices(true),
-                        onselect: move |value| match value {
-                            "stale-prices" => refresh_prices(false),
-                            "resync" => resync_data(),
-                            _ => git_sync(),
-                        },
-                        "Refresh all prices"
-                    }
-                }
-                if let Some(error) = operation.error() {
-                    ErrorNotice { message: error, ondismiss: move |_| operation.dismiss() }
-                }
                 SummaryGrid {
                     MetricCard {
                         label: "Net worth",

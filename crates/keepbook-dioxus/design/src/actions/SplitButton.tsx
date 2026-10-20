@@ -12,8 +12,8 @@ export interface MenuAction {
 }
 
 export interface SplitButtonProps {
-  /** Label of the main action. */
-  children: ReactNode;
+  /** Label of the main action; omit for an icon-only button with a `title`. */
+  children?: ReactNode;
   primary?: boolean;
   icon?: IconName;
   title?: string;

@@ -52,6 +52,38 @@ const CASES: &[Case] = &[
             }
         }
     }),
+    ("AppShell.actions", || {
+        rsx! {
+            AppShell {
+                title: "Keepbook",
+                currency: "USD",
+                repositories: vec![],
+                repository: "",
+                actions: rsx! {
+                    SplitButton {
+                        icon: ButtonIcon::Refresh,
+                        title: "Refresh stale balances and prices",
+                        menu_label: "More refresh options",
+                        actions: vec![MenuAction {
+                            value: "git",
+                            label: "Git sync",
+                            detail: "Pull and push the data repository",
+                        }],
+                        feedback: ButtonFeedback {
+                            tone: FeedbackTone::Busy,
+                            label: "Refreshing…".into(),
+                            detail: None,
+                        },
+                        onclick: |_| {},
+                        onselect: |_| {},
+                    }
+                },
+                nav_items: vec![NavItem { label: "Accounts".into(), icon: ButtonIcon::Wallet }],
+                active: "Accounts",
+                p { "Content" }
+            }
+        }
+    }),
     ("Modal.basic", || {
         rsx! {
             Modal {
@@ -65,13 +97,6 @@ const CASES: &[Case] = &[
     ("Modal.wide", || {
         rsx! {
             Modal { title: "Group edit", wide: true, p { "Body" } }
-        }
-    }),
-    ("PageToolbar.basic", || {
-        rsx! {
-            PageToolbar {
-                ControlButton { primary: true, icon: ButtonIcon::Refresh, onclick: |_| {}, "Refresh prices" }
-            }
         }
     }),
     ("Panel.basic", || {

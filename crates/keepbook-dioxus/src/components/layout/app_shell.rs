@@ -13,10 +13,11 @@ pub(crate) struct NavItem {
 /// The full app frame: sidebar navigation beside a scrolling workspace.
 ///
 /// Holds the logo, the repository switcher (shown when `repositories` is not
-/// empty), and the navigation. `refreshing` fades a spinner badge in over the
-/// logo while loaded data revalidates, without taking any space. Below 1200px
-/// wide the sidebar becomes a sticky compact header whose hamburger opens a
-/// drawer. Mirror:
+/// empty), and the navigation. `actions` sits at the end of the title row and
+/// holds app-wide actions such as refresh. `refreshing` fades a spinner badge
+/// in over the logo while loaded data revalidates, without taking any space.
+/// Below 1200px wide the sidebar becomes a sticky compact header whose
+/// hamburger opens a drawer. Mirror:
 /// `design/src/layout/AppShell.tsx`.
 #[component]
 pub(crate) fn AppShell(
@@ -27,6 +28,7 @@ pub(crate) fn AppShell(
     repository_busy: Option<bool>,
     repository_status: Option<String>,
     refreshing: Option<bool>,
+    actions: Option<Element>,
     nav_items: Vec<NavItem>,
     active: String,
     onrepositorychange: Option<EventHandler<String>>,
@@ -55,6 +57,9 @@ pub(crate) fn AppShell(
                         div { class: "nav-title-text",
                             strong { "{title}" }
                             small { "{currency}" }
+                        }
+                        if let Some(actions) = actions {
+                            div { class: "nav-actions", {actions} }
                         }
                     }
                     button {

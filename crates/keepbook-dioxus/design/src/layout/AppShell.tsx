@@ -38,21 +38,23 @@ export interface AppShellProps {
   repositoryStatus?: string;
   /** Loaded data is revalidating: fades a spinner badge in over the logo without taking space. */
   refreshing?: boolean;
+  /** App-wide actions at the end of the title row, e.g. the refresh `SplitButton`. */
+  actions?: ReactNode;
   /** Navigation items; defaults to the app's views. */
   navItems?: NavItem[];
   /** Selected navigation item. */
   active?: string;
   onRepositoryChange?: (value: string) => void;
   onNavigate?: (item: string) => void;
-  /** Page content: usually a `PageToolbar`, `SummaryGrid`, and `Panel`s. */
+  /** Page content: usually a `SummaryGrid` and `Panel`s. */
   children?: ReactNode;
 }
 
 /**
  * The full keepbook app frame: sidebar navigation beside a scrolling workspace.
  *
- * Holds the logo, repository switcher, and navigation. `refreshing` badges the
- * logo while loaded data revalidates. Below 1200px wide the sidebar becomes a
+ * Holds the logo, repository switcher, and navigation. `actions` ends the title
+ * row. `refreshing` badges the logo while loaded data revalidates. Below 1200px wide the sidebar becomes a
  * sticky compact header whose hamburger opens a drawer.
  * Every full-screen design starts here. Mirrors `components/layout/app_shell.rs`.
  */
@@ -64,6 +66,7 @@ export function AppShell({
   repositoryBusy = false,
   repositoryStatus,
   refreshing = false,
+  actions,
   navItems = NAV_ITEMS,
   active = navItems[0]?.label,
   onRepositoryChange,
@@ -92,6 +95,7 @@ export function AppShell({
               <strong>{title}</strong>
               <small>{currency}</small>
             </div>
+            {actions && <div className="nav-actions">{actions}</div>}
           </div>
           <button
             className="mobile-nav-toggle"

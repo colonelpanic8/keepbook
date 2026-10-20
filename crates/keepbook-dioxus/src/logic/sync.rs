@@ -45,6 +45,26 @@ pub(crate) fn sync_result_summary(result: &serde_json::Value) -> String {
     }
 }
 
+pub(crate) fn balance_sync_result_has_failures(result: &serde_json::Value) -> bool {
+    result
+        .get("results")
+        .and_then(|value| value.as_array())
+        .is_some_and(|results| {
+            results
+                .iter()
+                .any(|row| row.get("success").and_then(|v| v.as_bool()) == Some(false))
+        })
+}
+
+pub(crate) fn price_sync_result_has_failures(result: &serde_json::Value) -> bool {
+    result
+        .get("result")
+        .and_then(|value| value.get("failed_count"))
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0)
+        > 0
+}
+
 pub(crate) fn price_sync_result_summary(result: &serde_json::Value) -> String {
     let Some(refresh) = result.get("result") else {
         return "Price refresh finished.".to_string();

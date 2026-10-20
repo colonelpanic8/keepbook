@@ -489,6 +489,40 @@ body {
   opacity: 1;
 }
 
+/* App-wide actions at the end of the title row: icon-only, with the feedback
+   label kept for screen readers and the tooltip. Their menu spans the row
+   because the sidebar is narrower than a menu and clips what overflows it. */
+.nav-title {
+  position: relative;
+}
+
+.nav-actions {
+  display: flex;
+  flex: none;
+  margin-left: auto;
+}
+
+.nav-actions .split-button {
+  position: static;
+}
+
+.nav-actions .split-button > .control-button:first-child {
+  min-width: 0;
+  padding: 0 var(--sp-8);
+}
+
+.nav-actions .button-feedback-label {
+  clip-path: inset(50%);
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
+.nav-actions .menu {
+  left: 0;
+  min-width: 0;
+}
+
 .nav-title strong {
   font-size: var(--fs-title);
   letter-spacing: -0.01em;
@@ -627,15 +661,6 @@ small,
 
 .summary-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  margin-bottom: var(--sp-16);
-}
-
-/* Page-level actions, above the content they act on. */
-.page-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-8);
-  justify-content: flex-end;
   margin-bottom: var(--sp-16);
 }
 
@@ -3311,6 +3336,16 @@ button.stacked-legend-item {
     align-items: center;
     flex-direction: row;
     justify-content: space-between;
+    position: relative;
+  }
+
+  .nav-title {
+    position: static;
+  }
+
+  .nav-actions .menu {
+    left: auto;
+    width: min(320px, 100%);
   }
 
   .nav-logo {
@@ -3522,6 +3557,12 @@ button.stacked-legend-item {
 }
 
 @media (max-width: 520px) {
+  /* The logo alone identifies the app, leaving the row to the repository
+     selector and the app-wide actions. */
+  .nav-title-text {
+    display: none;
+  }
+
   /* Phones keep the tighter panel padding; width matters more than air. */
   .panel,
   .status-panel {
@@ -3530,10 +3571,6 @@ button.stacked-legend-item {
 
   .control-grid {
     grid-template-columns: 1fr;
-  }
-
-  .page-toolbar > * {
-    flex: 1 1 auto;
   }
 
   .tag-row {

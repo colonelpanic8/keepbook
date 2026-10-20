@@ -6,6 +6,7 @@ use dioxus::prelude::*;
 
 mod accounts;
 mod action_feedback;
+mod app_refresh;
 mod assets;
 mod charts;
 mod connections;
@@ -17,6 +18,7 @@ mod spending;
 
 use accounts::AccountsView;
 use action_feedback::*;
+use app_refresh::AppRefreshButton;
 use assets::AssetsView;
 use charts::{HistoryGraphPanel, StackedHistoryGraphPanel};
 use connections::ConnectionsView;
@@ -313,15 +315,6 @@ fn StatusPanel(state: LoadState, onretry: Option<EventHandler<()>>) -> Element {
     }
 }
 
-fn price_sync_result_has_failures(result: &serde_json::Value) -> bool {
-    result
-        .get("result")
-        .and_then(|value| value.get("failed_count"))
-        .and_then(|value| value.as_u64())
-        .unwrap_or(0)
-        > 0
-}
-
 #[component]
 fn Dashboard(
     overview: Overview,
@@ -335,6 +328,7 @@ fn Dashboard(
     onrefresh: EventHandler<()>,
 ) -> Element {
     let mut active_view = use_signal(|| ActiveView::Accounts);
+    let refresh_operation = use_action_feedback();
     let active = active_view();
     let (repository_options, active_repository) = match repositories.clone() {
         Some(Ok(registry)) => (
@@ -364,6 +358,12 @@ fn Dashboard(
             repository_busy,
             repository_status: (!repository_status.is_empty()).then(|| repository_status.clone()),
             refreshing: overview_refreshing,
+            actions: rsx! {
+                AppRefreshButton {
+                    operation: refresh_operation,
+                    onrefresh: move |_| onrefresh.call(()),
+                }
+            },
             nav_items: ActiveView::ALL
                 .map(|view| NavItem {
                     label: view.label().to_string(),
@@ -387,6 +387,9 @@ fn Dashboard(
                 }
                 active_view.set(view);
             },
+                if let Some(error) = refresh_operation.error() {
+                    ErrorNotice { message: error, ondismiss: move |_| refresh_operation.dismiss() }
+                }
                 match active {
                     ActiveView::Spending => rsx! {
                         SpendingView {

@@ -18,7 +18,6 @@ import {
   Modal,
   NetWorthChart,
   OperationStatus,
-  PageToolbar,
   Panel,
   Progress,
   SegmentedControl,
@@ -57,6 +56,27 @@ export const cases: Record<string, ComponentType> = {
       <p>Content</p>
     </AppShell>
   ),
+  "AppShell.actions": () => (
+    <AppShell
+      title="Keepbook"
+      currency="USD"
+      repositories={[]}
+      repository=""
+      actions={
+        <SplitButton
+          icon="refresh"
+          title="Refresh stale balances and prices"
+          menuLabel="More refresh options"
+          actions={[{ value: "git", label: "Git sync", detail: "Pull and push the data repository" }]}
+          feedback={{ tone: "busy", label: "Refreshing…" }}
+        />
+      }
+      navItems={[{ label: "Accounts", icon: "wallet" }]}
+      active="Accounts"
+    >
+      <p>Content</p>
+    </AppShell>
+  ),
   "Modal.basic": () => (
     <Modal
       title="Clone repository"
@@ -70,13 +90,6 @@ export const cases: Record<string, ComponentType> = {
     <Modal title="Group edit" wide>
       <p>Body</p>
     </Modal>
-  ),
-  "PageToolbar.basic": () => (
-    <PageToolbar>
-      <ControlButton primary icon="refresh">
-        Refresh prices
-      </ControlButton>
-    </PageToolbar>
   ),
   "Panel.basic": () => (
     <Panel title="Accounts" subtitle="2" actions={<ControlButton>Refresh</ControlButton>}>

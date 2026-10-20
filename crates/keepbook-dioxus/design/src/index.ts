@@ -8,7 +8,6 @@ export { seriesColor } from "./cx";
 export type { IconName } from "./actions/icons";
 
 export * from "./layout/AppShell";
-export * from "./layout/PageToolbar";
 export * from "./layout/SummaryGrid";
 export * from "./layout/Panel";
 export * from "./layout/Modal";

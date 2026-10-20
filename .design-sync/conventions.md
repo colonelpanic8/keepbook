@@ -8,8 +8,8 @@ numbers. These components mirror the app's real Dioxus components, and
 **Setup.** No provider or wrapper is needed: load `styles.css` and the bundle,
 and every component is styled. Start full screens with `AppShell`, which draws
 the sidebar and the scrolling workspace. Pass page content as its children, in
-this order: a `PageToolbar`, a `SummaryGrid` of three `MetricCard`s, then
-`Panel`s. Feedback for an action shows on the control that started it: a
+this order: a `SummaryGrid` of three `MetricCard`s, then `Panel`s. App-wide
+actions such as refresh go in `AppShell`'s `actions`, never in the page. Feedback for an action shows on the control that started it: a
 button's `feedback`, or a panel's `status` when no button started it. Never
 add a toast or a status line for progress or success. A failure also shows an
 `ErrorNotice` beneath the control until dismissed.
@@ -64,19 +64,17 @@ Wrap gains and losses in `<strong className="change-positive">` or
 **Example:**
 
 ```jsx
-const { AppShell, PageToolbar, SplitButton, SummaryGrid, MetricCard, Panel, NetWorthChart } = window.Keepbook;
+const { AppShell, SplitButton, SummaryGrid, MetricCard, Panel, NetWorthChart } = window.Keepbook;
 
-<AppShell active="Net Worth">
-  <PageToolbar>
-    <SplitButton primary icon="refresh" menuLabel="More refresh options"
+<AppShell active="Net Worth"
+  actions={
+    <SplitButton icon="refresh" title="Refresh stale balances and prices" menuLabel="More refresh options"
       actions={[
-        { value: "stale", label: "Refresh stale prices", detail: "Skip prices that are still fresh" },
+        { value: "all-prices", label: "Refresh all prices", detail: "Refetch every price, ignoring staleness" },
         { value: "git", label: "Git sync", detail: "Pull and push the data repository" },
       ]}
-      feedback={{ tone: "done", label: "Prices refreshed", detail: "Refreshed 14 prices." }}>
-      Refresh all prices
-    </SplitButton>
-  </PageToolbar>
+      feedback={{ tone: "done", label: "Refreshed", detail: "Refreshed 14 prices." }} />
+  }>
   <SummaryGrid>
     <MetricCard label="Net worth" value="$6,814.24" detail="2026-10-08" />
     <MetricCard label="Accounts" value="3" detail="3 total" />

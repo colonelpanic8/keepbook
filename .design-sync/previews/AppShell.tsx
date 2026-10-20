@@ -1,6 +1,6 @@
 import {
   AppShell, Badge, Checkbox, ControlButton, DataTable, MetricCard,
-  PageToolbar, Panel, SplitButton, SummaryGrid, TreeGroup,
+  Panel, SplitButton, SummaryGrid, TreeGroup,
 } from "keepbook-design";
 
 const accounts = [
@@ -10,22 +10,23 @@ const accounts = [
 ];
 
 export const AccountsScreen = () => (
-  <AppShell active="Accounts" repositories={["Personal", "Parents"]}>
-    <PageToolbar>
+  <AppShell
+    active="Accounts"
+    repositories={["Personal", "Parents"]}
+    actions={
       <SplitButton
-        primary
         icon="refresh"
+        title="Refresh stale balances and prices"
         menuLabel="More refresh options"
         actions={[
-          { value: "stale", label: "Refresh stale prices", detail: "Skip prices that are still fresh" },
+          { value: "all-prices", label: "Refresh all prices", detail: "Refetch every price, ignoring staleness" },
           { value: "resync", label: "Resync data", detail: "Reload keepbook data from disk" },
           { value: "git", label: "Git sync", detail: "Pull and push the data repository" },
         ]}
         feedback={{ tone: "busy", label: "Refreshing…" }}
-      >
-        Refresh all prices
-      </SplitButton>
-    </PageToolbar>
+      />
+    }
+  >
     <SummaryGrid>
       <MetricCard label="Net worth" value="$6,814.24" detail="2026-10-08" />
       <MetricCard label="Accounts" value="3" detail="3 total" />
