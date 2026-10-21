@@ -3339,8 +3339,18 @@ button.stacked-legend-item {
     position: relative;
   }
 
+  /* Lets the logo, title, and actions order around the repository selector. */
   .nav-title {
-    position: static;
+    display: contents;
+  }
+
+  .nav-logo-slot,
+  .nav-title-text {
+    order: -1;
+  }
+
+  .nav-actions {
+    order: 1;
   }
 
   .nav-actions .menu {
@@ -3363,7 +3373,6 @@ button.stacked-legend-item {
     flex: 1 1 auto;
     gap: 0;
     min-width: 0;
-    order: -1;
   }
 
   .repository-switcher > span {

@@ -194,7 +194,7 @@ named last in each row renders it.
 | Data table | `.data-table` › `.table-head` + `.table-row` | Each table's own class sets its columns with `grid-template-columns`. Below 1200px rows become labeled cards. `DataTable` |
 | Tree group | `.tree-group` › `.tree-parent` + `.data-table` | Accounts grouped by connection. `TreeGroup` |
 | Modal | `.modal-backdrop` › `.modal-dialog(.wide)` › `.modal-header`, body, `.modal-actions` | `Modal` |
-| Navigation | `.app-shell` › `.app-nav` › `.nav-header` + `nav` › `.nav-button(.selected)` (icon + label), then `.workspace` | A sidebar at wide widths, a sticky header with a drawer below 1200px. `.nav-actions` ends the title row with the app-wide actions: icon-only buttons whose feedback label is visually hidden, leaving the icon and the tooltip. While loaded data revalidates, `.nav-refresh-badge.active` fades a spinner in over the logo's corner without taking space. `AppShell` |
+| Navigation | `.app-shell` › `.app-nav` › `.nav-header` + `nav` › `.nav-button(.selected)` (icon + label), then `.workspace` | A sidebar at wide widths, a sticky header with a drawer below 1200px. `.nav-actions` ends the title row with the app-wide actions: icon-only primary buttons whose feedback label is visually hidden, leaving the icon and the tooltip. While loaded data revalidates, `.nav-refresh-badge.active` fades a spinner in over the logo's corner without taking space. `AppShell` |
 | Legend | `.stacked-legend` › `.stacked-legend-item` (`.selected`, `.asset`) | Swatch and label per series; buttons when selecting a series filters the chart. `Legend` |
 | Net worth | `.chart-card` › `.chart-meta`, `svg.net-worth-chart` | Line and area with per-point hover detail; dragging selects a range. `NetWorthChart` |
 | Spending over time | `.chart-card.spending-over-time-card` › `.chart-meta`, `svg.spending-bar-chart` of `.spending-bar-segment`s, `.stacked-legend` | Stacked by tag; focusing a tag narrows the bars to it. `SpendingChart` |
@@ -230,8 +230,8 @@ named last in each row renders it.
 - Navigation stays visible while the workspace scrolls.
   - At wide widths it is a fixed sidebar.
   - Narrower, it is a compact header stuck to the top. It holds the
-    hamburger, then the repository selector, then the logo and the app-wide
-    actions, and opening the drawer leaves it unchanged.
+    hamburger, then the logo, then the repository selector, then the
+    app-wide actions, and opening the drawer leaves it unchanged.
   - The drawer slides in from the left over 160ms while the scrim fades.
     Both stay in the DOM (an `open` class toggles them), and `visibility`
     flips after the slide so the closed drawer leaves the focus order.

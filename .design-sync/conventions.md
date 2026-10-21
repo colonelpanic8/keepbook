@@ -68,7 +68,7 @@ const { AppShell, SplitButton, SummaryGrid, MetricCard, Panel, NetWorthChart } =
 
 <AppShell active="Net Worth"
   actions={
-    <SplitButton icon="refresh" title="Refresh stale balances and prices" menuLabel="More refresh options"
+    <SplitButton primary icon="refresh" title="Refresh stale balances and prices" menuLabel="More refresh options"
       actions={[
         { value: "all-prices", label: "Refresh all prices", detail: "Refetch every price, ignoring staleness" },
         { value: "git", label: "Git sync", detail: "Pull and push the data repository" },

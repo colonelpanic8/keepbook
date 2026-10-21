@@ -64,6 +64,7 @@ export const cases: Record<string, ComponentType> = {
       repository=""
       actions={
         <SplitButton
+          primary
           icon="refresh"
           title="Refresh stale balances and prices"
           menuLabel="More refresh options"

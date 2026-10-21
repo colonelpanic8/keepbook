@@ -15,6 +15,7 @@ export const AccountsScreen = () => (
     repositories={["Personal", "Parents"]}
     actions={
       <SplitButton
+        primary
         icon="refresh"
         title="Refresh stale balances and prices"
         menuLabel="More refresh options"

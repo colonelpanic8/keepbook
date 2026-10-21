@@ -61,6 +61,7 @@ const CASES: &[Case] = &[
                 repository: "",
                 actions: rsx! {
                     SplitButton {
+                        primary: true,
                         icon: ButtonIcon::Refresh,
                         title: "Refresh stale balances and prices",
                         menu_label: "More refresh options",
