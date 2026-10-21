@@ -9,7 +9,6 @@ mod action_feedback;
 mod app_refresh;
 mod assets;
 mod charts;
-mod connections;
 mod graph_settings;
 mod proposed_edits;
 mod recurring;
@@ -18,10 +17,9 @@ mod spending;
 
 use accounts::AccountsView;
 use action_feedback::*;
-use app_refresh::AppRefreshButton;
+use app_refresh::{AppRefreshButton, APP_REFRESH_KEYS};
 use assets::AssetsView;
 use charts::{HistoryGraphPanel, StackedHistoryGraphPanel};
-use connections::ConnectionsView;
 use graph_settings::{NetWorthBreakdownGraphView, NetWorthGraphView, SettingsView};
 use proposed_edits::ProposedEditsView;
 use recurring::RecurringView;
@@ -42,21 +40,19 @@ pub(crate) enum ActiveView {
     NetWorthBreakdown,
     Accounts,
     Assets,
-    Connections,
     Recurring,
     ProposedEdits,
     Settings,
 }
 
 impl ActiveView {
-    pub(crate) const ALL: [Self; 9] = [
+    pub(crate) const ALL: [Self; 8] = [
         Self::Accounts,
         Self::Assets,
         Self::Spending,
         Self::Recurring,
         Self::NetWorth,
         Self::NetWorthBreakdown,
-        Self::Connections,
         Self::ProposedEdits,
         Self::Settings,
     ];
@@ -68,7 +64,6 @@ impl ActiveView {
             Self::NetWorthBreakdown => ButtonIcon::Layers,
             Self::Accounts => ButtonIcon::Wallet,
             Self::Assets => ButtonIcon::Landmark,
-            Self::Connections => ButtonIcon::Plug,
             Self::Recurring => ButtonIcon::Repeat,
             Self::ProposedEdits => ButtonIcon::FilePen,
             Self::Settings => ButtonIcon::Settings,
@@ -82,7 +77,6 @@ impl ActiveView {
             Self::NetWorthBreakdown => "Net Worth Breakdown",
             Self::Accounts => "Accounts",
             Self::Assets => "Assets",
-            Self::Connections => "Connections",
             Self::Recurring => "Recurring",
             Self::ProposedEdits => "Proposed Edits",
             Self::Settings => "Settings",
@@ -387,7 +381,7 @@ fn Dashboard(
                 }
                 active_view.set(view);
             },
-                if let Some(error) = refresh_operation.error() {
+                if let Some(error) = APP_REFRESH_KEYS.into_iter().find_map(|key| refresh_operation.error_for(key)) {
                     ErrorNotice { message: error, ondismiss: move |_| refresh_operation.dismiss() }
                 }
                 match active {
@@ -412,6 +406,7 @@ fn Dashboard(
                     },
                     ActiveView::Accounts => rsx! {
                         AccountsView {
+                            operation: refresh_operation,
                             accounts: overview.accounts.clone(),
                             connections: overview.connections.clone(),
                             balances: overview.balances.clone(),
@@ -428,12 +423,6 @@ fn Dashboard(
                     ActiveView::Assets => rsx! {
                         AssetsView {
                             filter_overrides: filter_overrides.clone(),
-                        }
-                    },
-                    ActiveView::Connections => rsx! {
-                        ConnectionsView {
-                            connections: overview.connections.clone(),
-                            onrefresh: move |_| onrefresh.call(())
                         }
                     },
                     ActiveView::Recurring => rsx! {

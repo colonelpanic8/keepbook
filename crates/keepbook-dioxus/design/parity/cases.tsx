@@ -28,6 +28,8 @@ import {
   Spinner,
   SplitButton,
   SummaryGrid,
+  SummaryCard,
+  SyncActions,
   Switch,
   TagPill,
   TextInput,
@@ -38,6 +40,19 @@ import {
 import { renderIcon } from "../src/actions/icons";
 
 export const cases: Record<string, ComponentType> = {
+  "SummaryCard.basic": () => (
+    <SummaryCard>
+      <MetricCard label="Net worth" value="$6,814.24" detail="2026-10-08" />
+      <MetricCard label="Accounts" value="3" detail="2 active" />
+      <MetricCard label="Connections" value="1" detail="" />
+    </SummaryCard>
+  ),
+  "SyncActions.connection": () => <SyncActions />,
+  "TreeGroup.actions": () => (
+    <TreeGroup title="Example bank" subtitle="manual · active · Last refreshed: Never" aside={<Badge>2/3 active</Badge>} actions={<SyncActions />}>
+      <p>Accounts</p>
+    </TreeGroup>
+  ),
   "AppShell.basic": () => (
     <AppShell
       title="Keepbook"

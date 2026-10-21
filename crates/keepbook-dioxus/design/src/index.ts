@@ -9,6 +9,7 @@ export type { IconName } from "./actions/icons";
 
 export * from "./layout/AppShell";
 export * from "./layout/SummaryGrid";
+export * from "./layout/SummaryCard";
 export * from "./layout/Panel";
 export * from "./layout/Modal";
 export * from "./layout/Theme";
@@ -18,6 +19,7 @@ export * from "./layout/PreviewTheme";
 
 export * from "./actions/ControlButton";
 export * from "./actions/SplitButton";
+export * from "./actions/SyncActions";
 export * from "./actions/IconButton";
 export * from "./actions/SegmentedControl";
 export * from "./actions/FilterChip";

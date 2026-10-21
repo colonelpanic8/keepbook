@@ -42,6 +42,7 @@ pub(super) fn AccountsView(
     account_totals: AccountTotals,
     connection_count: usize,
     onrefresh: EventHandler<()>,
+    operation: ActionFeedback,
 ) -> Element {
     let mut pull_start = use_signal(|| None::<PullStart>);
     let mut pull_distance = use_signal(|| 0.0);
@@ -62,6 +63,83 @@ pub(super) fn AccountsView(
     } else {
         "pull-refresh-indicator"
     };
+    let run_sync = move |target: Option<(String, String)>, action: SyncAction| {
+        if operation.is_busy() {
+            return;
+        }
+        let key = action.feedback_key(target.as_ref().map(|(id, _)| id.as_str()));
+        let scope = target
+            .as_ref()
+            .map(|(_, name)| format!("{name}: "))
+            .unwrap_or_default();
+        let target = target.map(|(id, _)| id);
+        operation.start(key.clone(), "Refreshing…");
+        spawn(async move {
+            match action {
+                SyncAction::Balances {
+                    if_stale,
+                    full_transactions,
+                } => {
+                    match sync_connections(SyncConnectionsInput {
+                        target,
+                        if_stale,
+                        full_transactions,
+                    })
+                    .await
+                    {
+                        Ok(result) => {
+                            let summary = sync_result_summary(&result);
+                            if balance_sync_result_has_failures(&result) {
+                                operation.fail(key, "Refresh failed", format!("{scope}{summary}"));
+                            } else {
+                                operation.succeed(key, "Refreshed", Some(summary));
+                            }
+                            onrefresh.call(());
+                        }
+                        Err(error) => operation.fail(
+                            key,
+                            "Refresh failed",
+                            format!("{scope}Balance refresh failed: {error}"),
+                        ),
+                    }
+                }
+                SyncAction::Prices { force } => {
+                    let input = SyncPricesInput {
+                        scope: if target.is_some() {
+                            "connection"
+                        } else {
+                            "all"
+                        }
+                        .to_string(),
+                        target,
+                        force,
+                        quote_staleness_seconds: None,
+                    };
+                    match sync_prices(input).await {
+                        Ok(result) => {
+                            let summary = price_sync_result_summary(&result);
+                            if price_sync_result_has_failures(&result) {
+                                operation.fail(
+                                    key,
+                                    "Some prices failed",
+                                    format!("{scope}{summary}"),
+                                );
+                            } else {
+                                operation.succeed(key, "Prices refreshed", Some(summary));
+                            }
+                            onrefresh.call(());
+                        }
+                        Err(error) => operation.fail(
+                            key,
+                            "Refresh failed",
+                            format!("{scope}Price refresh failed: {error}"),
+                        ),
+                    }
+                }
+            }
+        });
+    };
+
     rsx! {
         div {
             class: "pull-refresh-surface",
@@ -113,7 +191,7 @@ pub(super) fn AccountsView(
                 }
             }
             div { class: "pull-refresh-content",
-                SummaryGrid {
+                SummaryCard {
                     MetricCard {
                         label: "Net worth",
                         value: net_worth,
@@ -121,13 +199,13 @@ pub(super) fn AccountsView(
                     }
                     MetricCard {
                         label: "Accounts",
-                        value: active_accounts.to_string(),
-                        detail: format!("{account_count} total")
+                        value: account_count.to_string(),
+                        detail: format!("{active_accounts} active")
                     }
                     MetricCard {
                         label: "Connections",
                         value: connection_count.to_string(),
-                        detail: "Configured sources".to_string()
+                        detail: "".to_string()
                     }
                 }
                 if let Some(selection) = selected_graph_selection {
@@ -155,33 +233,32 @@ pub(super) fn AccountsView(
                         }
                     }
                 }
-                Panel {
-                    title: "Accounts",
-                    subtitle: account_count.to_string(),
-                    div { class: "group-list",
-                        if !virtual_accounts.is_empty() {
-                            VirtualAccountGroup {
-                                accounts: virtual_accounts,
-                                currency: currency.clone(),
-                                onselect: move |selection| selected_graph.set(Some(selection)),
-                            }
+                div { class: "group-list",
+                    if !virtual_accounts.is_empty() {
+                        VirtualAccountGroup {
+                            accounts: virtual_accounts,
+                            currency: currency.clone(),
+                            onselect: move |selection| selected_graph.set(Some(selection)),
                         }
-                        for connection in connections {
-                            AccountGroup {
-                                connection: connection.clone(),
-                                accounts: accounts
-                                    .iter()
-                                    .filter(|account| account.connection_id == connection.id)
-                                    .cloned()
-                                    .collect::<Vec<_>>(),
-                                account_summaries: account_summaries.clone(),
-                                currency: currency.clone(),
-                                filter_overrides: filter_overrides.clone(),
-                                onselect: move |selection| selected_graph.set(Some(selection)),
-                                onfilterchange,
-                            }
+                    }
+                    for connection in connections {
+                        AccountGroup {
+                            key: "{connection.id}",
+                            operation,
+                            onsync: move |(target, action)| run_sync(Some(target), action),
+                            connection: connection.clone(),
+                            accounts: accounts
+                                .iter()
+                                .filter(|account| account.connection_id == connection.id)
+                                .cloned()
+                                .collect::<Vec<_>>(),
+                            account_summaries: account_summaries.clone(),
+                            currency: currency.clone(),
+                            filter_overrides: filter_overrides.clone(),
+                            onselect: move |selection| selected_graph.set(Some(selection)),
+                            onfilterchange,
                         }
-                                    }
+                    }
                 }
             }
         }
@@ -248,6 +325,8 @@ fn VirtualAccountRow(
 #[component]
 fn AccountGroup(
     connection: Connection,
+    operation: ActionFeedback,
+    onsync: EventHandler<((String, String), SyncAction)>,
     accounts: Vec<Account>,
     account_summaries: Vec<AccountSummary>,
     currency: String,
@@ -255,6 +334,14 @@ fn AccountGroup(
     onselect: EventHandler<AccountGraphSelection>,
     onfilterchange: EventHandler<FilterOverrides>,
 ) -> Element {
+    let target = (connection.id.clone(), connection.name.clone());
+    let balances_key = format!("balances:{}", connection.id);
+    let prices_key = format!("prices:{}", connection.id);
+    let last_sync = connection.last_sync.as_deref().unwrap_or("Never");
+    let subtitle = format!(
+        "{} · {} · Last refreshed: {last_sync}",
+        connection.synchronizer, connection.status
+    );
     let active_count = connection.active_account_count;
     let ignored_count = connection.excluded_account_count;
     let status_text = if ignored_count == 0 {
@@ -269,7 +356,18 @@ fn AccountGroup(
     rsx! {
         TreeGroup {
             title: connection.name.clone(),
-            subtitle: connection.synchronizer.clone(),
+            subtitle,
+            actions: rsx! {
+                SyncActions {
+                    disabled: operation.is_busy(),
+                    balances_feedback: operation.for_key(&balances_key),
+                    prices_feedback: operation.for_key(&prices_key),
+                    onaction: move |action| onsync.call((target.clone(), action)),
+                }
+                if let Some(error) = operation.error_for(&balances_key).or_else(|| operation.error_for(&prices_key)) {
+                    ErrorNotice { message: error, ondismiss: move |_| operation.dismiss() }
+                }
+            },
             aside: rsx! { Badge { tone: BadgeTone::Positive, "{status_text}" } },
             DataTable {
                 class: "account-table",

@@ -174,6 +174,8 @@ named last in each row renders it.
 | Component | Markup | Rules |
 |---|---|---|
 | Panel | `section.panel` › `.panel-header` › `.panel-title` (`h2` + subtitle `span`), optional `.panel-status` | The unit of page content. It is a single column that can't exceed its own width. `.panel-status` reports work started in the panel that has no button of its own (a setting saving itself, an inline edit) on one line beside the actions; it shrinks first and ellipsizes, so it never wraps the title or grows the header. `Panel` |
+| Summary card | `section.summary-card` › `MetricCard`s | A single surface for the Accounts overview: net worth, total accounts (with active count), and configured connections. Three columns on wide screens; below 520px net worth spans the top and the two counts share the bottom row. `SummaryCard` |
+| Sync actions | `.connection-actions` › two `SplitButton`s | Balance and price refresh for one connection. Balance refresh skips fresh connections by default; its menu offers forced refresh and full transaction history. The price menu offers stale-only refresh. `SyncActions` |
 | Metric | `article.metric` › `.metric-label`, `strong`, `small`, inside `.summary-grid` | Three across, stacking below 1200px. `MetricCard` |
 | Button | `.control-button` + `.primary` / `.selected` / `.danger` / `.small` | One `primary` per toolbar. `.selected` is a toggled state, not emphasis. While busy, a spinner replaces the icon and the button is disabled. `.has-feedback` (`.feedback-busy` / `.feedback-done` / `.feedback-failed`) reports the work the button started on the button itself: `.button-feedback` (spinner, check, or alert icon + label) lays over `.button-face`, the button's own label kept in place but hidden, so the width never changes. Feedback labels are short ("Refreshing…", "Prices refreshed", "Refresh failed") and ellipsize past the button's width; buttons too narrow for words show only the icon. The full message is the tooltip. `ControlButton` |
 | Split button | `.split-button` › `.control-button` + `.control-button.split-button-caret`, then `.menu-backdrop` + `.menu` › `button.menu-item` (`strong` + `small`) | A main action plus a chevron that opens its less common variants, each with a one-line description. Escape or a click outside closes the menu. Feedback for any of its actions, the menu's included, shows on the main button. `SplitButton` |
@@ -192,7 +194,7 @@ named last in each row renders it.
 | Progress | `.activity-spinner` (`.large`, `.control-spinner`), `.indeterminate-progress` | Indeterminate only. `Spinner`, `Progress` |
 | Empty / loading | `.chart-empty`, `.chart-loading` (`strong` + detail), `.compact` | Holds the footprint of the content it replaces; `.compact` drops the chart aspect ratio for lists. `EmptyState` |
 | Data table | `.data-table` › `.table-head` + `.table-row` | Each table's own class sets its columns with `grid-template-columns`. Below 1200px rows become labeled cards. `DataTable` |
-| Tree group | `.tree-group` › `.tree-parent` + `.data-table` | Accounts grouped by connection. `TreeGroup` |
+| Tree group | `.tree-group` › `.tree-parent` + `.data-table` | One standalone card per connection, with status and last refresh in the subtitle, account counts in the aside, and refresh controls in optional `.tree-actions` above the accounts. `TreeGroup` |
 | Modal | `.modal-backdrop` › `.modal-dialog(.wide)` › `.modal-header`, body, `.modal-actions` | `Modal` |
 | Navigation | `.app-shell` › `.app-nav` › `.nav-header` + `nav` › `.nav-button(.selected)` (icon + label), then `.workspace` | A sidebar at wide widths, a sticky header with a drawer below 1200px. `.nav-actions` ends the title row with the app-wide actions: icon-only primary buttons whose feedback label is visually hidden, leaving the icon and the tooltip. While loaded data revalidates, `.nav-refresh-badge.active` fades a spinner in over the logo's corner without taking space. `AppShell` |
 | Legend | `.stacked-legend` › `.stacked-legend-item` (`.selected`, `.asset`) | Swatch and label per series; buttons when selecting a series filters the chart. `Legend` |
@@ -225,8 +227,17 @@ named last in each row renders it.
   action goes in a `SplitButton` menu with a one-line description, never in a
   checkbox beside the button or as another button. The shell's refresh is a
   single split button whose main action refreshes stale balances, then stale
-  prices; "Refresh all prices", "Resync data", and "Git sync" sit behind the
-  chevron.
+  prices. Its menu offers forced balance and price refresh, full transaction
+  history (all connections or stale only), "Resync data", and "Git sync".
+- Accounts is the home for both accounts and connection management; there is no
+  separate Connections destination. One summary card precedes the connection
+  cards, without an extra enclosing Accounts panel. Virtual portfolio adjustments
+  remain a separate card without sync controls. Account history and inclusion
+  toggles stay within this workflow. Below 1200px accounts become compact rows
+  divided by hairlines within each connection card, with name and balance on
+  the first line, status and tags below, and inclusion controls on the right.
+  Connection buttons use the short labels "Balances" and "Prices". The balance menu opens from its left
+  edge and the price menu from its right edge so neither clips on a phone.
 - Navigation stays visible while the workspace scrolls.
   - At wide widths it is a fixed sidebar.
   - Narrower, it is a compact header stuck to the top. It holds the

@@ -1,5 +1,7 @@
 use super::*;
 
+pub(super) const APP_REFRESH_KEYS: [&str; 5] = ["stale", "prices", "balances", "resync", "git"];
+
 /// The app-wide refresh control in the shell's title row.
 ///
 /// The main action brings stale balances and then stale prices up to date;
@@ -17,6 +19,33 @@ pub(super) fn AppRefreshButton(operation: ActionFeedback, onrefresh: EventHandle
                 operation.succeed("stale", "Refreshed", Some(summary));
             }
             onrefresh.call(());
+        });
+    };
+    let refresh_balances = move |if_stale: bool, full_transactions: bool| {
+        operation.start("balances", "Refreshing…");
+        spawn(async move {
+            match sync_connections(SyncConnectionsInput {
+                target: None,
+                if_stale,
+                full_transactions,
+            })
+            .await
+            {
+                Ok(result) => {
+                    let summary = sync_result_summary(&result);
+                    if balance_sync_result_has_failures(&result) {
+                        operation.fail("balances", "Some failed", summary);
+                    } else {
+                        operation.succeed("balances", "Refreshed", Some(summary));
+                    }
+                    onrefresh.call(());
+                }
+                Err(error) => operation.fail(
+                    "balances",
+                    "Refresh failed",
+                    format!("Balance refresh failed: {error}"),
+                ),
+            }
         });
     };
     let refresh_all_prices = move || {
@@ -100,6 +129,9 @@ pub(super) fn AppRefreshButton(operation: ActionFeedback, onrefresh: EventHandle
             title: "Refresh stale balances and prices",
             menu_label: "More refresh options",
             actions: vec![
+                MenuAction { value: "all-balances", label: "Refresh all balances", detail: "Refresh even if balances are still fresh" },
+                MenuAction { value: "full-history", label: "Refresh full history", detail: "Refresh balances and all available transactions" },
+                MenuAction { value: "stale-full-history", label: "Refresh stale full history", detail: "Fetch all transactions only for stale connections" },
                 MenuAction {
                     value: "all-prices",
                     label: "Refresh all prices",
@@ -116,9 +148,13 @@ pub(super) fn AppRefreshButton(operation: ActionFeedback, onrefresh: EventHandle
                     detail: "Pull and push the data repository",
                 },
             ],
-            feedback: operation.current(),
+            disabled: operation.is_busy(),
+            feedback: APP_REFRESH_KEYS.into_iter().find_map(|key| operation.for_key(key)),
             onclick: move |_| refresh_stale(),
             onselect: move |value| match value {
+                "all-balances" => refresh_balances(false, false),
+                "full-history" => refresh_balances(false, true),
+                "stale-full-history" => refresh_balances(true, true),
                 "all-prices" => refresh_all_prices(),
                 "resync" => resync_data(),
                 _ => git_sync(),

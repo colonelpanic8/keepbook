@@ -11,3 +11,6 @@ pub(crate) use icon_button::*;
 pub(crate) use icons::*;
 pub(crate) use segmented_control::*;
 pub(crate) use split_button::*;
+
+mod sync_actions;
+pub(crate) use sync_actions::*;

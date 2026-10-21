@@ -664,6 +664,44 @@ small,
   margin-bottom: var(--sp-16);
 }
 
+.summary-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) repeat(2, minmax(0, 1fr));
+  margin-bottom: var(--sp-16);
+}
+
+.summary-card > .metric {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.summary-card > .metric + .metric {
+  border-left: 1px solid var(--color-divider);
+}
+
+.summary-card .metric strong {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 520px) {
+  .summary-card {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .summary-card > .metric:first-child {
+    border-bottom: 1px solid var(--color-divider);
+    grid-column: 1 / -1;
+  }
+
+  .summary-card > .metric:nth-child(2) {
+    border-left: 0;
+  }
+}
+
 .metric,
 .panel,
 .status-panel {
@@ -3058,20 +3096,15 @@ button.stacked-legend-item {
   color: var(--color-text);
 }
 
-.connection-table .table-head,
-.connection-table .table-row {
-  grid-template-columns:
-    minmax(180px, 1fr)
-    110px
-    90px
-    minmax(220px, 1.2fr)
-    minmax(180px, 0.8fr);
-}
-
 .connection-actions {
   display: flex;
   flex-wrap: wrap;
   gap: var(--sp-8);
+}
+
+.connection-actions > .split-button:first-child .menu {
+  left: 0;
+  right: auto;
 }
 
 .proposed-edits-table .table-head,
@@ -3230,12 +3263,14 @@ button.stacked-legend-item {
 }
 
 .tree-group {
+  background: var(--color-surface);
+  min-width: 0;
   border: 1px solid var(--color-divider);
   border-radius: var(--radius-md);
-  overflow: hidden;
 }
 
 .tree-parent {
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
   align-items: center;
   background: var(--color-surface-subtle);
   border-bottom: 1px solid var(--color-divider);
@@ -3245,16 +3280,31 @@ button.stacked-legend-item {
   padding: var(--sp-12);
 }
 
-.tree-parent div {
+.tree-parent > div {
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
   min-width: 0;
 }
 
+.tree-actions {
+  display: grid;
+  gap: var(--sp-12);
+  padding: var(--sp-12);
+  border-bottom: 1px solid var(--color-divider);
+}
+
+.tree-actions .connection-actions {
+  justify-content: flex-end;
+}
+
+.tree-parent small {
+  overflow-wrap: anywhere;
+}
+
 .tree-group .data-table {
   border: 0;
-  border-radius: 0;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
 }
 
 .ignored-account-row {
@@ -4042,5 +4092,44 @@ button.stacked-legend-item {
   .assets-table .asset-change-cell {
     font-size: var(--fs-caption);
     gap: var(--sp-2);
+  }
+}
+
+@media (max-width: 1200px) {
+  .tree-group .account-table {
+    gap: 0;
+  }
+
+  .account-table .table-row,
+  .account-table button.table-row {
+    border: 0;
+    border-bottom: 1px solid var(--color-divider);
+    border-radius: 0;
+    grid-template-columns: minmax(0, 1fr) auto !important;
+  }
+
+  .account-table .table-row:last-child {
+    border-bottom: 0;
+  }
+
+  .account-table .table-row > :nth-child(2) {
+    text-align: right;
+  }
+
+  .account-table .table-row > .badge,
+  .account-table .table-row > small {
+    grid-column: 1;
+    justify-self: start;
+  }
+
+  .account-table .account-override-cell {
+    grid-column: 2;
+    grid-row: 2 / 4;
+  }
+}
+
+@media (max-width: 520px) {
+  .tree-actions .control-button {
+    padding-inline: var(--sp-8);
   }
 }

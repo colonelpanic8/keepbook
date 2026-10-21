@@ -12,7 +12,7 @@ export function MetricCard({ label, value, detail }: MetricCardProps) {
     <article className="metric">
       <span className="metric-label">{label}</span>
       <strong>{value}</strong>
-      <small>{detail}</small>
+      {detail && <small>{detail}</small>}
     </article>
   );
 }

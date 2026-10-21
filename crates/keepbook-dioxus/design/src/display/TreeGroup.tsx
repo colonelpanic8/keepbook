@@ -7,12 +7,14 @@ export interface TreeGroupProps {
   subtitle?: string;
   /** Right-aligned summary, usually a `Badge`. */
   aside?: ReactNode;
+  /** Refresh controls and their feedback. */
+  actions?: ReactNode;
   /** Usually an `embedded` `DataTable` of the parent's children. */
   children: ReactNode;
 }
 
-/** A titled group of rows, such as a connection and its accounts. Stack several in a `Panel`. */
-export function TreeGroup({ title, subtitle, aside, children }: TreeGroupProps) {
+/** A titled group of rows, such as a connection and its accounts. Use one card per connection. */
+export function TreeGroup({ title, subtitle, aside, actions, children }: TreeGroupProps) {
   return (
     <section className="tree-group">
       <div className="tree-parent">
@@ -22,6 +24,7 @@ export function TreeGroup({ title, subtitle, aside, children }: TreeGroupProps) 
         </div>
         {aside}
       </div>
+      {actions && <div className="tree-actions">{actions}</div>}
       {children}
     </section>
   );

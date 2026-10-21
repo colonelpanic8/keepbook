@@ -1,4 +1,4 @@
-import { Badge, Checkbox, DataTable, TreeGroup } from "keepbook-design";
+import { Badge, Checkbox, DataTable, SyncActions, TreeGroup } from "keepbook-design";
 
 const accounts = [
   { name: "Demo Checking", balance: "$8,250.44", tags: "cash", included: true },
@@ -7,7 +7,7 @@ const accounts = [
 ];
 
 export const ConnectionAccounts = () => (
-  <TreeGroup title="Demo Bank" subtitle="manual" aside={<Badge tone="positive">2/3 active</Badge>}>
+  <TreeGroup title="Demo Bank" subtitle="manual · active · Last refreshed: Never" actions={<SyncActions />} aside={<Badge tone="positive">2/3 active</Badge>}>
     <DataTable className="account-table" columns={["Account", "Balance (USD)", "Status", "Tags", "Include"]}>
       {accounts.map((a) => (
         <div key={a.name} className={a.included ? "table-row account-row-with-toggle" : "table-row ignored-account-row account-row-with-toggle"}>

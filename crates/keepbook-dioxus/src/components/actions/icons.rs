@@ -21,7 +21,6 @@ pub(crate) enum ButtonIcon {
     Repeat,
     TrendingUp,
     Layers,
-    Plug,
     FilePen,
     Settings,
 }
@@ -39,7 +38,6 @@ impl ButtonIcon {
             Self::Repeat => "repeat",
             Self::TrendingUp => "trending-up",
             Self::Layers => "layers",
-            Self::Plug => "plug",
             Self::FilePen => "file-pen-line",
             Self::Settings => "settings",
         }

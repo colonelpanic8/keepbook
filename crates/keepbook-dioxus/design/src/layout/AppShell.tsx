@@ -19,7 +19,6 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Recurring", icon: "repeat" },
   { label: "Net Worth", icon: "trending-up" },
   { label: "Net Worth Breakdown", icon: "layers" },
-  { label: "Connections", icon: "plug" },
   { label: "Proposed Edits", icon: "file-pen-line" },
   { label: "Settings", icon: "settings" },
 ];

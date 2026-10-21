@@ -9,7 +9,9 @@ pub(crate) fn MetricCard(label: String, value: String, detail: String) -> Elemen
         article { class: "metric",
             span { class: "metric-label", "{label}" }
             strong { "{value}" }
-            small { "{detail}" }
+            if !detail.is_empty() {
+                small { "{detail}" }
+            }
         }
     }
 }

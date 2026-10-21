@@ -8,6 +8,7 @@ pub(crate) fn TreeGroup(
     title: String,
     subtitle: Option<String>,
     aside: Option<Element>,
+    actions: Option<Element>,
     children: Element,
 ) -> Element {
     rsx! {
@@ -20,6 +21,9 @@ pub(crate) fn TreeGroup(
                     }
                 }
                 {aside}
+            }
+            if let Some(actions) = actions {
+                div { class: "tree-actions", {actions} }
             }
             {children}
         }

@@ -33,6 +33,30 @@ fn spending_entry(key: &str, total: &str, count: usize) -> SpendingBreakdownEntr
 type Case = (&'static str, fn() -> Element);
 
 const CASES: &[Case] = &[
+    ("SummaryCard.basic", || {
+        rsx! {
+            SummaryCard {
+                MetricCard { label: "Net worth", value: "$6,814.24", detail: "2026-10-08" }
+                MetricCard { label: "Accounts", value: "3", detail: "2 active" }
+                MetricCard { label: "Connections", value: "1", detail: "" }
+            }
+        }
+    }),
+    (
+        "SyncActions.connection",
+        || rsx! { SyncActions { onaction: |_| {} } },
+    ),
+    ("TreeGroup.actions", || {
+        rsx! {
+            TreeGroup {
+                title: "Example bank",
+                subtitle: "manual · active · Last refreshed: Never",
+                aside: rsx! { Badge { "2/3 active" } },
+                actions: rsx! { SyncActions { onaction: |_| {} } },
+                p { "Accounts" }
+            }
+        }
+    }),
     ("AppShell.basic", || {
         rsx! {
             AppShell {
@@ -582,11 +606,11 @@ fn every_component_has_a_parity_case() {
 }
 
 /// Every `ButtonIcon`; the match stops compiling when a variant is added.
-fn every_button_icon() -> [ButtonIcon; 13] {
+fn every_button_icon() -> [ButtonIcon; 12] {
     use ButtonIcon::*;
     match Refresh {
         Refresh | ChevronDown | Check | CircleAlert | Wallet | Landmark | Receipt | Repeat
-        | TrendingUp | Layers | Plug | FilePen | Settings => {}
+        | TrendingUp | Layers | FilePen | Settings => {}
     }
     [
         Refresh,
@@ -599,7 +623,6 @@ fn every_button_icon() -> [ButtonIcon; 13] {
         Repeat,
         TrendingUp,
         Layers,
-        Plug,
         FilePen,
         Settings,
     ]

@@ -20,6 +20,9 @@ export const AccountsScreen = () => (
         title="Refresh stale balances and prices"
         menuLabel="More refresh options"
         actions={[
+          { value: "all-balances", label: "Refresh all balances", detail: "Refresh even if balances are still fresh" },
+          { value: "full-history", label: "Refresh full history", detail: "Refresh balances and all available transactions" },
+          { value: "stale-full-history", label: "Refresh stale full history", detail: "Fetch all transactions only for stale connections" },
           { value: "all-prices", label: "Refresh all prices", detail: "Refetch every price, ignoring staleness" },
           { value: "resync", label: "Resync data", detail: "Reload keepbook data from disk" },
           { value: "git", label: "Git sync", detail: "Pull and push the data repository" },

@@ -20,6 +20,12 @@
     "DataTable": {
       "cardMode": "column"
     },
+    "SummaryCard": {
+      "cardMode": "column"
+    },
+    "SyncActions": {
+      "cardMode": "column"
+    },
     "SummaryGrid": {
       "cardMode": "column"
     },
