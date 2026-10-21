@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.19.0 - 2026-10-20
+
+### Changed
+
+- Accounts starts with one summary card for net worth, account count, and
+  connection count, followed by a card for each connection.
+- Connection status and refresh controls now live beside their accounts;
+  the separate Connections tab is removed. Full-history refresh options
+  remain available per connection and in the app header's refresh menu.
+- On phones, accounts use compact rows within each connection card, with
+  balances and inclusion controls aligned on the right.
+
 ## 0.18.0 - 2026-10-20
 
 ### Changed

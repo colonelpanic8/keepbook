@@ -63,9 +63,10 @@ pub(crate) fn SyncActions(
                     detail: "Skip prices that are still fresh",
                 }],
                 onclick: move |_| onaction.call(SyncAction::Prices { force: true }),
-                onselect: move |value| match value {
-                    "stale-prices" => onaction.call(SyncAction::Prices { force: false }),
-                    _ => {},
+                onselect: move |value| {
+                    if value == "stale-prices" {
+                        onaction.call(SyncAction::Prices { force: false });
+                    }
                 },
                 "Prices"
             }
