@@ -1,8 +1,8 @@
 //! Polymarket US prediction market prices.
 //!
 //! Uses the public gateway: `/v1/markets/{slug}/bbo` for current quotes and
-//! `/v1/price-history` for history. Polymarket US lists one instrument per market slug;
-//! short positions hold a negative quantity of it.
+//! `/v1/price-history` for history. Polymarket US lists one instrument per market slug and
+//! quotes it as YES; a NO contract is worth the $1 payout minus that price.
 
 use std::collections::BTreeMap;
 use std::str::FromStr;
@@ -14,15 +14,23 @@ use serde::Deserialize;
 
 use super::price_point;
 use crate::market_data::{AssetId, PredictionMarketPriceSource, PriceKind, PricePoint};
-use crate::models::Asset;
+use crate::models::{Asset, ContractSide};
 
 pub const POLYMARKET_US_EXCHANGE: &str = "polymarket_us";
 pub const POLYMARKET_US_GATEWAY_BASE: &str = "https://gateway.polymarket.us";
 const PRICE_DECIMALS: u32 = 6;
 
-/// The asset for a Polymarket US market.
-pub fn polymarket_us_asset(slug: &str, name: Option<String>) -> Asset {
-    Asset::polymarket_us(slug, name)
+/// The asset for one side of a Polymarket US market.
+pub fn polymarket_us_asset(slug: &str, side: ContractSide, name: Option<String>) -> Asset {
+    Asset::polymarket_us(slug, side, name)
+}
+
+/// Converts a YES price into the price of `side`.
+pub fn side_price(side: ContractSide, yes: Decimal) -> Decimal {
+    match side {
+        ContractSide::Yes => yes,
+        ContractSide::No => Decimal::ONE - yes,
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -179,9 +187,9 @@ fn encode_path_segment(value: &str) -> String {
     out
 }
 
-fn polymarket_slug(asset: &Asset) -> Option<&str> {
+fn polymarket_contract(asset: &Asset) -> Option<(&str, ContractSide)> {
     match asset {
-        Asset::PolymarketUs { slug, .. } => Some(slug.as_str()),
+        Asset::PolymarketUs { slug, side, .. } => Some((slug.as_str(), *side)),
         _ => None,
     }
 }
@@ -197,17 +205,18 @@ impl PredictionMarketPriceSource for PolymarketUsPriceSource {
     }
 
     async fn fetch_quote(&self, asset: &Asset, asset_id: &AssetId) -> Result<Option<PricePoint>> {
-        let Some(slug) = polymarket_slug(asset) else {
+        let Some((slug, side)) = polymarket_contract(asset) else {
             return Ok(None);
         };
         let price = self.fetch_mark_price(slug).await?;
+        let yes = Decimal::from_str(price.value.trim())
+            .with_context(|| format!("Invalid Polymarket US price {:?}", price.value))?;
         let now = Utc::now();
         Ok(Some(price_point(
             asset_id,
             now.date_naive(),
             now,
-            Decimal::from_str(price.value.trim())
-                .with_context(|| format!("Invalid Polymarket US price {:?}", price.value))?,
+            side_price(side, yes),
             &price.currency,
             PriceKind::Quote,
             POLYMARKET_US_EXCHANGE,
@@ -221,7 +230,7 @@ impl PredictionMarketPriceSource for PolymarketUsPriceSource {
         start: NaiveDate,
         end: NaiveDate,
     ) -> Result<Vec<PricePoint>> {
-        let Some(slug) = polymarket_slug(asset) else {
+        let Some((slug, side)) = polymarket_contract(asset) else {
             return Ok(Vec::new());
         };
 
@@ -239,6 +248,7 @@ impl PredictionMarketPriceSource for PolymarketUsPriceSource {
             if date < start || date > end {
                 continue;
             }
+            let price = side_price(side, price);
             let entry = closes.entry(date).or_insert((timestamp, price));
             if timestamp >= entry.0 {
                 *entry = (timestamp, price);

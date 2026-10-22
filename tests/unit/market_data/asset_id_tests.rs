@@ -120,12 +120,16 @@ fn asset_id_sanitizes_path_segments() {
 
 #[test]
 fn asset_id_is_human_readable_prediction_market() {
-    let kalshi = Asset::kalshi("fed-dec", crate::models::KalshiSide::No, Some("Fed".into()));
+    let kalshi = Asset::kalshi(
+        "fed-dec",
+        crate::models::ContractSide::No,
+        Some("Fed".into()),
+    );
     assert_eq!(AssetId::from_asset(&kalshi).as_str(), "kalshi/FED-DEC/no");
 
-    let polymarket = Asset::polymarket_us("Some-Slug", None);
+    let polymarket = Asset::polymarket_us("Some-Slug", crate::models::ContractSide::No, None);
     assert_eq!(
         AssetId::from_asset(&polymarket).as_str(),
-        "polymarket_us/some-slug"
+        "polymarket_us/some-slug/no"
     );
 }

@@ -23,7 +23,7 @@ use serde::Deserialize;
 
 use crate::credentials::CredentialStore;
 use crate::market_data::providers::kalshi::{
-    kalshi_asset, KalshiSide, KALSHI_API_BASE, KALSHI_API_PREFIX, KALSHI_EXCHANGE,
+    kalshi_asset, ContractSide, KALSHI_API_BASE, KALSHI_API_PREFIX, KALSHI_EXCHANGE,
 };
 use crate::market_data::providers::KalshiPriceSource;
 use crate::market_data::{AssetId, PriceKind, PricePoint};
@@ -224,9 +224,9 @@ impl KalshiSynchronizer {
                 .with_context(|| format!("Kalshi market {} not found", position.ticker))?;
             // Negative positions are NO contracts.
             let side = if quantity.is_sign_negative() {
-                KalshiSide::No
+                ContractSide::No
             } else {
-                KalshiSide::Yes
+                ContractSide::Yes
             };
             let cost = parse_decimal(&position.market_exposure_dollars)
                 .with_context(|| format!("Invalid market exposure for {}", position.ticker))?;

@@ -44,7 +44,7 @@ async fn fetch_quote_prices_the_held_side() -> Result<()> {
         .mount(&server)
         .await;
 
-    let asset = kalshi_asset("FED-DEC", KalshiSide::No, None);
+    let asset = kalshi_asset("FED-DEC", ContractSide::No, None);
     let price = source(&server)
         .fetch_quote(&asset, &AssetId::from_asset(&asset))
         .await?
@@ -87,7 +87,7 @@ async fn fetch_closes_maps_daily_candles_to_the_day_they_cover() -> Result<()> {
         .mount(&server)
         .await;
 
-    let asset = kalshi_asset("FED-DEC", KalshiSide::No, None);
+    let asset = kalshi_asset("FED-DEC", ContractSide::No, None);
     let prices = source(&server)
         .fetch_closes(
             &asset,
@@ -122,11 +122,11 @@ fn display_name_drops_a_no_subtitle_that_repeats_the_yes_side() {
     .unwrap();
 
     assert_eq!(
-        market.display_name(KalshiSide::Yes),
+        market.display_name(ContractSide::Yes),
         "1st Period: Over 5.5 goals scored (Yes: Over 5.5 goals)"
     );
     assert_eq!(
-        market.display_name(KalshiSide::No),
+        market.display_name(ContractSide::No),
         "1st Period: Over 5.5 goals scored (No)"
     );
 }

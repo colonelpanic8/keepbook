@@ -100,7 +100,7 @@ async fn sync_values_cash_and_open_positions() -> Result<()> {
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "positions": {
                 "long-market": position("10", "4.5", false, "Will A happen?", "Yes"),
-                "short-market": position("-2", "-1.4", false, "Will B happen?", ""),
+                "short-market": position("-2", "0.6", false, "Will B happen?", ""),
                 "settled-market": position("5", "2", true, "Old market", "Yes"),
                 "closed-market": position("0", "0", false, "Closed out", "Yes"),
             },
@@ -148,29 +148,29 @@ async fn sync_values_cash_and_open_positions() -> Result<()> {
             )
         })
         .collect();
-    let contract =
-        |slug: &str, name: &str| json!({"type": "polymarket_us", "slug": slug, "name": name});
+    let contract = |slug: &str, side: &str, name: &str| json!({"type": "polymarket_us", "slug": slug, "side": side, "name": name});
     let some = |v: &str| Some(v.to_string());
     assert_eq!(
         balances,
         vec![
             (
+                // 105.7 fiat less the $1 margin locked per short contract.
                 json!({"type": "currency", "iso_code": "USD"}),
-                "105.7".to_string(),
+                "103.7".to_string(),
                 None,
                 None
             ),
             (
-                contract("long-market", "Will A happen? (Yes)"),
+                contract("long-market", "yes", "Will A happen? (Yes)"),
                 "10".to_string(),
                 some("4.5"),
                 some("0.6325"),
             ),
             (
-                contract("short-market", "Will B happen?"),
-                "-2".to_string(),
-                some("-1.4"),
-                some("0.7"),
+                contract("short-market", "no", "Will B happen? (No)"),
+                "2".to_string(),
+                some("0.6"),
+                some("0.3"),
             ),
         ]
     );

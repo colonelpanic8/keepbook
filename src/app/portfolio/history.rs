@@ -618,6 +618,8 @@ fn asset_display_label(asset: &Asset) -> String {
         Asset::Kalshi { ticker, side, name } => name
             .clone()
             .unwrap_or_else(|| format!("{ticker} ({})", side.as_str())),
-        Asset::PolymarketUs { slug, name } => name.clone().unwrap_or_else(|| slug.clone()),
+        Asset::PolymarketUs { slug, side, name } => name
+            .clone()
+            .unwrap_or_else(|| format!("{slug} ({})", side.as_str())),
     }
 }

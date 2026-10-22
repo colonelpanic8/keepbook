@@ -15,7 +15,7 @@ use serde::Deserialize;
 use super::price_point;
 use crate::market_data::{AssetId, PredictionMarketPriceSource, PriceKind, PricePoint};
 use crate::models::Asset;
-pub use crate::models::KalshiSide;
+pub use crate::models::ContractSide;
 
 pub const KALSHI_EXCHANGE: &str = "kalshi";
 pub const KALSHI_API_BASE: &str = "https://api.elections.kalshi.com";
@@ -32,15 +32,8 @@ fn eastern_midnight(date: NaiveDate) -> Result<DateTime<chrono_tz::Tz>> {
         .with_context(|| format!("No Eastern midnight on {date}"))
 }
 
-fn side_label(side: KalshiSide) -> &'static str {
-    match side {
-        KalshiSide::Yes => "Yes",
-        KalshiSide::No => "No",
-    }
-}
-
 /// The asset for one side of a Kalshi market.
-pub fn kalshi_asset(ticker: &str, side: KalshiSide, name: Option<String>) -> Asset {
+pub fn kalshi_asset(ticker: &str, side: ContractSide, name: Option<String>) -> Asset {
     Asset::kalshi(ticker, side, name)
 }
 
@@ -90,13 +83,13 @@ pub struct KalshiMarket {
 impl KalshiMarket {
     /// Per-contract value for `side`: the settlement value once determined, otherwise the
     /// bid/ask midpoint when both sides are quoted, otherwise the last trade price.
-    pub fn mark_price(&self, side: KalshiSide) -> Result<Decimal> {
+    pub fn mark_price(&self, side: ContractSide) -> Result<Decimal> {
         let notional =
             parse_optional_decimal(&self.notional_value_dollars)?.unwrap_or(Decimal::ONE);
         // Settlement and last-trade prices are quoted for YES.
         let from_yes = |yes: Decimal| match side {
-            KalshiSide::Yes => yes,
-            KalshiSide::No => notional - yes,
+            ContractSide::Yes => yes,
+            ContractSide::No => notional - yes,
         };
 
         if let Some(settlement) = parse_optional_decimal(&self.settlement_value_dollars)? {
@@ -104,8 +97,8 @@ impl KalshiMarket {
         }
 
         let (bid, ask) = match side {
-            KalshiSide::Yes => (&self.yes_bid_dollars, &self.yes_ask_dollars),
-            KalshiSide::No => (&self.no_bid_dollars, &self.no_ask_dollars),
+            ContractSide::Yes => (&self.yes_bid_dollars, &self.yes_ask_dollars),
+            ContractSide::No => (&self.no_bid_dollars, &self.no_ask_dollars),
         };
         if let (Some(bid), Some(ask)) = (parse_optional_decimal(bid)?, parse_optional_decimal(ask)?)
         {
@@ -119,7 +112,7 @@ impl KalshiMarket {
             .with_context(|| format!("No price available for Kalshi market {}", self.ticker))
     }
 
-    pub fn display_name(&self, side: KalshiSide) -> String {
+    pub fn display_name(&self, side: ContractSide) -> String {
         let non_empty = |value: &Option<String>| {
             value
                 .as_deref()
@@ -130,13 +123,13 @@ impl KalshiMarket {
         let title = non_empty(&self.title).unwrap_or_else(|| self.ticker.clone());
         let yes_sub_title = non_empty(&self.yes_sub_title);
         let sub_title = match side {
-            KalshiSide::Yes => yes_sub_title,
+            ContractSide::Yes => yes_sub_title,
             // Kalshi often repeats the YES subtitle here, which would mislabel the NO side.
-            KalshiSide::No => {
+            ContractSide::No => {
                 non_empty(&self.no_sub_title).filter(|no| Some(no) != yes_sub_title.as_ref())
             }
         };
-        let label = side_label(side);
+        let label = side.label();
         match sub_title {
             Some(sub_title) if sub_title != title => format!("{title} ({label}: {sub_title})"),
             _ => format!("{title} ({label})"),
@@ -297,7 +290,7 @@ impl Default for KalshiPriceSource {
     }
 }
 
-fn kalshi_contract(asset: &Asset) -> Option<(&str, KalshiSide)> {
+fn kalshi_contract(asset: &Asset) -> Option<(&str, ContractSide)> {
     match asset {
         Asset::Kalshi { ticker, side, .. } => Some((ticker.as_str(), *side)),
         _ => None,
@@ -360,8 +353,8 @@ impl PredictionMarketPriceSource for KalshiPriceSource {
                 continue;
             }
             let price = match side {
-                KalshiSide::Yes => yes,
-                KalshiSide::No => Decimal::ONE - yes,
+                ContractSide::Yes => yes,
+                ContractSide::No => Decimal::ONE - yes,
             };
             prices.push(price_point(
                 asset_id,

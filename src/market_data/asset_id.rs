@@ -62,8 +62,12 @@ impl AssetId {
                     side.as_str()
                 )
             }
-            Asset::PolymarketUs { slug, .. } => {
-                format!("polymarket_us/{}", normalize_lower_segment(slug))
+            Asset::PolymarketUs { slug, side, .. } => {
+                format!(
+                    "polymarket_us/{}/{}",
+                    normalize_lower_segment(slug),
+                    side.as_str()
+                )
             }
         };
         Self(id)

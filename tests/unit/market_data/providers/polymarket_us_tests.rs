@@ -29,7 +29,7 @@ async fn fetch_quote_prefers_current_price_over_settlement() -> Result<()> {
         .mount(&server)
         .await;
 
-    let asset = polymarket_us_asset("settled-market", None);
+    let asset = polymarket_us_asset("settled-market", ContractSide::Yes, None);
     let price = source(&server)
         .fetch_quote(&asset, &AssetId::from_asset(&asset))
         .await?
@@ -37,12 +37,12 @@ async fn fetch_quote_prefers_current_price_over_settlement() -> Result<()> {
 
     assert_eq!(price.price, "0.6335");
     assert_eq!(price.kind, PriceKind::Quote);
-    assert_eq!(price.asset_id.as_str(), "polymarket_us/settled-market");
+    assert_eq!(price.asset_id.as_str(), "polymarket_us/settled-market/yes");
     Ok(())
 }
 
 #[tokio::test]
-async fn fetch_closes_takes_each_days_closing_midpoint() -> Result<()> {
+async fn fetch_closes_prices_no_contracts_from_each_days_closing_midpoint() -> Result<()> {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/v1/price-history"))
@@ -61,7 +61,7 @@ async fn fetch_closes_takes_each_days_closing_midpoint() -> Result<()> {
         .mount(&server)
         .await;
 
-    let asset = polymarket_us_asset("long-market", None);
+    let asset = polymarket_us_asset("long-market", ContractSide::No, None);
     let prices = source(&server)
         .fetch_closes(
             &asset,
@@ -77,7 +77,7 @@ async fn fetch_closes_takes_each_days_closing_midpoint() -> Result<()> {
         .collect();
     assert_eq!(
         closes,
-        vec![(date("2026-10-01"), "0.63"), (date("2026-10-02"), "0.7")]
+        vec![(date("2026-10-01"), "0.37"), (date("2026-10-02"), "0.3")]
     );
     Ok(())
 }

@@ -26,33 +26,42 @@ pub enum Asset {
     /// One side of a Kalshi market, priced per contract.
     Kalshi {
         ticker: String,
-        side: KalshiSide,
+        side: ContractSide,
         /// Display name only; not part of the asset's identity.
         #[serde(skip_serializing_if = "Option::is_none")]
         name: Option<String>,
     },
-    /// A Polymarket US market contract, priced per contract. Shorts hold a negative quantity.
+    /// One side of a Polymarket US market. The exchange records a NO position as a short of
+    /// the market's single instrument; it is stored here as the NO contract it is economically.
     PolymarketUs {
         slug: String,
+        side: ContractSide,
         /// Display name only; not part of the asset's identity.
         #[serde(skip_serializing_if = "Option::is_none")]
         name: Option<String>,
     },
 }
 
-/// Kalshi lists separately priced YES and NO contracts for each market.
+/// The side of a binary event contract; YES and NO contracts are priced separately.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum KalshiSide {
+pub enum ContractSide {
     Yes,
     No,
 }
 
-impl KalshiSide {
+impl ContractSide {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Yes => "yes",
             Self::No => "no",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Yes => "Yes",
+            Self::No => "No",
         }
     }
 }
@@ -90,7 +99,7 @@ impl Asset {
         }
     }
 
-    pub fn kalshi(ticker: impl Into<String>, side: KalshiSide, name: Option<String>) -> Self {
+    pub fn kalshi(ticker: impl Into<String>, side: ContractSide, name: Option<String>) -> Self {
         Asset::Kalshi {
             ticker: ticker.into().trim().to_string(),
             side,
@@ -98,9 +107,14 @@ impl Asset {
         }
     }
 
-    pub fn polymarket_us(slug: impl Into<String>, name: Option<String>) -> Self {
+    pub fn polymarket_us(
+        slug: impl Into<String>,
+        side: ContractSide,
+        name: Option<String>,
+    ) -> Self {
         Asset::PolymarketUs {
             slug: slug.into().trim().to_string(),
+            side,
             name: normalize_opt_name(&name),
         }
     }
@@ -127,8 +141,9 @@ impl Asset {
                 side: *side,
                 name: normalize_opt_name(name),
             },
-            Asset::PolymarketUs { slug, name } => Asset::PolymarketUs {
+            Asset::PolymarketUs { slug, side, name } => Asset::PolymarketUs {
                 slug: normalize_lower(slug),
+                side: *side,
                 name: normalize_opt_name(name),
             },
         }
@@ -241,9 +256,18 @@ impl PartialEq for Asset {
                     ..
                 },
             ) => normalize_upper(a) == normalize_upper(b) && side_a == side_b,
-            (Asset::PolymarketUs { slug: a, .. }, Asset::PolymarketUs { slug: b, .. }) => {
-                normalize_lower(a) == normalize_lower(b)
-            }
+            (
+                Asset::PolymarketUs {
+                    slug: a,
+                    side: side_a,
+                    ..
+                },
+                Asset::PolymarketUs {
+                    slug: b,
+                    side: side_b,
+                    ..
+                },
+            ) => normalize_lower(a) == normalize_lower(b) && side_a == side_b,
             _ => false,
         }
     }
@@ -278,9 +302,10 @@ impl Hash for Asset {
                 normalize_upper(ticker).hash(state);
                 side.hash(state);
             }
-            Asset::PolymarketUs { slug, .. } => {
+            Asset::PolymarketUs { slug, side, .. } => {
                 "polymarket_us".hash(state);
                 normalize_lower(slug).hash(state);
+                side.hash(state);
             }
         }
     }

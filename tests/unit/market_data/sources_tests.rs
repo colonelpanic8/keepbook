@@ -420,7 +420,7 @@ async fn prediction_market_router_dispatches_by_exchange() -> Result<()> {
         Arc::new(ExchangeSource("kalshi")),
     ]);
 
-    let kalshi = Asset::kalshi("FED-DEC", crate::models::KalshiSide::Yes, None);
+    let kalshi = Asset::kalshi("FED-DEC", crate::models::ContractSide::Yes, None);
     let quote = router
         .fetch_quote(&kalshi, &AssetId::from_asset(&kalshi))
         .await?

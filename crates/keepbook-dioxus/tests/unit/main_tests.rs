@@ -1712,6 +1712,7 @@ fn asset_display_names_cover_all_asset_kinds() {
     let contract = serde_json::json!({
         "type": "polymarket_us",
         "slug": "fed-cut-dec",
+        "side": "yes",
         "name": "Fed cut in December?"
     });
     let unnamed_contract = serde_json::json!({"type": "kalshi", "ticker": "FED-DEC", "side": "no"});
@@ -1722,7 +1723,7 @@ fn asset_display_names_cover_all_asset_kinds() {
     assert_eq!(asset_display_name(&crypto, "crypto/ETH"), "ETH");
     assert_eq!(asset_display_name(&manual, "manual_value/House"), "House");
     assert_eq!(
-        asset_display_name(&contract, "polymarket_us/fed-cut-dec"),
+        asset_display_name(&contract, "polymarket_us/fed-cut-dec/yes"),
         "Fed cut in December?"
     );
     assert_eq!(

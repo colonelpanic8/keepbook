@@ -17,12 +17,13 @@ use serde::Deserialize;
 
 use crate::credentials::CredentialStore;
 use crate::market_data::providers::polymarket_us::{
-    polymarket_us_asset, PolymarketAmount, POLYMARKET_US_EXCHANGE,
+    polymarket_us_asset, side_price, PolymarketAmount, POLYMARKET_US_EXCHANGE,
 };
 use crate::market_data::providers::PolymarketUsPriceSource;
 use crate::market_data::{AssetId, PriceKind, PricePoint};
 use crate::models::{
-    Account, Asset, AssetBalance, Connection, ConnectionStatus, Id, LastSync, SyncStatus,
+    Account, Asset, AssetBalance, Connection, ConnectionStatus, ContractSide, Id, LastSync,
+    SyncStatus,
 };
 use crate::storage::Storage;
 use crate::sync::{AccountBalances, AccountListing, SyncResult, SyncedAssetBalance, Synchronizer};
@@ -195,15 +196,9 @@ impl PolymarketUsSynchronizer {
 
         let now = Utc::now();
 
-        let mut asset_balances: Vec<SyncedAssetBalance> = balances
-            .iter()
-            .map(|balance| {
-                SyncedAssetBalance::new(AssetBalance::new(
-                    Asset::currency(&balance.currency),
-                    balance.current_balance.normalize().to_string(),
-                ))
-            })
-            .collect();
+        let mut contract_balances = Vec::new();
+        // $1 per short contract is locked as margin inside the fiat balance.
+        let mut short_margin: HashMap<String, Decimal> = HashMap::new();
 
         // Settled positions have already been paid out into the cash balance.
         for (slug, position) in positions.iter().filter(|(_, p)| !p.expired) {
@@ -214,24 +209,54 @@ impl PolymarketUsSynchronizer {
             }
 
             let mark = self.prices.fetch_mark_price(slug).await?;
-            let asset = polymarket_us_asset(slug, Some(position.display_name(slug)));
+            let currency = mark.currency.trim().to_uppercase();
+            // The exchange records a NO position as a short of the YES instrument. Holding it as
+            // NO contracts with the margin taken out of cash leaves the total unchanged:
+            // cash - qty + qty * (1 - price) = cash - qty * price.
+            let side = if quantity.is_sign_negative() {
+                *short_margin.entry(currency.clone()).or_default() += quantity.abs();
+                ContractSide::No
+            } else {
+                ContractSide::Yes
+            };
+            let asset = polymarket_us_asset(slug, side, Some(position.display_name(slug, side)));
             let price = PricePoint {
                 asset_id: AssetId::from_asset(&asset),
                 as_of_date: now.date_naive(),
                 timestamp: now,
-                price: parse_decimal(&mark.value)?.normalize().to_string(),
-                quote_currency: mark.currency.trim().to_uppercase(),
+                price: side_price(side, parse_decimal(&mark.value)?)
+                    .normalize()
+                    .to_string(),
+                quote_currency: currency,
                 kind: PriceKind::Quote,
                 source: POLYMARKET_US_EXCHANGE.to_string(),
             };
-            // Shorts carry a negative quantity, which nets their payout liability against the
-            // sale proceeds already included in the cash balance.
-            let mut asset_balance = AssetBalance::new(asset, quantity.normalize().to_string());
+            let mut asset_balance =
+                AssetBalance::new(asset, quantity.abs().normalize().to_string());
             if let Some(cost) = &position.cost {
                 asset_balance = asset_balance.with_cost_basis(cost.value.trim());
             }
-            asset_balances.push(SyncedAssetBalance::new(asset_balance).with_price(price));
+            contract_balances.push(SyncedAssetBalance::new(asset_balance).with_price(price));
         }
+
+        let mut asset_balances: Vec<SyncedAssetBalance> = balances
+            .iter()
+            .map(|balance| {
+                let currency = balance.currency.trim().to_uppercase();
+                let margin = short_margin.remove(&currency).unwrap_or_default();
+                SyncedAssetBalance::new(AssetBalance::new(
+                    Asset::currency(&balance.currency),
+                    (balance.current_balance - margin).normalize().to_string(),
+                ))
+            })
+            .collect();
+        for (currency, margin) in short_margin {
+            asset_balances.push(SyncedAssetBalance::new(AssetBalance::new(
+                Asset::currency(currency),
+                (-margin).normalize().to_string(),
+            )));
+        }
+        asset_balances.extend(contract_balances);
 
         let existing_created_at: HashMap<Id, _> = storage
             .list_accounts()
@@ -333,7 +358,7 @@ struct PolymarketPosition {
 }
 
 impl PolymarketPosition {
-    fn display_name(&self, slug: &str) -> String {
+    fn display_name(&self, slug: &str, side: ContractSide) -> String {
         let non_empty = |value: &Option<String>| {
             value
                 .as_deref()
@@ -342,9 +367,14 @@ impl PolymarketPosition {
                 .map(str::to_string)
         };
         let title = non_empty(&self.market_metadata.title).unwrap_or_else(|| slug.to_string());
+        let label = side.label();
         match non_empty(&self.market_metadata.outcome) {
-            Some(outcome) => format!("{title} ({outcome})"),
-            None => title,
+            Some(outcome)
+                if !outcome.eq_ignore_ascii_case("yes") && !outcome.eq_ignore_ascii_case("no") =>
+            {
+                format!("{title} ({label}: {outcome})")
+            }
+            _ => format!("{title} ({label})"),
         }
     }
 }
