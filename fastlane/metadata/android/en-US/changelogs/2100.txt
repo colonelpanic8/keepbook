@@ -1,0 +1,3 @@
+* Changed: Kalshi and Polymarket US positions are stored as contract holdings with their own prices, which refresh and backfill history like equities and crypto.
+* Changed: Polymarket US NO positions appear as NO contracts so value and cost basis line up. Totals are unchanged.
+* Fixed: Kalshi NO positions no longer take the YES side's outcome label.

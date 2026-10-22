@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.21.0 - 2026-10-22
+
+### Changed
+
+- Kalshi and Polymarket US positions are stored as contract holdings with
+  their own prices instead of fixed dollar values. Prices refresh, go stale,
+  and backfill history like equities and crypto, with no price source setup.
+- Polymarket US NO positions appear as NO contracts, so their value and cost
+  basis line up; the margin the exchange locks for them is no longer counted
+  as cash. Totals are unchanged.
+
+### Fixed
+
+- Kalshi NO positions no longer take the YES side's outcome label.
+
+Older app versions cannot read the new position format; update every device
+that reads the same data.
+
 ## 0.20.0 - 2026-10-22
 
 ### Added
