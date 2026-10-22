@@ -287,6 +287,9 @@ Implemented source types:
 - Crypto: =coingecko=, =cryptocompare=, =coincap=
 - FX: =frankfurter=
 
+Prediction market contracts (=kalshi= and =polymarket_us= assets) are priced
+from each exchange's public market data and need no configuration.
+
 * Development
 
 - Rust tests: =cargo test=

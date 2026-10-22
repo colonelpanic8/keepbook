@@ -96,7 +96,10 @@ async fn value_in_reporting_currency_detailed_with_options(
                 missing: None,
             })
         }
-        Asset::Equity { .. } | Asset::Crypto { .. } => {
+        Asset::Equity { .. }
+        | Asset::Crypto { .. }
+        | Asset::Kalshi { .. }
+        | Asset::PolymarketUs { .. } => {
             let Some(price) = market_data
                 .valuation_price_from_store(&asset, as_of_date)
                 .await?

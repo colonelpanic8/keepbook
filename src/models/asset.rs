@@ -23,6 +23,38 @@ pub enum Asset {
         #[serde(skip_serializing_if = "Option::is_none")]
         network: Option<String>,
     },
+    /// One side of a Kalshi market, priced per contract.
+    Kalshi {
+        ticker: String,
+        side: KalshiSide,
+        /// Display name only; not part of the asset's identity.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+    },
+    /// A Polymarket US market contract, priced per contract. Shorts hold a negative quantity.
+    PolymarketUs {
+        slug: String,
+        /// Display name only; not part of the asset's identity.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+    },
+}
+
+/// Kalshi lists separately priced YES and NO contracts for each market.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KalshiSide {
+    Yes,
+    No,
+}
+
+impl KalshiSide {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Yes => "yes",
+            Self::No => "no",
+        }
+    }
 }
 
 impl Asset {
@@ -58,6 +90,21 @@ impl Asset {
         }
     }
 
+    pub fn kalshi(ticker: impl Into<String>, side: KalshiSide, name: Option<String>) -> Self {
+        Asset::Kalshi {
+            ticker: ticker.into().trim().to_string(),
+            side,
+            name: normalize_opt_name(&name),
+        }
+    }
+
+    pub fn polymarket_us(slug: impl Into<String>, name: Option<String>) -> Self {
+        Asset::PolymarketUs {
+            slug: slug.into().trim().to_string(),
+            name: normalize_opt_name(&name),
+        }
+    }
+
     pub fn normalized(&self) -> Self {
         match self {
             Asset::Currency { iso_code } => Asset::Currency {
@@ -74,6 +121,15 @@ impl Asset {
             Asset::Crypto { symbol, network } => Asset::Crypto {
                 symbol: normalize_upper(symbol),
                 network: normalize_opt_lower(network),
+            },
+            Asset::Kalshi { ticker, side, name } => Asset::Kalshi {
+                ticker: normalize_upper(ticker),
+                side: *side,
+                name: normalize_opt_name(name),
+            },
+            Asset::PolymarketUs { slug, name } => Asset::PolymarketUs {
+                slug: normalize_lower(slug),
+                name: normalize_opt_name(name),
             },
         }
     }
@@ -93,8 +149,19 @@ fn normalize_upper(value: &str) -> String {
     value.trim().to_uppercase()
 }
 
+fn normalize_lower(value: &str) -> String {
+    value.trim().to_lowercase()
+}
+
 fn normalize_name(value: &str) -> String {
     value.trim().to_string()
+}
+
+fn normalize_opt_name(value: &Option<String>) -> Option<String> {
+    value
+        .as_deref()
+        .map(normalize_name)
+        .filter(|v| !v.is_empty())
 }
 
 fn normalize_name_for_key(value: &str) -> String {
@@ -162,6 +229,21 @@ impl PartialEq for Asset {
                 normalize_upper(a) == normalize_upper(b)
                     && normalize_opt_lower(net_a) == normalize_opt_lower(net_b)
             }
+            (
+                Asset::Kalshi {
+                    ticker: a,
+                    side: side_a,
+                    ..
+                },
+                Asset::Kalshi {
+                    ticker: b,
+                    side: side_b,
+                    ..
+                },
+            ) => normalize_upper(a) == normalize_upper(b) && side_a == side_b,
+            (Asset::PolymarketUs { slug: a, .. }, Asset::PolymarketUs { slug: b, .. }) => {
+                normalize_lower(a) == normalize_lower(b)
+            }
             _ => false,
         }
     }
@@ -190,6 +272,15 @@ impl Hash for Asset {
                 "crypto".hash(state);
                 normalize_upper(symbol).hash(state);
                 normalize_opt_lower(network).hash(state);
+            }
+            Asset::Kalshi { ticker, side, .. } => {
+                "kalshi".hash(state);
+                normalize_upper(ticker).hash(state);
+                side.hash(state);
+            }
+            Asset::PolymarketUs { slug, .. } => {
+                "polymarket_us".hash(state);
+                normalize_lower(slug).hash(state);
             }
         }
     }

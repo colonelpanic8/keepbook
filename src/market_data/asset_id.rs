@@ -55,6 +55,16 @@ impl AssetId {
                     normalize_lower_segment(net)
                 )
             }
+            Asset::Kalshi { ticker, side, .. } => {
+                format!(
+                    "kalshi/{}/{}",
+                    normalize_upper_segment(ticker),
+                    side.as_str()
+                )
+            }
+            Asset::PolymarketUs { slug, .. } => {
+                format!("polymarket_us/{}", normalize_lower_segment(slug))
+            }
         };
         Self(id)
     }

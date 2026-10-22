@@ -373,3 +373,64 @@ async fn fx_router_returns_none_when_every_source_misses() -> Result<()> {
     assert!(router.fetch_close("EUR", "USD", date).await?.is_none());
     Ok(())
 }
+
+struct ExchangeSource(&'static str);
+
+#[async_trait::async_trait]
+impl PredictionMarketPriceSource for ExchangeSource {
+    fn supports(&self, asset: &Asset) -> bool {
+        match asset {
+            Asset::Kalshi { .. } => self.0 == "kalshi",
+            Asset::PolymarketUs { .. } => self.0 == "polymarket_us",
+            _ => false,
+        }
+    }
+
+    fn name(&self) -> &str {
+        self.0
+    }
+
+    async fn fetch_quote(&self, _asset: &Asset, asset_id: &AssetId) -> Result<Option<PricePoint>> {
+        Ok(Some(PricePoint {
+            asset_id: asset_id.clone(),
+            as_of_date: quote_date(),
+            timestamp: Utc.with_ymd_and_hms(2024, 1, 2, 15, 0, 0).unwrap(),
+            price: "0.5".to_string(),
+            quote_currency: "USD".to_string(),
+            kind: PriceKind::Quote,
+            source: self.0.to_string(),
+        }))
+    }
+
+    async fn fetch_closes(
+        &self,
+        _asset: &Asset,
+        _asset_id: &AssetId,
+        _start: NaiveDate,
+        _end: NaiveDate,
+    ) -> Result<Vec<PricePoint>> {
+        Ok(Vec::new())
+    }
+}
+
+#[tokio::test]
+async fn prediction_market_router_dispatches_by_exchange() -> Result<()> {
+    let router = PredictionMarketPriceRouter::new(vec![
+        Arc::new(ExchangeSource("polymarket_us")),
+        Arc::new(ExchangeSource("kalshi")),
+    ]);
+
+    let kalshi = Asset::kalshi("FED-DEC", crate::models::KalshiSide::Yes, None);
+    let quote = router
+        .fetch_quote(&kalshi, &AssetId::from_asset(&kalshi))
+        .await?
+        .expect("routed quote");
+    assert_eq!(quote.source, "kalshi");
+
+    let unsupported = Asset::equity("AAPL");
+    assert!(router
+        .fetch_quote(&unsupported, &AssetId::from_asset(&unsupported))
+        .await?
+        .is_none());
+    Ok(())
+}

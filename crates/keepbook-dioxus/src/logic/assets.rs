@@ -16,17 +16,25 @@ pub(crate) fn asset_display_name(asset: &serde_json::Value, fallback: &str) -> S
         Some("equity") => asset_string_field(asset, "ticker"),
         Some("crypto") => asset_string_field(asset, "symbol"),
         Some("manual_value") => asset_string_field(asset, "name"),
+        Some("kalshi") => {
+            asset_string_field(asset, "name").or_else(|| asset_string_field(asset, "ticker"))
+        }
+        Some("polymarket_us") => {
+            asset_string_field(asset, "name").or_else(|| asset_string_field(asset, "slug"))
+        }
         _ => None,
     };
     name.unwrap_or(fallback).to_string()
 }
 
-/// Secondary detail for an asset row: an equity's exchange or a crypto
-/// asset's network, when present.
+/// Secondary detail for an asset row: an equity's exchange, a crypto
+/// asset's network, or a prediction market contract's exchange.
 pub(crate) fn asset_secondary_text(asset: &serde_json::Value) -> Option<String> {
     match asset_string_field(asset, "type") {
         Some("equity") => asset_string_field(asset, "exchange"),
         Some("crypto") => asset_string_field(asset, "network"),
+        Some("kalshi") => Some("Kalshi"),
+        Some("polymarket_us") => Some("Polymarket US"),
         _ => None,
     }
     .map(str::to_string)
@@ -38,6 +46,7 @@ pub(crate) fn asset_kind_label(asset: &serde_json::Value) -> &'static str {
         Some("equity") => "Equity",
         Some("crypto") => "Crypto",
         Some("manual_value") => "Manual",
+        Some("kalshi") | Some("polymarket_us") => "Prediction market",
         _ => "Asset",
     }
 }

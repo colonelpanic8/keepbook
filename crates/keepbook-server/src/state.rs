@@ -1265,6 +1265,8 @@ async fn tray_transaction_lines(storage: Arc<dyn Storage>, config: &ResolvedConf
                     Asset::ManualValue { currency, .. } => currency.as_str(),
                     Asset::Equity { ticker, .. } => ticker.as_str(),
                     Asset::Crypto { symbol, .. } => symbol.as_str(),
+                    Asset::Kalshi { ticker, .. } => ticker.as_str(),
+                    Asset::PolymarketUs { slug, .. } => slug.as_str(),
                 };
                 let amount = format_tray_currency(&row.amount, currency, &config.display);
                 let desc = if row.description.chars().count() > 30 {

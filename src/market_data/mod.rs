@@ -21,6 +21,6 @@ pub use service::{is_market_data_missing, MarketDataMissing, MarketDataService};
 pub use source_config::{AssetCategory, LoadedPriceSource, PriceSourceConfig, PriceSourceType};
 pub use sources::{
     CryptoPriceRouter, CryptoPriceSource, EquityPriceRouter, EquityPriceSource, FxRateRouter,
-    FxRateSource, RateLimitConfig,
+    FxRateSource, PredictionMarketPriceRouter, PredictionMarketPriceSource, RateLimitConfig,
 };
 pub use store::{MarketDataStore, MemoryMarketDataStore, NullMarketDataStore};

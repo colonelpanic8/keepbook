@@ -331,7 +331,10 @@ pub async fn list_balances(
                                 symbol_override,
                             )
                         }
-                        Asset::Equity { .. } | Asset::Crypto { .. } => None,
+                        Asset::Equity { .. }
+                        | Asset::Crypto { .. }
+                        | Asset::Kalshi { .. }
+                        | Asset::PolymarketUs { .. } => None,
                     };
                     let value_in_reporting_currency_display =
                         value_in_reporting_currency.as_deref().and_then(|value| {

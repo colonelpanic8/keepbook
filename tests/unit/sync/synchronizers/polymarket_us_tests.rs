@@ -141,25 +141,36 @@ async fn sync_values_cash_and_open_positions() -> Result<()> {
         .iter()
         .map(|b| {
             (
-                b.asset_balance.asset.clone(),
+                serde_json::to_value(&b.asset_balance.asset).unwrap(),
                 b.asset_balance.amount.clone(),
                 b.asset_balance.cost_basis.clone(),
+                b.price.as_ref().map(|p| p.price.clone()),
             )
         })
         .collect();
+    let contract =
+        |slug: &str, name: &str| json!({"type": "polymarket_us", "slug": slug, "name": name});
+    let some = |v: &str| Some(v.to_string());
     assert_eq!(
         balances,
         vec![
-            (Asset::currency("USD"), "105.7".to_string(), None),
             (
-                Asset::manual_value("Will A happen? (Yes)", "USD"),
-                "6.325".to_string(),
-                Some("4.5".to_string()),
+                json!({"type": "currency", "iso_code": "USD"}),
+                "105.7".to_string(),
+                None,
+                None
             ),
             (
-                Asset::manual_value("Will B happen?", "USD"),
-                "-1.4".to_string(),
-                Some("-1.4".to_string()),
+                contract("long-market", "Will A happen? (Yes)"),
+                "10".to_string(),
+                some("4.5"),
+                some("0.6325"),
+            ),
+            (
+                contract("short-market", "Will B happen?"),
+                "-2".to_string(),
+                some("-1.4"),
+                some("0.7"),
             ),
         ]
     );

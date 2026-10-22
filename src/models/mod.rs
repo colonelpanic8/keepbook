@@ -10,7 +10,7 @@ mod transaction;
 mod transaction_annotation;
 
 pub use account::{Account, AccountConfig, BalanceBackfillPolicy};
-pub use asset::Asset;
+pub use asset::{Asset, KalshiSide};
 pub use balance::{AssetBalance, BalanceSnapshot};
 pub use connection::{
     Connection, ConnectionConfig, ConnectionState, ConnectionStatus, LastSync, SyncStatus,

@@ -93,7 +93,10 @@ impl SyncOrchestrator {
                         ));
                     }
                 }
-                Asset::Equity { .. } | Asset::Crypto { .. } => {
+                Asset::Equity { .. }
+                | Asset::Crypto { .. }
+                | Asset::Kalshi { .. }
+                | Asset::PolymarketUs { .. } => {
                     if force {
                         match self.market_data.price_close_force(&asset, date).await {
                             Ok((price, fetched)) => {
@@ -220,7 +223,10 @@ impl SyncOrchestrator {
                         ));
                     }
                 }
-                Asset::Equity { .. } | Asset::Crypto { .. } => {
+                Asset::Equity { .. }
+                | Asset::Crypto { .. }
+                | Asset::Kalshi { .. }
+                | Asset::PolymarketUs { .. } => {
                     if is_today {
                         let resp = if force {
                             self.market_data.price_latest_force(&asset, date).await

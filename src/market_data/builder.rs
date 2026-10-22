@@ -2,9 +2,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::clock::{Clock, SystemClock};
+use crate::market_data::providers::{KalshiPriceSource, PolymarketUsPriceSource};
 use crate::market_data::{
     CryptoPriceRouter, EquityPriceRouter, FxRateRouter, JsonlMarketDataStore, MarketDataService,
-    MarketDataStore, PriceSourceRegistry,
+    MarketDataStore, PredictionMarketPriceRouter, PriceSourceRegistry,
 };
 
 /// Builds a [`MarketDataService`] from a data directory and optional configured price sources.
@@ -87,6 +88,14 @@ impl MarketDataServiceBuilder {
         if self.offline_only {
             return service;
         }
+
+        // Each exchange is the only source for its contracts, so these need no configuration.
+        service = service.with_prediction_market_router(Arc::new(
+            PredictionMarketPriceRouter::new(vec![
+                Arc::new(KalshiPriceSource::new()),
+                Arc::new(PolymarketUsPriceSource::new()),
+            ]),
+        ));
 
         let mut registry = PriceSourceRegistry::new(&self.data_dir);
         if let Err(e) = registry.load() {

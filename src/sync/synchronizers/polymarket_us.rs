@@ -16,6 +16,11 @@ use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 
 use crate::credentials::CredentialStore;
+use crate::market_data::providers::polymarket_us::{
+    polymarket_us_asset, PolymarketAmount, POLYMARKET_US_EXCHANGE,
+};
+use crate::market_data::providers::PolymarketUsPriceSource;
+use crate::market_data::{AssetId, PriceKind, PricePoint};
 use crate::models::{
     Account, Asset, AssetBalance, Connection, ConnectionStatus, Id, LastSync, SyncStatus,
 };
@@ -23,7 +28,6 @@ use crate::storage::Storage;
 use crate::sync::{AccountBalances, AccountListing, SyncResult, SyncedAssetBalance, Synchronizer};
 
 const API_BASE: &str = "https://api.polymarket.us";
-const GATEWAY_BASE: &str = "https://gateway.polymarket.us";
 
 /// Polymarket US synchronizer.
 pub struct PolymarketUsSynchronizer {
@@ -31,7 +35,7 @@ pub struct PolymarketUsSynchronizer {
     secret_key: SecretString,
     client: Client,
     api_base: String,
-    gateway_base: String,
+    prices: PolymarketUsPriceSource,
 }
 
 impl PolymarketUsSynchronizer {
@@ -42,15 +46,15 @@ impl PolymarketUsSynchronizer {
             secret_key,
             client: Client::new(),
             api_base: API_BASE.to_string(),
-            gateway_base: GATEWAY_BASE.to_string(),
+            prices: PolymarketUsPriceSource::new(),
         }
     }
 
     /// Point both the authenticated API and the public gateway at one base URL (useful for tests).
     pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
         let base_url = base_url.into();
-        self.api_base = base_url.clone();
-        self.gateway_base = base_url;
+        self.prices = PolymarketUsPriceSource::new().with_base_url(&base_url);
+        self.api_base = base_url;
         self
     }
 
@@ -112,19 +116,11 @@ impl PolymarketUsSynchronizer {
         &self,
         path: &str,
         query: &[(&str, &str)],
-        authenticated: bool,
     ) -> Result<T> {
-        let base = if authenticated {
-            &self.api_base
-        } else {
-            &self.gateway_base
-        };
-        let url = format!("{}{path}", base.trim_end_matches('/'));
+        let url = format!("{}{path}", self.api_base.trim_end_matches('/'));
         let mut request = self.client.get(&url).query(query);
-        if authenticated {
-            for (name, value) in self.auth_headers("GET", path)? {
-                request = request.header(name, value);
-            }
+        for (name, value) in self.auth_headers("GET", path)? {
+            request = request.header(name, value);
         }
 
         let response = request.send().await.context("HTTP request failed")?;
@@ -149,7 +145,7 @@ impl PolymarketUsSynchronizer {
             balances: Vec<PolymarketBalance>,
         }
 
-        let response: Response = self.get("/v1/account/balances", &[], true).await?;
+        let response: Response = self.get("/v1/account/balances", &[]).await?;
         Ok(response.balances)
     }
 
@@ -174,7 +170,7 @@ impl PolymarketUsSynchronizer {
                 query.push(("cursor", cursor));
             }
 
-            let response: Response = self.get("/v1/portfolio/positions", &query, true).await?;
+            let response: Response = self.get("/v1/portfolio/positions", &query).await?;
             positions.extend(response.positions);
 
             if response.eof {
@@ -189,29 +185,6 @@ impl PolymarketUsSynchronizer {
         Ok(positions)
     }
 
-    async fn get_mark_price(&self, slug: &str) -> Result<PolymarketAmount> {
-        #[derive(Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct MarketData {
-            current_px: Option<PolymarketAmount>,
-            last_trade_px: Option<PolymarketAmount>,
-            settlement_px: Option<PolymarketAmount>,
-        }
-        #[derive(Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Response {
-            market_data: MarketData,
-        }
-
-        let path = format!("/v1/markets/{}/bbo", encode_path_segment(slug));
-        let response: Response = self.get(&path, &[], false).await?;
-        let data = response.market_data;
-        data.current_px
-            .or(data.last_trade_px)
-            .or(data.settlement_px)
-            .with_context(|| format!("No price available for Polymarket US market {slug}"))
-    }
-
     async fn sync_internal<S: Storage + ?Sized>(
         &self,
         connection: &mut Connection,
@@ -220,13 +193,15 @@ impl PolymarketUsSynchronizer {
         let balances = self.get_balances().await?;
         let positions = self.get_positions().await?;
 
-        let mut asset_balances: Vec<AssetBalance> = balances
+        let now = Utc::now();
+
+        let mut asset_balances: Vec<SyncedAssetBalance> = balances
             .iter()
             .map(|balance| {
-                AssetBalance::new(
+                SyncedAssetBalance::new(AssetBalance::new(
                     Asset::currency(&balance.currency),
                     balance.current_balance.normalize().to_string(),
-                )
+                ))
             })
             .collect();
 
@@ -238,18 +213,24 @@ impl PolymarketUsSynchronizer {
                 continue;
             }
 
-            let price = self.get_mark_price(slug).await?;
+            let mark = self.prices.fetch_mark_price(slug).await?;
+            let asset = polymarket_us_asset(slug, Some(position.display_name(slug)));
+            let price = PricePoint {
+                asset_id: AssetId::from_asset(&asset),
+                as_of_date: now.date_naive(),
+                timestamp: now,
+                price: parse_decimal(&mark.value)?.normalize().to_string(),
+                quote_currency: mark.currency.trim().to_uppercase(),
+                kind: PriceKind::Quote,
+                source: POLYMARKET_US_EXCHANGE.to_string(),
+            };
             // Shorts carry a negative quantity, which nets their payout liability against the
             // sale proceeds already included in the cash balance.
-            let value = quantity * parse_decimal(&price.value)?;
-            let mut asset_balance = AssetBalance::new(
-                Asset::manual_value(position.display_name(slug), &price.currency),
-                value.normalize().to_string(),
-            );
+            let mut asset_balance = AssetBalance::new(asset, quantity.normalize().to_string());
             if let Some(cost) = &position.cost {
                 asset_balance = asset_balance.with_cost_basis(cost.value.trim());
             }
-            asset_balances.push(asset_balance);
+            asset_balances.push(SyncedAssetBalance::new(asset_balance).with_price(price));
         }
 
         let existing_created_at: HashMap<Id, _> = storage
@@ -277,10 +258,7 @@ impl PolymarketUsSynchronizer {
         };
 
         let account_balances = AccountBalances::snapshot_or_unavailable(
-            asset_balances
-                .into_iter()
-                .map(SyncedAssetBalance::new)
-                .collect(),
+            asset_balances,
             "Polymarket US returned no balances",
         );
 
@@ -325,30 +303,11 @@ fn deserialize_json_decimal<'de, D: serde::Deserializer<'de>>(
         .map_err(serde::de::Error::custom)
 }
 
-fn encode_path_segment(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for b in value.as_bytes() {
-        match *b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
-                out.push(*b as char)
-            }
-            other => out.push_str(&format!("%{other:02X}")),
-        }
-    }
-    out
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PolymarketBalance {
     #[serde(deserialize_with = "deserialize_json_decimal")]
     current_balance: Decimal,
-    currency: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct PolymarketAmount {
-    value: String,
     currency: String,
 }
 

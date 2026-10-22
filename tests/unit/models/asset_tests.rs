@@ -135,3 +135,33 @@ fn test_asset_normalized_canonicalizes_fields() {
         _ => panic!("expected crypto asset"),
     }
 }
+
+#[test]
+fn prediction_market_identity_ignores_display_name() {
+    let asset = Asset::kalshi(
+        "FED-DEC",
+        KalshiSide::No,
+        Some("Fed rate in December (No)".to_string()),
+    );
+    assert_eq!(
+        serde_json::to_string(&asset).unwrap(),
+        r#"{"type":"kalshi","ticker":"FED-DEC","side":"no","name":"Fed rate in December (No)"}"#
+    );
+
+    let renamed = Asset::kalshi("fed-dec", KalshiSide::No, Some("Renamed".to_string()));
+    assert_eq!(asset, renamed);
+    let mut set = std::collections::HashSet::new();
+    set.insert(asset.clone());
+    assert!(set.contains(&renamed));
+    assert_ne!(asset, Asset::kalshi("FED-DEC", KalshiSide::Yes, None));
+
+    let polymarket = Asset::polymarket_us("some-slug", Some(" ".into()));
+    assert_eq!(
+        serde_json::to_string(&polymarket).unwrap(),
+        r#"{"type":"polymarket_us","slug":"some-slug"}"#
+    );
+    assert_eq!(
+        polymarket,
+        Asset::polymarket_us("Some-Slug", Some("Named".into()))
+    );
+}

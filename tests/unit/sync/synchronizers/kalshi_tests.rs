@@ -133,7 +133,6 @@ async fn sync_values_cash_and_open_positions() -> Result<()> {
     Mock::given(method("GET"))
         .and(path("/trade-api/v2/markets"))
         .and(query_param("tickers", "YES-MKT,NO-MKT,DETERMINED-MKT"))
-        .and(ValidSignature)
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "markets": [
                 {
@@ -191,30 +190,41 @@ async fn sync_values_cash_and_open_positions() -> Result<()> {
         .iter()
         .map(|b| {
             (
-                b.asset_balance.asset.clone(),
+                serde_json::to_value(&b.asset_balance.asset).unwrap(),
                 b.asset_balance.amount.clone(),
                 b.asset_balance.cost_basis.clone(),
+                b.price.as_ref().map(|p| p.price.clone()),
             )
         })
         .collect();
+    let contract = |ticker: &str, side: &str, name: &str| json!({"type": "kalshi", "ticker": ticker, "side": side, "name": name});
+    let some = |v: &str| Some(v.to_string());
     assert_eq!(
         balances,
         vec![
-            (Asset::currency("USD"), "105.7".to_string(), None),
             (
-                Asset::manual_value("Will A happen? (Yes)", "USD"),
-                "6.3".to_string(),
-                Some("4.5".to_string()),
+                json!({"type": "currency", "iso_code": "USD"}),
+                "105.7".to_string(),
+                None,
+                None
             ),
             (
-                Asset::manual_value("Fed rate in December (No: Not above 4%)", "USD"),
-                "1".to_string(),
-                Some("1.2".to_string()),
+                contract("YES-MKT", "yes", "Will A happen? (Yes)"),
+                "10".to_string(),
+                some("4.5"),
+                some("0.63"),
             ),
             (
-                Asset::manual_value("Will C happen? (Yes)", "USD"),
+                contract("NO-MKT", "no", "Fed rate in December (No: Not above 4%)"),
+                "4".to_string(),
+                some("1.2"),
+                some("0.25"),
+            ),
+            (
+                contract("DETERMINED-MKT", "yes", "Will C happen? (Yes)"),
                 "3".to_string(),
-                Some("2.1".to_string()),
+                some("2.1"),
+                some("1"),
             ),
         ]
     );

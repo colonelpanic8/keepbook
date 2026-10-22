@@ -227,6 +227,8 @@ impl Daemon {
                         keepbook::models::Asset::ManualValue { currency, .. } => currency.as_str(),
                         keepbook::models::Asset::Equity { ticker, .. } => ticker.as_str(),
                         keepbook::models::Asset::Crypto { symbol, .. } => symbol.as_str(),
+                        keepbook::models::Asset::Kalshi { ticker, .. } => ticker.as_str(),
+                        keepbook::models::Asset::PolymarketUs { slug, .. } => slug.as_str(),
                     };
                     let amount = format_tray_currency(&row.amount, currency, &self.config.display);
                     // Truncate long descriptions (char-safe).

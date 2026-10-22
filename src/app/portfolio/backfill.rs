@@ -139,7 +139,10 @@ pub async fn fetch_historical_prices(
 
     for asset_cache in asset_caches.iter_mut() {
         match &asset_cache.asset {
-            Asset::Equity { .. } | Asset::Crypto { .. } => {
+            Asset::Equity { .. }
+            | Asset::Crypto { .. }
+            | Asset::Kalshi { .. }
+            | Asset::PolymarketUs { .. } => {
                 let mut needs_fetch = false;
                 let mut current = aligned_start;
                 while current <= end_date {
@@ -197,7 +200,10 @@ pub async fn fetch_historical_prices(
             let base_currency = match &asset_cache.asset {
                 Asset::Currency { iso_code } => Some(iso_code),
                 Asset::ManualValue { currency, .. } => Some(currency),
-                Asset::Equity { .. } | Asset::Crypto { .. } => None,
+                Asset::Equity { .. }
+                | Asset::Crypto { .. }
+                | Asset::Kalshi { .. }
+                | Asset::PolymarketUs { .. } => None,
             };
             if let Some(base_currency) = base_currency {
                 let base = base_currency.to_uppercase();
@@ -251,7 +257,10 @@ pub async fn fetch_historical_prices(
                             }
                         }
                     }
-                    Asset::Equity { .. } | Asset::Crypto { .. } => {
+                    Asset::Equity { .. }
+                    | Asset::Crypto { .. }
+                    | Asset::Kalshi { .. }
+                    | Asset::PolymarketUs { .. } => {
                         price_stats.attempted += 1;
                         if let Some((price, exact)) =
                             resolve_cached_price(&asset_cache.prices, current, lookback_days)

@@ -22,15 +22,16 @@ use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 
 use crate::credentials::CredentialStore;
+use crate::market_data::providers::kalshi::{
+    kalshi_asset, KalshiSide, KALSHI_API_BASE, KALSHI_API_PREFIX, KALSHI_EXCHANGE,
+};
+use crate::market_data::providers::KalshiPriceSource;
+use crate::market_data::{AssetId, PriceKind, PricePoint};
 use crate::models::{
     Account, Asset, AssetBalance, Connection, ConnectionStatus, Id, LastSync, SyncStatus,
 };
 use crate::storage::Storage;
 use crate::sync::{AccountBalances, AccountListing, SyncResult, SyncedAssetBalance, Synchronizer};
-
-const API_BASE: &str = "https://api.elections.kalshi.com";
-const API_PREFIX: &str = "/trade-api/v2";
-const MARKET_BATCH_SIZE: usize = 50;
 
 enum KalshiSigner {
     Ed25519(ed25519_dalek::SigningKey),
@@ -64,6 +65,7 @@ pub struct KalshiSynchronizer {
     signer: KalshiSigner,
     client: Client,
     base_url: String,
+    prices: KalshiPriceSource,
 }
 
 impl KalshiSynchronizer {
@@ -73,13 +75,15 @@ impl KalshiSynchronizer {
             key_id,
             signer: KalshiSigner::from_pem(private_key.expose_secret())?,
             client: Client::new(),
-            base_url: API_BASE.to_string(),
+            base_url: KALSHI_API_BASE.to_string(),
+            prices: KalshiPriceSource::new(),
         })
     }
 
     /// Use a custom API host (useful for tests or the demo environment).
     pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
         self.base_url = base_url.into();
+        self.prices = KalshiPriceSource::new().with_base_url(&self.base_url);
         self
     }
 
@@ -116,7 +120,7 @@ impl KalshiSynchronizer {
         query: &[(&str, &str)],
     ) -> Result<T> {
         // Signs `timestamp + method + path`; the query string is not part of the signed message.
-        let path = format!("{API_PREFIX}{endpoint}");
+        let path = format!("{KALSHI_API_PREFIX}{endpoint}");
         let timestamp = Utc::now().timestamp_millis().to_string();
         let signature = self.signer.sign(format!("{timestamp}GET{path}").as_bytes());
 
@@ -185,30 +189,6 @@ impl KalshiSynchronizer {
         Ok(positions)
     }
 
-    async fn get_markets(&self, tickers: &[&str]) -> Result<HashMap<String, KalshiMarket>> {
-        #[derive(Deserialize)]
-        struct Response {
-            #[serde(default)]
-            markets: Vec<KalshiMarket>,
-        }
-
-        let mut markets = HashMap::new();
-        for chunk in tickers.chunks(MARKET_BATCH_SIZE) {
-            let tickers = chunk.join(",");
-            let limit = chunk.len().to_string();
-            let response: Response = self
-                .get("/markets", &[("tickers", &tickers), ("limit", &limit)])
-                .await?;
-            markets.extend(
-                response
-                    .markets
-                    .into_iter()
-                    .map(|market| (market.ticker.clone(), market)),
-            );
-        }
-        Ok(markets)
-    }
-
     async fn sync_internal<S: Storage + ?Sized>(
         &self,
         connection: &mut Connection,
@@ -230,12 +210,13 @@ impl KalshiSynchronizer {
             .collect();
 
         let tickers: Vec<&str> = positions.iter().map(|(p, _)| p.ticker.as_str()).collect();
-        let markets = self.get_markets(&tickers).await?;
+        let markets = self.prices.fetch_markets(&tickers).await?;
+        let now = Utc::now();
 
-        let mut asset_balances = vec![AssetBalance::new(
+        let mut asset_balances = vec![SyncedAssetBalance::new(AssetBalance::new(
             Asset::currency("USD"),
             cash.normalize().to_string(),
-        )];
+        ))];
 
         for (position, quantity) in &positions {
             let market = markets
@@ -243,20 +224,28 @@ impl KalshiSynchronizer {
                 .with_context(|| format!("Kalshi market {} not found", position.ticker))?;
             // Negative positions are NO contracts.
             let side = if quantity.is_sign_negative() {
-                Side::No
+                KalshiSide::No
             } else {
-                Side::Yes
+                KalshiSide::Yes
             };
-            let price = market.mark_price(side)?;
-            let value = quantity.abs() * price;
             let cost = parse_decimal(&position.market_exposure_dollars)
                 .with_context(|| format!("Invalid market exposure for {}", position.ticker))?;
+            let asset = kalshi_asset(&position.ticker, side, Some(market.display_name(side)));
+            let price = PricePoint {
+                asset_id: AssetId::from_asset(&asset),
+                as_of_date: now.date_naive(),
+                timestamp: now,
+                price: market.mark_price(side)?.normalize().to_string(),
+                quote_currency: "USD".to_string(),
+                kind: PriceKind::Quote,
+                source: KALSHI_EXCHANGE.to_string(),
+            };
             asset_balances.push(
-                AssetBalance::new(
-                    Asset::manual_value(market.display_name(side), "USD"),
-                    value.normalize().to_string(),
+                SyncedAssetBalance::new(
+                    AssetBalance::new(asset, quantity.abs().normalize().to_string())
+                        .with_cost_basis(cost.normalize().to_string()),
                 )
-                .with_cost_basis(cost.normalize().to_string()),
+                .with_price(price),
             );
         }
 
@@ -282,13 +271,8 @@ impl KalshiSynchronizer {
             synchronizer_data: serde_json::json!({ "market_tickers": tickers }),
         };
 
-        let account_balances = AccountBalances::snapshot_or_unavailable(
-            asset_balances
-                .into_iter()
-                .map(SyncedAssetBalance::new)
-                .collect(),
-            "Kalshi returned no balances",
-        );
+        let account_balances =
+            AccountBalances::snapshot_or_unavailable(asset_balances, "Kalshi returned no balances");
 
         connection.state.account_ids = vec![account_id.clone()];
         connection.state.last_sync = Some(LastSync {
@@ -312,103 +296,11 @@ fn parse_decimal(value: &str) -> Result<Decimal> {
     Decimal::from_str(value.trim()).with_context(|| format!("Invalid decimal: {value:?}"))
 }
 
-fn parse_optional_decimal(value: &Option<String>) -> Result<Option<Decimal>> {
-    value
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .map(parse_decimal)
-        .transpose()
-}
-
-#[derive(Debug, Clone, Copy)]
-enum Side {
-    Yes,
-    No,
-}
-
 #[derive(Debug, Deserialize)]
 struct KalshiPosition {
     ticker: String,
     position_fp: String,
     market_exposure_dollars: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct KalshiMarket {
-    ticker: String,
-    #[serde(default)]
-    title: Option<String>,
-    #[serde(default)]
-    yes_sub_title: Option<String>,
-    #[serde(default)]
-    no_sub_title: Option<String>,
-    #[serde(default)]
-    yes_bid_dollars: Option<String>,
-    #[serde(default)]
-    yes_ask_dollars: Option<String>,
-    #[serde(default)]
-    no_bid_dollars: Option<String>,
-    #[serde(default)]
-    no_ask_dollars: Option<String>,
-    #[serde(default)]
-    last_price_dollars: Option<String>,
-    #[serde(default)]
-    notional_value_dollars: Option<String>,
-    #[serde(default)]
-    settlement_value_dollars: Option<String>,
-}
-
-impl KalshiMarket {
-    /// Per-contract value for `side`: the settlement value once determined, otherwise the
-    /// bid/ask midpoint when both sides are quoted, otherwise the last trade price.
-    fn mark_price(&self, side: Side) -> Result<Decimal> {
-        let notional =
-            parse_optional_decimal(&self.notional_value_dollars)?.unwrap_or(Decimal::ONE);
-        // Settlement and last-trade prices are quoted for YES.
-        let from_yes = |yes: Decimal| match side {
-            Side::Yes => yes,
-            Side::No => notional - yes,
-        };
-
-        if let Some(settlement) = parse_optional_decimal(&self.settlement_value_dollars)? {
-            return Ok(from_yes(settlement));
-        }
-
-        let (bid, ask) = match side {
-            Side::Yes => (&self.yes_bid_dollars, &self.yes_ask_dollars),
-            Side::No => (&self.no_bid_dollars, &self.no_ask_dollars),
-        };
-        if let (Some(bid), Some(ask)) = (parse_optional_decimal(bid)?, parse_optional_decimal(ask)?)
-        {
-            if bid > Decimal::ZERO && ask < notional && bid <= ask {
-                return Ok((bid + ask) / Decimal::TWO);
-            }
-        }
-
-        parse_optional_decimal(&self.last_price_dollars)?
-            .map(from_yes)
-            .with_context(|| format!("No price available for Kalshi market {}", self.ticker))
-    }
-
-    fn display_name(&self, side: Side) -> String {
-        let non_empty = |value: &Option<String>| {
-            value
-                .as_deref()
-                .map(str::trim)
-                .filter(|v| !v.is_empty())
-                .map(str::to_string)
-        };
-        let title = non_empty(&self.title).unwrap_or_else(|| self.ticker.clone());
-        let (sub_title, side_label) = match side {
-            Side::Yes => (non_empty(&self.yes_sub_title), "Yes"),
-            Side::No => (non_empty(&self.no_sub_title), "No"),
-        };
-        match sub_title {
-            Some(sub_title) if sub_title != title => format!("{title} ({side_label}: {sub_title})"),
-            _ => format!("{title} ({side_label})"),
-        }
-    }
 }
 
 #[async_trait::async_trait]

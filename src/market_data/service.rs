@@ -8,7 +8,7 @@ use crate::clock::{Clock, SystemClock};
 
 use super::{
     AssetId, CryptoPriceRouter, EquityPriceRouter, FxRateKind, FxRatePoint, FxRateRouter,
-    MarketDataSource, MarketDataStore, PricePoint,
+    MarketDataSource, MarketDataStore, PredictionMarketPriceRouter, PricePoint,
 };
 use crate::models::Asset;
 
@@ -32,6 +32,7 @@ pub struct MarketDataService {
     equity_router: Option<Arc<EquityPriceRouter>>,
     crypto_router: Option<Arc<CryptoPriceRouter>>,
     fx_router: Option<Arc<FxRateRouter>>,
+    prediction_market_router: Option<Arc<PredictionMarketPriceRouter>>,
     // When set, bounds store lookups to N days back from query date.
     // When None, store lookups are unbounded and return the latest price <= query date.
     store_lookback_days: Option<u32>,
@@ -56,6 +57,7 @@ impl MarketDataService {
             equity_router: None,
             crypto_router: None,
             fx_router: None,
+            prediction_market_router: None,
             store_lookback_days: None,
             fetch_lookback_days: 7,
             allow_future_projection: false,
@@ -76,6 +78,14 @@ impl MarketDataService {
 
     pub fn with_fx_router(mut self, router: Arc<FxRateRouter>) -> Self {
         self.fx_router = Some(router);
+        self
+    }
+
+    pub fn with_prediction_market_router(
+        mut self,
+        router: Arc<PredictionMarketPriceRouter>,
+    ) -> Self {
+        self.prediction_market_router = Some(router);
         self
     }
 
@@ -627,6 +637,13 @@ impl MarketDataService {
                     }
                 }
             }
+            Asset::Kalshi { .. } | Asset::PolymarketUs { .. } => {
+                if let Some(router) = &self.prediction_market_router {
+                    if let Some(price) = router.fetch_quote(asset, asset_id).await? {
+                        return Ok(Some(price));
+                    }
+                }
+            }
             _ => {}
         }
 
@@ -649,6 +666,13 @@ impl MarketDataService {
             }
             Asset::Crypto { .. } => {
                 if let Some(router) = &self.crypto_router {
+                    if let Some(price) = router.fetch_close(asset, asset_id, date).await? {
+                        return Ok(Some(price));
+                    }
+                }
+            }
+            Asset::Kalshi { .. } | Asset::PolymarketUs { .. } => {
+                if let Some(router) = &self.prediction_market_router {
                     if let Some(price) = router.fetch_close(asset, asset_id, date).await? {
                         return Ok(Some(price));
                     }
@@ -682,6 +706,14 @@ impl MarketDataService {
             }
             Asset::Crypto { .. } => {
                 if let Some(router) = &self.crypto_router {
+                    let prices = router.fetch_closes(asset, asset_id, start, end).await?;
+                    if !prices.is_empty() {
+                        return Ok(prices);
+                    }
+                }
+            }
+            Asset::Kalshi { .. } | Asset::PolymarketUs { .. } => {
+                if let Some(router) = &self.prediction_market_router {
                     let prices = router.fetch_closes(asset, asset_id, start, end).await?;
                     if !prices.is_empty() {
                         return Ok(prices);

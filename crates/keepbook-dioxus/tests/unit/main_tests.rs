@@ -1709,17 +1709,35 @@ fn asset_display_names_cover_all_asset_kinds() {
     let equity = serde_json::json!({"type": "equity", "ticker": "AAPL", "exchange": "NASDAQ"});
     let crypto = serde_json::json!({"type": "crypto", "symbol": "ETH", "network": "mainnet"});
     let manual = serde_json::json!({"type": "manual_value", "name": "House", "currency": "USD"});
+    let contract = serde_json::json!({
+        "type": "polymarket_us",
+        "slug": "fed-cut-dec",
+        "name": "Fed cut in December?"
+    });
+    let unnamed_contract = serde_json::json!({"type": "kalshi", "ticker": "FED-DEC", "side": "no"});
     let unknown = serde_json::json!({"type": "mystery"});
 
     assert_eq!(asset_display_name(&currency, "currency/USD"), "USD");
     assert_eq!(asset_display_name(&equity, "equity/AAPL"), "AAPL");
     assert_eq!(asset_display_name(&crypto, "crypto/ETH"), "ETH");
     assert_eq!(asset_display_name(&manual, "manual_value/House"), "House");
+    assert_eq!(
+        asset_display_name(&contract, "polymarket_us/fed-cut-dec"),
+        "Fed cut in December?"
+    );
+    assert_eq!(
+        asset_display_name(&unnamed_contract, "kalshi/FED-DEC/no"),
+        "FED-DEC"
+    );
     assert_eq!(asset_display_name(&unknown, "fallback-id"), "fallback-id");
 
     assert_eq!(asset_secondary_text(&currency), None);
     assert_eq!(asset_secondary_text(&equity).as_deref(), Some("NASDAQ"));
     assert_eq!(asset_secondary_text(&crypto).as_deref(), Some("mainnet"));
+    assert_eq!(
+        asset_secondary_text(&contract).as_deref(),
+        Some("Polymarket US")
+    );
     assert_eq!(
         asset_secondary_text(&serde_json::json!({"type": "equity", "ticker": "AAPL"})),
         None
@@ -1729,6 +1747,7 @@ fn asset_display_names_cover_all_asset_kinds() {
     assert_eq!(asset_kind_label(&equity), "Equity");
     assert_eq!(asset_kind_label(&crypto), "Crypto");
     assert_eq!(asset_kind_label(&manual), "Manual");
+    assert_eq!(asset_kind_label(&contract), "Prediction market");
     assert_eq!(asset_kind_label(&unknown), "Asset");
 }
 

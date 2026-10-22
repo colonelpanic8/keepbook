@@ -1093,7 +1093,10 @@ impl PortfolioService {
                     }
                 }
             }
-            Asset::Equity { .. } | Asset::Crypto { .. } => {
+            Asset::Equity { .. }
+            | Asset::Crypto { .. }
+            | Asset::Kalshi { .. }
+            | Asset::PolymarketUs { .. } => {
                 // Use live pricing for today. Historical valuation uses cached/fetched prices
                 // at or before the requested date without special-casing price kind.
                 // A live quote is the price *now*, so it can only stand in for

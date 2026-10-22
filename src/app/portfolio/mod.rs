@@ -278,7 +278,10 @@ pub async fn portfolio_snapshot(
         for (_, snapshot) in &snapshots {
             for asset_balance in &snapshot.balances {
                 match &asset_balance.asset {
-                    Asset::Equity { .. } | Asset::Crypto { .. } => {
+                    Asset::Equity { .. }
+                    | Asset::Crypto { .. }
+                    | Asset::Kalshi { .. }
+                    | Asset::PolymarketUs { .. } => {
                         let asset_id = AssetId::from_asset(&asset_balance.asset);
                         let asset_key = asset_id.to_string();
 

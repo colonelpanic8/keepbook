@@ -117,3 +117,15 @@ fn asset_id_sanitizes_path_segments() {
     let id = AssetId::from_asset(&crypto);
     assert_eq!(id.as_str(), "crypto/ETH-ARB/arb-one");
 }
+
+#[test]
+fn asset_id_is_human_readable_prediction_market() {
+    let kalshi = Asset::kalshi("fed-dec", crate::models::KalshiSide::No, Some("Fed".into()));
+    assert_eq!(AssetId::from_asset(&kalshi).as_str(), "kalshi/FED-DEC/no");
+
+    let polymarket = Asset::polymarket_us("Some-Slug", None);
+    assert_eq!(
+        AssetId::from_asset(&polymarket).as_str(),
+        "polymarket_us/some-slug"
+    );
+}

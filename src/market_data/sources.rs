@@ -457,6 +457,100 @@ impl FxRateRouter {
     }
 }
 
+/// Prices contracts listed on one prediction market exchange.
+#[async_trait::async_trait]
+pub trait PredictionMarketPriceSource: Send + Sync {
+    /// Whether this source prices `asset`; each exchange is the only source for its contracts.
+    fn supports(&self, asset: &Asset) -> bool;
+
+    fn name(&self) -> &str;
+
+    async fn fetch_quote(&self, asset: &Asset, asset_id: &AssetId) -> Result<Option<PricePoint>>;
+
+    /// Fetch daily prices for a date range.
+    async fn fetch_closes(
+        &self,
+        asset: &Asset,
+        asset_id: &AssetId,
+        start: NaiveDate,
+        end: NaiveDate,
+    ) -> Result<Vec<PricePoint>>;
+}
+
+/// Routes prediction market contracts to the source for their exchange.
+pub struct PredictionMarketPriceRouter {
+    sources: Vec<Arc<dyn PredictionMarketPriceSource>>,
+}
+
+impl PredictionMarketPriceRouter {
+    pub fn new(sources: Vec<Arc<dyn PredictionMarketPriceSource>>) -> Self {
+        Self { sources }
+    }
+
+    fn source_for(&self, asset: &Asset) -> Option<&Arc<dyn PredictionMarketPriceSource>> {
+        self.sources.iter().find(|source| source.supports(asset))
+    }
+
+    pub async fn fetch_quote(
+        &self,
+        asset: &Asset,
+        asset_id: &AssetId,
+    ) -> Result<Option<PricePoint>> {
+        let Some(source) = self.source_for(asset) else {
+            return Ok(None);
+        };
+        match source.fetch_quote(asset, asset_id).await {
+            Ok(price) => Ok(price),
+            Err(e) => {
+                warn!(
+                    source = source.name(),
+                    asset_id = %asset_id,
+                    error = %e,
+                    "prediction market quote fetch failed"
+                );
+                Ok(None)
+            }
+        }
+    }
+
+    pub async fn fetch_close(
+        &self,
+        asset: &Asset,
+        asset_id: &AssetId,
+        date: NaiveDate,
+    ) -> Result<Option<PricePoint>> {
+        Ok(self
+            .fetch_closes(asset, asset_id, date, date)
+            .await?
+            .into_iter()
+            .find(|price| price.as_of_date == date))
+    }
+
+    pub async fn fetch_closes(
+        &self,
+        asset: &Asset,
+        asset_id: &AssetId,
+        start: NaiveDate,
+        end: NaiveDate,
+    ) -> Result<Vec<PricePoint>> {
+        let Some(source) = self.source_for(asset) else {
+            return Ok(Vec::new());
+        };
+        match source.fetch_closes(asset, asset_id, start, end).await {
+            Ok(prices) => Ok(prices),
+            Err(e) => {
+                warn!(
+                    source = source.name(),
+                    asset_id = %asset_id,
+                    error = %e,
+                    "prediction market price range fetch failed"
+                );
+                Ok(Vec::new())
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 #[path = "../../tests/unit/market_data/sources_tests.rs"]
 mod sources_tests;
