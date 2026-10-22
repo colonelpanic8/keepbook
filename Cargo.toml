@@ -83,6 +83,7 @@ sync = [
   "dep:reqwest",
   "dep:base64",
   "dep:chromiumoxide",
+  "dep:ed25519-dalek",
   "dep:futures",
   "dep:p256",
   "dep:rand",
@@ -112,6 +113,7 @@ uuid = { version = "1", features = ["v4", "v5", "serde"] }
 # Crypto for EC key handling
 p256 = { version = "0.13", features = ["ecdsa", "pem"], optional = true }
 rand = { version = "0.8", optional = true }
+ed25519-dalek = { version = "2", optional = true }
 
 # Base64 encoding
 base64 = { version = "0.22", optional = true }
