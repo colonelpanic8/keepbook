@@ -227,7 +227,9 @@ path = "credentials/coinbase.age"
 The decrypted payload uses the same field format as =pass show= output. For
 Coinbase, the relevant fields are =key-name= and =private-key=. For Polymarket US
 (=synchronizer = "polymarket_us"=), they are =key-id= and =secret-key=, as issued at
-[[https://polymarket.us/developer][polymarket.us/developer]].
+[[https://polymarket.us/developer][polymarket.us/developer]]. For Kalshi
+(=synchronizer = "kalshi"=), they are =key-id= and =private-key= (the PEM key file
+from Kalshi's API key settings, Ed25519 or RSA, with newlines escaped as =\n=).
 
 * Storage Layout
 

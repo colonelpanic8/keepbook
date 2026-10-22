@@ -7,8 +7,8 @@ use crate::storage::Storage;
 
 use super::Synchronizer;
 use crate::sync::synchronizers::{
-    ChaseSynchronizer, CoinbaseSynchronizer, PlaidSynchronizer, PolymarketUsSynchronizer,
-    SchwabSynchronizer,
+    ChaseSynchronizer, CoinbaseSynchronizer, KalshiSynchronizer, PlaidSynchronizer,
+    PolymarketUsSynchronizer, SchwabSynchronizer,
 };
 
 #[async_trait::async_trait]
@@ -64,6 +64,9 @@ impl SynchronizerFactory for DefaultSynchronizerFactory {
             )),
             "coinbase" => Ok(Box::new(
                 CoinbaseSynchronizer::from_connection(connection, storage).await?,
+            )),
+            "kalshi" => Ok(Box::new(
+                KalshiSynchronizer::from_connection(connection, storage).await?,
             )),
             "plaid" => Ok(Box::new(
                 PlaidSynchronizer::from_connection(connection, storage).await?,

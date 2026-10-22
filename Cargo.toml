@@ -1,6 +1,6 @@
 [package]
 name = "keepbook"
-version = "0.19.0"
+version = "0.20.0"
 edition = "2021"
 description = "Local-first personal finance toolkit"
 license = "MIT OR Apache-2.0"
@@ -87,6 +87,7 @@ sync = [
   "dep:futures",
   "dep:p256",
   "dep:rand",
+  "dep:rsa",
 ]
 tray = ["dep:ksni", "dep:image", "dep:notify"]
 
@@ -113,7 +114,8 @@ uuid = { version = "1", features = ["v4", "v5", "serde"] }
 # Crypto for EC key handling
 p256 = { version = "0.13", features = ["ecdsa", "pem"], optional = true }
 rand = { version = "0.8", optional = true }
-ed25519-dalek = { version = "2", optional = true }
+ed25519-dalek = { version = "2", features = ["pkcs8", "pem"], optional = true }
+rsa = { version = "0.9", features = ["sha2"], optional = true }
 
 # Base64 encoding
 base64 = { version = "0.22", optional = true }

@@ -1,0 +1,2 @@
+* Added: Kalshi and Polymarket US connections sync cash balances and open prediction market positions, including their current values and available cost basis.
+* Added: Kalshi supports Ed25519 and RSA API keys. Both integrations support encrypted credentials for use across desktop and mobile devices.
