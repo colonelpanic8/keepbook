@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.21.1 - 2026-11-05
+
+### Fixed
+
+- Android status bar icons are dark on light themes instead of white on the
+  light background, and follow the theme when it changes.
+- Chase activity from a replaced card that shows up on its successor's feed is
+  stored on the old card's account, instead of duplicating rows already there.
+
 ## 0.21.0 - 2026-10-22
 
 ### Changed
