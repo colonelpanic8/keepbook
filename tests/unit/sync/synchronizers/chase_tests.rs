@@ -3,28 +3,18 @@ use crate::sync::chase::api::{
     ActivityAccount, ChaseActivity, EnrichedMerchant, MerchantDetails, RawMerchantDetails,
 };
 
-fn activity_account(category_type: &str, account_type: &str) -> ActivityAccount {
-    ActivityAccount {
-        id: 123,
-        mask: "1234".to_string(),
-        nickname: "Test".to_string(),
-        category_type: category_type.to_string(),
-        account_type: account_type.to_string(),
-    }
-}
-
 #[test]
 fn chase_account_kind_detects_credit_cards_and_mortgages() {
     assert_eq!(
-        chase_account_kind(&activity_account("CreditCard", "Card")),
+        chase_account_kind("CreditCard", "Card"),
         ChaseAccountKind::CreditCard
     );
     assert_eq!(
-        chase_account_kind(&activity_account("HomeLending", "Mortgage")),
+        chase_account_kind("HomeLending", "Mortgage"),
         ChaseAccountKind::Mortgage
     );
     assert_eq!(
-        chase_account_kind(&activity_account("Deposit", "Checking")),
+        chase_account_kind("Deposit", "Checking"),
         ChaseAccountKind::Other
     );
 }
@@ -155,7 +145,7 @@ fn chase_domestic_card_purchase_uses_usd_asset() {
     assert_eq!(tx.synchronizer_data["chase_currency_code"], "840");
 }
 
-fn stored_card(chase_account_id: i64, mask: &str) -> Account {
+fn stored_account(chase_account_id: i64, mask: &str, category_type: &str) -> Account {
     let mut account = Account::new_with(
         Id::from_external(&format!("chase:conn-1:{chase_account_id}")),
         Utc::now(),
@@ -165,10 +155,18 @@ fn stored_card(chase_account_id: i64, mask: &str) -> Account {
     account.synchronizer_data = serde_json::json!({
         "chase_account_id": chase_account_id,
         "mask": mask,
-        "category_type": "CARD",
-        "account_type": "SAPPHIRE",
+        "category_type": category_type,
+        "account_type": "BAC",
     });
     account
+}
+
+fn stored_card(chase_account_id: i64, mask: &str) -> Account {
+    stored_account(chase_account_id, mask, "CARD")
+}
+
+fn cards(stored: &[Account], listed: &[ActivityAccount]) -> CardsByMask {
+    CardsByMask::new(&Id::from_string("conn-1"), stored, listed)
 }
 
 fn listed_card(chase_account_id: i64, mask: &str) -> ActivityAccount {
@@ -205,7 +203,7 @@ fn card_activity(sor_id: &str, last4: Option<&str>) -> ChaseActivity {
 
 #[test]
 fn old_card_activity_on_successor_feed_routes_to_predecessor_with_its_original_id() {
-    let predecessors = PredecessorCards::new(
+    let routing = cards(
         &[
             stored_card(886859518, "6395"),
             stored_card(1339069761, "9194"),
@@ -215,7 +213,7 @@ fn old_card_activity_on_successor_feed_routes_to_predecessor_with_its_original_i
     let feed = feed_card(1339069761, "9194");
     let activity = card_activity("sor-old", Some(" 6395 "));
 
-    let target = predecessors.route(&activity, &feed);
+    let target = routing.route(&activity, &feed);
     assert_eq!(target, &feed_card(886859518, "6395"));
 
     let tx = chase_activity_to_transaction(
@@ -234,7 +232,7 @@ fn old_card_activity_on_successor_feed_routes_to_predecessor_with_its_original_i
 
 #[test]
 fn successor_or_unknown_card_activity_stays_on_feed_account() {
-    let predecessors = PredecessorCards::new(
+    let routing = cards(
         &[stored_card(886859518, "6395")],
         &[listed_card(1339069761, "9194")],
     );
@@ -242,7 +240,7 @@ fn successor_or_unknown_card_activity_stays_on_feed_account() {
 
     for last4 in [Some("9194"), Some("1111"), Some("  "), None] {
         assert_eq!(
-            predecessors.route(&card_activity("sor-1", last4), &feed),
+            routing.route(&card_activity("sor-1", last4), &feed),
             &feed,
             "last4 {last4:?}"
         );
@@ -250,24 +248,51 @@ fn successor_or_unknown_card_activity_stays_on_feed_account() {
 }
 
 #[test]
-fn listed_or_ambiguous_stored_cards_are_never_routing_targets() {
-    let predecessors = PredecessorCards::new(
+fn old_card_activity_keeps_its_owner_when_the_old_card_is_listed_again() {
+    let routing = cards(
         &[
+            stored_card(886859518, "6395"),
             stored_card(1339069761, "9194"),
-            stored_card(555, "1111"),
+        ],
+        &[
+            listed_card(886859518, "6395"),
+            listed_card(1339069761, "9194"),
+        ],
+    );
+
+    assert_eq!(
+        routing.route(
+            &card_activity("sor-old", Some("6395")),
+            &feed_card(1339069761, "9194")
+        ),
+        &feed_card(886859518, "6395")
+    );
+}
+
+#[test]
+fn non_card_and_ambiguous_masks_are_never_routing_targets() {
+    let routing = cards(
+        &[
+            stored_account(42, "1111", "MORTGAGE"),
+            stored_card(886859518, "6395"),
+            stored_account(43, "6395", "MORTGAGE"),
             stored_card(777, "2222"),
             stored_card(888, "2222"),
         ],
-        &[listed_card(1339069761, "9194"), listed_card(555, "1111")],
+        &[listed_card(1339069761, "9194")],
     );
     let feed = feed_card(1339069761, "9194");
 
     assert_eq!(
-        predecessors.route(&card_activity("sor-1", Some("1111")), &feed),
+        routing.route(&card_activity("sor-1", Some("1111")), &feed),
         &feed
     );
     assert_eq!(
-        predecessors.route(&card_activity("sor-2", Some("2222")), &feed),
+        routing.route(&card_activity("sor-2", Some("2222")), &feed),
         &feed
+    );
+    assert_eq!(
+        routing.route(&card_activity("sor-3", Some("6395")), &feed),
+        &feed_card(886859518, "6395")
     );
 }

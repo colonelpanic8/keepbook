@@ -265,12 +265,12 @@ impl ChaseSynchronizer {
         // Fetch accounts from Chase.
         let chase_accounts = backend.get_accounts().await?;
         eprintln!("Chase: found {} accounts", chase_accounts.len());
-        let predecessors = PredecessorCards::new(existing_by_id.values(), &chase_accounts);
+        let cards = CardsByMask::new(connection.id(), existing_by_id.values(), &chase_accounts);
 
         let mut accounts = Vec::new();
         let mut balances: Vec<(Id, AccountBalances)> = Vec::new();
         let mut transactions: Vec<(Id, Vec<Transaction>)> = Vec::new();
-        let mut predecessor_txns: HashMap<Id, Vec<Transaction>> = HashMap::new();
+        let mut routed_txns: HashMap<Id, Vec<Transaction>> = HashMap::new();
 
         for acct in &chase_accounts {
             let account_id = Id::from_external(&format!("chase:{}:{}", connection.id(), acct.id));
@@ -286,7 +286,7 @@ impl ChaseSynchronizer {
                 format!("Chase ({})", acct.mask)
             };
 
-            let account_kind = chase_account_kind(acct);
+            let account_kind = chase_account_kind(&acct.category_type, &acct.account_type);
             let is_credit_card = matches!(account_kind, ChaseAccountKind::CreditCard);
 
             let mut tags = vec!["chase".to_string()];
@@ -376,7 +376,7 @@ impl ChaseSynchronizer {
                             storage,
                             connection.id(),
                             &feed,
-                            &predecessors,
+                            &cards,
                         )
                         .await
                     }
@@ -392,7 +392,7 @@ impl ChaseSynchronizer {
                         );
                         let mut routed: BTreeMap<(&str, i64), usize> = BTreeMap::new();
                         for activity in &activities {
-                            let target = predecessors.route(activity, &feed);
+                            let target = cards.route(activity, &feed);
                             let Some(txn) = chase_activity_to_transaction(
                                 activity,
                                 connection.id(),
@@ -407,7 +407,7 @@ impl ChaseSynchronizer {
                             *routed
                                 .entry((&target.mask, target.chase_account_id))
                                 .or_default() += 1;
-                            predecessor_txns
+                            routed_txns
                                 .entry(target.account_id.clone())
                                 .or_default()
                                 .push(txn);
@@ -418,7 +418,7 @@ impl ChaseSynchronizer {
                                 .map(|((mask, id), count)| format!("{count} to {mask} ({id})"))
                                 .collect();
                             eprintln!(
-                                "Chase: routed transactions for {} ({}) to predecessor cards: {}",
+                                "Chase: routed transactions for {} ({}) to other cards by last4: {}",
                                 acct.mask,
                                 acct.id,
                                 summary.join(", ")
@@ -453,7 +453,7 @@ impl ChaseSynchronizer {
             ));
             transactions.push((account_id, acct_txns));
         }
-        transactions.extend(predecessor_txns);
+        transactions.extend(routed_txns);
 
         // If we had to use browser fallback, refresh cached session cookies from the browser.
         if let ChaseBackend::Browser(browser) = &mut backend {
@@ -512,9 +512,9 @@ impl ChaseSynchronizer {
     }
 }
 
-fn chase_account_kind(acct: &ActivityAccount) -> ChaseAccountKind {
-    let category_type = acct.category_type.to_lowercase();
-    let account_type = acct.account_type.to_lowercase();
+fn chase_account_kind(category_type: &str, account_type: &str) -> ChaseAccountKind {
+    let category_type = category_type.to_lowercase();
+    let account_type = account_type.to_lowercase();
 
     if category_type.contains("mortgage") || account_type.contains("mortgage") {
         ChaseAccountKind::Mortgage
@@ -704,39 +704,59 @@ struct CardAccount {
     mask: String,
 }
 
-/// Stored card accounts that Chase no longer lists, keyed by mask. After a product change
+/// The connection's card accounts, stored or listed, keyed by mask. After a product change
 /// Chase opens a new account whose feed still carries the old card's history, tagged with
-/// the old card's last4.
-struct PredecessorCards {
+/// the old card's last4, so activity is owned by the card whose mask matches its last4.
+struct CardsByMask {
     by_mask: HashMap<String, CardAccount>,
 }
 
-impl PredecessorCards {
+impl CardsByMask {
     fn new<'a>(
+        connection_id: &Id,
         stored_accounts: impl IntoIterator<Item = &'a Account>,
         listed_accounts: &[ActivityAccount],
     ) -> Self {
-        let listed_ids: HashSet<i64> = listed_accounts.iter().map(|a| a.id).collect();
-        let mut candidates: HashMap<String, Vec<CardAccount>> = HashMap::new();
+        let mut by_chase_id: HashMap<i64, CardAccount> = HashMap::new();
         for account in stored_accounts {
             let data = &account.synchronizer_data;
-            let (Some(mask), Some(chase_account_id)) = (
-                data.get("mask").and_then(Value::as_str).map(str::trim),
+            let field = |key| data.get(key).and_then(Value::as_str).unwrap_or_default();
+            let (Some(chase_account_id), ChaseAccountKind::CreditCard) = (
                 data.get("chase_account_id").and_then(Value::as_i64),
+                chase_account_kind(field("category_type"), field("account_type")),
             ) else {
                 continue;
             };
-            if mask.is_empty() || listed_ids.contains(&chase_account_id) {
-                continue;
-            }
-            candidates
-                .entry(mask.to_string())
-                .or_default()
-                .push(CardAccount {
+            by_chase_id.insert(
+                chase_account_id,
+                CardAccount {
                     account_id: account.id.clone(),
                     chase_account_id,
-                    mask: mask.to_string(),
-                });
+                    mask: field("mask").trim().to_string(),
+                },
+            );
+        }
+        for acct in listed_accounts {
+            if chase_account_kind(&acct.category_type, &acct.account_type)
+                == ChaseAccountKind::CreditCard
+            {
+                by_chase_id.insert(
+                    acct.id,
+                    CardAccount {
+                        account_id: Id::from_external(&format!(
+                            "chase:{connection_id}:{}",
+                            acct.id
+                        )),
+                        chase_account_id: acct.id,
+                        mask: acct.mask.trim().to_string(),
+                    },
+                );
+            }
+        }
+
+        let mut candidates: HashMap<String, Vec<CardAccount>> = HashMap::new();
+        for card in by_chase_id.into_values().filter(|c| !c.mask.is_empty()) {
+            candidates.entry(card.mask.clone()).or_default().push(card);
         }
         let by_mask = candidates
             .into_iter()
@@ -1001,7 +1021,7 @@ async fn get_card_transactions_auto(
     storage: &dyn Storage,
     connection_id: &Id,
     feed: &CardAccount,
-    predecessors: &PredecessorCards,
+    cards: &CardsByMask,
 ) -> Result<Vec<ChaseActivity>> {
     let chase_account_id = feed.chase_account_id;
     // If we have no stored transactions for this account, we need a full backfill anyway.
@@ -1011,8 +1031,8 @@ async fn get_card_transactions_auto(
     }
 
     let mut existing_ids: HashSet<Id> = existing.into_iter().map(|t| t.id).collect();
-    for predecessor in predecessors.by_mask.values() {
-        let stored = storage.get_transactions(&predecessor.account_id).await?;
+    for card in cards.by_mask.values().filter(|card| *card != feed) {
+        let stored = storage.get_transactions(&card.account_id).await?;
         existing_ids.extend(stored.into_iter().map(|t| t.id));
     }
 
@@ -1051,7 +1071,7 @@ async fn get_card_transactions_auto(
         }
 
         for activity in resp.activities {
-            let target = predecessors.route(&activity, feed);
+            let target = cards.route(&activity, feed);
             let id =
                 chase_activity_to_transaction_id(connection_id, target.chase_account_id, &activity);
             if existing_ids.contains(&id) {
