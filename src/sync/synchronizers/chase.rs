@@ -4,7 +4,7 @@
 //! to make direct API calls for accounts, balances, and transactions.
 //! Login still uses browser automation so the user can complete 2FA.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -265,10 +265,12 @@ impl ChaseSynchronizer {
         // Fetch accounts from Chase.
         let chase_accounts = backend.get_accounts().await?;
         eprintln!("Chase: found {} accounts", chase_accounts.len());
+        let predecessors = PredecessorCards::new(existing_by_id.values(), &chase_accounts);
 
         let mut accounts = Vec::new();
         let mut balances: Vec<(Id, AccountBalances)> = Vec::new();
         let mut transactions: Vec<(Id, Vec<Transaction>)> = Vec::new();
+        let mut predecessor_txns: HashMap<Id, Vec<Transaction>> = HashMap::new();
 
         for acct in &chase_accounts {
             let account_id = Id::from_external(&format!("chase:{}:{}", connection.id(), acct.id));
@@ -361,6 +363,11 @@ impl ChaseSynchronizer {
             // Fetch transactions for credit card accounts.
             let mut acct_txns: Vec<Transaction> = Vec::new();
             if is_credit_card {
+                let feed = CardAccount {
+                    account_id: account_id.clone(),
+                    chase_account_id: acct.id,
+                    mask: acct.mask.clone(),
+                };
                 let activities = match options.transactions {
                     TransactionSyncMode::Full => backend.get_all_card_transactions(acct.id).await,
                     TransactionSyncMode::Auto => {
@@ -368,8 +375,8 @@ impl ChaseSynchronizer {
                             &backend,
                             storage,
                             connection.id(),
-                            &account_id,
-                            acct.id,
+                            &feed,
+                            &predecessors,
                         )
                         .await
                     }
@@ -383,12 +390,39 @@ impl ChaseSynchronizer {
                             acct.mask,
                             acct.id
                         );
+                        let mut routed: BTreeMap<(&str, i64), usize> = BTreeMap::new();
                         for activity in &activities {
-                            if let Some(txn) =
-                                chase_activity_to_transaction(activity, connection.id(), acct.id)
-                            {
+                            let target = predecessors.route(activity, &feed);
+                            let Some(txn) = chase_activity_to_transaction(
+                                activity,
+                                connection.id(),
+                                target.chase_account_id,
+                            ) else {
+                                continue;
+                            };
+                            if target == &feed {
                                 acct_txns.push(txn);
+                                continue;
                             }
+                            *routed
+                                .entry((&target.mask, target.chase_account_id))
+                                .or_default() += 1;
+                            predecessor_txns
+                                .entry(target.account_id.clone())
+                                .or_default()
+                                .push(txn);
+                        }
+                        if !routed.is_empty() {
+                            let summary: Vec<String> = routed
+                                .iter()
+                                .map(|((mask, id), count)| format!("{count} to {mask} ({id})"))
+                                .collect();
+                            eprintln!(
+                                "Chase: routed transactions for {} ({}) to predecessor cards: {}",
+                                acct.mask,
+                                acct.id,
+                                summary.join(", ")
+                            );
                         }
                     }
                     Err(e) => {
@@ -419,6 +453,7 @@ impl ChaseSynchronizer {
             ));
             transactions.push((account_id, acct_txns));
         }
+        transactions.extend(predecessor_txns);
 
         // If we had to use browser fallback, refresh cached session cookies from the browser.
         if let ChaseBackend::Browser(browser) = &mut backend {
@@ -661,6 +696,65 @@ impl InteractiveAuth for ChaseSynchronizer {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CardAccount {
+    account_id: Id,
+    chase_account_id: i64,
+    mask: String,
+}
+
+/// Stored card accounts that Chase no longer lists, keyed by mask. After a product change
+/// Chase opens a new account whose feed still carries the old card's history, tagged with
+/// the old card's last4.
+struct PredecessorCards {
+    by_mask: HashMap<String, CardAccount>,
+}
+
+impl PredecessorCards {
+    fn new<'a>(
+        stored_accounts: impl IntoIterator<Item = &'a Account>,
+        listed_accounts: &[ActivityAccount],
+    ) -> Self {
+        let listed_ids: HashSet<i64> = listed_accounts.iter().map(|a| a.id).collect();
+        let mut candidates: HashMap<String, Vec<CardAccount>> = HashMap::new();
+        for account in stored_accounts {
+            let data = &account.synchronizer_data;
+            let (Some(mask), Some(chase_account_id)) = (
+                data.get("mask").and_then(Value::as_str).map(str::trim),
+                data.get("chase_account_id").and_then(Value::as_i64),
+            ) else {
+                continue;
+            };
+            if mask.is_empty() || listed_ids.contains(&chase_account_id) {
+                continue;
+            }
+            candidates
+                .entry(mask.to_string())
+                .or_default()
+                .push(CardAccount {
+                    account_id: account.id.clone(),
+                    chase_account_id,
+                    mask: mask.to_string(),
+                });
+        }
+        let by_mask = candidates
+            .into_iter()
+            .filter_map(|(mask, mut cards)| (cards.len() == 1).then(|| (mask, cards.remove(0))))
+            .collect();
+        Self { by_mask }
+    }
+
+    fn route<'a>(&'a self, activity: &ChaseActivity, feed: &'a CardAccount) -> &'a CardAccount {
+        activity
+            .last4_card_number
+            .as_deref()
+            .map(str::trim)
+            .filter(|last4| !last4.is_empty() && *last4 != feed.mask)
+            .and_then(|last4| self.by_mask.get(last4))
+            .unwrap_or(feed)
+    }
+}
 
 fn chase_activity_to_transaction(
     activity: &ChaseActivity,
@@ -906,16 +1000,21 @@ async fn get_card_transactions_auto(
     backend: &ChaseBackend,
     storage: &dyn Storage,
     connection_id: &Id,
-    keepbook_account_id: &Id,
-    chase_account_id: i64,
+    feed: &CardAccount,
+    predecessors: &PredecessorCards,
 ) -> Result<Vec<ChaseActivity>> {
+    let chase_account_id = feed.chase_account_id;
     // If we have no stored transactions for this account, we need a full backfill anyway.
-    let existing = storage.get_transactions(keepbook_account_id).await?;
+    let existing = storage.get_transactions(&feed.account_id).await?;
     if existing.is_empty() {
         return backend.get_all_card_transactions(chase_account_id).await;
     }
 
-    let existing_ids: HashSet<Id> = existing.into_iter().map(|t| t.id).collect();
+    let mut existing_ids: HashSet<Id> = existing.into_iter().map(|t| t.id).collect();
+    for predecessor in predecessors.by_mask.values() {
+        let stored = storage.get_transactions(&predecessor.account_id).await?;
+        existing_ids.extend(stored.into_iter().map(|t| t.id));
+    }
 
     let page_size = DEFAULT_CARD_TXN_PAGE_SIZE;
     let max_transactions = max_card_transactions();
@@ -952,7 +1051,9 @@ async fn get_card_transactions_auto(
         }
 
         for activity in resp.activities {
-            let id = chase_activity_to_transaction_id(connection_id, chase_account_id, &activity);
+            let target = predecessors.route(&activity, feed);
+            let id =
+                chase_activity_to_transaction_id(connection_id, target.chase_account_id, &activity);
             if existing_ids.contains(&id) {
                 consecutive_existing += 1;
             } else {

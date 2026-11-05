@@ -154,3 +154,120 @@ fn chase_domestic_card_purchase_uses_usd_asset() {
     assert_eq!(tx.asset, Asset::currency("USD"));
     assert_eq!(tx.synchronizer_data["chase_currency_code"], "840");
 }
+
+fn stored_card(chase_account_id: i64, mask: &str) -> Account {
+    let mut account = Account::new_with(
+        Id::from_external(&format!("chase:conn-1:{chase_account_id}")),
+        Utc::now(),
+        format!("Chase ({mask})"),
+        Id::from_string("conn-1"),
+    );
+    account.synchronizer_data = serde_json::json!({
+        "chase_account_id": chase_account_id,
+        "mask": mask,
+        "category_type": "CARD",
+        "account_type": "SAPPHIRE",
+    });
+    account
+}
+
+fn listed_card(chase_account_id: i64, mask: &str) -> ActivityAccount {
+    ActivityAccount {
+        id: chase_account_id,
+        mask: mask.to_string(),
+        nickname: String::new(),
+        category_type: "CARD".to_string(),
+        account_type: "SAPPHIRE".to_string(),
+    }
+}
+
+fn feed_card(chase_account_id: i64, mask: &str) -> CardAccount {
+    CardAccount {
+        account_id: Id::from_external(&format!("chase:conn-1:{chase_account_id}")),
+        chase_account_id,
+        mask: mask.to_string(),
+    }
+}
+
+fn card_activity(sor_id: &str, last4: Option<&str>) -> ChaseActivity {
+    serde_json::from_value(serde_json::json!({
+        "transactionStatusCode": "Posted",
+        "transactionAmount": 42.5,
+        "transactionDate": "2026-10-01",
+        "transactionPostDate": "2026-10-02",
+        "sorTransactionIdentifier": sor_id,
+        "creditDebitCode": "D",
+        "last4CardNumber": last4,
+        "digitalAccountIdentifier": 1339069761_i64,
+    }))
+    .unwrap()
+}
+
+#[test]
+fn old_card_activity_on_successor_feed_routes_to_predecessor_with_its_original_id() {
+    let predecessors = PredecessorCards::new(
+        &[
+            stored_card(886859518, "6395"),
+            stored_card(1339069761, "9194"),
+        ],
+        &[listed_card(1339069761, "9194")],
+    );
+    let feed = feed_card(1339069761, "9194");
+    let activity = card_activity("sor-old", Some(" 6395 "));
+
+    let target = predecessors.route(&activity, &feed);
+    assert_eq!(target, &feed_card(886859518, "6395"));
+
+    let tx = chase_activity_to_transaction(
+        &activity,
+        &Id::from_string("conn-1"),
+        target.chase_account_id,
+    )
+    .unwrap();
+    assert_eq!(tx.id, Id::from_external("chase:conn-1:886859518:sor-old"));
+    assert_eq!(tx.synchronizer_data["chase_account_id"], 886859518);
+    assert_eq!(
+        tx.synchronizer_data["digital_account_identifier"],
+        1339069761
+    );
+}
+
+#[test]
+fn successor_or_unknown_card_activity_stays_on_feed_account() {
+    let predecessors = PredecessorCards::new(
+        &[stored_card(886859518, "6395")],
+        &[listed_card(1339069761, "9194")],
+    );
+    let feed = feed_card(1339069761, "9194");
+
+    for last4 in [Some("9194"), Some("1111"), Some("  "), None] {
+        assert_eq!(
+            predecessors.route(&card_activity("sor-1", last4), &feed),
+            &feed,
+            "last4 {last4:?}"
+        );
+    }
+}
+
+#[test]
+fn listed_or_ambiguous_stored_cards_are_never_routing_targets() {
+    let predecessors = PredecessorCards::new(
+        &[
+            stored_card(1339069761, "9194"),
+            stored_card(555, "1111"),
+            stored_card(777, "2222"),
+            stored_card(888, "2222"),
+        ],
+        &[listed_card(1339069761, "9194"), listed_card(555, "1111")],
+    );
+    let feed = feed_card(1339069761, "9194");
+
+    assert_eq!(
+        predecessors.route(&card_activity("sor-1", Some("1111")), &feed),
+        &feed
+    );
+    assert_eq!(
+        predecessors.route(&card_activity("sor-2", Some("2222")), &feed),
+        &feed
+    );
+}
