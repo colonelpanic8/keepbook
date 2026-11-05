@@ -114,6 +114,30 @@ pub(crate) fn use_dynamic_theme_refresh() {
     });
 }
 
+/// Keeps Android's status and navigation bar icons legible over the resolved
+/// theme, which `assets/theme.js` can change without Rust's involvement.
+pub(crate) fn use_system_bar_appearance() {
+    #[cfg(target_os = "android")]
+    use_future(|| async {
+        let mut theme = document::eval(&format!(
+            "{THEME_JS}\n\
+             var root = document.documentElement;\n\
+             var report = function () {{ dioxus.send(root.dataset.theme || \"\"); }};\n\
+             new MutationObserver(report).observe(root, {{ attributes: true, attributeFilter: [\"data-theme\"] }});\n\
+             report();\n\
+             await new Promise(function () {{}});"
+        ));
+        let mut last = None;
+        while let Ok(id) = theme.recv::<String>().await {
+            let light = !id.ends_with("-dark");
+            if last != Some(light) {
+                last = Some(light);
+                crate::platform::set_light_system_bars(light);
+            }
+        }
+    });
+}
+
 /// The setting stored by `assets/theme.js`.
 async fn read_theme_settings() -> Option<ThemeSettings> {
     // The runtime installs itself once, so running it first covers callers

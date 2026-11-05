@@ -93,6 +93,7 @@ enum LoadState {
 #[component]
 pub(crate) fn App() -> Element {
     use_dynamic_theme_refresh();
+    use_system_bar_appearance();
     #[cfg(all(
         feature = "desktop",
         not(any(target_os = "ios", target_os = "android"))
